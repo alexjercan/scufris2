@@ -33,6 +33,7 @@ interface SpawnResult {
   harness: "pi" | "claude";
   project: string;
   feature: string;
+  tmux_session: string;
   model: string;
   thinking: string;
   message: string;

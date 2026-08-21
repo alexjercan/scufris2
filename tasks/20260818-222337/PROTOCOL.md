@@ -12,10 +12,10 @@
 
 ## Harness defaults
 
-| Harness | Model                | Thinking |
-| ------- | -------------------- | -------- |
-| Pi      | `openai/gpt-5.6-sol` | `medium` |
-| Claude  | `opus`               | `xhigh`  |
+| Harness | Model                      | Thinking |
+| ------- | -------------------------- | -------- |
+| Pi      | `openai-codex/gpt-5.6-sol` | `medium` |
+| Claude  | `opus`                     | `xhigh`  |
 
 The foreground orchestrator can override project, model, and thinking in each spawn request. Scufris does not infer project check commands.
 
@@ -45,12 +45,12 @@ ${XDG_STATE_HOME:-$HOME/.local/state}/scufris/jobs/<job_id>/report.md
 Tmux target:
 
 ```text
-socket:  scufris
-session: jobs
+server:  normal user server
+session: <project>_<feature>
 window:  job-<job_id>
 ```
 
-Every tmux invocation selects the dedicated socket explicitly. Every tmux and sprout subprocess removes inherited `TMUX` and uses a Scufris-owned socket directory. Never touch the user's default tmux server.
+Session naming matches Sprout and the session starts in the generated worktree. Spawn creates or reuses the session and creates the worker window detached. It never attaches, selects, or switches a client. The immutable job record stores exact session, window, and pane IDs. Stop kills only the recorded window and never kills a session or server.
 
 ## Agent tools
 
@@ -69,7 +69,7 @@ Input:
   "harness": "pi",
   "project": "personal/example",
   "instructions": "Investigate the failing check and implement the fix.",
-  "model": "openai/gpt-5.6-sol",
+  "model": "openai-codex/gpt-5.6-sol",
   "thinking": "medium"
 }
 ```
@@ -92,6 +92,7 @@ Result:
   "state": "running",
   "harness": "pi",
   "feature": "scufris-8k2m4p6q9s1v",
+  "tmux_session": "example_scufris-8k2m4p6q9s1v",
   "message": "Worker started in an isolated worktree. It runs independently."
 }
 ```
@@ -105,8 +106,8 @@ Spawn transaction:
 5. Create the job directory with mode 0700.
 6. Write immutable `job.json` and `prompt.md` with mode 0400.
 7. Create empty `status` and `report.md` with mode 0600.
-8. Create the exact tmux window with a fixed helper invocation and the generated job ID only.
-9. The helper reads job data and replaces itself with the selected harness using argument arrays. Model text never enters the tmux shell command.
+8. Create or reuse the Sprout-named worktree session on the normal tmux server and create the exact detached worker window.
+9. Record exact tmux IDs, then replace the window process with the selected ambient harness using argument arrays. Model text never enters the tmux shell command. Ambient Pi is normal Pi, without Scufris extensions or skills.
 10. Add in-memory ownership only after launch succeeds.
 11. Roll back created resources on any earlier failure.
 
@@ -254,11 +255,15 @@ Immutable extension-owned record:
   "version": 1,
   "job_id": "8k2m4p6q9s1v",
   "harness": "pi",
-  "model": "openai/gpt-5.6-sol",
+  "model": "openai-codex/gpt-5.6-sol",
   "thinking": "medium",
   "feature": "scufris-8k2m4p6q9s1v",
   "landing_branch": "master",
   "landing_sha": "0123456789abcdef0123456789abcdef01234567",
+  "tmux_session": "example_scufris-8k2m4p6q9s1v",
+  "tmux_session_id": "$4",
+  "tmux_window_id": "@9",
+  "tmux_pane_id": "%12",
   "created_at": "2026-08-21T07:30:00Z"
 }
 ```

@@ -96,7 +96,7 @@ Use Python standard library and small Bash adapters. Helpers accept narrow verbs
 
 ### Delegated workers
 
-Each worker is one direct interactive Pi or Claude Code process in one tmux window and one isolated worktree.
+Each worker is one direct interactive Pi or Claude Code process in one tmux window and one isolated worktree. Pi workers invoke the ambient `pi` executable without Scufris extensions or skills.
 
 Workers own:
 
@@ -159,7 +159,7 @@ Scufris:
 - Delegates to the current repository by default when one exists.
 - Lists repositories below configured discovery roots as opaque project IDs for cross-project delegation.
 - Resolves and verifies the selected ID before Sprout runs. Model-facing tools never accept filesystem paths.
-- Defaults Pi to `openai/gpt-5.6-sol` with medium thinking.
+- Defaults Pi to `openai-codex/gpt-5.6-sol` with medium thinking.
 - Defaults Claude to `opus` with xhigh thinking.
 - Lets the foreground orchestrator override model and thinking per spawn.
 - Does not sandbox filesystem or network access.
@@ -206,14 +206,14 @@ ${XDG_CACHE_HOME:-$HOME/.cache}/sprouts/<project>/<feature>
 Tmux:
 
 ```text
-server socket: scufris
-session:       jobs
-window:        job-<job_id>
+server:  normal user server
+session: <project>_<feature>, matching Sprout session naming
+window:  job-<job_id>
 ```
 
-Every tmux and sprout subprocess uses an isolated socket directory and removes inherited `TMUX`. Scufris never creates, targets, or kills resources on the user's default tmux server.
+Scufris inherits the normal tmux server selection. It creates or reuses the worktree session without attaching, selecting, or switching the user's client. The worker window receives the current safe path and configuration environment, starts in the worktree, and invokes the ambient harness directly. Scufris records exact session, window, and pane IDs. It never kills a session or server.
 
-The matching job directory and exact tmux window are both required for orphan eligibility.
+The matching job directory and exact tmux window are both required for orphan eligibility. `remain-on-exit` retains a failed pane for manual debugging while pane-dead state marks the worker as exited.
 
 ## Foreground request flow
 
@@ -309,7 +309,7 @@ Custom messages identify Scufris as the source. They are not fake user messages.
 
 For ordinary steering:
 
-1. Resolve the owned job ID to the dedicated tmux socket and exact window.
+1. Resolve the owned job ID to its recorded exact pane on the normal tmux server.
 2. Load literal UTF-8 text into a unique tmux buffer.
 3. Paste the buffer once.
 4. Wait a fixed short delay.
@@ -408,7 +408,7 @@ Normal shutdown:
 Startup orphan scan:
 
 1. Scan bounded job-directory names.
-2. List exact windows in session `jobs` on the dedicated Scufris tmux socket.
+2. List exact generated worker windows across worktree sessions on the normal tmux server.
 3. Intersect job directories and windows.
 4. Report candidates once.
 5. Ask the user to retain or close them.

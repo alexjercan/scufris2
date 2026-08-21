@@ -80,10 +80,10 @@ scufris2/
 ### Version 1 scope and project policy
 
 - Handle direct user requests only. Do not add host-event triggers, background automation rules, or proactive workflows.
-- Version 1 delegates only in the current trusted Git repository and does not maintain project configuration or a global project registry.
+- Version 1 delegates to the current Git repository or an opaque project ID discovered below configured roots. Model-facing tools never accept repository paths.
 - Do not add a project harness allowlist, filesystem sandbox, or network sandbox. Workers run with the local user's authority. Nix system rollback is the accepted machine recovery boundary.
 - Keep harness selection in the spawn request. Version 1 implements Pi and Claude Code adapters; later adapters do not change the native job-tool contract.
-- Default Pi to `openai/gpt-5.6-sol` with medium thinking and Claude to `opus` with xhigh thinking. Let the foreground orchestrator override model and thinking for each spawn when the user requests another model.
+- Default Pi to `openai-codex/gpt-5.6-sol` with medium thinking and Claude to `opus` with xhigh thinking. Let the foreground orchestrator override model and thinking for each spawn when the user requests another model.
 - Launch Claude Code with `--dangerously-skip-permissions`. Pi already has unrestricted local-user authority.
 - Keep dashboardd presentation-only. Version 1 adds no machine-data query, task-query, host-event, or generic data-query tool. Future agent-facing data sources require separate narrow tools.
 
@@ -91,7 +91,7 @@ scufris2/
 
 - Build the assistant in this repository, outside dashboardd. Use Pi as the fast foreground conversation harness.
 - Implement orchestration as one small TypeScript Pi extension. Do not add MCP, a supervisor daemon, an agent runner, or an RPC bridge.
-- Run the actual delegated Pi, Claude Code, or future harness process in a tmux window on a dedicated Scufris server socket. Never target the user's default tmux server. Keep harness differences behind small launch, send, inspect, and stop adapters.
+- Run each delegated harness in a detached window within its Sprout-named worktree session on the normal tmux server. Never attach, select, or switch the user's client. Record exact tmux IDs and never kill a session or server. Pi workers invoke ambient normal Pi without Scufris extensions or skills. Keep harness differences behind small launch, send, inspect, and stop adapters.
 - Give every delegated coding job its own Git worktree. Never let concurrent coding agents share a checkout.
 - Use `sprout` to create, synchronize, land, and remove isolated worktrees under its standard cache location.
 - Use Plannotator as the local pull-request surface for coding jobs. Call its public Pi event API with the `code-review` action in the isolated worktree and return requested changes to the same worker for another committed revision. Do not launch the CLI or use private Plannotator interfaces.

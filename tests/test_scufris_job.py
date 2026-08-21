@@ -7,7 +7,6 @@ import subprocess
 import tempfile
 import time
 import unittest
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -65,14 +64,16 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         (self.project / "README.md").write_text("# Fixture\n", encoding="utf-8")
         self.run_external(["git", "add", "README.md"], cwd=self.project)
         self.run_external(["git", "commit", "-m", "fixture"], cwd=self.project)
-        self.socket = f"scufris-test-{uuid.uuid4().hex[:12]}"
+        self.tmux_root = self.root / "tmux"
+        self.tmux_root.mkdir()
         self.env = os.environ.copy()
+        self.env.pop("TMUX", None)
         self.env.update(
             {
                 "PATH": f"{self.bin}:{self.env['PATH']}",
                 "XDG_STATE_HOME": str(self.state),
                 "XDG_CACHE_HOME": str(self.cache),
-                "SCUFRIS_TMUX_SOCKET": self.socket,
+                "TMUX_TMPDIR": str(self.tmux_root),
                 "SCUFRIS_PROJECT_ROOTS": json.dumps([str(self.projects_root)]),
             }
         )
@@ -84,26 +85,13 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         for job_id in self.jobs:
             self.cli("stop", {"job_id": job_id}, check=False)
             self.run_external(
-                ["tmux", "-L", self.socket, "kill-window", "-t", f"jobs:job-{job_id}"],
-                env=self.isolated_env(),
-                check=False,
-            )
-            self.run_external(
                 ["sprout", "rm", f"scufris-{job_id}"],
                 cwd=self.project,
-                env=self.isolated_env(),
+                env=self.env,
                 check=False,
             )
         self.assertEqual(self.default_tmux_server(), self.default_server)
         self.temporary.cleanup()
-
-    def isolated_env(self) -> dict[str, str]:
-        env = self.env.copy()
-        env.pop("TMUX", None)
-        tmux_root = self.state / "scufris" / "tmux"
-        tmux_root.mkdir(parents=True, exist_ok=True)
-        env["TMUX_TMPDIR"] = str(tmux_root)
-        return env
 
     def default_tmux_server(self) -> str | None:
         if "TMUX" not in os.environ:
@@ -202,31 +190,34 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
 
     def test_spawn_send_inspect_stop_and_orphans(self) -> None:
         result = self.spawn()
-        self.assertEqual(result["model"], "openai/gpt-5.6-sol")
+        self.assertEqual(result["model"], "openai-codex/gpt-5.6-sol")
         self.assertEqual(result["thinking"], "medium")
         self.assertEqual(result["project"], "current")
         directory = self.state / "scufris" / "jobs" / result["job_id"]
         self.wait_for(directory / "status", "working: fake harness ready")
+        pi_argv = json.loads((directory / "argv.json").read_text(encoding="utf-8"))
+        self.assertNotIn("--extension", pi_argv)
+        self.assertNotIn("--skill", pi_argv)
 
         self.assertEqual(stat.S_IMODE((directory / "prompt.md").stat().st_mode), 0o400)
         self.assertEqual(stat.S_IMODE((directory / "job.json").stat().st_mode), 0o400)
         self.assertTrue(
             (self.cache / "sprouts" / self.project.name / result["feature"]).is_dir()
         )
+        self.assertEqual(result["tmux_session"], f"target_scufris-{result['job_id']}")
         windows = self.run_external(
             [
                 "tmux",
-                "-L",
-                self.socket,
                 "list-windows",
                 "-t",
-                "jobs",
+                f"={result['tmux_session']}",
                 "-F",
-                "#{window_name}",
+                "#{window_name}:#{pane_current_path}",
             ],
-            env=self.isolated_env(),
+            env=self.env,
         ).stdout.splitlines()
-        self.assertEqual(windows, [f"job-{result['job_id']}"])
+        worktree = self.cache / "sprouts" / self.project.name / result["feature"]
+        self.assertEqual(windows, [f"job-{result['job_id']}:{worktree}"])
         self.assertEqual(
             self.cli("orphans", {})["result"]["job_ids"], [result["job_id"]]
         )
@@ -270,6 +261,42 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             "inspect", {"job_id": claude["job_id"], "include_report": False}
         )["result"]
         self.assertTrue(second_inspection["window_alive"])
+
+        self.cli("send", {"job_id": claude["job_id"], "message": "/exit"})
+        deadline = time.monotonic() + 8
+        while self.poll_request(claude["job_id"])["window_alive"]:
+            if time.monotonic() >= deadline:
+                self.fail("worker pane did not become dead")
+            time.sleep(0.05)
+        claude_job = json.loads(
+            (claude_directory / "job.json").read_text(encoding="utf-8")
+        )
+        dead_window = self.run_external(
+            [
+                "tmux",
+                "display-message",
+                "-p",
+                "-t",
+                claude_job["tmux_window_id"],
+                "#{pane_dead}",
+            ],
+            env=self.env,
+        )
+        self.assertEqual(dead_window.stdout.strip(), "1")
+        self.cli("stop", {"job_id": claude["job_id"]})
+        removed = self.run_external(
+            [
+                "tmux",
+                "display-message",
+                "-p",
+                "-t",
+                claude_job["tmux_window_id"],
+                "#{window_id}",
+            ],
+            env=self.env,
+            check=False,
+        )
+        self.assertNotEqual(removed.returncode, 0)
         self.assertEqual(
             self.cli("stop", {"job_id": result["job_id"]})["result"]["state"], "stopped"
         )
@@ -339,6 +366,17 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(oversized_file["errors"], ["status exceeds 256 KiB"])
 
+    def test_tmux_policy_never_changes_clients_or_destroys_containers(self) -> None:
+        source = CLI.read_text(encoding="utf-8")
+        for command in (
+            "attach-session",
+            "select-window",
+            "switch-client",
+            "kill-session",
+            "kill-server",
+        ):
+            self.assertNotIn(f'"{command}"', source)
+
     def test_rejects_unknown_project_and_request_fields(self) -> None:
         unknown = self.cli(
             "spawn",
@@ -381,7 +419,7 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         self.assertFalse(outside["ok"])
         self.assertIn("project is required", outside["error"])
 
-        result = self.cli("orphans", {"command": "tmux kill-server"}, check=False)
+        result = self.cli("orphans", {"command": "unsafe operation"}, check=False)
         self.assertFalse(result["ok"])
         self.assertIn("unknown fields", result["error"])
 

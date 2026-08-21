@@ -21,7 +21,7 @@ from typing import Any, NoReturn
 JOB_ID_RE = re.compile(r"[a-z0-9]{12}\Z")
 MODEL_RE = re.compile(r"[^\x00-\x1f\x7f]{1,200}\Z")
 PROJECT_ID_RE = re.compile(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\Z")
-TMUX_LABEL_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}\Z")
+TMUX_ID_RE = re.compile(r"[$@%][0-9]+\Z")
 STATES = {"working", "needs-decision", "blocked", "review-ready", "done", "failed"}
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 MAX_INSTRUCTIONS = 256 * 1024
@@ -29,7 +29,6 @@ MAX_PROMPT = 1024 * 1024
 MAX_STATUS = 256 * 1024
 MAX_STATUS_LINE = 2 * 1024
 MAX_REPORT = 1024 * 1024
-TMUX_SESSION = "jobs"
 
 
 class JobError(Exception):
@@ -60,25 +59,6 @@ def job_dir(job_id: str) -> Path:
     return jobs_root() / job_id
 
 
-def tmux_label() -> str:
-    label = os.environ.get("SCUFRIS_TMUX_SOCKET", "scufris")
-    if not TMUX_LABEL_RE.fullmatch(label):
-        raise JobError("invalid Scufris tmux socket label")
-    return label
-
-
-def isolated_process_env() -> dict[str, str]:
-    env = os.environ.copy()
-    env.pop("TMUX", None)
-    root = state_root()
-    root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    root.chmod(0o700)
-    socket_root = root / "tmux"
-    socket_root.mkdir(mode=0o700, exist_ok=True)
-    env["TMUX_TMPDIR"] = str(socket_root)
-    return env
-
-
 def run(
     argv: list[str],
     *,
@@ -107,11 +87,7 @@ def run(
 
 
 def tmux(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
-    return run(
-        ["tmux", "-L", tmux_label(), *argv],
-        env=isolated_process_env(),
-        **kwargs,
-    )
+    return run(["tmux", *argv], **kwargs)
 
 
 def sprout(
@@ -122,7 +98,6 @@ def sprout(
         cwd=project_root,
         timeout=60,
         check=check,
-        env=isolated_process_env(),
     )
 
 
@@ -283,7 +258,7 @@ def git_text(root: Path, *args: str) -> str:
 
 def selected_adapter(harness: str, model: Any, thinking: Any) -> tuple[str, str]:
     defaults = {
-        "pi": ("openai/gpt-5.6-sol", "medium"),
+        "pi": ("openai-codex/gpt-5.6-sol", "medium"),
         "claude": ("opus", "xhigh"),
     }
     if not isinstance(harness, str) or harness not in defaults:
@@ -342,9 +317,7 @@ Follow the repository AGENTS.md files and project instructions.
 
 
 def tmux_windows() -> set[str]:
-    result = tmux(
-        ["list-windows", "-t", TMUX_SESSION, "-F", "#{window_name}"], check=False
-    )
+    result = tmux(["list-windows", "-a", "-F", "#{window_name}"], check=False)
     if result.returncode != 0:
         return set()
     return {
@@ -356,40 +329,86 @@ def window_name(job_id: str) -> str:
     return f"job-{validate_job_id(job_id)}"
 
 
+def session_name(project_root: Path, feature: str) -> str:
+    return f"{project_root.name}_{feature}".translate(str.maketrans("./ :", "____"))
+
+
+def tmux_identity(job: dict[str, Any]) -> tuple[str, str, str]:
+    values = tuple(
+        job.get(key) for key in ("tmux_session_id", "tmux_window_id", "tmux_pane_id")
+    )
+    prefixes = ("$", "@", "%")
+    if not all(
+        isinstance(value, str)
+        and value.startswith(prefix)
+        and TMUX_ID_RE.fullmatch(value)
+        for value, prefix in zip(values, prefixes, strict=True)
+    ):
+        raise JobError("job.json has invalid tmux identity")
+    return values  # type: ignore[return-value]
+
+
+def window_exists(job_id: str) -> bool:
+    try:
+        _, window_id, _ = tmux_identity(load_job(job_id))
+    except JobError:
+        return False
+    result = tmux(
+        ["display-message", "-p", "-t", window_id, "#{window_id}"], check=False
+    )
+    return result.returncode == 0 and result.stdout.decode().strip() == window_id
+
+
 def window_alive(job_id: str) -> bool:
-    return window_name(job_id) in tmux_windows()
+    try:
+        _, _, pane_id = tmux_identity(load_job(job_id))
+    except JobError:
+        return False
+    result = tmux(["display-message", "-p", "-t", pane_id, "#{pane_dead}"], check=False)
+    return result.returncode == 0 and result.stdout.decode().strip() == "0"
 
 
-def create_window(job_id: str, worktree: Path) -> None:
+def parse_tmux_identity(
+    result: subprocess.CompletedProcess[bytes],
+) -> tuple[str, str, str]:
+    values = tuple(result.stdout.decode("utf-8", "replace").strip().split("\t"))
+    if len(values) != 3 or not all(TMUX_ID_RE.fullmatch(value) for value in values):
+        raise JobError("tmux returned an invalid worker identity")
+    return values  # type: ignore[return-value]
+
+
+def create_window(
+    job_id: str, project_root: Path, feature: str, worktree: Path
+) -> tuple[str, str, str]:
+    name = session_name(project_root, feature)
+    output = ["-P", "-F", "#{session_id}\t#{window_id}\t#{pane_id}"]
+    common = ["-d", "-c", str(worktree), "-n", window_name(job_id)]
+    for key in (
+        "HOME",
+        "PATH",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "PI_CODING_AGENT_DIR",
+    ):
+        if value := os.environ.get(key):
+            common.extend(["-e", f"{key}={value}"])
+    if tmux(["has-session", "-t", f"={name}"], check=False).returncode == 0:
+        result = tmux(["new-window", *output, *common, "-t", f"={name}"])
+    else:
+        result = tmux(["new-session", *output, *common, "-s", name])
+    identity = parse_tmux_identity(result)
+    tmux(["set-option", "-w", "-t", identity[1], "remain-on-exit", "on"])
+    return identity
+
+
+def start_window(job_id: str, worktree: Path, identity: tuple[str, str, str]) -> None:
     script = Path(__file__).resolve()
     command = (
         f"exec {shlex.quote(sys.executable)} {shlex.quote(str(script))} launch {job_id}"
     )
-    common = ["-d", "-c", str(worktree)]
-    if tmux(["has-session", "-t", TMUX_SESSION], check=False).returncode == 0:
-        tmux(
-            [
-                "new-window",
-                *common,
-                "-t",
-                TMUX_SESSION,
-                "-n",
-                window_name(job_id),
-                command,
-            ]
-        )
-    else:
-        tmux(
-            [
-                "new-session",
-                *common,
-                "-s",
-                TMUX_SESSION,
-                "-n",
-                window_name(job_id),
-                command,
-            ]
-        )
+    tmux(["respawn-window", "-k", "-t", identity[1], "-c", str(worktree), command])
 
 
 def spawn(request: dict[str, Any]) -> dict[str, Any]:
@@ -416,6 +435,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
         raise JobError("job_id already exists")
     feature = f"scufris-{job_id}"
     created_worktree = False
+    worker_identity: tuple[str, str, str] | None = None
     try:
         sprout(["new", feature], root)
         created_worktree = True
@@ -425,6 +445,13 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
         directory.mkdir(mode=0o700, parents=True)
         landing_branch = git_text(root, "branch", "--show-current")
         landing_sha = git_text(root, "rev-parse", "HEAD")
+        prompt = prompt_text(job_id, instructions).encode("utf-8")
+        if len(prompt) > MAX_PROMPT:
+            raise JobError("generated prompt exceeds the limit")
+        write_new(directory / "prompt.md", prompt, 0o400)
+        write_new(directory / "status", b"", 0o600)
+        write_new(directory / "report.md", b"", 0o600)
+        worker_identity = create_window(job_id, root, feature, worktree)
         record = {
             "version": 1,
             "job_id": job_id,
@@ -435,21 +462,21 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
             "project": project,
             "landing_branch": landing_branch,
             "landing_sha": landing_sha,
+            "tmux_session": session_name(root, feature),
+            "tmux_session_id": worker_identity[0],
+            "tmux_window_id": worker_identity[1],
+            "tmux_pane_id": worker_identity[2],
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
-        prompt = prompt_text(job_id, instructions).encode("utf-8")
-        if len(prompt) > MAX_PROMPT:
-            raise JobError("generated prompt exceeds the limit")
         write_new(
             directory / "job.json",
             json.dumps(record, sort_keys=True, indent=2).encode() + b"\n",
             0o400,
         )
-        write_new(directory / "prompt.md", prompt, 0o400)
-        write_new(directory / "status", b"", 0o600)
-        write_new(directory / "report.md", b"", 0o600)
-        create_window(job_id, worktree)
+        start_window(job_id, worktree, worker_identity)
     except Exception:
+        if worker_identity is not None:
+            tmux(["kill-window", "-t", worker_identity[1]], check=False)
         shutil.rmtree(directory, ignore_errors=True)
         if created_worktree:
             sprout(["rm", feature], root, check=False)
@@ -460,6 +487,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
         "harness": harness,
         "feature": feature,
         "project": project,
+        "tmux_session": session_name(root, feature),
         "model": model,
         "thinking": thinking,
         "message": "Worker started in an isolated worktree. It runs independently.",
@@ -506,10 +534,11 @@ def launch(job_id: str) -> NoReturn:
 
 
 def submit(job_id: str, message: str) -> None:
+    job = load_job(job_id)
     if not window_alive(job_id):
         raise JobError("worker window is not running")
+    _, _, target = tmux_identity(job)
     buffer_name = f"scufris-{job_id}-{secrets.token_hex(4)}"
-    target = f"{TMUX_SESSION}:{window_name(job_id)}"
     try:
         tmux(
             ["load-buffer", "-b", buffer_name, "-"], input_bytes=message.encode("utf-8")
@@ -548,11 +577,12 @@ def stop(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(request, {"job_id"})
     job_id = validate_job_id(request["job_id"])
     job = load_job(job_id)
-    if not window_alive(job_id):
+    _, window_id, pane_id = tmux_identity(job)
+    if not window_exists(job_id):
         return {"job_id": job_id, "state": "stopped"}
-    target = f"{TMUX_SESSION}:{window_name(job_id)}"
-    tmux(["send-keys", "-t", target, "Escape"], check=False)
-    time.sleep(2)
+    if window_alive(job_id):
+        tmux(["send-keys", "-t", pane_id, "Escape"], check=False)
+        time.sleep(2)
     if window_alive(job_id):
         command = "/quit" if job.get("harness") == "pi" else "/exit"
         try:
@@ -562,8 +592,8 @@ def stop(request: dict[str, Any]) -> dict[str, Any]:
     deadline = time.monotonic() + 5
     while window_alive(job_id) and time.monotonic() < deadline:
         time.sleep(0.1)
-    if window_alive(job_id):
-        tmux(["kill-window", "-t", target], check=False)
+    if window_exists(job_id):
+        tmux(["kill-window", "-t", window_id], check=False)
     return {"job_id": job_id, "state": "stopped"}
 
 

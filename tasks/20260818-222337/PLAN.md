@@ -60,7 +60,7 @@ Add:
 
 - Built-in harness defaults and per-spawn overrides.
 - Job ID and immutable job-file creation.
-- One dedicated tmux server socket, one job session, exact window naming, and fixed job-ID-only launch helper.
+- Normal-server Sprout-named worktree sessions, exact detached worker windows, and fixed job-ID-only launch helper.
 - Fake interactive harness fixture.
 - Append-only status parser with byte offsets and limits.
 - One delegation-owned one-second loop.

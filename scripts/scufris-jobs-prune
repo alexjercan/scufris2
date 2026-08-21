@@ -1,0 +1,684 @@
+#!/usr/bin/env python3
+"""Preview or delete stale durable Scufris job metadata."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import selectors
+import stat
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+JOB_ID_RE = re.compile(r"[a-z0-9]{12}\Z")
+FEATURE_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+MODEL_RE = re.compile(r"[^\x00-\x1f\x7f]{1,200}\Z")
+PROJECT_RE = re.compile(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\Z")
+TMUX_ID_RE = re.compile(r"[$@%][0-9]+\Z")
+KNOWN_FILES = ("job.json", "prompt.md", "report.md", "status")
+RECORD_KEYS = {
+    "version",
+    "job_id",
+    "harness",
+    "model",
+    "thinking",
+    "feature",
+    "cleanup",
+    "project",
+    "landing_branch",
+    "landing_sha",
+    "tmux_session",
+    "tmux_session_id",
+    "tmux_window_id",
+    "tmux_pane_id",
+    "created_at",
+}
+HARNESSES = {"pi", "claude"}
+THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+CLEANUP = {"remove", "retain"}
+MAX_DAYS = 36500
+MAX_ENTRIES = 256
+MAX_RECORD = 64 * 1024
+MAX_COMMAND_OUTPUT = 256 * 1024
+ONE_HOUR_NS = 60 * 60 * 1_000_000_000
+TMUX_FIELDS = (
+    "#{session_id}",
+    "#{window_id}",
+    "#{pane_id}",
+    "#{session_name}",
+    "#{window_name}",
+    "#{pane_dead}",
+)
+
+
+class PruneError(Exception):
+    """Expected top-level pruning failure."""
+
+
+class Refusal(Exception):
+    """Expected per-record policy refusal."""
+
+
+Fingerprint = tuple[int, int, int, int, int, int, int, int, int]
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    directory: Fingerprint
+    files: tuple[tuple[str, Fingerprint], ...]
+    record_bytes: bytes
+
+
+@dataclass(frozen=True)
+class Candidate:
+    job_id: str
+    snapshot: Snapshot
+    record: dict[str, Any] | None
+
+
+def state_home() -> Path:
+    configured = os.environ.get("XDG_STATE_HOME")
+    if configured:
+        path = Path(configured).expanduser()
+        if not path.is_absolute():
+            raise PruneError("XDG_STATE_HOME must be an absolute path")
+        return path
+    return Path.home() / ".local/state"
+
+
+def jobs_root() -> Path:
+    return state_home() / "scufris/jobs"
+
+
+def fingerprint(info: os.stat_result) -> Fingerprint:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_uid,
+        info.st_gid,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def directory_flags() -> int:
+    return (
+        os.O_RDONLY
+        | os.O_DIRECTORY
+        | os.O_NOFOLLOW
+        | os.O_CLOEXEC
+        | getattr(os, "O_NOATIME", 0)
+    )
+
+
+def file_flags() -> int:
+    return os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_NOATIME", 0)
+
+
+def open_jobs_root(root: Path) -> tuple[int, Fingerprint] | None:
+    try:
+        descriptor = os.open(root, directory_flags())
+    except FileNotFoundError as error:
+        try:
+            root.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as stat_error:
+            raise PruneError(
+                f"jobs root: cannot inspect safely: {stat_error.strerror}"
+            ) from stat_error
+        raise PruneError("jobs root: cannot open safely") from error
+    except OSError as error:
+        raise PruneError(f"jobs root: cannot open safely: {error.strerror}") from error
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISDIR(info.st_mode):
+            raise PruneError("jobs root: not a directory or is a symlink")
+        path_info = root.lstat()
+        if fingerprint(path_info) != fingerprint(info):
+            raise PruneError("jobs root: changed while opening")
+        return descriptor, fingerprint(info)
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def bounded_names(descriptor: int, maximum: int, label: str) -> list[str]:
+    names: list[str] = []
+    try:
+        with os.scandir(descriptor) as entries:
+            for entry in entries:
+                if len(names) >= maximum:
+                    raise Refusal(f"{label}: exceeds {maximum} entries")
+                names.append(entry.name)
+    except Refusal:
+        raise
+    except OSError as error:
+        raise Refusal(f"{label}: cannot scan: {error.strerror}") from error
+    return sorted(names)
+
+
+def list_names(descriptor: int) -> list[str]:
+    try:
+        return bounded_names(descriptor, MAX_ENTRIES, "jobs root")
+    except Refusal as error:
+        raise PruneError(str(error)) from error
+
+
+def rendered_name(name: str) -> str:
+    return json.dumps(name, ensure_ascii=True)
+
+
+def read_record(descriptor: int) -> tuple[bytes, Fingerprint]:
+    try:
+        file_descriptor = os.open("job.json", file_flags(), dir_fd=descriptor)
+    except OSError as error:
+        raise Refusal(f"job.json: cannot open safely: {error.strerror}") from error
+    try:
+        before = os.fstat(file_descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise Refusal("job.json: not a regular non-symlink file")
+        if before.st_size > MAX_RECORD:
+            return b"", fingerprint(before)
+        data = bytearray()
+        while len(data) <= MAX_RECORD:
+            chunk = os.read(file_descriptor, min(8192, MAX_RECORD + 1 - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+        after = os.fstat(file_descriptor)
+        if fingerprint(after) != fingerprint(before):
+            raise Refusal("job.json: changed while reading")
+        return bytes(data), fingerprint(after)
+    except OSError as error:
+        raise Refusal(f"job.json: cannot read safely: {error.strerror}") from error
+    finally:
+        os.close(file_descriptor)
+
+
+def inspect_job(root_descriptor: int, root_device: int, job_id: str) -> Snapshot:
+    try:
+        descriptor = os.open(job_id, directory_flags(), dir_fd=root_descriptor)
+    except OSError as error:
+        raise Refusal(f"job directory: cannot open safely: {error.strerror}") from error
+    try:
+        directory_info = os.fstat(descriptor)
+        if not stat.S_ISDIR(directory_info.st_mode):
+            raise Refusal("job directory: not a non-symlink directory")
+        if directory_info.st_dev != root_device:
+            raise Refusal("job directory: crosses the jobs-root filesystem boundary")
+        names = bounded_names(descriptor, len(KNOWN_FILES), "job directory")
+        missing = sorted(set(KNOWN_FILES) - set(names))
+        unknown = sorted(set(names) - set(KNOWN_FILES))
+        if missing or unknown:
+            details = []
+            if missing:
+                details.append(f"missing {', '.join(missing)}")
+            if unknown:
+                details.append(
+                    f"unknown {', '.join(rendered_name(name) for name in unknown)}"
+                )
+            raise Refusal(f"job directory: invalid entries ({'; '.join(details)})")
+        file_snapshots: list[tuple[str, Fingerprint]] = []
+        for name in KNOWN_FILES:
+            try:
+                info = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            except OSError as error:
+                raise Refusal(
+                    f"{name}: cannot stat safely: {error.strerror}"
+                ) from error
+            if not stat.S_ISREG(info.st_mode):
+                raise Refusal(f"{name}: not a regular non-symlink file")
+            if info.st_dev != directory_info.st_dev:
+                raise Refusal(f"{name}: crosses the job-directory filesystem boundary")
+            if info.st_nlink != 1:
+                raise Refusal(f"{name}: has multiple hard links")
+            file_snapshots.append((name, fingerprint(info)))
+        record_bytes, record_fingerprint = read_record(descriptor)
+        if record_fingerprint != dict(file_snapshots)["job.json"]:
+            raise Refusal("job.json: changed during inspection")
+        final_directory = os.fstat(descriptor)
+        if final_directory.st_dev != root_device:
+            raise Refusal("job directory: changed filesystem boundary")
+        return Snapshot(
+            directory=fingerprint(final_directory),
+            files=tuple(file_snapshots),
+            record_bytes=record_bytes,
+        )
+    finally:
+        os.close(descriptor)
+
+
+def validate_text(value: Any, name: str, maximum: int = 200) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value.encode("utf-8")) > maximum
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise ValueError(f"invalid {name}")
+    return value
+
+
+def parse_created_at(value: Any) -> int:
+    text = validate_text(value, "created_at", 20)
+    parsed = dt.datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=dt.timezone.utc
+    )
+    if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != text:
+        raise ValueError("invalid created_at")
+    return int(parsed.timestamp() * 1_000_000_000)
+
+
+def validate_record(raw: bytes, job_id: str) -> tuple[dict[str, Any], int]:
+    if len(raw) > MAX_RECORD:
+        raise ValueError("job.json exceeds 64 KiB")
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ValueError("job.json is not valid UTF-8 JSON") from error
+    if not isinstance(value, dict) or set(value) != RECORD_KEYS:
+        raise ValueError("job.json has invalid fields")
+    if value["version"] != 1 or isinstance(value["version"], bool):
+        raise ValueError("job.json has an unsupported version")
+    if value["job_id"] != job_id:
+        raise ValueError("job.json job_id does not match its directory")
+    if value["harness"] not in HARNESSES:
+        raise ValueError("job.json has an invalid harness")
+    model = value["model"]
+    if not isinstance(model, str) or MODEL_RE.fullmatch(model) is None:
+        raise ValueError("job.json has an invalid model")
+    if value["thinking"] not in THINKING:
+        raise ValueError("job.json has an invalid thinking level")
+    feature = value["feature"]
+    if (
+        not isinstance(feature, str)
+        or len(feature) > 48
+        or FEATURE_RE.fullmatch(feature) is None
+    ):
+        raise ValueError("job.json has an invalid feature")
+    if value["cleanup"] not in CLEANUP:
+        raise ValueError("job.json has an invalid cleanup policy")
+    project = value["project"]
+    if not isinstance(project, str) or (
+        project != "current"
+        and (
+            PROJECT_RE.fullmatch(project) is None
+            or any(part in {".", ".."} for part in project.split("/"))
+        )
+    ):
+        raise ValueError("job.json has an invalid project")
+    validate_text(value["landing_branch"], "landing_branch", 255)
+    landing_sha = value["landing_sha"]
+    if (
+        not isinstance(landing_sha, str)
+        or re.fullmatch(r"[0-9a-f]{40}", landing_sha) is None
+    ):
+        raise ValueError("job.json has an invalid landing_sha")
+    session = validate_text(value["tmux_session"], "tmux_session", 128)
+    if any(character in session for character in "/:."):
+        raise ValueError("job.json has an invalid tmux_session")
+    for key, prefix in (
+        ("tmux_session_id", "$"),
+        ("tmux_window_id", "@"),
+        ("tmux_pane_id", "%"),
+    ):
+        identity = value[key]
+        if (
+            not isinstance(identity, str)
+            or not identity.startswith(prefix)
+            or TMUX_ID_RE.fullmatch(identity) is None
+        ):
+            raise ValueError(f"job.json has an invalid {key}")
+    created_ns = parse_created_at(value["created_at"])
+    return value, created_ns
+
+
+def run_bounded(argv: list[str], timeout: float = 3) -> tuple[int, bytes, bytes]:
+    environment = os.environ.copy()
+    try:
+        process = subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=environment,
+        )
+    except OSError as error:
+        raise Refusal(f"tmux: cannot execute: {error.strerror}") from error
+    assert process.stdout is not None
+    assert process.stderr is not None
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+    output = {"stdout": bytearray(), "stderr": bytearray()}
+    deadline = time.monotonic() + timeout
+    problem: str | None = None
+    try:
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                problem = "timed out"
+                break
+            ready = selector.select(remaining)
+            if not ready:
+                problem = "timed out"
+                break
+            for key, _ in ready:
+                chunk = os.read(key.fileobj.fileno(), 8192)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                target = output[key.data]
+                target.extend(chunk)
+                if len(target) > MAX_COMMAND_OUTPUT:
+                    problem = "output exceeds 256 KiB"
+                    break
+            if problem:
+                break
+    finally:
+        selector.close()
+        if problem and process.poll() is None:
+            process.terminate()
+        try:
+            returncode = process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            returncode = process.wait(timeout=1)
+    if problem:
+        raise Refusal(f"tmux: {problem}")
+    return returncode, bytes(output["stdout"]), bytes(output["stderr"])
+
+
+def pane_liveness(record: dict[str, Any], job_id: str) -> str:
+    session = record["tmux_session"]
+    delimiter = next(
+        value
+        for number in range(256)
+        if (value := f"__SCUFRIS_{number:02x}_BOUNDARY__") not in session
+    )
+    tmux_format = delimiter.join(TMUX_FIELDS)
+    code, stdout, stderr = run_bounded(
+        ["tmux", "display-message", "-p", "-t", record["tmux_pane_id"], tmux_format]
+    )
+    if code != 0:
+        message = stderr.decode("utf-8", "replace").strip()
+        if (
+            "can't find pane" in message
+            or "no server running" in message
+            or (
+                "error connecting to" in message
+                and "No such file or directory" in message
+            )
+        ):
+            return "missing"
+        raise Refusal(f"tmux: cannot verify exact pane ({message or f'exited {code}'})")
+    values = tuple(stdout.decode("utf-8", "replace").strip().split(delimiter))
+    expected = (
+        record["tmux_session_id"],
+        record["tmux_window_id"],
+        record["tmux_pane_id"],
+        record["tmux_session"],
+        f"job-{job_id}",
+    )
+    if len(values) != 6 or values[:5] != expected:
+        raise Refusal("tmux: recorded pane identity does not match exactly")
+    if values[5] == "0":
+        return "alive"
+    if values[5] == "1":
+        return "dead"
+    raise Refusal("tmux: pane returned an invalid liveness value")
+
+
+def threshold_met(timestamp_ns: int, required_ns: int, now_ns: int) -> bool:
+    return timestamp_ns <= now_ns and now_ns - timestamp_ns >= required_ns
+
+
+def classify_candidate(
+    job_id: str,
+    snapshot: Snapshot,
+    older_than_days: int,
+    now_ns: int,
+) -> tuple[Candidate | None, str]:
+    threshold_ns = older_than_days * 24 * 60 * 60 * 1_000_000_000
+    try:
+        record, created_ns = validate_record(snapshot.record_bytes, job_id)
+    except (ValueError, OverflowError):
+        directory_mtime_ns = snapshot.directory[7]
+        required_ns = max(threshold_ns, ONE_HOUR_NS)
+        if not threshold_met(directory_mtime_ns, required_ns, now_ns):
+            return (
+                None,
+                "malformed record is newer than the retention or one-hour grace boundary",
+            )
+        return (
+            Candidate(job_id, snapshot, None),
+            "malformed record; directory mtime meets retention and one-hour grace",
+        )
+    if not threshold_met(created_ns, threshold_ns, now_ns):
+        return (
+            None,
+            f"valid record is newer than the {older_than_days}-day retention boundary",
+        )
+    try:
+        liveness = pane_liveness(record, job_id)
+    except Refusal as error:
+        return None, str(error)
+    if liveness == "alive":
+        return None, "exact recorded pane is alive"
+    return (
+        Candidate(job_id, snapshot, record),
+        f"valid record; exact pane is {liveness}; retention boundary met",
+    )
+
+
+def root_identity(value: Fingerprint) -> tuple[int, int, int, int, int]:
+    return value[0], value[1], value[2], value[4], value[5]
+
+
+def verify_root(root: Path, descriptor: int, expected: Fingerprint) -> None:
+    try:
+        opened = fingerprint(os.fstat(descriptor))
+        current = fingerprint(root.lstat())
+    except OSError as error:
+        raise Refusal(f"jobs root: cannot revalidate: {error.strerror}") from error
+    if root_identity(opened) != root_identity(expected) or root_identity(
+        current
+    ) != root_identity(expected):
+        raise Refusal("jobs root changed after candidate scan")
+
+
+def revalidate_candidate(
+    root: Path,
+    root_descriptor: int,
+    root_fingerprint: Fingerprint,
+    root_device: int,
+    candidate: Candidate,
+) -> None:
+    verify_root(root, root_descriptor, root_fingerprint)
+    try:
+        current = inspect_job(root_descriptor, root_device, candidate.job_id)
+    except Refusal as error:
+        raise Refusal(f"changed after candidate scan ({error})") from error
+    if current != candidate.snapshot:
+        raise Refusal("changed after candidate scan")
+
+
+def delete_candidate(
+    root: Path,
+    root_descriptor: int,
+    root_fingerprint: Fingerprint,
+    root_device: int,
+    candidate: Candidate,
+) -> None:
+    revalidate_candidate(
+        root, root_descriptor, root_fingerprint, root_device, candidate
+    )
+    if candidate.record is not None:
+        liveness = pane_liveness(candidate.record, candidate.job_id)
+        if liveness == "alive":
+            raise Refusal("exact recorded pane became alive before deletion")
+        revalidate_candidate(
+            root, root_descriptor, root_fingerprint, root_device, candidate
+        )
+    try:
+        descriptor = os.open(
+            candidate.job_id, directory_flags(), dir_fd=root_descriptor
+        )
+    except OSError as error:
+        raise Refusal(f"changed before deletion ({error.strerror})") from error
+    try:
+        if fingerprint(os.fstat(descriptor)) != candidate.snapshot.directory:
+            raise Refusal("changed before deletion")
+        expected_files = dict(candidate.snapshot.files)
+        for name in KNOWN_FILES:
+            verify_root(root, root_descriptor, root_fingerprint)
+            current = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            if fingerprint(current) != expected_files[name]:
+                raise Refusal(f"{name} changed before deletion")
+        for name in KNOWN_FILES:
+            current = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            if fingerprint(current) != expected_files[name]:
+                raise Refusal(f"{name} changed during deletion")
+            os.unlink(name, dir_fd=descriptor)
+        with os.scandir(descriptor) as entries:
+            if next(entries, None) is not None:
+                raise PruneError(
+                    f"{candidate.job_id}: entries appeared during deletion"
+                )
+    except OSError as error:
+        raise PruneError(
+            f"{candidate.job_id}: safe deletion failed: {error.strerror}"
+        ) from error
+    finally:
+        os.close(descriptor)
+    try:
+        verify_root(root, root_descriptor, root_fingerprint)
+        os.rmdir(candidate.job_id, dir_fd=root_descriptor)
+    except Refusal:
+        raise
+    except OSError as error:
+        raise PruneError(
+            f"{candidate.job_id}: cannot remove empty job directory: {error.strerror}"
+        ) from error
+
+
+def bounded_days(value: str) -> int:
+    if re.fullmatch(r"[0-9]+", value) is None:
+        raise argparse.ArgumentTypeError("must be a nonnegative integer")
+    result = int(value)
+    if result > MAX_DAYS:
+        raise argparse.ArgumentTypeError(f"must not exceed {MAX_DAYS}")
+    return result
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(
+        description="Preview stale Scufris job metadata; delete it only with --apply.",
+        epilog=(
+            "Valid jobs require an old record and an exact non-live pane. Malformed jobs "
+            "use directory mtime and always have a one-hour grace. Only strict known-file "
+            "directories below the conventional jobs root can be deleted. Policy refusals "
+            "exit 0; unsafe operational failures exit 1."
+        ),
+    )
+    result.add_argument(
+        "--apply",
+        action="store_true",
+        help="delete candidates after race and liveness revalidation",
+    )
+    result.add_argument(
+        "--older-than-days",
+        type=bounded_days,
+        default=30,
+        metavar="N",
+        help=f"retention age in whole days, 0..{MAX_DAYS} (default: 30)",
+    )
+    return result
+
+
+def main() -> int:
+    arguments = parser().parse_args()
+    root = jobs_root()
+    try:
+        opened = open_jobs_root(root)
+        if opened is None:
+            action = "Apply" if arguments.apply else "Preview"
+            print(f"{action}: 0 candidates, 0 refused; jobs root does not exist.")
+            return 0
+        root_descriptor, root_fingerprint = opened
+        root_device = root_fingerprint[0]
+        try:
+            names = list_names(root_descriptor)
+            now_ns = time.time_ns()
+            candidates: list[Candidate] = []
+            refusals = 0
+            for name in names:
+                if JOB_ID_RE.fullmatch(name) is None:
+                    print(
+                        f"refuse root entry {rendered_name(name)}: "
+                        "name is not an exact 12-character job ID"
+                    )
+                    refusals += 1
+                    continue
+                try:
+                    snapshot = inspect_job(root_descriptor, root_device, name)
+                except Refusal as error:
+                    print(f"refuse {name}: {error}")
+                    refusals += 1
+                    continue
+                candidate, reason = classify_candidate(
+                    name, snapshot, arguments.older_than_days, now_ns
+                )
+                if candidate is None:
+                    print(f"refuse {name}: {reason}")
+                    refusals += 1
+                else:
+                    print(f"candidate {name}: {reason}")
+                    candidates.append(candidate)
+            if not arguments.apply:
+                print(
+                    f"Preview: {len(candidates)} candidates, {refusals} refused; "
+                    "no changes made."
+                )
+                return 0
+            deleted = 0
+            errors = 0
+            for candidate in candidates:
+                try:
+                    delete_candidate(
+                        root,
+                        root_descriptor,
+                        root_fingerprint,
+                        root_device,
+                        candidate,
+                    )
+                    print(f"deleted {candidate.job_id}: metadata directory removed")
+                    deleted += 1
+                except Refusal as error:
+                    print(f"refuse {candidate.job_id}: {error}")
+                    refusals += 1
+                except PruneError as error:
+                    print(f"error {error}", file=sys.stderr)
+                    errors += 1
+            print(f"Apply: {deleted} deleted, {refusals} refused, {errors} errors.")
+            return 1 if errors else 0
+        finally:
+            os.close(root_descriptor)
+    except PruneError as error:
+        print(f"scufris-jobs-prune: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

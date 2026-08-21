@@ -115,7 +115,10 @@
             test -f ${resources}/share/scufris/extensions/scufris/widgets.ts
             test -x ${resources}/share/scufris/scripts/scufris-job
             test -x ${resources}/share/scufris/scripts/scufris-jobs
+            test -x ${resources}/share/scufris/scripts/scufris-jobs-prune
             test -x ${resources}/share/scufris/scripts/scufris-dashboard
+            test ! -e ${resources}/bin/scufris-jobs-prune
+            test ! -e ${launcher}/bin/scufris-jobs-prune
             test -f ${resources}/share/scufris/skills/delegation/SKILL.md
             test -f ${resources}/share/scufris/skills/widgets/SKILL.md
             touch "$out"

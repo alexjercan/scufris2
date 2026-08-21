@@ -66,6 +66,40 @@
         };
 
         checks = {
+          launcher-system-pi = let
+            systemPi = pkgs.writeShellScriptBin "pi" ''
+              printf '%s\n' system-pi "$@"
+            '';
+          in
+            pkgs.runCommand "scufris-launcher-system-pi-check" {
+              nativeBuildInputs = [launcher systemPi];
+            } ''
+              scufris user-argument > actual
+              cat > expected <<'EOF'
+              system-pi
+              --extension
+              ${resources}/share/scufris/extensions/scufris/agents.ts
+              --skill
+              ${resources}/share/scufris/skills/delegation
+              --extension
+              ${resources}/share/scufris/extensions/scufris/widgets.ts
+              --skill
+              ${resources}/share/scufris/skills/widgets
+              user-argument
+              EOF
+              diff -u expected actual
+              touch "$out"
+            '';
+
+          launcher-fallback-pi = pkgs.runCommand "scufris-launcher-fallback-pi-check" {} ''
+            export HOME="$TMPDIR/home"
+            mkdir -p "$HOME"
+            expected="$(${inputs.pi.packages.${system}.default}/bin/pi --version)"
+            actual="$(PATH=/nonexistent ${launcher}/bin/scufris --version)"
+            test "$actual" = "$expected"
+            touch "$out"
+          '';
+
           resources = pkgs.runCommand "scufris-resources-check" {} ''
             test -f ${resources}/share/scufris/extensions/scufris/agents.ts
             test -f ${resources}/share/scufris/extensions/scufris/widgets.ts

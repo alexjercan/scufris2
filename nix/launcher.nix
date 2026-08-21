@@ -23,11 +23,14 @@
 in
   pkgs.writeShellApplication {
     name = "scufris";
-    runtimeInputs =
-      [piPackage]
-      ++ pkgs.lib.optional widgets dashboardctlPackage;
+    runtimeInputs = pkgs.lib.optional widgets dashboardctlPackage;
     text = ''
-      exec pi ${renderedArgs} "$@"
+      pi=${pkgs.lib.escapeShellArg "${piPackage}/bin/pi"}
+      if system_pi="$(type -P pi)"; then
+        pi="$system_pi"
+      fi
+
+      exec "$pi" ${renderedArgs} "$@"
     '';
     meta = {
       description = "Pi launcher with configurable Scufris extensions";

@@ -78,6 +78,8 @@
               cat > expected <<'EOF'
               system-pi
               --extension
+              ${resources}/share/scufris/extensions/scufris/calm.ts
+              --extension
               ${resources}/share/scufris/extensions/scufris/agents.ts
               --skill
               ${resources}/share/scufris/skills/delegation
@@ -101,6 +103,7 @@
           '';
 
           resources = pkgs.runCommand "scufris-resources-check" {} ''
+            test -f ${resources}/share/scufris/extensions/scufris/calm.ts
             test -f ${resources}/share/scufris/extensions/scufris/agents.ts
             test -f ${resources}/share/scufris/extensions/scufris/widgets.ts
             test -x ${resources}/share/scufris/scripts/scufris-job
@@ -146,6 +149,10 @@
 
       flake = {
         extensions = {
+          calm = builtins.path {
+            path = ./extensions/scufris/calm.ts;
+            name = "scufris-calm-extension";
+          };
           delegation = builtins.path {
             path = ./extensions/scufris/agents.ts;
             name = "scufris-delegation-extension";

@@ -7,14 +7,16 @@
     "pi-package"
   ],
   "scripts": {
-    "check": "npm run typecheck && npm run format:check",
+    "check": "npm run typecheck && npm test && npm run format:check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "pi": "pi -e ./extensions/scufris/agents.ts -e ./extensions/scufris/widgets.ts",
+    "pi": "pi -e ./extensions/scufris/calm.ts -e ./extensions/scufris/agents.ts -e ./extensions/scufris/widgets.ts",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "pi": {
     "extensions": [
+      "./extensions/scufris/calm.ts",
       "./extensions/scufris/agents.ts",
       "./extensions/scufris/widgets.ts"
     ],

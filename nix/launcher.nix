@@ -7,7 +7,11 @@
   widgets ? true,
 }: let
   extensionArgs =
-    pkgs.lib.optionals delegation [
+    [
+      "--extension"
+      "${resources}/share/scufris/extensions/scufris/calm.ts"
+    ]
+    ++ pkgs.lib.optionals delegation [
       "--extension"
       "${resources}/share/scufris/extensions/scufris/agents.ts"
       "--skill"

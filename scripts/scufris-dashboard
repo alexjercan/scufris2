@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Private Scufris dashboardctl adapter."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import selectors
+import subprocess
+import sys
+import time
+from typing import Any, NoReturn
+
+MAX_REQUEST = 64 * 1024
+MAX_RESPONSE = 64 * 1024
+TIMEOUT_SECONDS = 5.0
+IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
+
+
+class DashboardError(Exception):
+    """Expected user-visible dashboard error."""
+
+    def __init__(self, message: str, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def validate_request(
+    request: Any, required: set[str], optional: set[str] | None = None
+) -> dict[str, Any]:
+    optional = optional or set()
+    if not isinstance(request, dict):
+        raise DashboardError("request must be a JSON object")
+    keys = set(request)
+    missing = required - keys
+    unknown = keys - required - optional
+    if missing:
+        raise DashboardError(f"missing fields: {', '.join(sorted(missing))}")
+    if unknown:
+        raise DashboardError(f"unknown fields: {', '.join(sorted(unknown))}")
+    return request
+
+
+def read_request() -> dict[str, Any]:
+    raw = sys.stdin.buffer.read(MAX_REQUEST + 1)
+    if len(raw) > MAX_REQUEST:
+        raise DashboardError("request exceeds 64 KiB")
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise DashboardError(f"invalid JSON request: {error}") from error
+    if not isinstance(value, dict):
+        raise DashboardError("request must be a JSON object")
+    return value
+
+
+def identifier(value: Any, name: str) -> str:
+    if not isinstance(value, str) or not IDENTIFIER_RE.fullmatch(value):
+        raise DashboardError(f"invalid {name}")
+    return value
+
+
+def json_object(value: Any, name: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise DashboardError(f"{name} must be a JSON object")
+    return value
+
+
+def compact_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def command_argv(command: str, request: dict[str, Any]) -> list[str]:
+    if command in {"discover", "list"}:
+        validate_request(request, set())
+        return ["dashboardctl", command]
+    if command == "open":
+        values = validate_request(
+            request,
+            {"widget_id", "variant_id"},
+            {"options", "inputs", "presentation"},
+        )
+        argv = [
+            "dashboardctl",
+            "open",
+            identifier(values["widget_id"], "widget_id"),
+            "--variant",
+            identifier(values["variant_id"], "variant_id"),
+        ]
+        options = json_object(values.get("options", {}), "options")
+        inputs = json_object(values.get("inputs", {}), "inputs")
+        argv.extend(
+            ["--options", compact_json(options), "--inputs", compact_json(inputs)]
+        )
+        presentation = values.get("presentation", "focus")
+        if presentation not in {"focus", "tile"}:
+            raise DashboardError("presentation must be focus or tile")
+        argv.extend(["--presentation", presentation])
+        return argv
+    if command == "update":
+        values = validate_request(request, {"surface_id"}, {"inputs", "presentation"})
+        if "inputs" not in values and "presentation" not in values:
+            raise DashboardError("update requires inputs or presentation")
+        argv = [
+            "dashboardctl",
+            "update",
+            identifier(values["surface_id"], "surface_id"),
+        ]
+        if "inputs" in values:
+            argv.extend(
+                ["--inputs", compact_json(json_object(values["inputs"], "inputs"))]
+            )
+        if "presentation" in values:
+            presentation = values["presentation"]
+            if presentation not in {"focus", "tile"}:
+                raise DashboardError("presentation must be focus or tile")
+            argv.extend(["--presentation", presentation])
+        return argv
+    if command in {"focus", "close"}:
+        values = validate_request(request, {"surface_id"})
+        return [
+            "dashboardctl",
+            command,
+            identifier(values["surface_id"], "surface_id"),
+        ]
+    raise DashboardError(f"unknown command: {command}")
+
+
+def bounded_run(argv: list[str]) -> tuple[int, bytes, bytes]:
+    try:
+        process = subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError as error:
+        raise DashboardError(f"cannot start dashboardctl: {error}") from error
+    assert process.stdout is not None
+    assert process.stderr is not None
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+    chunks: dict[str, list[bytes]] = {"stdout": [], "stderr": []}
+    total = 0
+    deadline = time.monotonic() + TIMEOUT_SECONDS
+    try:
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                process.kill()
+                process.wait()
+                raise DashboardError("dashboardctl timed out")
+            events = selector.select(remaining)
+            if not events and process.poll() is None:
+                continue
+            for key, _mask in events:
+                data = os.read(key.fileobj.fileno(), 8192)
+                if not data:
+                    selector.unregister(key.fileobj)
+                    continue
+                total += len(data)
+                if total > MAX_RESPONSE:
+                    process.kill()
+                    process.wait()
+                    raise DashboardError("dashboardctl response exceeds 64 KiB")
+                chunks[key.data].append(data)
+        return process.wait(), b"".join(chunks["stdout"]), b"".join(chunks["stderr"])
+    finally:
+        selector.close()
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+
+
+def invoke(command: str, request: dict[str, Any]) -> Any:
+    returncode, stdout, stderr = bounded_run(command_argv(command, request))
+    try:
+        response = json.loads(stdout)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        diagnostic = stderr.decode("utf-8", "replace").strip()
+        suffix = f": {diagnostic}" if diagnostic else ""
+        raise DashboardError(f"invalid dashboardctl response{suffix}") from error
+    if not isinstance(response, dict) or response.get("version") != 2:
+        raise DashboardError("dashboardctl protocol version must be 2")
+    status = response.get("status")
+    if status == "failed":
+        error = response.get("error")
+        if not isinstance(error, dict):
+            raise DashboardError("invalid dashboardctl error response")
+        code = error.get("code")
+        message = error.get("message")
+        if not isinstance(code, str) or not IDENTIFIER_RE.fullmatch(code):
+            raise DashboardError("invalid dashboardctl error response")
+        if (
+            not isinstance(message, str)
+            or not message
+            or len(message.encode("utf-8")) > 2048
+            or any(
+                ord(character) < 32 or ord(character) == 127 for character in message
+            )
+        ):
+            raise DashboardError("invalid dashboardctl error response")
+        raise DashboardError(message, code)
+    if status != "ok" or "result" not in response:
+        raise DashboardError("invalid dashboardctl success response")
+    if returncode != 0:
+        raise DashboardError(f"dashboardctl exited with status {returncode}")
+    return response["result"]
+
+
+def emit(value: dict[str, Any]) -> None:
+    sys.stdout.write(compact_json(value) + "\n")
+
+
+def fail(error: Exception) -> NoReturn:
+    value: dict[str, Any] = {"ok": False, "error": str(error)}
+    if isinstance(error, DashboardError) and error.code is not None:
+        value["error_code"] = error.code
+    emit(value)
+    raise SystemExit(1)
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        raise DashboardError("usage: scufris-dashboard COMMAND")
+    emit({"ok": True, "result": invoke(sys.argv[1], read_request())})
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except DashboardError as error:
+        fail(error)

@@ -441,15 +441,9 @@ Dashboardd is presentation-only. No dashboard query tool exists.
 
 All commands invoke `dashboardctl` directly with argument arrays and a five-second process timeout. Scufris parses protocol version 2 responses and preserves stable dashboardd error codes.
 
-### `scufris_widget_discover`
+During `session_start`, Scufris calls `dashboardctl discover` once, bounds the response to 64 KiB, validates the catalog, and caches it for that Pi session. It then registers widget tools dynamically. The open-tool schema is a discriminated union of exact discovered widget IDs, variants, options, and input envelopes. A failed discovery leaves agent tools available, emits one notification, and registers no widget tools. `/reload` retries discovery. There is no model-facing discover tool.
 
-Input:
-
-```json
-{}
-```
-
-Result is the bounded public discovery result from `dashboardctl discover`. Backend paths and frontend paths are not present in dashboardd discovery.
+Dashboardctl JSON remains the process protocol. Model-facing widget results use concise text and retain bounded structured details. Raw discovery JSON does not enter model context.
 
 ### `scufris_widget_open`
 
@@ -468,19 +462,26 @@ Input:
 Schema:
 
 - `widget_id`: required discovered ID.
-- `variant_id`: required discovered variant ID.
-- `options`: optional JSON object, default `{}`.
-- `inputs`: optional map of `{ "type": string, "value": JSON }`, default `{}`.
+- `variant_id`: required variant for that widget.
+- `options`: optional object containing only options applicable to that variant, with discovered types, limits, and choices.
+- `inputs`: optional object containing only inputs applicable to that variant. Required inputs are required by the generated schema, and each envelope type is the exact discovered type.
 - `presentation`: optional enum `focus | tile`, default `focus`.
 
 Result:
 
 ```json
 {
+  "widget_id": "cpu",
+  "variant_id": "full",
   "surface_id": "surface-4",
-  "state": "open",
-  "message": "Surface is open independently and is tracked for external closure."
+  "state": "open"
 }
+```
+
+Model text:
+
+```text
+Opened cpu full view as surface-4.
 ```
 
 Every call creates a new surface. No reuse or deduplication.
@@ -496,7 +497,7 @@ Input:
 }
 ```
 
-At least one of `inputs` or `presentation` is required. `inputs` replaces the complete direct-input map. Options are immutable.
+At least one of `inputs` or `presentation` is required. `inputs` replaces the complete direct-input map. Options are immutable. The surface must be owned by the current Pi session.
 
 ### `scufris_widget_list`
 
@@ -518,7 +519,7 @@ Input:
 }
 ```
 
-Requires an explicit existing surface ID.
+Requires an explicit surface ID owned by the current Pi session.
 
 ### `scufris_widget_close`
 
@@ -530,7 +531,7 @@ Input:
 }
 ```
 
-Requires an explicit existing surface ID. Closing deletes the surface and runtime instance. An already externally closed tracked surface is removed from ownership and is not closed again.
+Requires an explicit surface ID owned by the current Pi session. Closing deletes the surface and runtime instance. An already externally closed tracked surface is removed from ownership and is not closed again.
 
 ## External widget close event
 

@@ -54,7 +54,7 @@ Does not own:
 
 Owns only Pi-specific or in-memory concerns:
 
-- Native tool registration.
+- Native and discovery-derived tool registration.
 - `session_start` and `session_shutdown`.
 - One fixed one-second timer.
 - In-memory job and opened-surface ownership.
@@ -139,6 +139,7 @@ Workers read repository instructions and decide which checks apply. Scufris does
 
 The extension keeps:
 
+- The session's validated dashboard widget catalog.
 - Owned job IDs and tmux window IDs.
 - Parsed status byte offsets and partial trailing bytes.
 - Last surfaced event identity.

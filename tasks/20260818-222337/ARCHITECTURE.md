@@ -294,7 +294,7 @@ Do not emit unchanged status.
 | Event                                 | UI                       | Model turn                        |
 | ------------------------------------- | ------------------------ | --------------------------------- |
 | `working:`                            | Notify or compact status | No                                |
-| `review-ready:`                       | Notify and start review  | No automatic mediation            |
+| `review-ready:`                       | Notify and start review  | Follow-up, trigger turn           |
 | `needs-decision:`                     | Compact notification     | Follow-up, trigger turn           |
 | `blocked:`                            | Compact notification     | Follow-up, trigger turn           |
 | `done:`                               | Compact notification     | Follow-up, trigger turn           |

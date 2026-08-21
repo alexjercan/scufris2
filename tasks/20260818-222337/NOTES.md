@@ -33,3 +33,7 @@ Delegated workers use detached Sprout-named worktree sessions on the user's norm
 A Pi worker invokes ambient `pi` directly. It does not invoke the Scufris launcher and does not load Scufris extensions or skills. Safe path and configuration variables from the orchestrator environment are applied to the worker window so stale tmux-server environment does not select another Pi or state directory.
 
 The live cross-project playtest also corrected the Sol provider from `openai/gpt-5.6-sol` to the OAuth-backed `openai-codex/gpt-5.6-sol`.
+
+## Review-ready mediation accepted 2026-08-21
+
+`review-ready` is actionable and triggers one foreground model turn. The prior notification-only behavior assumed automated Plannotator review that was not implemented and left completed work waiting until the user spoke. `working` remains notification-only. Poll offsets ensure each review-ready event triggers once.

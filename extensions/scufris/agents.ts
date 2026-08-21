@@ -86,6 +86,10 @@ function generatedJobId(): string {
   return randomBytes(6).toString("hex");
 }
 
+export function jobEventTriggersTurn(state: string): boolean {
+  return state !== "working";
+}
+
 function parseEvent(line: string): { state: string; summary: string } {
   const separator = line.indexOf(": ");
   return {
@@ -157,7 +161,7 @@ export default function scufris(pi: ExtensionAPI): void {
           const event = parseEvent(line);
           job.state = event.state;
           job.summary = event.summary;
-          if (event.state === "working" || event.state === "review-ready") {
+          if (!jobEventTriggersTurn(event.state)) {
             routine.push(`${job.job_id}: ${line}`);
           } else {
             sendJobEvent(job, line, true);

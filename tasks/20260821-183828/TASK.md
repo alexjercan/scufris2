@@ -1,6 +1,6 @@
 # Restore Sprout-owned landing and cleanup policy
 
-- STATUS: OPEN
+- STATUS: IN_PROGRESS
 - PRIORITY: 100
 - TAGS: agents, sprout, review
 

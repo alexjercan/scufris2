@@ -1,0 +1,30 @@
+{
+  "name": "scufris2",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "scripts": {
+    "check": "npm run typecheck && npm run format:check",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "pi": "pi -e ./extensions/scufris/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/scufris/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@types/node": "24.12.4",
+    "prettier": "3.5.3",
+    "typescript": "5.9.3"
+  }
+}

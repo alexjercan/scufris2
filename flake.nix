@@ -22,7 +22,6 @@
           packages = with pkgs; [
             bashInteractive
             git
-            jq
             alejandra
             nodejs_22
             python3

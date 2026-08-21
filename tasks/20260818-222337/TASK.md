@@ -1,6 +1,6 @@
 # Build Scufris, a local personal assistant with agent-driven widgets
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: assistant,agents,orchestration,tauri,widgets,research
 
@@ -67,7 +67,7 @@ scufris2/
 - Do not add empty skill or script placeholders. Add `skills/<skill>/SKILL.md`, skill-owned helpers, or top-level scripts with their first tested behavior.
 - The initial Pi package exports `extensions/scufris/index.ts`. It gains skill paths when the first skill exists.
 - Pin development against Pi 0.84.2. Keep the Pi runtime peer range open because Pi provides its own extension API.
-- The Nix shell provides Node.js 22, Python 3, Bash, Git, tmux, jq, ShellCheck, Ruff, and Alejandra. Alejandra is the flake formatter.
+- The Nix shell provides Node.js 22, Python 3, Bash, Git, tmux, ShellCheck, Ruff, and Alejandra. Alejandra is the flake formatter.
 - Initialize Git on `master`. Use the MIT license.
 
 ### Repository documentation and conventions
@@ -77,22 +77,33 @@ scufris2/
 - Put durable documentation in `docs/` as an mdBook when the first durable page is needed. Do not add an empty documentation scaffold or mdBook dependency.
 - Keep design evidence and work records in the owning task directory until they become durable documentation.
 
+### Version 1 scope and project policy
+
+- Handle direct user requests only. Do not add host-event triggers, background automation rules, or proactive workflows.
+- Version 1 delegates only in the current trusted Git repository and does not maintain project configuration or a global project registry.
+- Do not add a project harness allowlist, filesystem sandbox, or network sandbox. Workers run with the local user's authority. Nix system rollback is the accepted machine recovery boundary.
+- Keep harness selection in the spawn request. Version 1 implements Pi and Claude Code adapters; later adapters do not change the native job-tool contract.
+- Default Pi to `openai/gpt-5.6-sol` with medium thinking and Claude to `opus` with xhigh thinking. Let the foreground orchestrator override model and thinking for each spawn when the user requests another model.
+- Launch Claude Code with `--dangerously-skip-permissions`. Pi already has unrestricted local-user authority.
+- Keep dashboardd presentation-only. Version 1 adds no machine-data query, task-query, host-event, or generic data-query tool. Future agent-facing data sources require separate narrow tools.
+
 ### Assistant and agent mediation
 
-- Build the assistant outside this repository. Use Pi as the fast foreground conversation harness.
+- Build the assistant in this repository, outside dashboardd. Use Pi as the fast foreground conversation harness.
 - Implement orchestration as one small TypeScript Pi extension. Do not add MCP, a supervisor daemon, an agent runner, or an RPC bridge.
 - Run the actual delegated Pi, Claude Code, or future harness process in a tmux window. Keep harness differences behind small launch, send, inspect, and stop adapters.
 - Give every delegated coding job its own Git worktree. Never let concurrent coding agents share a checkout.
-- Place worktrees under `${XDG_CACHE_HOME:-$HOME/.cache}/sprouts/<project>/<branch>`. Interoperate with `sprout` when useful, but do not require it; an internal implementation must preserve the same path convention.
-- Use Plannotator as the local pull-request surface for coding jobs. Run `plannotator review --git` in the isolated worktree and return requested changes to the same worker for another committed revision.
-- Require `sprout sync <feature>` before every review. The worker reruns applicable checks after synchronization, records the evidence in `report.md`, and only then reports `review-ready:`. The extension verifies that the current landing-target commit is an ancestor of the clean feature worktree before opening Plannotator.
+- Use `sprout` to create, synchronize, land, and remove isolated worktrees under its standard cache location.
+- Use Plannotator as the local pull-request surface for coding jobs. Call its public Pi event API with the `code-review` action in the isolated worktree and return requested changes to the same worker for another committed revision. Do not launch the CLI or use private Plannotator interfaces.
+- Require one committed revision per review round. Request `diffType: "since-base"` for initial and final approval reviews. A reviewer can request a separate `diffType: "last-commit"` session for a focused feedback delta; ignore approval from that focused session. Plannotator 0.27.3 returns structured `approved` and `feedback` fields through this event API.
+- Require `sprout sync <feature>` before every review. The worker reads repository instructions, reruns the applicable checks after synchronization, records commands and outcomes in `report.md` and the repository task record when required, and only then reports `review-ready:`. The extension verifies that the current landing-target commit is an ancestor of the clean feature worktree before opening Plannotator.
 - Bind approval to the exact feature and landing-target commits shown during review. If either commit or the worktree changes before landing, invalidate approval and repeat synchronization, checks, and review.
-- Treat explicit Plannotator approval as authorization to land without another confirmation. Until review exposes structured approval output, require an exact full-output match for the configured approval response. Fail closed on feedback, closure without feedback, unknown output, or process failure.
+- Treat `approved: true` from the final `since-base` Plannotator event response as authorization to land without another confirmation. Fail closed on feedback, closure without approval, malformed responses, or review errors.
 - Run `sprout land --dry-run` after approval, then land with `sprout land` or an equivalent guarded local operation. Never push to a forge merely to obtain pull-request workflow semantics.
 - Let the extension own one fixed one-second polling loop for all jobs. Start it with the Pi session and stop it during Pi shutdown. Coalesce changes found in one cycle and never emit an event for unchanged status content.
 - Give every job a directory containing immutable `prompt.md`, append-only `status`, and worker-written `report.md`. Require UTF-8 with LF line endings. A tmux window is eligible for orphan discovery only when its matching job directory exists.
 - Limit `prompt.md` and `report.md` to 1 MiB each, `status` to 256 KiB, and each status line to 2 KiB. Parse only complete newline-terminated `<state>: <summary>` lines. The worker writes `report.md` before publishing its related status line. Surface malformed, unknown, or oversized input as a protocol-error follow-up without interpreting it or automatically stopping the worker.
-- Put complete initial and long follow-up instructions in files. Use short tmux submissions for ordinary steering.
+- Put complete initial instructions in `prompt.md`. Keep later steering short enough for one tmux submission.
 - Submit steering literally through a tmux buffer: load and paste the text once, wait a short fixed delay, then send Enter once. Never automatically retype the text or retry Enter. A tmux failure fails the send; an uncertain harness result remains uncertain and requires explicit inspection or intervention.
 - Require delegated agents to append sparse `working:`, `needs-decision:`, `blocked:`, `review-ready:`, `done:`, or `failed:` lines to their status file. Coding agents use `review-ready:` only after committing the proposed revision and recording its checks in `report.md`; this starts or restarts the Plannotator review loop. Reserve `done:` for terminal work that requires no review or landing.
 - Show `working:` as a non-blocking Pi notification or compact status update. Let `review-ready:` start review and show a compact notification. Deliver `needs-decision:`, `blocked:`, `done:`, and `failed:` as Pi follow-up messages so the foreground assistant mediates between the user and worker.
@@ -113,9 +124,9 @@ scufris2/
 
 ### Assistant widget tools
 
-- Use native Pi extension tools for widget discovery, query, open, update, focus, list, and close operations.
-- Keep data queries separate from visual window operations so simple questions do not need to open a widget.
+- Use native Pi extension tools for widget discovery, open, update, focus, list, and close operations.
 - Make every `open` operation create a new surface, runtime instance, and native window with a generated `surface_id`. Closing the window deletes that surface and instance; opening the same widget and inputs afterward creates a new surface normally. Omit implicit reuse, semantic deduplication, and a `show` operation from version 1. Require explicit surface IDs for later update, focus, and close operations.
+- Track surfaces opened by Scufris through the same one-second loop. If a user closes one through i3 or native controls, remove it from extension state, show a compact notification, and add a model-visible custom message without triggering a turn. Never call close again or reopen it automatically.
 
 ## Completed dashboardd dependency
 
@@ -133,32 +144,19 @@ scufris2/
 
 ### Agent mediation
 
-- What exact allowlisted launch commands and permission modes should the Pi and Claude Code tmux adapters use?
-- Which repository checks are applicable to each coding job, and how does the extension verify the worker recorded post-sync evidence before opening Plannotator?
-- Which permissions, credentials, prompts, and approval requests can delegated harnesses expose safely?
-- How should a worker process exit that has no matching terminal status be reported?
+- Measure complete Pi and Claude worker launch-to-first-status latency.
+- Verify that workers follow repository instructions when selecting checks and recording evidence.
+- Verify process-exit reporting when no matching terminal status exists.
 
-### Widget service and desktop shell
+### Widget integration
 
-- Which current dashboardd backend-process, event, health, shared-state, and frontend SDK contracts move into `dashboardd-runtime` unchanged?
-- Which contracts must change when instances no longer belong to Dashboard composition?
-- Which Tauri APIs and Linux native dependencies are required for a hidden resident tray process, UI-thread window creation, X11 focus, and clean shutdown?
-- How should startup validate and safely replace a stale same-user socket without following a malicious path?
-- How do window placement, sizing, focus, refresh, multi-monitor behavior, and cleanup work?
-- How does an agent retain and use a returned surface ID for explicit update, focus, and close operations?
-- How does a Task Artifact surface validate and resolve a direct project/worktree/task reference?
-
-### Tool boundary
-
-- Define narrow native Pi tool schemas. Avoid exposing generic shell, arbitrary URLs, raw filesystem paths, or unrestricted window creation.
-- Define separate read/query and visual surface operations.
+- Verify explicit update, focus, close, and external-close tracking with returned surface IDs.
+- Verify Task Artifact references derived from foreground repository context.
 - Measure native tool and standalone-window latency on the foreground path.
 
 ### Safety and operations
 
-- Define capability grants for repositories, commands, network use, credentials, harnesses, and widget types.
-- Define minimal audit events, resource limits, timeouts, cancellation, unexpected-exit reporting, and orphan cleanup without adding recovery machinery.
-- Identify sensitive values that must never enter widget payloads, logs, model context, or browser storage.
+- Verify resource limits, timeouts, cancellation, unexpected-exit reporting, and orphan cleanup without adding recovery machinery.
 
 ## Required artifacts
 
@@ -179,6 +177,17 @@ scufris2/
 - Defines non-blocking job progress, steering, cancellation, completion, shutdown, and orphan discovery behavior.
 - Defines explicit security and permission boundaries.
 - Ends with one recommended architecture and a sequence of independently testable implementation tasks.
+
+## Artifact record
+
+- Added `SPIKE.md`, `ARCHITECTURE.md`, `PROTOCOL.md`, and `PLAN.md` after reconciling the completed dashboardd dependency with the accepted skills-and-scripts implementation shape.
+- Inspected installed Pi 0.84.2 documentation and examples, Claude Code 2.1.220 CLI and permission documentation, FirstMate commit `03bb1d8b78a8632ae2d9cea4c10868eb100e885e`, Plannotator 0.27.3 source, and dashboardd 0.2.0 control code and task evidence.
+- Measured local offline Pi startup with and without the empty extension and measured dashboardctl discover and list process latency. Provider response, visible window, and worker first-status latency remain implementation-slice measurements.
+- Chose explicit unrestricted local-user workers and current-repository-only operation for version 1. Removed project configuration because defaults and spawn overrides cover the required behavior. Project trust, visible tmux ownership, isolated worktrees, exact stop targeting, and Nix rollback remain the practical recovery boundaries.
+- Kept dashboardd presentation-only and deferred agent-facing data sources and host-event triggers.
+- Removed `.scufris/config.json`, configured checks, approval hashing, machine-readable worker evidence, oversized steering-file machinery, the Plannotator upstream proposal, and unused jq. Built-in model defaults remain overridable per spawn. Workers select checks from repository instructions and record visible evidence in `report.md` and the project task record when required.
+- Replaced the Plannotator CLI and output parsing with its public Pi `plannotator:request` event API. The `code-review` action accepts an explicit diff type and returns structured approval and feedback. This removes a process adapter, approval text parsing, and the unsupported CLI-selector workaround.
+- Verification: `npm run check` and `nix flake check` pass. The flake check evaluated the local system and omitted incompatible configured systems.
 
 ## Non-goals
 

@@ -1,6 +1,6 @@
 # Define Scufris orchestration and worker lifecycle
 
-- STATUS: OPEN
+- STATUS: IN_PROGRESS
 - PRIORITY: 100
 - TAGS: agents, orchestration, pair
 

@@ -153,11 +153,12 @@ Sprout owns worktree creation, synchronization, and guarded landing. Plannotator
 
 ## Project and harness policy
 
-Version 1:
+Scufris:
 
-- Requires a user-trusted current Git repository.
-- Delegates only in that repository.
-- Has no Scufris project configuration.
+- Can run inside or outside a Git repository.
+- Delegates to the current repository by default when one exists.
+- Lists repositories below configured discovery roots as opaque project IDs for cross-project delegation.
+- Resolves and verifies the selected ID before Sprout runs. Model-facing tools never accept filesystem paths.
 - Defaults Pi to `openai/gpt-5.6-sol` with medium thinking.
 - Defaults Claude to `opus` with xhigh thinking.
 - Lets the foreground orchestrator override model and thinking per spawn.
@@ -379,18 +380,18 @@ Scufris never reopens an externally closed surface and never calls close for an 
 
 ## Trust boundaries
 
-| Boundary           | Trust decision                                                 |
-| ------------------ | -------------------------------------------------------------- |
-| Pi package         | Installed code has full user authority                         |
-| Current repository | Pi project trust allows project instructions                   |
-| Worker             | Explicit unrestricted local-user execution                     |
-| Model provider     | Prompt, selected files, and tool traffic may leave the machine |
-| Job files          | Worker-written bytes are untrusted protocol input              |
-| tmux               | Exact session and window IDs only                              |
-| Git                | Only current repository and generated worktree                 |
-| Plannotator        | Public event result and exact Git revisions                    |
-| dashboardd         | Public dashboardctl commands only                              |
-| Widget inputs      | May reach widget backends and webviews; exclude secrets        |
+| Boundary            | Trust decision                                                 |
+| ------------------- | -------------------------------------------------------------- |
+| Pi package          | Installed code has full user authority                         |
+| Selected repository | Pi project trust allows project instructions                   |
+| Worker              | Explicit unrestricted local-user execution                     |
+| Model provider      | Prompt, selected files, and tool traffic may leave the machine |
+| Job files           | Worker-written bytes are untrusted protocol input              |
+| tmux                | Exact session and window IDs only                              |
+| Git                 | Verified discovered repository and generated worktree          |
+| Plannotator         | Public event result and exact Git revisions                    |
+| dashboardd          | Public dashboardctl commands only                              |
+| Widget inputs       | May reach widget backends and webviews; exclude secrets        |
 
 Never place credentials, environment dumps, raw transcripts, or unrelated file content in status summaries, widget inputs, or model follow-up messages.
 

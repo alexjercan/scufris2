@@ -19,3 +19,9 @@ Scufris starts in Calm mode. `/calm` toggles it for the current Scufris process.
 Calm shows genuine user prompts, final assistant replies, the standard working indicator, Scufris footer status and notifications, and final model, abort, or truncation errors. It hides thinking, intermediate assistant text before tool calls, tool call and result rows, and Scufris job and widget event transcript rows.
 
 Calm changes presentation only. Session storage, model context, resume, compaction, and exports retain the complete content. Keep the required Pi renderer patches isolated in one Scufris-only extension and fail checks when those renderer seams become incompatible.
+
+## Cross-project delegation accepted 2026-08-21
+
+Scufris can run from any directory and delegate into a different discovered Git repository. The model uses an opaque project ID, not a filesystem path. Project IDs are repository paths relative to configured discovery roots, such as `personal/nix.dotfiles`.
+
+`scufris_agent_projects` lists valid IDs. `scufris_agent_spawn.project` selects one. When omitted, spawn uses the current repository if the session is inside one. Outside a repository, an explicit discovered project is required. Unknown, duplicate, non-Git, and escaping targets fail before Sprout runs. Worktree isolation and review guarantees remain unchanged.

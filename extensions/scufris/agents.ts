@@ -15,6 +15,7 @@ const jobHelperPath = fileURLToPath(
 interface OwnedJob {
   job_id: string;
   harness: "pi" | "claude";
+  project: string;
   feature: string;
   state: string;
   summary: string;
@@ -30,6 +31,7 @@ interface SpawnResult {
   job_id: string;
   state: string;
   harness: "pi" | "claude";
+  project: string;
   feature: string;
   model: string;
   thinking: string;
@@ -51,6 +53,7 @@ interface PollResult {
 interface InspectResult {
   job_id: string;
   harness: string;
+  project: string;
   feature: string;
   state: string;
   summary: string;
@@ -197,6 +200,26 @@ export default function scufris(pi: ExtensionAPI): void {
     }
   };
 
+  const projectsTool = defineTool({
+    name: "scufris_agent_projects",
+    label: "List delegation projects",
+    description:
+      "List opaque Git project IDs accepted by scufris_agent_spawn. Use this before cross-project delegation.",
+    parameters: Type.Object({}, { additionalProperties: false }),
+    async execute() {
+      try {
+        return toolResult(
+          await runHelper<{ projects: string[] }>("projects", {}),
+        );
+      } catch (error) {
+        return toolResult(
+          { error: error instanceof Error ? error.message : String(error) },
+          true,
+        );
+      }
+    },
+  });
+
   const spawnTool = defineTool({
     name: "scufris_agent_spawn",
     label: "Spawn delegated agent",
@@ -205,6 +228,13 @@ export default function scufris(pi: ExtensionAPI): void {
     parameters: Type.Object(
       {
         harness: StringEnum(["pi", "claude"] as const),
+        project: Type.Optional(
+          Type.String({
+            description:
+              "Opaque project ID from scufris_agent_projects. Omit to use the current Git repository.",
+            pattern: "^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$",
+          }),
+        ),
         instructions: Type.String({ minLength: 1, maxLength: 262_144 }),
         model: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
         thinking: Type.Optional(
@@ -229,7 +259,10 @@ export default function scufris(pi: ExtensionAPI): void {
             job_id: generatedJobId(),
             harness: params.harness,
             instructions: params.instructions,
-            project_root: ctx.cwd,
+            current_root: ctx.cwd,
+            ...(params.project === undefined
+              ? {}
+              : { project: params.project }),
             ...(params.model === undefined ? {} : { model: params.model }),
             ...(params.thinking === undefined
               ? {}
@@ -245,6 +278,7 @@ export default function scufris(pi: ExtensionAPI): void {
         jobs.set(result.job_id, {
           job_id: result.job_id,
           harness: result.harness,
+          project: result.project,
           feature: result.feature,
           state: result.state,
           summary: "worker starting",
@@ -276,6 +310,7 @@ export default function scufris(pi: ExtensionAPI): void {
         jobs: [...jobs.values()].map((job) => ({
           job_id: job.job_id,
           harness: job.harness,
+          project: job.project,
           state: job.state,
           summary: job.summary,
           feature: job.feature,
@@ -394,6 +429,7 @@ export default function scufris(pi: ExtensionAPI): void {
     },
   });
 
+  pi.registerTool(projectsTool);
   pi.registerTool(spawnTool);
   pi.registerTool(listTool);
   pi.registerTool(inspectTool);

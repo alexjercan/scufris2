@@ -52,8 +52,9 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             path = self.bin / name
             path.write_text(FAKE_HARNESS, encoding="utf-8")
             path.chmod(0o755)
-        self.project = self.root / f"project-{uuid.uuid4().hex[:8]}"
-        self.project.mkdir()
+        self.projects_root = self.root / "projects"
+        self.project = self.projects_root / "target"
+        self.project.mkdir(parents=True)
         self.run_external(["git", "init", "-b", "master"], cwd=self.project)
         self.run_external(
             ["git", "config", "user.email", "test@example.invalid"], cwd=self.project
@@ -72,6 +73,7 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
                 "XDG_STATE_HOME": str(self.state),
                 "XDG_CACHE_HOME": str(self.cache),
                 "SCUFRIS_TMUX_SOCKET": self.socket,
+                "SCUFRIS_PROJECT_ROOTS": json.dumps([str(self.projects_root)]),
             }
         )
         self.jobs: list[str] = []
@@ -151,16 +153,24 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         return envelope
 
     def spawn(
-        self, job_id: str = "abc123def456", harness: str = "pi"
+        self,
+        job_id: str = "abc123def456",
+        harness: str = "pi",
+        *,
+        project: str | None = None,
+        current_root: Path | None = None,
     ) -> dict[str, Any]:
+        request = {
+            "job_id": job_id,
+            "harness": harness,
+            "instructions": "Make a bounded fixture change.",
+            "current_root": str(current_root or self.project),
+        }
+        if project is not None:
+            request["project"] = project
         envelope = self.cli(
             "spawn",
-            {
-                "job_id": job_id,
-                "harness": harness,
-                "instructions": "Make a bounded fixture change.",
-                "project_root": str(self.project),
-            },
+            request,
         )
         self.jobs.append(job_id)
         return envelope["result"]
@@ -194,6 +204,7 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         result = self.spawn()
         self.assertEqual(result["model"], "openai/gpt-5.6-sol")
         self.assertEqual(result["thinking"], "medium")
+        self.assertEqual(result["project"], "current")
         directory = self.state / "scufris" / "jobs" / result["job_id"]
         self.wait_for(directory / "status", "working: fake harness ready")
 
@@ -230,9 +241,19 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             "inspect", {"job_id": result["job_id"], "include_report": True}
         )["result"]
         self.assertTrue(inspected["window_alive"])
+        self.assertEqual(inspected["project"], "current")
         self.assertIn("working: fake harness ready", inspected["events"])
 
-        claude = self.spawn("fedcba987654", "claude")
+        self.assertEqual(
+            self.cli("projects", {})["result"]["projects"], ["projects/target"]
+        )
+        claude = self.spawn(
+            "fedcba987654",
+            "claude",
+            project="projects/target",
+            current_root=self.root,
+        )
+        self.assertEqual(claude["project"], "projects/target")
         claude_directory = self.state / "scufris" / "jobs" / claude["job_id"]
         self.wait_for(claude_directory / "status", "working: fake harness ready")
         claude_argv = json.loads(
@@ -318,7 +339,48 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(oversized_file["errors"], ["status exceeds 256 KiB"])
 
-    def test_rejects_unknown_request_fields(self) -> None:
+    def test_rejects_unknown_project_and_request_fields(self) -> None:
+        unknown = self.cli(
+            "spawn",
+            {
+                "job_id": "bbbbbbbbbbbb",
+                "harness": "pi",
+                "instructions": "Do not run.",
+                "current_root": str(self.root),
+                "project": "projects/missing",
+            },
+            check=False,
+        )
+        self.assertFalse(unknown["ok"])
+        self.assertIn("unknown project ID", unknown["error"])
+
+        escaping = self.cli(
+            "spawn",
+            {
+                "job_id": "dddddddddddd",
+                "harness": "pi",
+                "instructions": "Do not run.",
+                "current_root": str(self.root),
+                "project": "../target",
+            },
+            check=False,
+        )
+        self.assertFalse(escaping["ok"])
+        self.assertIn("invalid project ID", escaping["error"])
+
+        outside = self.cli(
+            "spawn",
+            {
+                "job_id": "cccccccccccc",
+                "harness": "pi",
+                "instructions": "Do not run.",
+                "current_root": str(self.root),
+            },
+            check=False,
+        )
+        self.assertFalse(outside["ok"])
+        self.assertIn("project is required", outside["error"])
+
         result = self.cli("orphans", {"command": "tmux kill-server"}, check=False)
         self.assertFalse(result["ok"])
         self.assertIn("unknown fields", result["error"])

@@ -17,6 +17,7 @@
     dashboardctlPackage = cfg.widgets.dashboardctlPackage;
     delegation = cfg.delegation.enable;
     widgets = cfg.widgets.enable;
+    projectRoots = cfg.projectRoots;
   };
 in {
   options.programs.scufris = {
@@ -34,6 +35,12 @@ in {
       // {
         default = true;
       };
+
+    projectRoots = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = ["~/personal" "~/work" "~/third-party"];
+      description = "Directories recursively searched for delegation projects.";
+    };
 
     widgets = {
       enable =

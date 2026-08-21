@@ -5,6 +5,7 @@
   dashboardctlPackage,
   delegation ? true,
   widgets ? true,
+  projectRoots ? ["~/personal" "~/work" "~/third-party"],
 }: let
   extensionArgs =
     [
@@ -29,6 +30,10 @@ in
     name = "scufris";
     runtimeInputs = pkgs.lib.optional widgets dashboardctlPackage;
     text = ''
+      if [[ -z "''${SCUFRIS_PROJECT_ROOTS+x}" ]]; then
+        export SCUFRIS_PROJECT_ROOTS=${pkgs.lib.escapeShellArg (builtins.toJSON projectRoots)}
+      fi
+
       pi=${pkgs.lib.escapeShellArg "${piPackage}/bin/pi"}
       if system_pi="$(type -P pi)"; then
         pi="$system_pi"

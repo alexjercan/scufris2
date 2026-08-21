@@ -20,6 +20,7 @@ from typing import Any, NoReturn
 
 JOB_ID_RE = re.compile(r"[a-z0-9]{12}\Z")
 MODEL_RE = re.compile(r"[^\x00-\x1f\x7f]{1,200}\Z")
+PROJECT_ID_RE = re.compile(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\Z")
 TMUX_LABEL_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}\Z")
 STATES = {"working", "needs-decision", "blocked", "review-ready", "done", "failed"}
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
@@ -192,15 +193,88 @@ def load_job(job_id: str) -> dict[str, Any]:
     return value
 
 
-def resolve_git_root(value: Any) -> Path:
-    if not isinstance(value, str) or not value:
-        raise JobError("project_root must be a nonempty string")
-    root = Path(value).resolve()
-    result = run(["git", "rev-parse", "--show-toplevel"], cwd=root)
-    actual = Path(result.stdout.decode().strip()).resolve()
-    if actual != root:
-        raise JobError("project_root must be the current Git root")
+def configured_project_roots() -> list[Path]:
+    raw = os.environ.get("SCUFRIS_PROJECT_ROOTS")
+    if raw is None:
+        values: Any = ["~/personal", "~/work", "~/third-party"]
+    else:
+        try:
+            values = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise JobError("SCUFRIS_PROJECT_ROOTS must be a JSON array") from error
+    if not isinstance(values, list) or not all(
+        isinstance(value, str) and value for value in values
+    ):
+        raise JobError("SCUFRIS_PROJECT_ROOTS must be a JSON array of paths")
+    roots = [Path(value).expanduser().resolve() for value in values]
+    names = [root.name for root in roots]
+    if len(names) != len(set(names)):
+        raise JobError("project discovery root names must be unique")
+    return roots
+
+
+def discover_projects() -> dict[str, Path]:
+    discovered: dict[str, Path] = {}
+    for discovery_root in configured_project_roots():
+        if not discovery_root.is_dir():
+            continue
+        for directory, child_names, file_names in os.walk(discovery_root):
+            candidate = Path(directory)
+            has_git = ".git" in child_names or ".git" in file_names
+            child_names[:] = [name for name in child_names if not name.startswith(".")]
+            if not has_git:
+                continue
+            child_names.clear()
+            relative = candidate.relative_to(discovery_root)
+            parts = [discovery_root.name, *relative.parts]
+            project_id = "/".join(parts)
+            if not PROJECT_ID_RE.fullmatch(project_id):
+                continue
+            root = resolve_git_root(candidate, require_exact=True)
+            if project_id in discovered:
+                raise JobError(f"duplicate project ID: {project_id}")
+            discovered[project_id] = root
+    return discovered
+
+
+def resolve_git_root(value: Any, *, require_exact: bool = False) -> Path:
+    if not isinstance(value, (str, Path)) or not str(value):
+        raise JobError("current_root must be a nonempty string")
+    directory = Path(value).resolve()
+    result = run(["git", "rev-parse", "--show-toplevel"], cwd=directory)
+    root = Path(result.stdout.decode().strip()).resolve()
+    if require_exact and root != directory:
+        raise JobError("discovered project must be a Git root")
     return root
+
+
+def valid_project_id(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and PROJECT_ID_RE.fullmatch(value) is not None
+        and all(part not in {".", ".."} for part in value.split("/"))
+    )
+
+
+def selected_project(project: Any, current_root: Any) -> tuple[str, Path]:
+    if project is None:
+        try:
+            return "current", resolve_git_root(current_root)
+        except JobError as error:
+            raise JobError(
+                "project is required outside a Git repository; call projects"
+            ) from error
+    if not valid_project_id(project):
+        raise JobError("invalid project ID")
+    root = discover_projects().get(project)
+    if root is None:
+        raise JobError(f"unknown project ID: {project}")
+    return project, root
+
+
+def projects(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, set())
+    return {"projects": sorted(discover_projects())}
 
 
 def git_text(root: Path, *args: str) -> str:
@@ -321,8 +395,8 @@ def create_window(job_id: str, worktree: Path) -> None:
 def spawn(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(
         request,
-        {"job_id", "harness", "instructions", "project_root"},
-        {"model", "thinking"},
+        {"job_id", "harness", "instructions", "current_root"},
+        {"model", "thinking", "project"},
     )
     job_id = validate_job_id(request["job_id"])
     harness = request["harness"]
@@ -336,7 +410,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
     )
     if shutil.which(harness) is None:
         raise JobError(f"harness executable not found: {harness}")
-    root = resolve_git_root(request["project_root"])
+    project, root = selected_project(request.get("project"), request["current_root"])
     directory = job_dir(job_id)
     if directory.exists():
         raise JobError("job_id already exists")
@@ -358,6 +432,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
             "model": model,
             "thinking": thinking,
             "feature": feature,
+            "project": project,
             "landing_branch": landing_branch,
             "landing_sha": landing_sha,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -384,6 +459,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
         "state": "running",
         "harness": harness,
         "feature": feature,
+        "project": project,
         "model": model,
         "thinking": thinking,
         "message": "Worker started in an isolated worktree. It runs independently.",
@@ -629,6 +705,7 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {
         "job_id": job_id,
         "harness": job.get("harness"),
+        "project": job.get("project"),
         "feature": job.get("feature"),
         "state": state,
         "summary": summary,
@@ -663,6 +740,7 @@ def orphans(request: dict[str, Any]) -> dict[str, Any]:
 
 def dispatch(command: str, request: dict[str, Any]) -> dict[str, Any]:
     handlers = {
+        "projects": projects,
         "spawn": spawn,
         "inspect": inspect,
         "send": send,
@@ -680,7 +758,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=["spawn", "inspect", "send", "stop", "poll", "orphans", "launch"],
+        choices=[
+            "projects",
+            "spawn",
+            "inspect",
+            "send",
+            "stop",
+            "poll",
+            "orphans",
+            "launch",
+        ],
     )
     parser.add_argument("job_id", nargs="?")
     args = parser.parse_args()

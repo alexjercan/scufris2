@@ -8,7 +8,7 @@
 - Byte limits are checked after UTF-8 encoding, not by JavaScript character count alone.
 - Unknown fields are rejected.
 - Native tools never accept shell commands, executable paths, repository paths, URLs, or desktop commands.
-- Version 1 uses the current trusted Git repository only.
+- Delegation targets use opaque IDs discovered below user-configured roots.
 
 ## Harness defaults
 
@@ -17,7 +17,7 @@
 | Pi      | `openai/gpt-5.6-sol` | `medium` |
 | Claude  | `opus`               | `xhigh`  |
 
-The foreground orchestrator can override model and thinking in each spawn request. Scufris has no project configuration and does not infer project check commands.
+The foreground orchestrator can override project, model, and thinking in each spawn request. Scufris does not infer project check commands.
 
 ## Job IDs and locations
 
@@ -54,6 +54,10 @@ Every tmux invocation selects the dedicated socket explicitly. Every tmux and sp
 
 ## Agent tools
 
+### `scufris_agent_projects`
+
+Lists opaque Git project IDs accepted by spawn. It accepts no input fields and returns only IDs, never filesystem paths.
+
 ### `scufris_agent_spawn`
 
 Starts one delegated worker in a generated isolated worktree.
@@ -63,6 +67,7 @@ Input:
 ```json
 {
   "harness": "pi",
+  "project": "personal/example",
   "instructions": "Investigate the failing check and implement the fix.",
   "model": "openai/gpt-5.6-sol",
   "thinking": "medium"
@@ -72,6 +77,7 @@ Input:
 Schema:
 
 - `harness`: required enum `pi | claude`.
+- `project`: optional opaque ID returned by `scufris_agent_projects`. Omit it to use the current Git repository.
 - `instructions`: required nonempty string, maximum 256 KiB UTF-8.
 - `model`: optional nonempty string, maximum 200 bytes, no control characters.
 - `thinking`: optional enum `off | minimal | low | medium | high | xhigh | max`.
@@ -92,16 +98,17 @@ Result:
 
 Spawn transaction:
 
-1. Resolve and verify the current trusted Git root.
-2. Generate job and feature IDs.
-3. Create the worktree with `sprout new`.
-4. Create the job directory with mode 0700.
-5. Write immutable `job.json` and `prompt.md` with mode 0400.
-6. Create empty `status` and `report.md` with mode 0600.
-7. Create the exact tmux window with a fixed helper invocation and the generated job ID only.
-8. The helper reads job data and replaces itself with the selected harness using argument arrays. Model text never enters the tmux shell command.
-9. Add in-memory ownership only after launch succeeds.
-10. Roll back created resources on any earlier failure.
+1. Resolve the explicit discovered project ID, or the current Git root when the ID is omitted.
+2. Verify the selected directory is an exact Git root.
+3. Generate job and feature IDs.
+4. Create the worktree with `sprout new`.
+5. Create the job directory with mode 0700.
+6. Write immutable `job.json` and `prompt.md` with mode 0400.
+7. Create empty `status` and `report.md` with mode 0600.
+8. Create the exact tmux window with a fixed helper invocation and the generated job ID only.
+9. The helper reads job data and replaces itself with the selected harness using argument arrays. Model text never enters the tmux shell command.
+10. Add in-memory ownership only after launch succeeds.
+11. Roll back created resources on any earlier failure.
 
 ### `scufris_agent_list`
 

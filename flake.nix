@@ -68,7 +68,7 @@
         checks = {
           launcher-system-pi = let
             systemPi = pkgs.writeShellScriptBin "pi" ''
-              printf '%s\n' system-pi "$@"
+              printf '%s\n' "$SCUFRIS_PROJECT_ROOTS" system-pi "$@"
             '';
           in
             pkgs.runCommand "scufris-launcher-system-pi-check" {
@@ -76,6 +76,7 @@
             } ''
               scufris user-argument > actual
               cat > expected <<'EOF'
+              ["~/personal","~/work","~/third-party"]
               system-pi
               --extension
               ${resources}/share/scufris/extensions/scufris/calm.ts

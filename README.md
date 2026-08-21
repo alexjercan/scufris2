@@ -1,5 +1,7 @@
 # Scufris
 
+Scufris is an assistant that works with you.
+
 ## Quickstart
 
 ```bash

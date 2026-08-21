@@ -39,7 +39,7 @@
 
 ## Documentation
 
-- Keep `README.md` limited to the project title and Quickstart commands.
+- Keep `README.md` limited to the project title, one concise project-description sentence, and Quickstart commands.
 - Put durable documentation in `docs/` as an mdBook when the first durable page is needed.
 - Add the mdBook scaffold and dependency with that first page, not before it.
 - Keep design evidence and work records with the owning task until they become durable documentation.

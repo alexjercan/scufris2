@@ -1,6 +1,6 @@
 # Allow user tmux windows and retry blocked reviews
 
-- STATUS: REVIEW_READY
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: agents, tmux, review
 

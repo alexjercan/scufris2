@@ -1,0 +1,807 @@
+#!/usr/bin/env python3
+"""Inspect bounded Scufris job state without changing it."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import selectors
+import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+JOB_ID_RE = re.compile(r"[a-z0-9]{12}\Z")
+FEATURE_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+MODEL_RE = re.compile(r"[^\x00-\x1f\x7f]{1,200}\Z")
+PROJECT_RE = re.compile(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\Z")
+TMUX_ID_RE = re.compile(r"[$@%][0-9]+\Z")
+SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
+STATES = {"working", "needs-decision", "blocked", "review-ready", "done", "failed"}
+HARNESSES = {"pi", "claude"}
+THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+CLEANUP = {"remove", "retain"}
+RECORD_KEYS = {
+    "version",
+    "job_id",
+    "harness",
+    "model",
+    "thinking",
+    "feature",
+    "cleanup",
+    "project",
+    "landing_branch",
+    "landing_sha",
+    "tmux_session",
+    "tmux_session_id",
+    "tmux_window_id",
+    "tmux_pane_id",
+    "created_at",
+}
+MAX_JOBS = 256
+MAX_RECORD = 64 * 1024
+MAX_STATUS = 256 * 1024
+MAX_STATUS_LINE = 2 * 1024
+MAX_EVENTS = 100
+MAX_EVENTS_BYTES = 32 * 1024
+MAX_REPORT = 1024 * 1024
+MAX_COMMAND_OUTPUT = 256 * 1024
+TMUX_FORMAT = "#{session_id}\t#{window_id}\t#{pane_id}\t#{session_name}\t#{window_name}\t#{pane_dead}"
+
+
+class DiagnosticError(Exception):
+    """Expected diagnostics failure."""
+
+
+def state_home() -> Path:
+    configured = os.environ.get("XDG_STATE_HOME")
+    return Path(configured).expanduser() if configured else Path.home() / ".local/state"
+
+
+def cache_home() -> Path:
+    configured = os.environ.get("XDG_CACHE_HOME")
+    return Path(configured).expanduser() if configured else Path.home() / ".cache"
+
+
+def jobs_root() -> Path:
+    return state_home() / "scufris/jobs"
+
+
+def validate_job_id(value: str) -> str:
+    if JOB_ID_RE.fullmatch(value) is None:
+        raise DiagnosticError("job ID must be exactly 12 lowercase letters or digits")
+    return value
+
+
+def bounded_regular_file(path: Path, maximum: int) -> tuple[bytes, int]:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as error:
+        raise DiagnosticError(
+            f"{path.name}: cannot open regular file: {error.strerror}"
+        ) from error
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise DiagnosticError(f"{path.name}: not a regular file")
+        if info.st_size > maximum:
+            raise DiagnosticError(f"{path.name}: exceeds {maximum} bytes")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            return stream.read(maximum + 1), info.st_size
+    except OSError as error:
+        raise DiagnosticError(f"{path.name}: cannot read: {error.strerror}") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def validate_text(value: Any, name: str, maximum: int = 200) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value.encode("utf-8")) > maximum
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise DiagnosticError(f"job.json: invalid {name}")
+    return value
+
+
+def parse_created_at(value: Any) -> tuple[str, dt.datetime]:
+    text = validate_text(value, "created_at", 20)
+    try:
+        parsed = dt.datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=dt.timezone.utc
+        )
+    except ValueError as error:
+        raise DiagnosticError("job.json: invalid created_at") from error
+    if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != text:
+        raise DiagnosticError("job.json: invalid created_at")
+    return text, parsed
+
+
+def validate_record(value: Any, job_id: str) -> tuple[dict[str, Any], dt.datetime]:
+    if not isinstance(value, dict):
+        raise DiagnosticError("job.json: root must be an object")
+    if set(value) != RECORD_KEYS:
+        missing = sorted(RECORD_KEYS - set(value))
+        unknown = sorted(set(value) - RECORD_KEYS)
+        details = []
+        if missing:
+            details.append(f"missing {', '.join(missing)}")
+        if unknown:
+            details.append(f"unknown {', '.join(unknown)}")
+        raise DiagnosticError(f"job.json: invalid fields ({'; '.join(details)})")
+    if value["version"] != 1 or isinstance(value["version"], bool):
+        raise DiagnosticError("job.json: unsupported version")
+    if value["job_id"] != job_id:
+        raise DiagnosticError("job.json: job_id does not match directory")
+    harness = value["harness"]
+    if harness not in HARNESSES:
+        raise DiagnosticError("job.json: invalid harness")
+    model = value["model"]
+    if not isinstance(model, str) or MODEL_RE.fullmatch(model) is None:
+        raise DiagnosticError("job.json: invalid model")
+    if value["thinking"] not in THINKING:
+        raise DiagnosticError("job.json: invalid thinking")
+    feature = value["feature"]
+    if (
+        not isinstance(feature, str)
+        or len(feature) > 48
+        or FEATURE_RE.fullmatch(feature) is None
+    ):
+        raise DiagnosticError("job.json: invalid feature")
+    if value["cleanup"] not in CLEANUP:
+        raise DiagnosticError("job.json: invalid cleanup")
+    project = value["project"]
+    if not isinstance(project, str) or (
+        project != "current"
+        and (
+            PROJECT_RE.fullmatch(project) is None
+            or any(part in {".", ".."} for part in project.split("/"))
+        )
+    ):
+        raise DiagnosticError("job.json: invalid project")
+    validate_text(value["landing_branch"], "landing_branch", 255)
+    if (
+        not isinstance(value["landing_sha"], str)
+        or SHA_RE.fullmatch(value["landing_sha"]) is None
+    ):
+        raise DiagnosticError("job.json: invalid landing_sha")
+    session = validate_text(value["tmux_session"], "tmux_session", 128)
+    if any(character in session for character in "/:."):
+        raise DiagnosticError("job.json: invalid tmux_session")
+    for key, prefix in (
+        ("tmux_session_id", "$"),
+        ("tmux_window_id", "@"),
+        ("tmux_pane_id", "%"),
+    ):
+        identity = value[key]
+        if (
+            not isinstance(identity, str)
+            or not identity.startswith(prefix)
+            or TMUX_ID_RE.fullmatch(identity) is None
+        ):
+            raise DiagnosticError(f"job.json: invalid {key}")
+    created_at, created = parse_created_at(value["created_at"])
+    sanitized = {key: value[key] for key in sorted(RECORD_KEYS)}
+    sanitized["created_at"] = created_at
+    return sanitized, created
+
+
+def load_record(job_id: str) -> tuple[dict[str, Any], dt.datetime]:
+    directory = jobs_root() / job_id
+    try:
+        info = directory.lstat()
+    except OSError as error:
+        raise DiagnosticError(
+            f"job directory: cannot stat: {error.strerror}"
+        ) from error
+    if not stat.S_ISDIR(info.st_mode):
+        raise DiagnosticError("job directory: not a directory or is a symlink")
+    raw, _ = bounded_regular_file(directory / "job.json", MAX_RECORD)
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise DiagnosticError(f"job.json: invalid JSON: {error}") from error
+    return validate_record(value, job_id)
+
+
+def classify_status_line(frame: bytes) -> tuple[str | None, str | None]:
+    if len(frame) + 1 > MAX_STATUS_LINE:
+        return None, "line exceeds 2 KiB"
+    try:
+        line = frame.decode("utf-8")
+    except UnicodeDecodeError:
+        return None, "line is not valid UTF-8"
+    if line.endswith("\r"):
+        return None, "uses CRLF"
+    if not line or any(
+        ord(character) < 32 or ord(character) == 127 for character in line
+    ):
+        return None, "line is empty or contains a control character"
+    state, separator, summary = line.partition(": ")
+    if not separator or state not in STATES or not summary:
+        return None, "line has invalid grammar or state"
+    return line, None
+
+
+def read_status(job_id: str) -> tuple[list[str], list[str], int | None]:
+    try:
+        raw, size = bounded_regular_file(jobs_root() / job_id / "status", MAX_STATUS)
+    except DiagnosticError as error:
+        return [], [str(error)], None
+    frames = raw.split(b"\n")
+    incomplete = frames.pop()
+    events: list[str] = []
+    errors: list[str] = []
+    for number, frame in enumerate(frames, start=1):
+        event, error = classify_status_line(frame)
+        if event is not None:
+            events.append(event)
+        if error is not None:
+            errors.append(f"status line {number}: {error}")
+    if incomplete:
+        errors.append("status: incomplete final line")
+    events = events[-MAX_EVENTS:]
+    while events and len("\n".join(events).encode("utf-8")) > MAX_EVENTS_BYTES:
+        events.pop(0)
+    return events, errors[:MAX_EVENTS], size
+
+
+def run_bounded(
+    argv: list[str],
+    *,
+    cwd: Path | None = None,
+    timeout: float = 3,
+    env: dict[str, str] | None = None,
+) -> tuple[int, bytes, bytes]:
+    try:
+        process = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+    except OSError as error:
+        raise DiagnosticError(f"{argv[0]}: cannot execute: {error.strerror}") from error
+    selector = selectors.DefaultSelector()
+    assert process.stdout is not None
+    assert process.stderr is not None
+    selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+    selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+    output = {"stdout": bytearray(), "stderr": bytearray()}
+    deadline = time.monotonic() + timeout
+    problem: str | None = None
+    try:
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                problem = "timed out"
+                break
+            ready = selector.select(remaining)
+            if not ready:
+                problem = "timed out"
+                break
+            for key, _ in ready:
+                chunk = os.read(key.fileobj.fileno(), 8192)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                target = output[key.data]
+                target.extend(chunk)
+                if len(target) > MAX_COMMAND_OUTPUT:
+                    problem = "output exceeds 256 KiB"
+                    break
+            if problem:
+                break
+    finally:
+        selector.close()
+        if problem and process.poll() is None:
+            process.terminate()
+        try:
+            returncode = process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            returncode = process.wait(timeout=1)
+    if problem:
+        raise DiagnosticError(f"{argv[0]}: {problem}")
+    return returncode, bytes(output["stdout"]), bytes(output["stderr"])
+
+
+def expected_tmux_row(record: dict[str, Any], job_id: str) -> tuple[str, ...]:
+    return (
+        record["tmux_session_id"],
+        record["tmux_window_id"],
+        record["tmux_pane_id"],
+        record["tmux_session"],
+        f"job-{job_id}",
+    )
+
+
+def tmux_snapshot() -> tuple[dict[str, tuple[str, ...]], str | None]:
+    try:
+        code, stdout, stderr = run_bounded(
+            ["tmux", "list-panes", "-a", "-F", TMUX_FORMAT]
+        )
+    except DiagnosticError as error:
+        return {}, str(error)
+    if code != 0:
+        message = stderr.decode("utf-8", "replace").strip()
+        return {}, f"tmux unavailable: {message or code}"
+    rows: dict[str, tuple[str, ...]] = {}
+    for line in stdout.decode("utf-8", "replace").splitlines():
+        values = tuple(line.split("\t"))
+        if len(values) == 6 and TMUX_ID_RE.fullmatch(values[2]):
+            rows[values[2]] = values
+    return rows, None
+
+
+def pane_liveness(
+    record: dict[str, Any],
+    job_id: str,
+    rows: dict[str, tuple[str, ...]],
+    tmux_error: str | None,
+) -> tuple[str, list[str]]:
+    if tmux_error:
+        return "unknown", [tmux_error]
+    row = rows.get(record["tmux_pane_id"])
+    if row is None:
+        return "missing", []
+    if row[:5] != expected_tmux_row(record, job_id):
+        return "identity-mismatch", ["tmux: recorded pane identity does not match"]
+    if row[5] == "0":
+        return "alive", []
+    if row[5] == "1":
+        return "dead", []
+    return "unknown", ["tmux: invalid pane_dead value"]
+
+
+def exact_pane_liveness(record: dict[str, Any], job_id: str) -> tuple[str, list[str]]:
+    try:
+        code, stdout, stderr = run_bounded(
+            [
+                "tmux",
+                "display-message",
+                "-p",
+                "-t",
+                record["tmux_pane_id"],
+                TMUX_FORMAT,
+            ]
+        )
+    except DiagnosticError as error:
+        return "unknown", [str(error)]
+    if code != 0:
+        message = stderr.decode("utf-8", "replace").strip()
+        if "can't find pane" in message or "no server running" in message:
+            return "missing", []
+        return "unknown", [f"tmux unavailable: {message or code}"]
+    values = tuple(stdout.decode("utf-8", "replace").strip().split("\t"))
+    if len(values) != 6 or values[:5] != expected_tmux_row(record, job_id):
+        return "identity-mismatch", ["tmux: recorded pane identity does not match"]
+    if values[5] == "0":
+        return "alive", []
+    if values[5] == "1":
+        return "dead", []
+    return "unknown", ["tmux: invalid pane_dead value"]
+
+
+def worktree_path(record: dict[str, Any]) -> tuple[Path | None, list[str]]:
+    feature = record["feature"]
+    suffix = f"_{feature}"
+    session = record["tmux_session"]
+    if record["project"] == "current":
+        if not session.endswith(suffix) or len(session) == len(suffix):
+            return None, ["worktree: tmux session does not encode the project name"]
+        project_name = session[: -len(suffix)]
+    else:
+        project_name = record["project"].rsplit("/", 1)[-1]
+        rendered = project_name.translate(str.maketrans("./ :", "____"))
+        if session != f"{rendered}_{feature}":
+            return None, [
+                "worktree: project, feature, and tmux session are inconsistent"
+            ]
+    if project_name in {"", ".", ".."} or "/" in project_name:
+        return None, ["worktree: invalid derived project name"]
+    return cache_home() / "sprouts" / project_name / feature, []
+
+
+def git_output(worktree: Path, *arguments: str) -> tuple[str | None, str | None]:
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+    }
+    environment.update(
+        {
+            "GIT_NO_LAZY_FETCH": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_TERMINAL_PROMPT": "0",
+            "LC_ALL": "C",
+        }
+    )
+    try:
+        code, stdout, stderr = run_bounded(
+            [
+                "git",
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-C",
+                str(worktree),
+                *arguments,
+            ],
+            timeout=5,
+            env=environment,
+        )
+    except DiagnosticError as error:
+        return None, str(error)
+    if code != 0:
+        message = stderr.decode("utf-8", "replace").strip()
+        return None, f"git: {message or f'exited {code}'}"
+    try:
+        return stdout.decode("utf-8").strip(), None
+    except UnicodeDecodeError:
+        return None, "git: output is not valid UTF-8"
+
+
+def inspect_git(record: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    path, errors = worktree_path(record)
+    result: dict[str, Any] = {
+        "path": str(path) if path is not None else None,
+        "exists": False,
+        "branch": None,
+        "revision": None,
+        "clean": None,
+        "recorded_landing_revision": record["landing_sha"],
+        "recorded_landing_revision_valid": None,
+    }
+    if path is None:
+        return result, errors
+    for candidate in (path.parent.parent, path.parent, path):
+        try:
+            info = candidate.lstat()
+        except FileNotFoundError:
+            errors.append("worktree: missing")
+            return result, errors
+        except OSError as error:
+            errors.append(f"worktree: cannot stat: {error.strerror}")
+            return result, errors
+        if not stat.S_ISDIR(info.st_mode):
+            errors.append("worktree: path component is not a directory or is a symlink")
+            return result, errors
+    result["exists"] = True
+    top, error = git_output(path, "rev-parse", "--show-toplevel")
+    if error:
+        errors.append(error)
+        return result, errors
+    if Path(top or "") != path.absolute():
+        errors.append("git: worktree top level does not match expected path")
+        return result, errors
+    branch, error = git_output(path, "branch", "--show-current")
+    if error:
+        errors.append(error)
+    else:
+        result["branch"] = branch or None
+        if branch != record["feature"]:
+            errors.append("git: worktree branch does not match recorded feature")
+    revision, error = git_output(path, "rev-parse", "--verify", "HEAD^{commit}")
+    if error:
+        errors.append(error)
+    else:
+        result["revision"] = revision
+    branch_revision, error = git_output(
+        path, "rev-parse", "--verify", f"refs/heads/{record['feature']}^{{commit}}"
+    )
+    if error:
+        errors.append("git: recorded feature branch is missing")
+    elif revision is not None and branch_revision != revision:
+        errors.append("git: HEAD does not match recorded feature branch")
+    status, error = git_output(
+        path, "status", "--porcelain=v1", "--untracked-files=normal", "--no-renames"
+    )
+    if error:
+        errors.append(error)
+    else:
+        result["clean"] = not bool(status)
+    _, landing_error = git_output(
+        path, "cat-file", "-e", f"{record['landing_sha']}^{{commit}}"
+    )
+    result["recorded_landing_revision_valid"] = landing_error is None
+    if landing_error:
+        errors.append("git: recorded landing revision is missing")
+    elif revision is not None:
+        _, ancestor_error = git_output(
+            path, "merge-base", "--is-ancestor", record["landing_sha"], revision
+        )
+        if ancestor_error:
+            errors.append("git: recorded landing revision is not an ancestor of HEAD")
+    return result, errors
+
+
+def elapsed_seconds(created: dt.datetime) -> int:
+    now = dt.datetime.now(dt.timezone.utc)
+    return max(0, int((now - created).total_seconds()))
+
+
+def base_job(
+    job_id: str,
+    record: dict[str, Any],
+    created: dt.datetime,
+    liveness: str,
+    diagnostics: list[str],
+) -> dict[str, Any]:
+    events, protocol_errors, _ = read_status(job_id)
+    latest = events[-1] if events else "starting: worker starting"
+    state, summary = latest.split(": ", 1)
+    return {
+        "job_id": job_id,
+        "valid": True,
+        "project": record["project"],
+        "feature": record["feature"],
+        "harness": record["harness"],
+        "model": record["model"],
+        "state": state,
+        "summary": summary,
+        "created_at": record["created_at"],
+        "elapsed_seconds": elapsed_seconds(created),
+        "tmux_session": record["tmux_session"],
+        "pane_liveness": liveness,
+        "cleanup": record["cleanup"],
+        "diagnostics": [*diagnostics, *protocol_errors],
+    }
+
+
+def enumerate_job_ids() -> list[str]:
+    root = jobs_root()
+    try:
+        info = root.lstat()
+    except FileNotFoundError:
+        return []
+    except OSError as error:
+        raise DiagnosticError(f"jobs root: cannot stat: {error.strerror}") from error
+    if not stat.S_ISDIR(info.st_mode):
+        raise DiagnosticError("jobs root: not a directory or is a symlink")
+    names: list[str] = []
+    try:
+        with os.scandir(root) as entries:
+            for entry in entries:
+                if len(names) >= MAX_JOBS:
+                    raise DiagnosticError(f"jobs root: exceeds {MAX_JOBS} entries")
+                names.append(entry.name)
+    except OSError as error:
+        raise DiagnosticError(f"jobs root: cannot scan: {error.strerror}") from error
+    invalid = sorted(name for name in names if JOB_ID_RE.fullmatch(name) is None)
+    if invalid:
+        raise DiagnosticError("jobs root: contains invalid entry names")
+    return sorted(names)
+
+
+def list_jobs(include_all: bool) -> dict[str, Any]:
+    job_ids = enumerate_job_ids()
+    rows, tmux_error = tmux_snapshot() if job_ids else ({}, None)
+    jobs: list[dict[str, Any]] = []
+    for job_id in job_ids:
+        try:
+            record, created = load_record(job_id)
+        except DiagnosticError as error:
+            if include_all:
+                jobs.append(
+                    {
+                        "job_id": job_id,
+                        "valid": False,
+                        "diagnostics": [str(error)],
+                    }
+                )
+            continue
+        liveness, diagnostics = pane_liveness(record, job_id, rows, tmux_error)
+        if include_all or liveness == "alive":
+            jobs.append(base_job(job_id, record, created, liveness, diagnostics))
+    return {"scope": "all" if include_all else "live", "jobs": jobs}
+
+
+def report_info(job_id: str, include_content: bool) -> tuple[dict[str, Any], list[str]]:
+    path = jobs_root() / job_id / "report.md"
+    try:
+        info = path.lstat()
+    except OSError as error:
+        return {"size_bytes": None, "content": None}, [
+            f"report.md: cannot stat: {error.strerror}"
+        ]
+    result: dict[str, Any] = {"size_bytes": info.st_size, "content": None}
+    if not stat.S_ISREG(info.st_mode):
+        return result, ["report.md: not a regular file or is a symlink"]
+    if info.st_size > MAX_REPORT:
+        return result, [f"report.md: exceeds {MAX_REPORT} bytes"]
+    if not include_content:
+        return result, []
+    try:
+        raw, _ = bounded_regular_file(path, MAX_REPORT)
+        result["content"] = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return result, ["report.md: not valid UTF-8"]
+    except DiagnosticError as error:
+        return result, [str(error)]
+    return result, []
+
+
+def detail_job(job_id: str, include_report: bool) -> dict[str, Any]:
+    record, created = load_record(job_id)
+    liveness, tmux_errors = exact_pane_liveness(record, job_id)
+    events, protocol_errors, status_size = read_status(job_id)
+    report, report_errors = report_info(job_id, include_report)
+    git, git_errors = inspect_git(record)
+    latest = events[-1] if events else "starting: worker starting"
+    state, summary = latest.split(": ", 1)
+    return {
+        "job_id": job_id,
+        "metadata": record,
+        "state": state,
+        "summary": summary,
+        "created_at": record["created_at"],
+        "elapsed_seconds": elapsed_seconds(created),
+        "pane_liveness": liveness,
+        "tmux": {
+            "session": record["tmux_session"],
+            "session_id": record["tmux_session_id"],
+            "window_id": record["tmux_window_id"],
+            "pane_id": record["tmux_pane_id"],
+        },
+        "status": {
+            "size_bytes": status_size,
+            "events": events,
+            "protocol_errors": protocol_errors,
+        },
+        "report": report,
+        "git": git,
+        "diagnostics": [*tmux_errors, *protocol_errors, *report_errors, *git_errors],
+    }
+
+
+def short(value: Any, maximum: int = 40) -> str:
+    text = "-" if value is None else str(value)
+    return text if len(text) <= maximum else f"{text[: maximum - 3]}..."
+
+
+def duration(seconds: int) -> str:
+    days, remainder = divmod(seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if days:
+        return f"{days}d{hours:02}h"
+    if hours:
+        return f"{hours}h{minutes:02}m"
+    if minutes:
+        return f"{minutes}m{secs:02}s"
+    return f"{secs}s"
+
+
+def print_human_list(result: dict[str, Any]) -> None:
+    jobs = result["jobs"]
+    if not jobs:
+        print("No live jobs." if result["scope"] == "live" else "No Scufris jobs.")
+        return
+    print(
+        "JOB ID       PROJECT          FEATURE                  HARNESS MODEL              STATE          LIVE     AGE      SUMMARY"
+    )
+    for job in jobs:
+        if not job.get("valid"):
+            print(f"{job['job_id']:<12}  MALFORMED  {short(job['diagnostics'][0], 80)}")
+            continue
+        print(
+            f"{job['job_id']:<12}  {short(job['project'], 16):<16} "
+            f"{short(job['feature'], 24):<24} {job['harness']:<7} "
+            f"{short(job['model'], 18):<18} {job['state']:<14} "
+            f"{job['pane_liveness']:<8} {duration(job['elapsed_seconds']):<8} "
+            f"{short(job['summary'], 72)}"
+        )
+        print(
+            f"              created={job['created_at']} tmux={job['tmux_session']} "
+            f"cleanup={job['cleanup']}"
+        )
+        for diagnostic in job["diagnostics"]:
+            print(f"              diagnostic: {diagnostic}")
+
+
+def print_human_detail(job: dict[str, Any]) -> None:
+    metadata = job["metadata"]
+    print(f"Job {job['job_id']}")
+    print(f"State: {job['state']} - {job['summary']}")
+    print(f"Created: {job['created_at']} ({duration(job['elapsed_seconds'])} ago)")
+    print(
+        f"Worker: {metadata['harness']} model={metadata['model']} "
+        f"thinking={metadata['thinking']} liveness={job['pane_liveness']}"
+    )
+    print(
+        f"Project: {metadata['project']} feature={metadata['feature']} "
+        f"cleanup={metadata['cleanup']}"
+    )
+    print(
+        f"Tmux: {job['tmux']['session']} {job['tmux']['session_id']} "
+        f"{job['tmux']['window_id']} {job['tmux']['pane_id']}"
+    )
+    git = job["git"]
+    print(
+        f"Git: path={git['path'] or '-'} exists={str(git['exists']).lower()} "
+        f"branch={git['branch'] or '-'} revision={git['revision'] or '-'} "
+        f"clean={git['clean']}"
+    )
+    print(
+        "Recorded landing revision: "
+        f"{git['recorded_landing_revision']} valid={git['recorded_landing_revision_valid']}"
+    )
+    print(f"Status: {job['status']['size_bytes']} bytes")
+    for event in job["status"]["events"]:
+        print(f"  {event}")
+    print(f"Report: {job['report']['size_bytes']} bytes")
+    if job["report"]["content"] is not None:
+        print("Report content:")
+        print(
+            job["report"]["content"],
+            end="" if job["report"]["content"].endswith("\n") else "\n",
+        )
+    for diagnostic in job["diagnostics"]:
+        print(f"Diagnostic: {diagnostic}")
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(
+        description="Private read-only diagnostics for durable Scufris job state.",
+        epilog=(
+            "With no JOB_ID, list live jobs. --all includes historical jobs. "
+            "No path, tmux target, or state-root input is accepted."
+        ),
+    )
+    result.add_argument("job_id", nargs="?", metavar="JOB_ID")
+    result.add_argument("--all", action="store_true", help="include historical jobs")
+    result.add_argument(
+        "--report", action="store_true", help="include one job's bounded report"
+    )
+    result.add_argument(
+        "--json", action="store_true", help="emit machine-readable JSON"
+    )
+    return result
+
+
+def main() -> int:
+    arguments = parser().parse_args()
+    if arguments.all and arguments.job_id:
+        parser().error("--all cannot be used with JOB_ID")
+    if arguments.report and not arguments.job_id:
+        parser().error("--report requires JOB_ID")
+    try:
+        if arguments.job_id:
+            job_id = validate_job_id(arguments.job_id)
+            result = detail_job(job_id, arguments.report)
+            if arguments.json:
+                json.dump(result, sys.stdout, sort_keys=True, separators=(",", ":"))
+                sys.stdout.write("\n")
+            else:
+                print_human_detail(result)
+        else:
+            result = list_jobs(arguments.all)
+            if arguments.json:
+                json.dump(result, sys.stdout, sort_keys=True, separators=(",", ":"))
+                sys.stdout.write("\n")
+            else:
+                print_human_list(result)
+        return 0
+    except DiagnosticError as error:
+        if arguments.json:
+            json.dump(
+                {"error": str(error)}, sys.stdout, sort_keys=True, separators=(",", ":")
+            )
+            sys.stdout.write("\n")
+        else:
+            print(f"scufris-jobs: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,6 +1,6 @@
 # Add read-only Scufris job diagnostics
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: agents, diagnostics
 
@@ -53,3 +53,31 @@ Add a standalone private helper that lets the user inspect live and historical S
 - `npm run check`.
 - `nix flake check`.
 - `git diff --check`.
+
+## Implementation evidence
+
+- Added `scripts/scufris-jobs`. Direct repository use and packaged resource use only. No launcher or extension wiring.
+- Reads only `XDG_STATE_HOME/scufris/jobs`, the conventional Sprout cache location, validated Git data, and exact recorded tmux identities.
+- Bounded job count, files, status history, report content, subprocess output, and subprocess runtime.
+- Git inspection clears inherited `GIT_*` overrides, disables optional locks, hooks, fsmonitor, prompts, and lazy fetches.
+- Isolated integration tests cover human and JSON forms, live and historical ordering, report composition, exit codes, dead and mismatched panes, malformed and oversized files, symlinks, status errors, missing worktrees, dirty state, and stale landing metadata.
+- Changed files: `scripts/scufris-jobs`, `tests/test_scufris_jobs.py`, `flake.nix`, and this task record.
+- Pre-sync checks:
+  - `python3 -m unittest discover -v -s tests -p 'test_*.py'` - 17 passed.
+  - `ruff check scripts tests` - passed.
+  - `ruff format --check scripts tests` - passed.
+  - `npm run check` - passed after local `npm ci` restored ignored development dependencies.
+  - `nix flake check` - passed.
+  - `git diff --check` - passed.
+- Direct smoke checks: `./scripts/scufris-jobs` and `./scripts/scufris-jobs 2c1eb6f00c15 --json` passed against the active durable record.
+- Design tradeoff: malformed records appear in `--all` and exact-ID diagnostics. The default list fails closed and includes only records with an exact live pane identity.
+- `sprout sync job-diagnostics` - already up to date after implementation commit `fb62222`.
+- Post-sync checks:
+  - `python3 -m unittest discover -v -s tests -p 'test_*.py'` - 17 passed.
+  - `ruff check scripts tests` and `ruff format --check scripts tests` - passed.
+  - `npm run check` - passed: typecheck, 12 TypeScript tests, and Prettier.
+  - `nix flake check` - passed for the local system.
+  - `git diff --check` - passed.
+  - Direct `--all --json` and exact-ID `--report --json` parse checks - passed.
+- Revisions after sync: landing `8b432f0`; feature `fb62222` before this evidence update.
+- No known limitations.

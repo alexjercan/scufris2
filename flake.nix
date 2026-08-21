@@ -114,6 +114,7 @@
             test -f ${resources}/share/scufris/extensions/scufris/agents.ts
             test -f ${resources}/share/scufris/extensions/scufris/widgets.ts
             test -x ${resources}/share/scufris/scripts/scufris-job
+            test -x ${resources}/share/scufris/scripts/scufris-jobs
             test -x ${resources}/share/scufris/scripts/scufris-dashboard
             test -f ${resources}/share/scufris/skills/delegation/SKILL.md
             test -f ${resources}/share/scufris/skills/widgets/SKILL.md

@@ -26,6 +26,15 @@ if not prompt_arg.startswith(prefix):
 prompt = pathlib.Path(prompt_arg[len(prefix):])
 directory = prompt.parent
 (directory / "foreground-marker").write_text(os.environ.get("SCUFRIS_FOREGROUND", ""), encoding="utf-8")
+with (directory / "scufris-environment.json").open("w", encoding="utf-8") as stream:
+    import json
+    json.dump({key: os.environ.get(key) for key in (
+        "SCUFRIS_FOREGROUND",
+        "SCUFRIS_SPEECH",
+        "SCUFRIS_CALM",
+        "SCUFRIS_PIPER_MODEL",
+        "SCUFRIS_PIPER_CONFIG",
+    )}, stream)
 with (directory / "argv.json").open("w", encoding="utf-8") as stream:
     import json
     json.dump(sys.argv[1:], stream)
@@ -97,6 +106,10 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
                 "TMUX_TMPDIR": str(self.tmux_root),
                 "SCUFRIS_PROJECT_ROOTS": json.dumps([str(self.projects_root)]),
                 "SCUFRIS_FOREGROUND": "1",
+                "SCUFRIS_SPEECH": "1",
+                "SCUFRIS_CALM": "1",
+                "SCUFRIS_PIPER_MODEL": "/trusted/model.onnx",
+                "SCUFRIS_PIPER_CONFIG": "/trusted/model.json",
             }
         )
         self.jobs: dict[str, str] = {}
@@ -231,6 +244,18 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         self.assertNotIn("--skill", pi_argv)
         self.assertEqual(
             (directory / "foreground-marker").read_text(encoding="utf-8"), ""
+        )
+        self.assertEqual(
+            json.loads(
+                (directory / "scufris-environment.json").read_text(encoding="utf-8")
+            ),
+            {
+                "SCUFRIS_FOREGROUND": None,
+                "SCUFRIS_SPEECH": None,
+                "SCUFRIS_CALM": None,
+                "SCUFRIS_PIPER_MODEL": None,
+                "SCUFRIS_PIPER_CONFIG": None,
+            },
         )
 
         self.assertEqual(stat.S_IMODE((directory / "prompt.md").stat().st_mode), 0o400)

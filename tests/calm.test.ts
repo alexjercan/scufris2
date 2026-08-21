@@ -148,4 +148,24 @@ test("Calm hides operational transcript rows and restores them on toggle", async
   finalComponent.invalidate();
   assert.equal(notices.at(-1), "Calm mode on.");
   assert.equal(rendered(intermediateComponent), "");
+
+  await reloadedCommands.get("calm")?.handler("", context);
+  const originalCalm = process.env.SCUFRIS_CALM;
+  process.env.SCUFRIS_CALM = "1";
+  try {
+    const popupStarts: Array<(event: unknown, context: any) => void> = [];
+    calm({
+      on(event: string, handler: (event: unknown, context: any) => void) {
+        if (event === "session_start") popupStarts.push(handler);
+      },
+      registerCommand() {},
+    } as unknown as ExtensionAPI);
+    popupStarts[0]?.({}, context);
+    intermediateComponent.invalidate();
+    assert.equal(labels.at(-1), "");
+    assert.equal(rendered(intermediateComponent), "");
+  } finally {
+    if (originalCalm === undefined) delete process.env.SCUFRIS_CALM;
+    else process.env.SCUFRIS_CALM = originalCalm;
+  }
 });

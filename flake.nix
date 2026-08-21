@@ -69,21 +69,43 @@
         checks = {
           launcher-system-pi = let
             systemPi = pkgs.writeShellScriptBin "pi" ''
-              printf '%s\n' "$SCUFRIS_PROJECT_ROOTS" "$SCUFRIS_FOREGROUND" system-pi "$@"
+              printf '%s\n' \
+                "$SCUFRIS_PROJECT_ROOTS" \
+                "$SCUFRIS_FOREGROUND" \
+                "$SCUFRIS_SPEECH" \
+                "$SCUFRIS_CALM" \
+                "$SCUFRIS_PIPER_MODEL" \
+                "$SCUFRIS_PIPER_CONFIG" \
+                "$(type -P piper)" \
+                "$(type -P pw-play)" \
+                system-pi \
+                "$@"
             '';
           in
             pkgs.runCommand "scufris-launcher-system-pi-check" {
               nativeBuildInputs = [launcher systemPi];
             } ''
-              scufris user-argument > actual
+              SCUFRIS_SPEECH=1 \
+                SCUFRIS_CALM=1 \
+                SCUFRIS_PIPER_MODEL=/trusted/model.onnx \
+                SCUFRIS_PIPER_CONFIG=/trusted/model.json \
+                scufris user-argument > actual
               cat > expected <<'EOF'
               ["~/personal","~/work","~/third-party"]
               1
+              1
+              1
+              /trusted/model.onnx
+              /trusted/model.json
+              ${pkgs.piper-tts}/bin/piper
+              ${pkgs.pipewire}/bin/pw-play
               system-pi
               --extension
               ${resources}/share/scufris/extensions/scufris/identity.ts
               --extension
               ${resources}/share/scufris/extensions/scufris/calm.ts
+              --extension
+              ${resources}/share/scufris/extensions/scufris/speech.ts
               --extension
               ${resources}/share/scufris/extensions/scufris/agents.ts
               --skill
@@ -110,6 +132,8 @@
           resources = pkgs.runCommand "scufris-resources-check" {} ''
             test -f ${resources}/share/scufris/extensions/scufris/identity.ts
             test -f ${resources}/share/scufris/extensions/scufris/calm.ts
+            test -f ${resources}/share/scufris/extensions/scufris/speech.ts
+            test -x ${resources}/share/scufris/scripts/scufris-speak
             test -f ${resources}/share/scufris/prompts/pair.md
             test -f ${resources}/share/scufris/extensions/scufris/agents.ts
             test -f ${resources}/share/scufris/extensions/scufris/widgets.ts
@@ -163,6 +187,10 @@
           calm = builtins.path {
             path = ./extensions/scufris/calm.ts;
             name = "scufris-calm-extension";
+          };
+          speech = builtins.path {
+            path = ./extensions/scufris/speech.ts;
+            name = "scufris-speech-extension";
           };
           delegation = builtins.path {
             path = ./extensions/scufris/agents.ts;

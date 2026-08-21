@@ -13,6 +13,8 @@
       "${resources}/share/scufris/extensions/scufris/identity.ts"
       "--extension"
       "${resources}/share/scufris/extensions/scufris/calm.ts"
+      "--extension"
+      "${resources}/share/scufris/extensions/scufris/speech.ts"
     ]
     ++ pkgs.lib.optionals delegation [
       "--extension"
@@ -30,7 +32,12 @@
 in
   pkgs.writeShellApplication {
     name = "scufris";
-    runtimeInputs = pkgs.lib.optional widgets dashboardctlPackage;
+    runtimeInputs =
+      [
+        pkgs.piper-tts
+        pkgs.pipewire
+      ]
+      ++ pkgs.lib.optional widgets dashboardctlPackage;
     text = ''
       if [[ -z "''${SCUFRIS_PROJECT_ROOTS+x}" ]]; then
         export SCUFRIS_PROJECT_ROOTS=${pkgs.lib.escapeShellArg (builtins.toJSON projectRoots)}

@@ -100,6 +100,7 @@ function applyCalmPresentation(context: ExtensionContext): void {
 
 export default function calm(pi: ExtensionAPI): void {
   installCalmPatches();
+  if (process.env.SCUFRIS_CALM === "1") calmState().enabled = true;
 
   pi.on("session_start", (_event, context) => {
     applyCalmPresentation(context);

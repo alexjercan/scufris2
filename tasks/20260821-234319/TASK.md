@@ -1,6 +1,6 @@
 # Add Scufris spoken response mode
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: voice, speech, tui
 
@@ -55,3 +55,33 @@ The Scufris launcher must preserve these variables and include Piper and `pw-pla
 - `nix flake check`.
 - `git diff --check`.
 - Live Piper playback after the Nix integration lands.
+
+## Implementation evidence
+
+- Added `extensions/scufris/speech.ts` for TUI-only persisted on, off, once, and replay state; per-run prompt shaping; settled final-response extraction; compact notifications; and exact helper ownership.
+- Added `scripts/scufris-speak` for bounded UTF-8 stdin, trusted model and optional config environment paths, fixed no-shell Piper and `pw-play` processes, deadlines, and exact child termination.
+- Cross-project Piper 1.4.2 feedback showed that validated prose requires a final LF. The helper now appends exactly one internal LF, buffers at most 64 MiB of synthesis output, validates a non-empty RIFF/WAVE format and data structure, and starts `pw-play` only after validation.
+- Added speech extension and runtime packaging in `package.json`, `nix/launcher.nix`, and `flake.nix`. Launcher checks prove popup variables stay exact and Piper plus `pw-play` are on runtime PATH.
+- Added `SCUFRIS_CALM=1` startup opt-in without changing the existing Calm default.
+- Removed popup-only speech and Calm variables from delegated Pi and Claude worker environments in `scripts/scufris-job`.
+- Added extraction, transition, settlement, persistence, replay, mode isolation, error, helper integration, malformed audio, missing runtime, replacement, and exact cancellation tests.
+
+## Decisions and tradeoffs
+
+- Session custom entries store mode state. Branch, reload, and resume restore the applicable state. The environment is the fallback only when the session has no speech state.
+- `/speech once` changes the mode to one-shot and consumes it when the next agent run starts. Retry and queued continuation settlement retain that run's decision.
+- Extraction rejects the latest final assistant response instead of falling back to older safe speech. This prevents stale replay after malformed or unsafe output.
+- Playback uses bounded in-memory WAV bytes. No audio or speech text file is created. Playback starts from the settled response without a second model call.
+- The launcher always includes the fixed speech runtime because `/speech on` can enable speech after startup.
+
+## Verification evidence
+
+- `npm run check` - passed, including 31 TypeScript and helper integration tests.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` - passed, 22 tests.
+- `nix develop --command bash -lc 'ruff check ... && ruff format --check ... && python3 -m py_compile ...'` - passed.
+- `nix fmt -- --check .` - passed.
+- `nix flake check` - passed after staging new flake source files. The initial resources check correctly failed because Git-based flake source filtering omitted unstaged new files.
+- Post-sync testing exposed a fake-helper readiness race: the fixture logged startup before installing its signal handler. The fixture now installs the handler first, so cancellation assertions are deterministic.
+- Review feedback regressions prove a fake Piper emits WAV only after the internal LF, and zero-byte or malformed successful synthesis never starts the fake player.
+- `git diff --check` - passed.
+- Live Piper playback remains for the external `nix.dotfiles` model and popup integration, as required by the accepted verification plan.

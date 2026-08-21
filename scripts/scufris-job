@@ -567,6 +567,19 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def worker_environment() -> dict[str, str]:
+    env = os.environ.copy()
+    for variable in (
+        "SCUFRIS_FOREGROUND",
+        "SCUFRIS_SPEECH",
+        "SCUFRIS_CALM",
+        "SCUFRIS_PIPER_MODEL",
+        "SCUFRIS_PIPER_CONFIG",
+    ):
+        env.pop(variable, None)
+    return env
+
+
 def launch(job_id: str) -> NoReturn:
     job = load_job(job_id)
     harness = job.get("harness")
@@ -585,8 +598,7 @@ def launch(job_id: str) -> NoReturn:
             str(thinking),
             prompt,
         ]
-        env = os.environ.copy()
-        env.pop("SCUFRIS_FOREGROUND", None)
+        env = worker_environment()
     elif harness == "claude":
         argv = [
             "claude",
@@ -597,8 +609,7 @@ def launch(job_id: str) -> NoReturn:
             str(thinking),
             prompt,
         ]
-        env = os.environ.copy()
-        env.pop("SCUFRIS_FOREGROUND", None)
+        env = worker_environment()
         env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] = "false"
     else:
         raise JobError("invalid harness in job.json")

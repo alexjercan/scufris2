@@ -308,22 +308,36 @@ def prompt_text(job_id: str, feature: str, instructions: str) -> str:
     directory = job_dir(job_id)
     return f"""# Delegated Scufris job
 
-Follow the repository AGENTS.md files and project instructions.
+## Role
+
+You are a bounded delegated worker, not a normal user session. Complete only the request below in your assigned worktree. You have normal local-user coding capabilities. Do not land, push, use Scufris orchestration tools, or spawn workers.
+
+Follow all repository AGENTS.md files and project instructions. Treat the request as the exact problem, outcome, scope, accepted design, artifacts, constraints, non-goals, checks, and completion conditions. If it is not self-contained enough to proceed safely, use `needs-decision`.
 
 ## Request
 
 {instructions}
 
-## Job protocol
+## Files and status protocol
 
-- Do not modify `{directory / "prompt.md"}`.
-- Append sparse LF-terminated status lines to `{directory / "status"}`.
-- Write the final or review result to `{directory / "report.md"}` before its status line.
-- Allowed states: working, needs-decision, blocked, review-ready, done, failed.
-- Format: `<state>: <one-line summary>`.
-- Do not put credentials, raw logs, absolute paths, or transcripts in status summaries.
-- Read repository instructions to select checks. Record commands, results, and limitations in the report and repository task record when required.
-- Commit coding work, run `sprout sync {feature}` and applicable checks, then use `review-ready:`. Do not land or push.
+- Work only in the assigned worktree. Do not modify `{directory / "prompt.md"}`.
+- Append sparse LF-terminated lines to `{directory / "status"}`. Format: `<state>: <one-line summary>`.
+- Allowed states: `working`, `needs-decision`, `blocked`, `review-ready`, `done`, and `failed`.
+- Keep summaries concise. Do not include credentials, raw logs, absolute paths, or transcripts.
+- Write the related detailed context to `{directory / "report.md"}` before each actionable or terminal status line.
+- `working`: optional quiet progress for the UI. It never wakes Scufris.
+- `needs-decision`: explain the decision, recommendation, consequences, and viable alternatives in the report, append the status, then wait. Scufris will inspect it and answer through this same session.
+- `blocked`: explain the blocker, attempts, evidence, effect, and exact unblock condition in the report, append the status, then wait. Scufris will inspect it and answer through this same session.
+- `failed`: record the failure and useful recovery context in the report, append the status, then wait.
+
+## Coding and review lifecycle
+
+- Read repository instructions before selecting checks. Record changed files, `sprout sync {feature}`, each check command and result, limitations, and current revisions in the report and repository task record when required.
+- For coding work: implement, commit, run `sprout sync {feature}`, rerun applicable checks after synchronization, update evidence, append `review-ready:`, then wait. Do not use `done` before review.
+- Scufris verifies Git state and opens structured Plannotator review. Review feedback returns to this same session. Address only that feedback, commit a new revision, synchronize, check, update evidence, append another `review-ready:`, then wait.
+- After approval, Scufris sends one final instruction. Make no repository changes. Finalize the report, append exactly `done: review approved with no changes requested`, then wait. This acknowledgment is required before Scufris can land the exact approved revisions locally.
+- For a requested non-coding result that needs no review or landing: write the final report, append `done: <summary>`, then wait.
+- Scufris stops this session after terminal handling. Never land or push.
 """
 
 
@@ -535,6 +549,8 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
     return {
         "job_id": job_id,
         "state": "running",
+        "project_root": str(root),
+        "worktree": str(worktree),
         "harness": harness,
         "feature": feature,
         "project": project,
@@ -564,6 +580,7 @@ def launch(job_id: str) -> NoReturn:
             prompt,
         ]
         env = os.environ.copy()
+        env.pop("SCUFRIS_FOREGROUND", None)
     elif harness == "claude":
         argv = [
             "claude",
@@ -575,6 +592,7 @@ def launch(job_id: str) -> NoReturn:
             prompt,
         ]
         env = os.environ.copy()
+        env.pop("SCUFRIS_FOREGROUND", None)
         env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] = "false"
     else:
         raise JobError("invalid harness in job.json")
@@ -803,6 +821,154 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def owned_project_root(value: Any) -> Path:
+    root = resolve_git_root(value, require_exact=True)
+    main = (
+        run(["git", "worktree", "list", "--porcelain"], cwd=root)
+        .stdout.decode("utf-8", "strict")
+        .splitlines()
+    )
+    if not main or main[0] != f"worktree {root}":
+        raise JobError("project_root is not the main worktree")
+    return root
+
+
+def validated_review_snapshot(job_id: str, project_root: Any) -> dict[str, str]:
+    job = load_job(job_id)
+    root = owned_project_root(project_root)
+    feature = validate_feature(job.get("feature"))
+    landing_branch = job.get("landing_branch")
+    if not isinstance(landing_branch, str) or not landing_branch:
+        raise JobError("job.json has invalid landing branch")
+    worktree = Path(sprout(["show", feature], root).stdout.decode().strip()).resolve()
+    session_id, window_id, pane_id = tmux_identity(job)
+    identity = (
+        tmux(
+            [
+                "display-message",
+                "-p",
+                "-t",
+                window_id,
+                "#{session_id}\t#{window_id}\t#{pane_id}",
+            ]
+        )
+        .stdout.decode("utf-8", "strict")
+        .strip()
+    )
+    if identity != f"{session_id}\t{window_id}\t{pane_id}":
+        raise JobError("worker tmux identity changed")
+    owned_windows = (
+        tmux(["list-windows", "-t", session_id, "-F", "#{window_id}"])
+        .stdout.decode("utf-8", "strict")
+        .splitlines()
+    )
+    if owned_windows != [window_id]:
+        raise JobError("worker tmux session contains an unowned window")
+    expected = (
+        Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+        / "sprouts"
+        / root.name
+        / feature
+    ).resolve()
+    if worktree != expected:
+        raise JobError("sprout returned an unexpected worktree")
+    if git_text(root, "branch", "--show-current") != landing_branch:
+        raise JobError("main checkout is not on the landing branch")
+    if git_text(worktree, "branch", "--show-current") != feature:
+        raise JobError("feature worktree is not on its feature branch")
+    if git_text(worktree, "status", "--porcelain"):
+        raise JobError("feature worktree is not clean")
+    if git_text(root, "status", "--porcelain", "--untracked-files=no"):
+        raise JobError("main checkout has tracked changes")
+    landing_sha = git_text(root, "rev-parse", f"refs/heads/{landing_branch}")
+    feature_sha = git_text(worktree, "rev-parse", "HEAD")
+    branch_sha = git_text(root, "rev-parse", f"refs/heads/{feature}")
+    if feature_sha != branch_sha:
+        raise JobError("feature HEAD does not match its branch")
+    ancestry = run(
+        ["git", "merge-base", "--is-ancestor", landing_sha, feature_sha],
+        cwd=root,
+        check=False,
+    )
+    if ancestry.returncode != 0:
+        raise JobError("landing revision is not an ancestor of the feature")
+    subjects = (
+        run(
+            ["git", "log", "--reverse", "--format=%s", f"{landing_sha}..{feature_sha}"],
+            cwd=worktree,
+        )
+        .stdout.decode("utf-8", "strict")
+        .splitlines()
+    )
+    if not subjects:
+        raise JobError("feature has no committed revision to review")
+    subject = subjects[0]
+    if (
+        not subject
+        or len(subject.encode("utf-8")) > 200
+        or any(ord(char) < 32 or ord(char) == 127 for char in subject)
+    ):
+        raise JobError("oldest feature commit has an invalid subject")
+    return {
+        "job_id": job_id,
+        "worktree": str(worktree),
+        "landing_branch": landing_branch,
+        "landing_sha": landing_sha,
+        "feature_sha": feature_sha,
+        "subject": subject,
+    }
+
+
+def review_snapshot(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id", "project_root"})
+    return validated_review_snapshot(
+        validate_job_id(request["job_id"]), request["project_root"]
+    )
+
+
+def land(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(
+        request,
+        {"job_id", "project_root", "landing_sha", "feature_sha", "subject"},
+    )
+    job_id = validate_job_id(request["job_id"])
+    expected_landing = request["landing_sha"]
+    expected_feature = request["feature_sha"]
+    subject = request["subject"]
+    if not all(
+        isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value)
+        for value in (expected_landing, expected_feature)
+    ):
+        raise JobError("invalid approved revision")
+    if (
+        not isinstance(subject, str)
+        or not subject
+        or len(subject.encode("utf-8")) > 200
+        or any(ord(char) < 32 or ord(char) == 127 for char in subject)
+    ):
+        raise JobError("invalid landing subject")
+    root = owned_project_root(request["project_root"])
+    snapshot = validated_review_snapshot(job_id, root)
+    if (
+        snapshot["landing_sha"] != expected_landing
+        or snapshot["feature_sha"] != expected_feature
+    ):
+        raise JobError("approved revisions changed before landing")
+    if snapshot["subject"] != subject:
+        raise JobError("approved landing subject changed")
+    feature = validate_feature(load_job(job_id).get("feature"))
+    sprout(["land", feature, "--dry-run", "-m", subject], root)
+    snapshot = validated_review_snapshot(job_id, root)
+    if (
+        snapshot["landing_sha"] != expected_landing
+        or snapshot["feature_sha"] != expected_feature
+    ):
+        raise JobError("approved revisions changed after landing dry-run")
+    sprout(["land", feature, "-m", subject], root)
+    landed_sha = git_text(root, "rev-parse", "HEAD")
+    return {"job_id": job_id, "state": "landed", "landed_sha": landed_sha}
+
+
 def orphans(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(request, set())
     windows = tmux_windows()
@@ -827,6 +993,8 @@ def dispatch(command: str, request: dict[str, Any]) -> dict[str, Any]:
         "send": send,
         "stop": stop,
         "poll": poll,
+        "review-snapshot": review_snapshot,
+        "land": land,
         "orphans": orphans,
     }
     handler = handlers.get(command)
@@ -846,6 +1014,8 @@ def main() -> int:
             "send",
             "stop",
             "poll",
+            "review-snapshot",
+            "land",
             "orphans",
             "launch",
         ],

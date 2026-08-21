@@ -1,6 +1,6 @@
 # Define Scufris orchestration and worker lifecycle
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: agents, orchestration, pair
 
@@ -93,3 +93,19 @@ Status semantics:
 - Python unittest and Ruff checks.
 - Focused Nix launcher and Home Manager checks.
 - Live playtest: small full-send job, blocked or decision mediation, review feedback or approval, worker done, and local landing.
+
+## Completion record
+
+- Added the exact 495-byte canonical `prompts/pair.md`. The foreground-only identity extension appends it from `before_agent_start` on every agent run, including post-compaction runs. The Scufris launchers set a private foreground marker. Ambient delegated harnesses remove it, and normal Pi package loading stays unchanged.
+- Replaced opt-in delegation guidance with automatic Pair readiness. Scufris now inspects the smallest relevant project context, retains durable decisions, full-sends only bounded self-contained work, and uses task artifacts for consequential or compaction-sensitive work.
+- Expanded generated worker prompts with the complete bounded-worker role, capability and scope limits, status semantics, detailed decision and blocker reports, same-session mediation, review feedback loop, exact approval acknowledgment, synchronization and check evidence, and no-land, no-push, no-worker-spawn rules.
+- Added trusted review snapshots and guarded landing helper verbs. They verify the selected main checkout and feature, exact branches and revisions, clean tracked state, ancestry, commit subject, Sprout worktree location, exact tmux identities, and absence of unowned windows. Landing rechecks the approved snapshot before and after `sprout land --dry-run`.
+- Added automatic structured Plannotator review through `plannotator:request` with `code-review` and `since-base`. Structured feedback takes precedence over approval and returns as one bounded literal message to the same worker. Closed, malformed, unavailable, oversized, or inconsistent review outcomes fail closed as actionable lifecycle blockers.
+- Bound approval to the exact landing SHA, feature SHA, subject, and review request. Scufris sends one final no-change instruction, requires exact `done: review approved with no changes requested`, reverifies, lands locally through Sprout, and stops the exact worker. Missing or incorrect acknowledgment blocks landing.
+- Preserved quiet `working` telemetry, once-per-line actionable wakeups, detailed report inspection, cross-project IDs, descriptive feature names, normal-server detached tmux sessions, ambient normal worker Pi, collision rejection, and exact resource ownership.
+- Updated architecture, protocol, delegation guidance, launcher resources, and focused TypeScript and Python tests.
+- Verification passed: `npm run check` (8 TypeScript tests); `python3 -m unittest discover -s tests -p 'test_*.py'` (13 integration tests); Ruff lint and format checks for tests and the extensionless helper; `nix flake check`; Pi offline extension load and model listing; `git diff --check`.
+- `nix flake check` built launcher, resource, and Home Manager checks for x86_64-linux. It omitted incompatible configured systems.
+- Integration tests use real Git, Sprout, and isolated normal-server tmux with fake ambient Pi and Claude executables. They exercise complete prompt generation, foreground-marker removal, review snapshots, revision drift rejection, unowned-window rejection, dry-run, local landing, and exact cleanup.
+- Limitation: no interactive provider and browser playtest was run in this non-foreground worker. Structured public-event response policy and process integration are covered separately. A foreground Scufris session must complete the listed live feedback or approval playtest before release.
+- Tradeoff: trusted project and worktree paths exist only in extension-owned memory and private helper calls. They are not added to model tool schemas or immutable job records. This keeps cross-project review possible without exposing generic filesystem paths.

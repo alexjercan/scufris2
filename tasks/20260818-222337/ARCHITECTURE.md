@@ -54,6 +54,12 @@ Does not own:
 
 ### Scufris TypeScript extensions
 
+The Scufris identity extension owns:
+
+- Loading the repository canonical Pair prompt.
+- Appending its complete canonical text in `before_agent_start` on every foreground agent run, including runs after compaction.
+- Activation only from the `SCUFRIS_FOREGROUND=1` launcher marker.
+
 The delegation extension owns:
 
 - Agent tool registration.
@@ -69,6 +75,8 @@ The widget extension owns:
 - External-close mediation.
 
 Both use the shared bounded helper runtime. Neither parses shell commands, implements Git, inspects arbitrary paths, or embeds harness-specific process logic.
+
+The Nix launcher and local npm command set `SCUFRIS_FOREGROUND=1` and load the identity extension before the other Scufris extensions. The worker launcher removes that marker and invokes ambient Pi without Scufris extensions or skills. Normal Pi and direct package loading therefore do not receive the Scufris identity prompt.
 
 ### Skills
 
@@ -218,6 +226,12 @@ Scufris inherits the normal tmux server selection. The session name uses the exa
 
 The matching job directory and exact tmux window are both required for orphan eligibility. `remain-on-exit` retains a failed pane for manual debugging while pane-dead state marks the worker as exited.
 
+## Pair and delegation readiness
+
+Scufris pairs automatically. There is no `/pair` command or deterministic router. Before proposing work, it inspects the smallest relevant project instructions, conventions, docs, task artifacts, code, tests, Git state, history, and user style. It stops only for real decisions and records durable decisions in project artifacts.
+
+Full-send is a prose judgment. Delegate only one bounded outcome with no unresolved product or durable architecture decision, known constraints and checks, and a self-contained handoff. Consequential or compaction-sensitive work uses a Tatr task folder. Accepted design artifacts are committed before implementation delegation. Bounded research, prototypes, diagrams, and demos can run while Pair continues.
+
 ## Foreground request flow
 
 ```mermaid
@@ -256,7 +270,8 @@ stateDiagram-v2
   blocked --> running
   running --> review_ready
   review_ready --> running: feedback
-  review_ready --> landing: exact approval
+  review_ready --> awaiting_done: exact approval and final instruction
+  awaiting_done --> landing: exact worker done acknowledgment
   landing --> landed
   running --> done
   running --> failed
@@ -342,8 +357,12 @@ sequenceDiagram
   else approved
     Plannotator-->>Scufris: approved true
     Scufris->>Scufris: reverify exact SHAs and clean state
+    Scufris->>Worker: one no-changes finalization instruction
+    Worker->>Scufris: exact done acknowledgment
+    Scufris->>Scufris: reverify exact approved SHAs and clean state
     Scufris->>Sprout: land --dry-run
     Scufris->>Sprout: land
+    Scufris->>Worker: stop exact owned window
   end
 ```
 
@@ -351,6 +370,7 @@ One committed revision is required per review round. Scufris requests `last-comm
 
 Approval is invalid if:
 
+- The worker does not append exactly `done: review approved with no changes requested` after the one approval instruction.
 - Feature SHA changed.
 - Landing-target SHA changed.
 - Worktree became dirty.

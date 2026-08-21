@@ -14,6 +14,7 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 CLI = REPOSITORY / "scripts" / "scufris-job"
 
 FAKE_HARNESS = r"""#!/usr/bin/env python3
+import os
 import pathlib
 import sys
 
@@ -23,11 +24,12 @@ if not prompt_arg.startswith(prefix):
     raise SystemExit("missing prompt pointer")
 prompt = pathlib.Path(prompt_arg[len(prefix):])
 directory = prompt.parent
-with (directory / "status").open("a", encoding="utf-8", newline="") as stream:
-    stream.write("working: fake harness ready\n")
+(directory / "foreground-marker").write_text(os.environ.get("SCUFRIS_FOREGROUND", ""), encoding="utf-8")
 with (directory / "argv.json").open("w", encoding="utf-8") as stream:
     import json
     json.dump(sys.argv[1:], stream)
+with (directory / "status").open("a", encoding="utf-8", newline="") as stream:
+    stream.write("working: fake harness ready\n")
 for line in sys.stdin:
     message = line.rstrip("\r\n")
     with (directory / "received").open("a", encoding="utf-8", newline="") as stream:
@@ -75,6 +77,7 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
                 "XDG_CACHE_HOME": str(self.cache),
                 "TMUX_TMPDIR": str(self.tmux_root),
                 "SCUFRIS_PROJECT_ROOTS": json.dumps([str(self.projects_root)]),
+                "SCUFRIS_FOREGROUND": "1",
             }
         )
         self.jobs: dict[str, str] = {}
@@ -203,12 +206,25 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         pi_argv = json.loads((directory / "argv.json").read_text(encoding="utf-8"))
         self.assertNotIn("--extension", pi_argv)
         self.assertNotIn("--skill", pi_argv)
+        self.assertEqual(
+            (directory / "foreground-marker").read_text(encoding="utf-8"), ""
+        )
 
         self.assertEqual(stat.S_IMODE((directory / "prompt.md").stat().st_mode), 0o400)
-        self.assertIn(
+        prompt = (directory / "prompt.md").read_text(encoding="utf-8")
+        for required in (
+            "bounded delegated worker, not a normal user session",
+            "Do not land, push",
+            "or spawn workers",
+            "decision, recommendation, consequences",
+            "blocker, attempts, evidence, effect, and exact unblock condition",
+            "Scufris verifies Git state and opens structured Plannotator review",
+            "Review feedback returns to this same session",
+            "Do not use `done` before review",
+            "done: review approved with no changes requested",
             f"sprout sync {result['feature']}",
-            (directory / "prompt.md").read_text(encoding="utf-8"),
-        )
+        ):
+            self.assertIn(required, prompt)
         self.assertEqual(stat.S_IMODE((directory / "job.json").stat().st_mode), 0o400)
         self.assertTrue(
             (self.cache / "sprouts" / self.project.name / result["feature"]).is_dir()
@@ -316,6 +332,97 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         self.assertEqual(
             self.cli("stop", {"job_id": result["job_id"]})["result"]["state"], "stopped"
         )
+
+    def test_guarded_review_snapshot_and_local_landing(self) -> None:
+        result = self.spawn("aaa111bbb222", feature="guarded-local-land")
+        directory = self.state / "scufris" / "jobs" / result["job_id"]
+        self.wait_for(directory / "status", "working: fake harness ready")
+        worktree = Path(result["worktree"])
+        (worktree / "result.txt").write_text("approved\n", encoding="utf-8")
+        self.run_external(["git", "add", "result.txt"], cwd=worktree, env=self.env)
+        self.run_external(
+            ["git", "commit", "-m", "Add approved result"],
+            cwd=worktree,
+            env=self.env,
+        )
+        self.run_external(
+            ["sprout", "sync", result["feature"]], cwd=self.project, env=self.env
+        )
+        snapshot = self.cli(
+            "review-snapshot",
+            {"job_id": result["job_id"], "project_root": str(self.project)},
+        )["result"]
+        self.assertEqual(snapshot["subject"], "Add approved result")
+        self.assertEqual(snapshot["worktree"], str(worktree))
+
+        extra_window = self.run_external(
+            [
+                "tmux",
+                "new-window",
+                "-d",
+                "-P",
+                "-F",
+                "#{window_id}",
+                "-t",
+                f"={result['tmux_session']}",
+                "-n",
+                "user-extra",
+                "sleep 30",
+            ],
+            env=self.env,
+        ).stdout.strip()
+        unowned = self.cli(
+            "land",
+            {
+                "job_id": result["job_id"],
+                "project_root": str(self.project),
+                "landing_sha": snapshot["landing_sha"],
+                "feature_sha": snapshot["feature_sha"],
+                "subject": snapshot["subject"],
+            },
+            check=False,
+        )
+        self.assertFalse(unowned["ok"])
+        self.assertIn("unowned window", unowned["error"])
+        self.assertEqual(
+            self.run_external(
+                ["tmux", "display-message", "-p", "-t", extra_window, "#{window_id}"],
+                env=self.env,
+            ).stdout.strip(),
+            extra_window,
+        )
+        self.run_external(["tmux", "kill-window", "-t", extra_window], env=self.env)
+
+        changed = self.cli(
+            "land",
+            {
+                "job_id": result["job_id"],
+                "project_root": str(self.project),
+                "landing_sha": "0" * 40,
+                "feature_sha": snapshot["feature_sha"],
+                "subject": snapshot["subject"],
+            },
+            check=False,
+        )
+        self.assertFalse(changed["ok"])
+        self.assertIn("approved revisions changed", changed["error"])
+        self.assertTrue(worktree.exists())
+
+        landed = self.cli(
+            "land",
+            {
+                "job_id": result["job_id"],
+                "project_root": str(self.project),
+                "landing_sha": snapshot["landing_sha"],
+                "feature_sha": snapshot["feature_sha"],
+                "subject": snapshot["subject"],
+            },
+        )["result"]
+        self.assertEqual(landed["state"], "landed")
+        self.assertEqual(
+            (self.project / "result.txt").read_text(encoding="utf-8"), "approved\n"
+        )
+        self.assertFalse(worktree.exists())
 
     def test_poll_waits_for_lf_and_consumes_malformed_frames_once(self) -> None:
         result = self.spawn("0123456789ab")

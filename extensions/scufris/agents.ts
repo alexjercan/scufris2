@@ -12,10 +12,32 @@ const jobHelperPath = fileURLToPath(
   new URL("../../scripts/scufris-job", import.meta.url),
 );
 
+interface ReviewSnapshot {
+  job_id: string;
+  worktree: string;
+  landing_branch: string;
+  landing_sha: string;
+  feature_sha: string;
+  subject: string;
+}
+
+interface ApprovedReview extends ReviewSnapshot {
+  request_id: string;
+}
+
+type ReviewPhase =
+  | "idle"
+  | "reviewing"
+  | "feedback"
+  | "awaiting-done"
+  | "landing";
+
 interface OwnedJob {
   job_id: string;
   harness: "pi" | "claude";
   project: string;
+  project_root: string;
+  worktree: string;
   feature: string;
   state: string;
   summary: string;
@@ -25,11 +47,17 @@ interface OwnedJob {
   window_alive: boolean;
   protocolErrors: Set<string>;
   exitReported: boolean;
+  reviewPhase: ReviewPhase;
+  lastReviewedFeature?: string;
+  reviewRequestId?: string;
+  approval?: ApprovedReview;
 }
 
 interface SpawnResult {
   job_id: string;
   state: string;
+  project_root: string;
+  worktree: string;
   harness: "pi" | "claude";
   project: string;
   feature: string;
@@ -96,6 +124,90 @@ export function jobEventTriggersTurn(state: string): boolean {
   return state !== "working";
 }
 
+export const APPROVAL_INSTRUCTION =
+  "Review approved. Do not make repository changes. Finalize report.md, append exactly `done: review approved with no changes requested`, then wait.";
+export const APPROVAL_DONE_SUMMARY =
+  "review approved with no changes requested";
+
+interface PlannotatorResponse {
+  status: "handled" | "unavailable" | "error";
+  error?: string;
+  result?: {
+    approved?: unknown;
+    feedback?: unknown;
+    annotations?: unknown;
+  };
+}
+
+export type ReviewOutcome =
+  | { kind: "approved" }
+  | { kind: "feedback"; message: string }
+  | { kind: "blocked"; reason: string };
+
+export function classifyReviewResponse(response: unknown): ReviewOutcome {
+  if (!response || typeof response !== "object") {
+    return {
+      kind: "blocked",
+      reason: "Plannotator returned a malformed response",
+    };
+  }
+  const value = response as PlannotatorResponse;
+  if (
+    value.status !== "handled" ||
+    !value.result ||
+    typeof value.result !== "object"
+  ) {
+    const reason =
+      typeof value.error === "string" && value.error
+        ? value.error
+        : `Plannotator review was ${String(value.status)}`;
+    return { kind: "blocked", reason };
+  }
+  const feedback =
+    typeof value.result.feedback === "string"
+      ? value.result.feedback.trim()
+      : "";
+  const annotations = Array.isArray(value.result.annotations)
+    ? value.result.annotations
+    : [];
+  if (feedback || annotations.length > 0) {
+    let details: string;
+    try {
+      details = JSON.stringify({ feedback, annotations });
+    } catch {
+      return {
+        kind: "blocked",
+        reason: "Plannotator feedback is not valid structured data",
+      };
+    }
+    const message = `Plannotator requested changes. Address this exact feedback: ${details}`;
+    if (Buffer.byteLength(message, "utf8") > 16 * 1024) {
+      return {
+        kind: "blocked",
+        reason: "Plannotator feedback exceeds the steering limit",
+      };
+    }
+    return { kind: "feedback", message };
+  }
+  if (value.result.approved === true) return { kind: "approved" };
+  return {
+    kind: "blocked",
+    reason: "Plannotator closed without approval or actionable feedback",
+  };
+}
+
+export function isApprovalDone(state: string, summary: string): boolean {
+  return state === "done" && summary === APPROVAL_DONE_SUMMARY;
+}
+
+export function codeReviewPayload(snapshot: ReviewSnapshot) {
+  return {
+    cwd: snapshot.worktree,
+    defaultBranch: snapshot.landing_branch,
+    diffType: "since-base" as const,
+  };
+}
+
 function parseEvent(line: string): { state: string; summary: string } {
   const separator = line.indexOf(": ");
   return {
@@ -124,12 +236,162 @@ export default function scufris(pi: ExtensionAPI): void {
     );
   };
 
+  const blockLifecycle = (job: OwnedJob, reason: string) => {
+    job.reviewPhase = "idle";
+    job.state = "blocked";
+    job.summary = reason;
+    context?.ui.notify(`Job ${job.job_id}: ${reason}`, "error");
+    sendJobEvent(job, `blocked: ${reason}`, true);
+  };
+
+  const currentSnapshot = (job: OwnedJob) =>
+    runHelper<ReviewSnapshot>("review-snapshot", {
+      job_id: job.job_id,
+      project_root: job.project_root,
+    });
+
+  const sameReviewRevisions = (left: ReviewSnapshot, right: ReviewSnapshot) =>
+    left.landing_sha === right.landing_sha &&
+    left.feature_sha === right.feature_sha &&
+    left.subject === right.subject;
+
+  const handleReviewResponse = async (
+    job: OwnedJob,
+    requestId: string,
+    snapshot: ReviewSnapshot,
+    response: unknown,
+  ) => {
+    if (
+      shuttingDown ||
+      jobs.get(job.job_id) !== job ||
+      job.reviewPhase !== "reviewing" ||
+      job.reviewRequestId !== requestId
+    ) {
+      return;
+    }
+    const outcome = classifyReviewResponse(response);
+    if (outcome.kind === "blocked") {
+      blockLifecycle(job, outcome.reason);
+      return;
+    }
+    if (outcome.kind === "feedback") {
+      job.reviewPhase = "feedback";
+      try {
+        await runHelper("send", {
+          job_id: job.job_id,
+          message: outcome.message,
+        });
+        job.reviewPhase = "idle";
+        job.state = "working";
+        job.summary = "review feedback submitted to worker";
+        context?.ui.notify(`Review feedback sent to job ${job.job_id}`, "info");
+      } catch (error) {
+        blockLifecycle(
+          job,
+          `could not return review feedback: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return;
+    }
+    try {
+      const verified = await currentSnapshot(job);
+      if (!sameReviewRevisions(snapshot, verified)) {
+        throw new Error(
+          "reviewed revisions changed before approval acknowledgment",
+        );
+      }
+      job.reviewPhase = "awaiting-done";
+      job.approval = { ...snapshot, request_id: requestId };
+      await runHelper("send", {
+        job_id: job.job_id,
+        message: APPROVAL_INSTRUCTION,
+      });
+      job.state = "working";
+      job.summary = "waiting for required review approval acknowledgment";
+      context?.ui.notify(`Review approved for job ${job.job_id}`, "info");
+    } catch (error) {
+      job.approval = undefined;
+      blockLifecycle(
+        job,
+        `approval could not be finalized: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+
+  const beginReview = async (job: OwnedJob) => {
+    if (job.reviewPhase !== "idle") {
+      blockLifecycle(job, `review-ready is invalid during ${job.reviewPhase}`);
+      return;
+    }
+    job.reviewPhase = "reviewing";
+    try {
+      const snapshot = await currentSnapshot(job);
+      if (snapshot.feature_sha === job.lastReviewedFeature) {
+        throw new Error("review-ready requires a new committed revision");
+      }
+      const requestId = `scufris-${job.job_id}-${randomBytes(6).toString("hex")}`;
+      job.reviewRequestId = requestId;
+      job.lastReviewedFeature = snapshot.feature_sha;
+      context?.ui.notify(`Opening review for job ${job.job_id}`, "info");
+      pi.events.emit("plannotator:request", {
+        requestId,
+        action: "code-review",
+        payload: codeReviewPayload(snapshot),
+        respond: (response: unknown) => {
+          void handleReviewResponse(job, requestId, snapshot, response);
+        },
+      });
+    } catch (error) {
+      blockLifecycle(
+        job,
+        `review precondition failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+
+  const landApproved = async (job: OwnedJob) => {
+    const approval = job.approval;
+    if (!approval) {
+      blockLifecycle(
+        job,
+        "review approval acknowledgment has no approved revision",
+      );
+      return;
+    }
+    job.reviewPhase = "landing";
+    try {
+      await runHelper(
+        "land",
+        {
+          job_id: job.job_id,
+          project_root: job.project_root,
+          landing_sha: approval.landing_sha,
+          feature_sha: approval.feature_sha,
+          subject: approval.subject,
+        },
+        undefined,
+        120_000,
+      );
+      await runHelper("stop", { job_id: job.job_id }, undefined, 15_000);
+      job.state = "landed";
+      job.summary = "approved revision landed locally";
+      job.window_alive = false;
+      context?.ui.notify(`Job ${job.job_id} landed locally`, "info");
+    } catch (error) {
+      blockLifecycle(
+        job,
+        `guarded landing failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
+
   const poll = async () => {
     if (pollRunning || shuttingDown || !context) return;
     const active = [...jobs.values()].filter(
       (job) =>
         job.state !== "stopped" &&
         job.state !== "done" &&
+        job.state !== "landed" &&
         job.state !== "failed",
     );
     if (active.length === 0) {
@@ -165,9 +427,33 @@ export default function scufris(pi: ExtensionAPI): void {
         }
         for (const line of update.events) {
           const event = parseEvent(line);
+          if (event.state === "done" && job.reviewPhase === "awaiting-done") {
+            if (!isApprovalDone(event.state, event.summary)) {
+              blockLifecycle(
+                job,
+                "approved review requires the exact worker done acknowledgment",
+              );
+              continue;
+            }
+            job.state = event.state;
+            job.summary = event.summary;
+            sendJobEvent(job, line, true);
+            void landApproved(job);
+            continue;
+          }
+          if (
+            event.state === "done" &&
+            ["reviewing", "feedback", "landing"].includes(job.reviewPhase)
+          ) {
+            blockLifecycle(job, `done is invalid during ${job.reviewPhase}`);
+            continue;
+          }
           job.state = event.state;
           job.summary = event.summary;
-          if (!jobEventTriggersTurn(event.state)) {
+          if (event.state === "review-ready") {
+            sendJobEvent(job, line, true);
+            void beginReview(job);
+          } else if (!jobEventTriggersTurn(event.state)) {
             routine.push(`${job.job_id}: ${line}`);
           } else {
             sendJobEvent(job, line, true);
@@ -178,17 +464,25 @@ export default function scufris(pi: ExtensionAPI): void {
           !job.exitReported &&
           job.state !== "done" &&
           job.state !== "failed" &&
+          job.state !== "landed" &&
           job.state !== "stopped"
         ) {
           job.exitReported = true;
-          job.state = "failed";
-          job.summary = "worker exited without terminal status";
-          context.ui.notify(`Job ${job.job_id} exited`, "error");
-          sendJobEvent(
-            job,
-            "failed: worker exited without terminal status",
-            true,
-          );
+          if (job.reviewPhase === "awaiting-done") {
+            blockLifecycle(
+              job,
+              "worker exited without the required review approval acknowledgment",
+            );
+          } else {
+            job.state = "failed";
+            job.summary = "worker exited without terminal status";
+            context.ui.notify(`Job ${job.job_id} exited`, "error");
+            sendJobEvent(
+              job,
+              "failed: worker exited without terminal status",
+              true,
+            );
+          }
         }
       }
       if (routine.length > 0) context.ui.notify(routine.join("\n"), "info");
@@ -308,6 +602,8 @@ export default function scufris(pi: ExtensionAPI): void {
           job_id: result.job_id,
           harness: result.harness,
           project: result.project,
+          project_root: result.project_root,
+          worktree: result.worktree,
           feature: result.feature,
           state: result.state,
           summary: "worker starting",
@@ -317,9 +613,15 @@ export default function scufris(pi: ExtensionAPI): void {
           window_alive: true,
           protocolErrors: new Set(),
           exitReported: false,
+          reviewPhase: "idle",
         });
         void poll();
-        return toolResult(result);
+        const {
+          project_root: _projectRoot,
+          worktree: _worktree,
+          ...publicResult
+        } = result;
+        return toolResult(publicResult);
       } catch (error) {
         return toolResult(
           { error: error instanceof Error ? error.message : String(error) },
@@ -411,7 +713,13 @@ export default function scufris(pi: ExtensionAPI): void {
         );
       }
       try {
-        return toolResult(await runHelper("send", params, signal, 20_000));
+        const result = await runHelper("send", params, signal, 20_000);
+        const job = jobs.get(params.job_id);
+        if (job && ["needs-decision", "blocked"].includes(job.state)) {
+          job.state = "working";
+          job.summary = "Scufris response submitted to worker";
+        }
+        return toolResult(result);
       } catch (error) {
         return toolResult(
           { error: error instanceof Error ? error.message : String(error) },

@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  APPROVAL_DONE_SUMMARY,
+  APPROVAL_INSTRUCTION,
+  classifyReviewResponse,
+  codeReviewPayload,
+  isApprovalDone,
   isDelegatedFeature,
   jobEventTriggersTurn,
 } from "../extensions/scufris/agents.ts";
@@ -32,4 +37,59 @@ test("review-ready wakes the orchestrator while working stays routine", () => {
   assert.equal(jobEventTriggersTurn("blocked"), true);
   assert.equal(jobEventTriggersTurn("done"), true);
   assert.equal(jobEventTriggersTurn("failed"), true);
+});
+
+test("review request uses the public structured since-base contract", () => {
+  assert.deepEqual(
+    codeReviewPayload({
+      job_id: "abc123def456",
+      worktree: "/trusted/worktree",
+      landing_branch: "master",
+      landing_sha: "1".repeat(40),
+      feature_sha: "2".repeat(40),
+      subject: "Change",
+    }),
+    {
+      cwd: "/trusted/worktree",
+      defaultBranch: "master",
+      diffType: "since-base",
+    },
+  );
+});
+
+test("structured feedback takes precedence and returns to the same worker", () => {
+  assert.deepEqual(
+    classifyReviewResponse({
+      status: "handled",
+      result: {
+        approved: true,
+        feedback: "Fix the race.\nAdd a regression test.",
+        annotations: [{ path: "src/a.ts", line: 3, comment: "Guard this" }],
+      },
+    }),
+    {
+      kind: "feedback",
+      message:
+        'Plannotator requested changes. Address this exact feedback: {"feedback":"Fix the race.\\nAdd a regression test.","annotations":[{"path":"src/a.ts","line":3,"comment":"Guard this"}]}',
+    },
+  );
+  assert.deepEqual(
+    classifyReviewResponse({ status: "handled", result: { approved: false } }),
+    {
+      kind: "blocked",
+      reason: "Plannotator closed without approval or actionable feedback",
+    },
+  );
+  assert.deepEqual(classifyReviewResponse({ status: "unavailable" }), {
+    kind: "blocked",
+    reason: "Plannotator review was unavailable",
+  });
+});
+
+test("approval requires the exact done acknowledgment", () => {
+  assert.match(APPROVAL_INSTRUCTION, /Do not make repository changes/);
+  assert.match(APPROVAL_INSTRUCTION, /append exactly/);
+  assert.equal(isApprovalDone("done", APPROVAL_DONE_SUMMARY), true);
+  assert.equal(isApprovalDone("done", "approved"), false);
+  assert.equal(isApprovalDone("review-ready", APPROVAL_DONE_SUMMARY), false);
 });

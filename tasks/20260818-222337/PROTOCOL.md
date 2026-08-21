@@ -10,6 +10,12 @@
 - Native tools never accept shell commands, executable paths, repository paths, URLs, or desktop commands.
 - Delegation targets use opaque IDs discovered below user-configured roots.
 
+## Scufris identity
+
+`prompts/pair.md` is the one canonical Pair prompt. It is LF-terminated ASCII and at most 500 bytes. The Scufris launcher sets `SCUFRIS_FOREGROUND=1`; `extensions/scufris/identity.ts` appends the complete canonical text in `before_agent_start` for every foreground agent run. This rebuilds it after compaction. The worker launcher removes the marker. Normal Pi sessions, direct package loading, and ambient delegated Pi workers do not receive the Scufris prompt.
+
+Pair is automatic. No Pair command exists. Readiness remains a Scufris prose judgment, not a deterministic routing tool.
+
 ## Harness defaults
 
 | Harness | Model                      | Thinking |
@@ -279,7 +285,8 @@ Do not store prompt text, credentials, environment values, or absolute paths in 
 - Written once before launch.
 - Maximum 1 MiB.
 - Mode 0400.
-- Contains the complete initial request, selected feature, job paths, status grammar, report rules, Git rules, and a requirement to follow repository instructions and run applicable checks.
+- Starts by identifying the worker as a bounded executor, not a user session.
+- Contains the complete initial request, selected feature, job paths, role and capability limits, escalation and waiting rules, status grammar, report rules, Git rules, review feedback loop, approval acknowledgment, and a requirement to follow repository instructions and run applicable checks.
 - Synchronization instructions name the selected feature exactly. They do not assume the generated fallback.
 - The worker must not modify it.
 
@@ -323,7 +330,7 @@ Semantics:
 - `needs-decision`: worker cannot choose safely.
 - `blocked`: external condition prevents progress.
 - `review-ready`: coding revision is committed, synchronized, checked, and documented.
-- `done`: terminal result that needs no code review or landing.
+- `done`: terminal result that needs no code review or landing, or the exact required post-approval acknowledgment.
 - `failed`: terminal failure.
 
 `review-ready` is not terminal. Feedback returns the same worker to work. A later `review-ready` starts a new round.
@@ -442,15 +449,16 @@ Outcomes:
 Candidate approval validation:
 
 1. Require structured `approved: true` from the current `since-base` request.
-2. Require unchanged landing and feature SHAs.
-3. Require clean worktree.
-4. Require target ancestry.
-5. Read the oldest feature-only commit subject and reject an empty, multiline, control-containing, or over-200-byte value.
-6. Run `sprout land <feature> --dry-run -m <subject>`.
-7. Recheck revisions.
-8. Run `sprout land <feature> -m <subject>`.
+2. Require unchanged landing and feature SHAs, clean worktrees, and target ancestry.
+3. Send exactly one instruction to make no repository changes, finalize `report.md`, append exactly `done: review approved with no changes requested`, and wait.
+4. Require that exact worker status acknowledgment. Missing or different `done` is a protocol bug and blocks landing.
+5. Reverify the exact approved revisions, clean worktrees, and ancestry.
+6. Read the oldest feature-only commit subject and reject an empty, multiline, control-containing, or over-200-byte value.
+7. Run `sprout land <feature> --dry-run -m <subject>`.
+8. Recheck the exact approved revisions.
+9. Run `sprout land <feature> -m <subject>` and then stop the exact owned worker window.
 
-Pass the subject as one argument without a shell. Do not push.
+Pass the subject as one argument without a shell. Do not push. Approval is bound to the landing SHA, feature SHA, subject, and `since-base` request. Feedback is JSON-encoded into one bounded literal line and returned to the same worker. Feedback takes precedence over an inconsistent response that also sets approval.
 
 ## Widget tools
 

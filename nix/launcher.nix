@@ -10,6 +10,8 @@
   extensionArgs =
     [
       "--extension"
+      "${resources}/share/scufris/extensions/scufris/identity.ts"
+      "--extension"
       "${resources}/share/scufris/extensions/scufris/calm.ts"
     ]
     ++ pkgs.lib.optionals delegation [
@@ -33,6 +35,7 @@ in
       if [[ -z "''${SCUFRIS_PROJECT_ROOTS+x}" ]]; then
         export SCUFRIS_PROJECT_ROOTS=${pkgs.lib.escapeShellArg (builtins.toJSON projectRoots)}
       fi
+      export SCUFRIS_FOREGROUND=1
 
       pi=${pkgs.lib.escapeShellArg "${piPackage}/bin/pi"}
       if system_pi="$(type -P pi)"; then

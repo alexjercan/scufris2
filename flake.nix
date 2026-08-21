@@ -44,6 +44,7 @@
           cp -R ${./extensions} "$out/share/scufris/extensions"
           cp -R ${./scripts} "$out/share/scufris/scripts"
           cp -R ${./skills} "$out/share/scufris/skills"
+          cp -R ${./prompts} "$out/share/scufris/prompts"
         '';
         launcher = import ./nix/launcher.nix {
           inherit pkgs resources;
@@ -68,7 +69,7 @@
         checks = {
           launcher-system-pi = let
             systemPi = pkgs.writeShellScriptBin "pi" ''
-              printf '%s\n' "$SCUFRIS_PROJECT_ROOTS" system-pi "$@"
+              printf '%s\n' "$SCUFRIS_PROJECT_ROOTS" "$SCUFRIS_FOREGROUND" system-pi "$@"
             '';
           in
             pkgs.runCommand "scufris-launcher-system-pi-check" {
@@ -77,7 +78,10 @@
               scufris user-argument > actual
               cat > expected <<'EOF'
               ["~/personal","~/work","~/third-party"]
+              1
               system-pi
+              --extension
+              ${resources}/share/scufris/extensions/scufris/identity.ts
               --extension
               ${resources}/share/scufris/extensions/scufris/calm.ts
               --extension
@@ -104,7 +108,9 @@
           '';
 
           resources = pkgs.runCommand "scufris-resources-check" {} ''
+            test -f ${resources}/share/scufris/extensions/scufris/identity.ts
             test -f ${resources}/share/scufris/extensions/scufris/calm.ts
+            test -f ${resources}/share/scufris/prompts/pair.md
             test -f ${resources}/share/scufris/extensions/scufris/agents.ts
             test -f ${resources}/share/scufris/extensions/scufris/widgets.ts
             test -x ${resources}/share/scufris/scripts/scufris-job

@@ -80,6 +80,44 @@ export function consumeReviewRetry(
   return undefined;
 }
 
+export type CleanupPolicy = "remove" | "retain";
+
+export interface LandingOperations {
+  land(): Promise<void>;
+  stop(): Promise<void>;
+  remove(): Promise<void>;
+}
+
+export type LandingOutcome =
+  | { state: "landed"; summary: string }
+  | { state: "landed-with-retained-resources"; summary: string };
+
+export async function completeApprovedLanding(
+  cleanup: CleanupPolicy,
+  operations: LandingOperations,
+): Promise<LandingOutcome> {
+  await operations.land();
+  try {
+    await operations.stop();
+    if (cleanup === "remove") await operations.remove();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      state: "landed-with-retained-resources",
+      summary: `landing succeeded but cleanup failed: ${message}. Inspect the job and remove retained resources manually.`,
+    };
+  }
+  return cleanup === "remove"
+    ? {
+        state: "landed",
+        summary: "approved revision landed and resources removed",
+      }
+    : {
+        state: "landed",
+        summary: "approved revision landed; branch and worktree retained",
+      };
+}
+
 interface OwnedJob {
   job_id: string;
   harness: "pi" | "claude";
@@ -87,6 +125,7 @@ interface OwnedJob {
   project_root: string;
   worktree: string;
   feature: string;
+  cleanup: CleanupPolicy;
   state: string;
   summary: string;
   offset: number;
@@ -110,6 +149,7 @@ interface SpawnResult {
   harness: "pi" | "claude";
   project: string;
   feature: string;
+  cleanup: CleanupPolicy;
   tmux_session: string;
   model: string;
   thinking: string;
@@ -133,6 +173,7 @@ interface InspectResult {
   harness: string;
   project: string;
   feature: string;
+  cleanup: CleanupPolicy;
   state: string;
   summary: string;
   window_alive: boolean;
@@ -219,6 +260,9 @@ export function classifyReviewResponse(response: unknown): ReviewOutcome {
   const annotations = Array.isArray(value.result.annotations)
     ? value.result.annotations
     : [];
+  if (annotations.length === 0 && value.result.approved === true) {
+    return { kind: "approved" };
+  }
   if (feedback || annotations.length > 0) {
     let details: string;
     try {
@@ -238,7 +282,6 @@ export function classifyReviewResponse(response: unknown): ReviewOutcome {
     }
     return { kind: "feedback", message };
   }
-  if (value.result.approved === true) return { kind: "approved" };
   return {
     kind: "blocked",
     reason: "Plannotator closed without approval or actionable feedback",
@@ -432,23 +475,48 @@ export default function scufris(pi: ExtensionAPI): void {
     }
     job.reviewPhase = "landing";
     try {
-      await runHelper(
-        "land",
-        {
-          job_id: job.job_id,
-          project_root: job.project_root,
-          landing_sha: approval.landing_sha,
-          feature_sha: approval.feature_sha,
-          subject: approval.subject,
+      const outcome = await completeApprovedLanding(job.cleanup, {
+        land: async () => {
+          await runHelper(
+            "land",
+            {
+              job_id: job.job_id,
+              project_root: job.project_root,
+              landing_sha: approval.landing_sha,
+              feature_sha: approval.feature_sha,
+              subject: approval.subject,
+            },
+            undefined,
+            120_000,
+          );
         },
-        undefined,
-        120_000,
-      );
-      await runHelper("stop", { job_id: job.job_id }, undefined, 15_000);
-      job.state = "landed";
-      job.summary = "approved revision landed locally";
-      job.window_alive = false;
-      context?.ui.notify(`Job ${job.job_id} landed locally`, "info");
+        stop: async () => {
+          await runHelper("stop", { job_id: job.job_id }, undefined, 15_000);
+          job.window_alive = false;
+        },
+        remove: async () => {
+          await runHelper(
+            "remove",
+            { job_id: job.job_id, project_root: job.project_root },
+            undefined,
+            120_000,
+          );
+        },
+      });
+      job.state = outcome.state;
+      job.summary = outcome.summary;
+      if (outcome.state === "landed-with-retained-resources") {
+        job.summary =
+          job.cleanup === "remove"
+            ? `${outcome.summary} Run sprout rm ${job.feature} in project ${job.project}.`
+            : `${outcome.summary} Stop owned job ${job.job_id} manually; keep its feature resources.`;
+      }
+      if (outcome.state === "landed") {
+        context?.ui.notify(`Job ${job.job_id}: ${outcome.summary}`, "info");
+      } else {
+        context?.ui.notify(`Job ${job.job_id}: ${outcome.summary}`, "error");
+        sendJobEvent(job, `${outcome.state}: ${outcome.summary}`, true);
+      }
     } catch (error) {
       blockLifecycle(
         job,
@@ -464,6 +532,7 @@ export default function scufris(pi: ExtensionAPI): void {
         job.state !== "stopped" &&
         job.state !== "done" &&
         job.state !== "landed" &&
+        job.state !== "landed-with-retained-resources" &&
         job.state !== "failed",
     );
     if (active.length === 0) {
@@ -537,6 +606,7 @@ export default function scufris(pi: ExtensionAPI): void {
           job.state !== "done" &&
           job.state !== "failed" &&
           job.state !== "landed" &&
+          job.state !== "landed-with-retained-resources" &&
           job.state !== "stopped"
         ) {
           job.exitReported = true;
@@ -623,6 +693,7 @@ export default function scufris(pi: ExtensionAPI): void {
           }),
         ),
         model: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+        cleanup: Type.Optional(StringEnum(["remove", "retain"] as const)),
         thinking: Type.Optional(
           StringEnum([
             "off",
@@ -659,6 +730,9 @@ export default function scufris(pi: ExtensionAPI): void {
               ? {}
               : { feature: params.feature }),
             ...(params.model === undefined ? {} : { model: params.model }),
+            ...(params.cleanup === undefined
+              ? {}
+              : { cleanup: params.cleanup }),
             ...(params.thinking === undefined
               ? {}
               : { thinking: params.thinking }),
@@ -677,6 +751,7 @@ export default function scufris(pi: ExtensionAPI): void {
           project_root: result.project_root,
           worktree: result.worktree,
           feature: result.feature,
+          cleanup: result.cleanup,
           state: result.state,
           summary: "worker starting",
           offset: 0,
@@ -718,6 +793,7 @@ export default function scufris(pi: ExtensionAPI): void {
           state: job.state,
           summary: job.summary,
           feature: job.feature,
+          cleanup: job.cleanup,
           window_alive: job.window_alive,
         })),
       });

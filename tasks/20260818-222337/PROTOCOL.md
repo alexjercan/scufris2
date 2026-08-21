@@ -58,7 +58,7 @@ session: <project>_<feature>
 window:  job-<job_id>
 ```
 
-Session naming matches Sprout and the session starts in the selected worktree. Spawn rejects an existing matching session and creates the worker window detached. It never attaches, selects, or switches a client. The immutable job record stores exact session, window, and pane IDs. User-created windows can remain in the same session. Review, landing, stop, and shutdown do not enumerate, inspect, target, or close those unrelated windows. Stop resolves ownership by opaque job ID, kills only the recorded window, and never kills a session or server.
+Session naming matches Sprout and the session starts in the selected worktree. Spawn rejects an existing matching session and creates the worker window detached. It never attaches, selects, or switches a client. The immutable job record stores exact session, window, and pane IDs. User-created windows can remain in the same session. Review, landing, retain cleanup, ordinary stop, and shutdown do not enumerate, inspect, target, or close those unrelated windows. Stop resolves ownership by opaque job ID and kills only the recorded window. After successful landing, remove cleanup calls `sprout rm`; the user accepts that Sprout can delete the complete feature session and evict its remaining windows.
 
 ## Agent tools
 
@@ -78,6 +78,7 @@ Input:
   "project": "personal/example",
   "instructions": "Investigate the failing check and implement the fix.",
   "feature": "fix-login-timeout",
+  "cleanup": "remove",
   "model": "openai-codex/gpt-5.6-sol",
   "thinking": "medium"
 }
@@ -90,9 +91,10 @@ Schema:
 - `instructions`: required nonempty string, maximum 256 KiB UTF-8.
 - `feature`: optional lowercase alphanumeric slug with single hyphen separators, maximum 48 characters. The selected value is used exactly.
 - `model`: optional nonempty string, maximum 200 bytes, no control characters.
+- `cleanup`: optional enum `remove | retain`, default `remove`.
 - `thinking`: optional enum `off | minimal | low | medium | high | xhigh | max`.
 
-Omitted model and thinking values use the harness defaults. An omitted feature selects `scufris-<job_id>`. Explicit input wins. The adapter validates thinking support. The harness validates its model name. Spawn rejects an invalid feature or any existing branch, worktree, or matching tmux session. It does not suffix names or reuse resources.
+Omitted model and thinking values use the harness defaults. An omitted feature selects `scufris-<job_id>`. Omitted cleanup selects `remove`; the orchestrator passes `retain` only when the user asks to keep landed resources. Explicit input wins. The adapter validates thinking support. The harness validates its model name. Spawn rejects an invalid feature, cleanup value, or any existing branch, worktree, or matching tmux session. It does not suffix names or reuse resources.
 
 Result:
 
@@ -102,6 +104,7 @@ Result:
   "state": "running",
   "harness": "pi",
   "feature": "fix-login-timeout",
+  "cleanup": "remove",
   "tmux_session": "example_fix-login-timeout",
   "message": "Worker started in an isolated worktree. It runs independently."
 }
@@ -139,7 +142,8 @@ Result:
       "harness": "pi",
       "state": "working",
       "summary": "running project checks",
-      "feature": "fix-login-timeout"
+      "feature": "fix-login-timeout",
+      "cleanup": "remove"
     }
   ]
 }
@@ -282,6 +286,7 @@ Immutable extension-owned record:
   "model": "openai-codex/gpt-5.6-sol",
   "thinking": "medium",
   "feature": "fix-login-timeout",
+  "cleanup": "remove",
   "landing_branch": "master",
   "landing_sha": "0123456789abcdef0123456789abcdef01234567",
   "tmux_session": "example_fix-login-timeout",
@@ -459,10 +464,11 @@ Review types:
 
 Outcomes:
 
-- Handled `since-base` result with `approved: true`: candidate approval.
-- Handled result with feedback: send feedback to the same worker.
-- Exit or empty feedback without approval: no approval.
-- Error, unavailable, or malformed response: no approval.
+- Handled `since-base` result with `approved: true` and no annotations: candidate approval. Informational feedback text such as `LGTM - no changes requested.` does not become a change request.
+- Any nonempty annotations: send the structured annotations and feedback to the same worker, even when `approved` is true.
+- When `approved` is not true, nonempty feedback: send feedback to the same worker.
+- No exact approval and no actionable feedback or annotations: no approval.
+- Error, unavailable, malformed, or oversized actionable response: no approval.
 
 Candidate approval validation:
 
@@ -474,11 +480,13 @@ Candidate approval validation:
 6. Read the oldest feature-only commit subject and reject an empty, multiline, control-containing, or over-200-byte value.
 7. Run `sprout land <feature> --dry-run -m <subject>`.
 8. Recheck the exact approved revisions.
-9. Perform the guarded squash commit, remove only the Git worktree and feature branch, and then stop the exact owned worker window.
+9. Call installed `sprout land <feature> -m <subject>` without `--remove`.
+10. Stop the exact owned worker window.
+11. For `cleanup: remove`, call `sprout rm <feature>`. For `cleanup: retain`, keep the landed branch, worktree, and remaining feature-session resources.
 
-The final Git-only landing intentionally does not call Sprout's mutating `land` command because that command kills the complete worktree tmux session. The prior Sprout dry-run supplies its current guards. The helper repeats the exact snapshot after the dry-run, uses argument arrays for `git merge --squash`, commit, worktree removal, and branch removal, and resets a failed squash or commit. It never targets the session or unrelated windows.
+Sprout owns the mutating squash landing operation. Scufris does not duplicate it with Git commands and never pushes. A landing failure remains a guarded landing failure. A stop or `sprout rm` failure after successful landing becomes one actionable `landed-with-retained-resources` result. It does not roll back or report the merge as failed. Job evidence remains available for manual cleanup. Remove cleanup can delete the complete feature tmux session, including user-created windows; the user accepts this post-land eviction.
 
-Pass the subject as one argument without a shell. Do not push. Approval is bound to the landing SHA, feature SHA, subject, and `since-base` request. Feedback is JSON-encoded into one bounded literal line and returned to the same worker. Feedback takes precedence over an inconsistent response that also sets approval.
+Pass the subject as one argument without a shell. Do not push. Approval is bound to the landing SHA, feature SHA, subject, and `since-base` request. Actionable feedback and annotations are JSON-encoded into one bounded literal line and returned to the same worker. Nonempty annotations prevent approval. With empty annotations, exact `approved: true` takes precedence over informational feedback text.
 
 ## Widget tools
 

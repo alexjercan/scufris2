@@ -1,6 +1,6 @@
 # Restore Sprout-owned landing and cleanup policy
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: agents, sprout, review
 
@@ -40,3 +40,19 @@ Return Scufris landing to the installed Sprout contract and make post-land clean
 - Focused Nix launcher and Home Manager checks.
 - `nix flake check` before landing.
 - Live playtest for both cleanup policies when practical.
+
+## Completion record
+
+- Added optional `cleanup: remove | retain` to delegated spawn. Omission defaults to `remove`. Spawn results, immutable job records, owned listing, and inspection preserve the selected policy.
+- Replaced temporary Git squash, commit, worktree removal, and branch deletion code with installed `sprout land` after the existing dry-run and exact revision recheck.
+- Added ordered post-land handling: stop the exact worker, then call `sprout rm` for remove or preserve Sprout resources for retain.
+- Added one terminal `landed-with-retained-resources` result for stop or remove failures after successful landing. It retains merge evidence, gives a policy-specific manual action, and never attempts rollback.
+- Preserved opaque cross-project selection, no push, exact approval binding, narrow schemas, exact tmux ownership, and immutable launch evidence.
+- Updated architecture, protocol, and delegation guidance. Remove cleanup now documents accepted eviction of remaining feature-session windows.
+- TypeScript tests cover remove order, retain order, and cleanup failure semantics. Python integration tests use real Git, installed Sprout, isolated tmux, and fake harnesses to cover default and explicit policy persistence, schema rejection, dry-run -> exact recheck -> land -> stop -> remove order, retained landing, failed cleanup with an intact landed commit, and cross-project mechanics.
+- Verification passed before evidence commit: `npm run check` (12 tests); `python3 -m unittest discover -s tests -p 'test_*.py'` (14 tests); `ruff check scripts/scufris-job tests`; `ruff format --check scripts/scufris-job tests`; `nix flake check`; `git diff --check`.
+- Nix checked launcher resources and Home Manager integration on x86_64-linux. Flake checking omitted incompatible configured systems.
+- Live foreground provider and Plannotator playtests were not practical in the delegated worker. Focused lifecycle tests and real Sprout process integration cover both cleanup policies.
+- Revisions at implementation evidence: landing baseline `51b36416295760276769fecdfb1fc8dd7a5e357d`; implementation `b9db39908fcde866c9c18428c1791c75de2f6e10`.
+- `sprout sync sprout-cleanup-policy` reported already up to date. Post-sync verification passed: `npm run check`; 14 Python integration tests; Ruff lint and format checks; `nix flake check`.
+- Review correction: Plannotator exact `approved: true` with empty annotations now approves even when feedback contains informational LGTM text. Nonempty annotations remain actionable and prevent approval. Without exact approval, nonempty feedback remains actionable; an empty outcome remains blocked. Focused tests preserve malformed and oversized response guards.

@@ -22,9 +22,10 @@ Use Scufris native agent tools. Do not invoke tmux, sprout, Pi, Claude, or Plann
 3. Choose `pi` unless the user requests Claude or a specific Claude model.
 4. Make `instructions` self-contained. Include the exact problem, outcome, scope, accepted design, artifacts, constraints, non-goals, applicable checks, completion conditions, and required task evidence. Never put filesystem paths or commands in tool arguments.
 5. For a clear task name, derive a lowercase alphanumeric single-hyphen `feature`, maximum 48 characters. Omit it when no clear name exists. Never request a job-ID feature.
-6. Pass `project` only for a discovered cross-project target. Pass `model` or `thinking` only for a user-requested override.
-7. Call `scufris_agent_spawn` once and retain its `job_id`.
-8. Tell the user that the bounded worker is independent and Pair remains available.
+6. Omit `cleanup` for the default `remove` policy. Pass `cleanup: retain` only when the user asks to keep the landed branch and worktree resources. Remove cleanup can evict any remaining windows in the feature tmux session after landing.
+7. Pass `project` only for a discovered cross-project target. Pass `model` or `thinking` only for a user-requested override.
+8. Call `scufris_agent_spawn` once and retain its `job_id`.
+9. Tell the user that the bounded worker is independent and Pair remains available.
 
 ## Mediation
 
@@ -34,6 +35,7 @@ Use Scufris native agent tools. Do not invoke tmux, sprout, Pi, Claude, or Plann
 - `review-ready`: review starts automatically through Plannotator's public event API. Do not open another review or spawn an independent reviewer unless the user requests one.
 - Review feedback returns automatically to the same worker. Approval requires its exact `done` acknowledgment before guarded local landing.
 - `done`: inspect the report for a non-review result. Reviewed coding work lands automatically only after the required approval acknowledgment.
+- `landed-with-retained-resources`: landing succeeded. Do not call it a merge failure or attempt rollback. Inspect the job once and give the manual stop or `sprout rm <feature>` cleanup action from the event context.
 - `failed` or lifecycle `blocked`: inspect the report and event detail. Give a concrete recovery recommendation. After resolving a retryable review-precondition blocker, call `scufris_agent_retry_review` once. Do not send a worker message or request a new commit for that retry.
 
 ## Operations

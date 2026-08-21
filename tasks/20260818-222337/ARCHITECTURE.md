@@ -158,7 +158,7 @@ scufris = {
 
 ### Plannotator and sprout
 
-Sprout owns worktree creation, synchronization, and landing dry-run validation. Plannotator owns human review presentation. Scufris calls Plannotator through its public Pi event API. After a green Sprout landing dry-run and a fresh exact snapshot, the helper performs the same squash commit and Git worktree and branch cleanup without Sprout's session cleanup. This keeps user-created windows outside Scufris control.
+Sprout owns worktree creation, synchronization, landing, and resource removal. Plannotator owns human review presentation. Scufris calls Plannotator through its public Pi event API. After a green Sprout landing dry-run and a fresh exact snapshot, the helper calls installed `sprout land` without `--remove`. Scufris then stops its exact worker window. The job cleanup policy either retains the landed branch and worktree or calls `sprout rm`, which can remove the complete feature session and evict user-created windows.
 
 ## Project and harness policy
 
@@ -172,6 +172,7 @@ Scufris:
 - Defaults Claude to `opus` with xhigh thinking.
 - Lets the foreground orchestrator override model and thinking per spawn.
 - Accepts an optional lowercase hyphen-separated feature slug of at most 48 characters. Uses it exactly, or generates `scufris-<job_id>` when omitted.
+- Defaults cleanup to `remove`. Uses `retain` only when the user asks to keep landed branch and worktree resources.
 - Rejects existing feature branches, worktrees, and matching tmux sessions. Never suffixes a requested name or reuses another job's resources.
 - Does not sandbox filesystem or network access.
 - Runs workers with local-user authority.
@@ -185,7 +186,7 @@ Workers read repository instructions and decide which checks apply. Scufris does
 
 The enabled extensions keep only their own state:
 
-- Delegation: opaque owned job IDs, selected feature display names, status offsets and tails, event identity, and worker-window state.
+- Delegation: opaque owned job IDs, selected feature display names, immutable cleanup policies, status offsets and tails, event identity, and worker-window state.
 - Widgets: the validated catalog and opened surface IDs.
 - Each: its own poll-in-progress and shutdown flags.
 
@@ -224,7 +225,7 @@ window:  job-<job_id>
 
 Scufris inherits the normal tmux server selection. The session name uses the exact selected feature and is rejected if it already exists. Scufris creates the session without attaching, selecting, or switching the user's client. The worker window receives the current safe path and configuration environment, starts in the worktree, and invokes the ambient harness directly. The opaque job ID and recorded exact session, window, and pane IDs define ownership; the descriptive feature and session names do not. User-created windows can share this session. Scufris ignores them: it does not inspect, target, close, or otherwise manage them. Scufris never kills a session or server.
 
-The matching job directory and exact tmux window are both required for orphan eligibility. `remain-on-exit` retains a failed pane for manual debugging while pane-dead state marks the worker as exited.
+The matching job directory and exact tmux window are both required for orphan eligibility. `remain-on-exit` retains a failed pane for manual debugging while pane-dead state marks the worker as exited. Ordinary stop targets only the owned worker window. Post-land `cleanup: remove` delegates full feature cleanup to `sprout rm`; this can remove all remaining windows in the feature session. `cleanup: retain` leaves the session, branch, and worktree in place after stopping the worker.
 
 ## Pair and delegation readiness
 
@@ -274,6 +275,7 @@ stateDiagram-v2
   review_ready --> awaiting_done: exact approval and final instruction
   awaiting_done --> landing: exact worker done acknowledgment
   landing --> landed
+  landing --> landed_with_retained_resources: cleanup failure after successful land
   running --> done
   running --> failed
   running --> stopping
@@ -366,14 +368,19 @@ sequenceDiagram
     Worker->>Scufris: exact done acknowledgment
     Scufris->>Scufris: reverify exact approved SHAs and clean state
     Scufris->>Sprout: land --dry-run
-    Scufris->>Scufris: squash commit and Git-only worktree cleanup
+    Scufris->>Sprout: land without --remove
     Scufris->>Worker: stop exact owned window
+    opt cleanup is remove
+      Scufris->>Sprout: rm feature
+    end
   end
 ```
 
 One committed revision is required per review round. An explicit retry after a transient review-precondition failure is the same round and does not require a new commit. It is accepted only for the owned blocked job marked retryable. It clears request and approval state, takes a fresh snapshot, and reruns every current tmux and Git precondition. Review outcomes and other lifecycle blockers are not retryable through this operation. Scufris requests `last-commit` only for a separate, non-approving fix review. Final approval requires a new `since-base` request and its structured `approved: true` result.
 
-Review and landing validate only the recorded session, window, pane, and worker liveness. Unrelated windows in the same session are outside Scufris ownership and are never enumerated or managed.
+Review and landing validate only the recorded session, window, pane, and worker liveness. Unrelated windows in the same session are outside Scufris ownership during review, landing, retain cleanup, and exact worker stop. The user accepts that `sprout rm` can evict them for remove cleanup after successful landing.
+
+A post-land stop or remove failure never rolls back or reports the merge as failed. Scufris emits one actionable `landed-with-retained-resources` result and keeps job evidence for manual cleanup.
 
 Approval is invalid if:
 

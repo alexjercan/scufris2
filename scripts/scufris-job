@@ -25,6 +25,7 @@ PROJECT_ID_RE = re.compile(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\Z")
 TMUX_ID_RE = re.compile(r"[$@%][0-9]+\Z")
 STATES = {"working", "needs-decision", "blocked", "review-ready", "done", "failed"}
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+CLEANUP = {"remove", "retain"}
 MAX_INSTRUCTIONS = 256 * 1024
 MAX_PROMPT = 1024 * 1024
 MAX_STATUS = 256 * 1024
@@ -468,7 +469,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(
         request,
         {"job_id", "harness", "instructions", "current_root"},
-        {"model", "thinking", "project", "feature"},
+        {"model", "thinking", "project", "feature", "cleanup"},
     )
     job_id = validate_job_id(request["job_id"])
     harness = request["harness"]
@@ -480,6 +481,9 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
     model, thinking = selected_adapter(
         harness, request.get("model"), request.get("thinking")
     )
+    cleanup = request.get("cleanup", "remove")
+    if not isinstance(cleanup, str) or cleanup not in CLEANUP:
+        raise JobError("cleanup must be remove or retain")
     if shutil.which(harness) is None:
         raise JobError(f"harness executable not found: {harness}")
     project, root = selected_project(request.get("project"), request["current_root"])
@@ -518,6 +522,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
             "model": model,
             "thinking": thinking,
             "feature": feature,
+            "cleanup": cleanup,
             "project": project,
             "landing_branch": landing_branch,
             "landing_sha": landing_sha,
@@ -554,6 +559,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
         "harness": harness,
         "feature": feature,
         "project": project,
+        "cleanup": cleanup,
         "tmux_session": session_name(root, feature),
         "model": model,
         "thinking": thinking,
@@ -806,6 +812,7 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
         "harness": job.get("harness"),
         "project": job.get("project"),
         "feature": job.get("feature"),
+        "cleanup": job.get("cleanup"),
         "state": state,
         "summary": summary,
         "window_alive": window_alive(job_id),
@@ -919,35 +926,6 @@ def review_snapshot(request: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def guarded_git_land(root: Path, worktree: Path, feature: str, subject: str) -> None:
-    merged = run(
-        ["git", "merge", "--squash", feature],
-        cwd=root,
-        timeout=60,
-        check=False,
-    )
-    if merged.returncode != 0:
-        run(["git", "reset", "--merge"], cwd=root, check=False)
-        if git_text(root, "status", "--porcelain", "--untracked-files=no"):
-            run(["git", "reset", "--hard"], cwd=root, check=False)
-        message = merged.stderr.decode("utf-8", "replace").strip()
-        raise JobError(f"feature squash failed: {message or merged.returncode}")
-    committed = run(
-        ["git", "commit", "--quiet", "-m", subject],
-        cwd=root,
-        timeout=60,
-        check=False,
-    )
-    if committed.returncode != 0:
-        run(["git", "reset", "--merge"], cwd=root, check=False)
-        if git_text(root, "status", "--porcelain", "--untracked-files=no"):
-            run(["git", "reset", "--hard"], cwd=root, check=False)
-        message = committed.stderr.decode("utf-8", "replace").strip()
-        raise JobError(f"landing commit failed: {message or committed.returncode}")
-    run(["git", "worktree", "remove", str(worktree)], cwd=root, timeout=60)
-    run(["git", "branch", "-D", feature], cwd=root)
-
-
 def land(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(
         request,
@@ -986,14 +964,18 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
         or snapshot["feature_sha"] != expected_feature
     ):
         raise JobError("approved revisions changed after landing dry-run")
-    guarded_git_land(
-        root,
-        Path(snapshot["worktree"]),
-        feature,
-        subject,
-    )
+    sprout(["land", feature, "-m", subject], root)
     landed_sha = git_text(root, "rev-parse", "HEAD")
     return {"job_id": job_id, "state": "landed", "landed_sha": landed_sha}
+
+
+def remove(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id", "project_root"})
+    job_id = validate_job_id(request["job_id"])
+    root = owned_project_root(request["project_root"])
+    feature = validate_feature(load_job(job_id).get("feature"))
+    sprout(["rm", feature], root)
+    return {"job_id": job_id, "state": "removed"}
 
 
 def orphans(request: dict[str, Any]) -> dict[str, Any]:
@@ -1022,6 +1004,7 @@ def dispatch(command: str, request: dict[str, Any]) -> dict[str, Any]:
         "poll": poll,
         "review-snapshot": review_snapshot,
         "land": land,
+        "remove": remove,
         "orphans": orphans,
     }
     handler = handlers.get(command)
@@ -1043,6 +1026,7 @@ def main() -> int:
             "poll",
             "review-snapshot",
             "land",
+            "remove",
             "orphans",
             "launch",
         ],

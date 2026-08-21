@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -53,6 +54,24 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             path = self.bin / name
             path.write_text(FAKE_HARNESS, encoding="utf-8")
             path.chmod(0o755)
+        real_sprout = shutil.which("sprout")
+        if real_sprout is None:
+            self.fail("sprout is required")
+        sprout_wrapper = self.bin / "sprout"
+        sprout_wrapper.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, pathlib, sys\n"
+            "log = os.environ.get('SCUFRIS_SPROUT_LOG')\n"
+            "if log:\n"
+            "    with pathlib.Path(log).open('a', encoding='utf-8') as stream:\n"
+            "        stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            "if os.environ.get('SCUFRIS_FAIL_RM') == '1' and sys.argv[1:2] == ['rm']:\n"
+            "    print('injected cleanup failure', file=sys.stderr)\n"
+            "    raise SystemExit(1)\n"
+            f"os.execv({real_sprout!r}, [{real_sprout!r}, *sys.argv[1:]])\n",
+            encoding="utf-8",
+        )
+        sprout_wrapper.chmod(0o755)
         self.projects_root = self.root / "projects"
         self.project = self.projects_root / "target"
         self.project.mkdir(parents=True)
@@ -151,6 +170,7 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         project: str | None = None,
         current_root: Path | None = None,
         feature: str | None = None,
+        cleanup: str | None = None,
     ) -> dict[str, Any]:
         request = {
             "job_id": job_id,
@@ -162,6 +182,8 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             request["project"] = project
         if feature is not None:
             request["feature"] = feature
+        if cleanup is not None:
+            request["cleanup"] = cleanup
         envelope = self.cli(
             "spawn",
             request,
@@ -201,6 +223,7 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         self.assertEqual(result["thinking"], "medium")
         self.assertEqual(result["project"], "current")
         self.assertEqual(result["feature"], f"scufris-{result['job_id']}")
+        self.assertEqual(result["cleanup"], "remove")
         directory = self.state / "scufris" / "jobs" / result["job_id"]
         self.wait_for(directory / "status", "working: fake harness ready")
         pi_argv = json.loads((directory / "argv.json").read_text(encoding="utf-8"))
@@ -226,6 +249,8 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         ):
             self.assertIn(required, prompt)
         self.assertEqual(stat.S_IMODE((directory / "job.json").stat().st_mode), 0o400)
+        record = json.loads((directory / "job.json").read_text(encoding="utf-8"))
+        self.assertEqual(record["cleanup"], "remove")
         self.assertTrue(
             (self.cache / "sprouts" / self.project.name / result["feature"]).is_dir()
         )
@@ -258,6 +283,7 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         )["result"]
         self.assertTrue(inspected["window_alive"])
         self.assertEqual(inspected["project"], "current")
+        self.assertEqual(inspected["cleanup"], "remove")
         self.assertIn("working: fake harness ready", inspected["events"])
 
         self.assertEqual(
@@ -269,9 +295,11 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             project="projects/target",
             current_root=self.root,
             feature="fix-cross-project-launch",
+            cleanup="retain",
         )
         self.assertEqual(claude["project"], "projects/target")
         self.assertEqual(claude["feature"], "fix-cross-project-launch")
+        self.assertEqual(claude["cleanup"], "retain")
         self.assertEqual(claude["tmux_session"], "target_fix-cross-project-launch")
         claude_directory = self.state / "scufris" / "jobs" / claude["job_id"]
         self.wait_for(claude_directory / "status", "working: fake harness ready")
@@ -285,6 +313,10 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(claude["model"], "opus")
         self.assertEqual(claude["thinking"], "xhigh")
+        claude_record = json.loads(
+            (claude_directory / "job.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(claude_record["cleanup"], "retain")
 
         self.assertEqual(
             self.cli("stop", {"job_id": result["job_id"]})["result"]["state"], "stopped"
@@ -386,6 +418,8 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         self.assertIn("approved revisions changed", changed["error"])
         self.assertTrue(worktree.exists())
 
+        sprout_log = self.root / "sprout.log"
+        self.env["SCUFRIS_SPROUT_LOG"] = str(sprout_log)
         landed = self.cli(
             "land",
             {
@@ -400,7 +434,7 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         self.assertEqual(
             (self.project / "result.txt").read_text(encoding="utf-8"), "approved\n"
         )
-        self.assertFalse(worktree.exists())
+        self.assertTrue(worktree.exists())
         self.assertEqual(
             self.cli("stop", {"job_id": result["job_id"]})["result"]["state"],
             "stopped",
@@ -412,7 +446,98 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             ).stdout.strip(),
             extra_window,
         )
-        self.run_external(["tmux", "kill-window", "-t", extra_window], env=self.env)
+        self.assertEqual(
+            self.cli(
+                "remove",
+                {"job_id": result["job_id"], "project_root": str(self.project)},
+            )["result"]["state"],
+            "removed",
+        )
+        self.assertFalse(worktree.exists())
+        operations = [
+            json.loads(line)
+            for line in sprout_log.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(
+            operations,
+            [
+                ["show", result["feature"]],
+                ["land", result["feature"], "--dry-run", "-m", "Add approved result"],
+                ["show", result["feature"]],
+                ["land", result["feature"], "-m", "Add approved result"],
+                ["rm", result["feature"]],
+            ],
+        )
+        self.env.pop("SCUFRIS_SPROUT_LOG")
+        self.assertNotEqual(
+            self.run_external(
+                ["tmux", "display-message", "-p", "-t", extra_window, "#{window_id}"],
+                env=self.env,
+                check=False,
+            ).returncode,
+            0,
+        )
+
+    def test_cross_project_retain_and_cleanup_failure_preserve_landing(self) -> None:
+        result = self.spawn(
+            "999999999999",
+            project="projects/target",
+            current_root=self.root,
+            feature="cross-project-retain",
+            cleanup="retain",
+        )
+        directory = self.state / "scufris" / "jobs" / result["job_id"]
+        self.wait_for(directory / "status", "working: fake harness ready")
+        worktree = Path(result["worktree"])
+        (worktree / "cross.txt").write_text("landed\n", encoding="utf-8")
+        self.run_external(["git", "add", "cross.txt"], cwd=worktree, env=self.env)
+        self.run_external(
+            ["git", "commit", "-m", "Add cross project result"],
+            cwd=worktree,
+            env=self.env,
+        )
+        self.run_external(
+            ["sprout", "sync", result["feature"]], cwd=self.project, env=self.env
+        )
+        snapshot = self.cli(
+            "review-snapshot",
+            {"job_id": result["job_id"], "project_root": str(self.project)},
+        )["result"]
+        self.cli(
+            "land",
+            {
+                "job_id": result["job_id"],
+                "project_root": str(self.project),
+                "landing_sha": snapshot["landing_sha"],
+                "feature_sha": snapshot["feature_sha"],
+                "subject": snapshot["subject"],
+            },
+        )
+        self.cli("stop", {"job_id": result["job_id"]})
+        self.assertTrue(worktree.exists())
+        self.assertTrue(
+            self.run_external(
+                ["git", "show-ref", "--verify", f"refs/heads/{result['feature']}"],
+                cwd=self.project,
+                env=self.env,
+                check=False,
+            ).returncode
+            == 0
+        )
+
+        self.env["SCUFRIS_FAIL_RM"] = "1"
+        failed_cleanup = self.cli(
+            "remove",
+            {"job_id": result["job_id"], "project_root": str(self.project)},
+            check=False,
+        )
+        self.env.pop("SCUFRIS_FAIL_RM")
+        self.assertFalse(failed_cleanup["ok"])
+        self.assertIn("injected cleanup failure", failed_cleanup["error"])
+        self.assertEqual(
+            (self.project / "cross.txt").read_text(encoding="utf-8"), "landed\n"
+        )
+        self.assertTrue(worktree.exists())
 
     def test_poll_waits_for_lf_and_consumes_malformed_frames_once(self) -> None:
         result = self.spawn("0123456789ab")
@@ -623,6 +748,20 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         )
         self.assertFalse(outside["ok"])
         self.assertIn("project is required", outside["error"])
+
+        invalid_cleanup = self.cli(
+            "spawn",
+            {
+                "job_id": "eeeeeeeeeeee",
+                "harness": "pi",
+                "instructions": "Do not run.",
+                "current_root": str(self.project),
+                "cleanup": "delete",
+            },
+            check=False,
+        )
+        self.assertFalse(invalid_cleanup["ok"])
+        self.assertEqual(invalid_cleanup["error"], "cleanup must be remove or retain")
 
         result = self.cli("orphans", {"command": "unsafe operation"}, check=False)
         self.assertFalse(result["ok"])

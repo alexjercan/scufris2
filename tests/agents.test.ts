@@ -6,6 +6,7 @@ import {
   APPROVAL_INSTRUCTION,
   classifyReviewResponse,
   codeReviewPayload,
+  completeApprovedLanding,
   consumeReviewRetry,
   isApprovalDone,
   isDelegatedFeature,
@@ -59,7 +60,7 @@ test("review request uses the public structured since-base contract", () => {
   );
 });
 
-test("structured feedback takes precedence and returns to the same worker", () => {
+test("annotations remain actionable and return to the same worker", () => {
   assert.deepEqual(
     classifyReviewResponse({
       status: "handled",
@@ -76,6 +77,32 @@ test("structured feedback takes precedence and returns to the same worker", () =
     },
   );
   assert.deepEqual(
+    classifyReviewResponse({
+      status: "handled",
+      result: {
+        approved: true,
+        feedback: "LGTM - no changes requested.",
+        annotations: [],
+      },
+    }),
+    { kind: "approved" },
+  );
+  assert.deepEqual(
+    classifyReviewResponse({
+      status: "handled",
+      result: {
+        approved: false,
+        feedback: "LGTM - no changes requested.",
+        annotations: [],
+      },
+    }),
+    {
+      kind: "feedback",
+      message:
+        'Plannotator requested changes. Address this exact feedback: {"feedback":"LGTM - no changes requested.","annotations":[]}',
+    },
+  );
+  assert.deepEqual(
     classifyReviewResponse({ status: "handled", result: { approved: false } }),
     {
       kind: "blocked",
@@ -86,6 +113,16 @@ test("structured feedback takes precedence and returns to the same worker", () =
     kind: "blocked",
     reason: "Plannotator review was unavailable",
   });
+  assert.deepEqual(
+    classifyReviewResponse({
+      status: "handled",
+      result: { approved: false, feedback: "x".repeat(17 * 1024) },
+    }),
+    {
+      kind: "blocked",
+      reason: "Plannotator feedback exceeds the steering limit",
+    },
+  );
 });
 
 test("review retry requires and consumes the exact blocked lifecycle", () => {
@@ -150,6 +187,47 @@ test("review retry requires and consumes the exact blocked lifecycle", () => {
     }),
     "review retry cannot reuse an approval",
   );
+});
+
+test("landing cleanup defaults call land, stop, then remove", async () => {
+  const calls: string[] = [];
+  const outcome = await completeApprovedLanding("remove", {
+    land: async () => void calls.push("land"),
+    stop: async () => void calls.push("stop"),
+    remove: async () => void calls.push("remove"),
+  });
+  assert.deepEqual(calls, ["land", "stop", "remove"]);
+  assert.deepEqual(outcome, {
+    state: "landed",
+    summary: "approved revision landed and resources removed",
+  });
+});
+
+test("retain lands and stops without resource removal", async () => {
+  const calls: string[] = [];
+  const outcome = await completeApprovedLanding("retain", {
+    land: async () => void calls.push("land"),
+    stop: async () => void calls.push("stop"),
+    remove: async () => void calls.push("remove"),
+  });
+  assert.deepEqual(calls, ["land", "stop"]);
+  assert.match(outcome.summary, /branch and worktree retained/);
+});
+
+test("cleanup failure preserves the successful landing result", async () => {
+  const calls: string[] = [];
+  const outcome = await completeApprovedLanding("remove", {
+    land: async () => void calls.push("land"),
+    stop: async () => void calls.push("stop"),
+    remove: async () => {
+      calls.push("remove");
+      throw new Error("resource is busy");
+    },
+  });
+  assert.deepEqual(calls, ["land", "stop", "remove"]);
+  assert.equal(outcome.state, "landed-with-retained-resources");
+  assert.match(outcome.summary, /landing succeeded/);
+  assert.match(outcome.summary, /resource is busy/);
 });
 
 test("approval requires the exact done acknowledgment", () => {

@@ -60,7 +60,7 @@ Add:
 
 - Built-in harness defaults and per-spawn overrides.
 - Job ID and immutable job-file creation.
-- One tmux session, exact window naming, and fixed job-ID-only launch helper.
+- One dedicated tmux server socket, one job session, exact window naming, and fixed job-ID-only launch helper.
 - Fake interactive harness fixture.
 - Append-only status parser with byte offsets and limits.
 - One extension-owned one-second loop.
@@ -78,6 +78,7 @@ Tests:
 - Malformed UTF-8, CRLF, oversized lines, unknown states, and oversized files produce one protocol error.
 - Steering pastes literal metacharacters once.
 - Stop targets only the recorded window and is idempotent.
+- Runtime and tests never alter the user's default tmux server.
 - Process exit without terminal status produces a failure follow-up.
 - Session shutdown stops all owned windows.
 - Matching directory/window pairs are reported as possible orphans and not adopted.

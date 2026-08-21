@@ -1,0 +1,713 @@
+#!/usr/bin/env python3
+"""Private Scufris job-process CLI."""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import re
+import secrets
+import shlex
+import shutil
+import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any, NoReturn
+
+JOB_ID_RE = re.compile(r"[a-z0-9]{12}\Z")
+MODEL_RE = re.compile(r"[^\x00-\x1f\x7f]{1,200}\Z")
+TMUX_LABEL_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}\Z")
+STATES = {"working", "needs-decision", "blocked", "review-ready", "done", "failed"}
+THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+MAX_INSTRUCTIONS = 256 * 1024
+MAX_PROMPT = 1024 * 1024
+MAX_STATUS = 256 * 1024
+MAX_STATUS_LINE = 2 * 1024
+MAX_REPORT = 1024 * 1024
+TMUX_SESSION = "jobs"
+
+
+class JobError(Exception):
+    """Expected user-visible job error."""
+
+
+def state_home() -> Path:
+    base = os.environ.get("XDG_STATE_HOME")
+    return Path(base) if base else Path.home() / ".local" / "state"
+
+
+def state_root() -> Path:
+    return state_home() / "scufris"
+
+
+def jobs_root() -> Path:
+    root = state_root()
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    root.chmod(0o700)
+    jobs = root / "jobs"
+    jobs.mkdir(mode=0o700, exist_ok=True)
+    jobs.chmod(0o700)
+    return jobs
+
+
+def job_dir(job_id: str) -> Path:
+    validate_job_id(job_id)
+    return jobs_root() / job_id
+
+
+def tmux_label() -> str:
+    label = os.environ.get("SCUFRIS_TMUX_SOCKET", "scufris")
+    if not TMUX_LABEL_RE.fullmatch(label):
+        raise JobError("invalid Scufris tmux socket label")
+    return label
+
+
+def isolated_process_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.pop("TMUX", None)
+    root = state_root()
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    root.chmod(0o700)
+    socket_root = root / "tmux"
+    socket_root.mkdir(mode=0o700, exist_ok=True)
+    env["TMUX_TMPDIR"] = str(socket_root)
+    return env
+
+
+def run(
+    argv: list[str],
+    *,
+    cwd: Path | None = None,
+    input_bytes: bytes | None = None,
+    timeout: float = 15,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    try:
+        result = subprocess.run(
+            argv,
+            cwd=cwd,
+            input=input_bytes,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+            env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise JobError(f"command failed: {argv[0]}: {error}") from error
+    if check and result.returncode != 0:
+        message = result.stderr.decode("utf-8", "replace").strip()
+        raise JobError(f"command failed: {argv[0]}: {message or result.returncode}")
+    return result
+
+
+def tmux(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+    return run(
+        ["tmux", "-L", tmux_label(), *argv],
+        env=isolated_process_env(),
+        **kwargs,
+    )
+
+
+def sprout(
+    argv: list[str], project_root: Path, *, check: bool = True
+) -> subprocess.CompletedProcess[bytes]:
+    return run(
+        ["sprout", *argv],
+        cwd=project_root,
+        timeout=60,
+        check=check,
+        env=isolated_process_env(),
+    )
+
+
+def validate_job_id(value: Any) -> str:
+    if not isinstance(value, str) or not JOB_ID_RE.fullmatch(value):
+        raise JobError("invalid job_id")
+    return value
+
+
+def validate_request(
+    request: Any, required: set[str], optional: set[str] | None = None
+) -> dict[str, Any]:
+    if optional is None:
+        optional = set()
+    if not isinstance(request, dict):
+        raise JobError("request must be a JSON object")
+    keys = set(request)
+    missing = required - keys
+    unknown = keys - required - optional
+    if missing:
+        raise JobError(f"missing fields: {', '.join(sorted(missing))}")
+    if unknown:
+        raise JobError(f"unknown fields: {', '.join(sorted(unknown))}")
+    return request
+
+
+def read_request() -> dict[str, Any]:
+    if sys.stdin.isatty():
+        raise JobError("JSON request required on stdin")
+    try:
+        value = json.load(sys.stdin)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise JobError(f"invalid JSON request: {error}") from error
+    if not isinstance(value, dict):
+        raise JobError("request must be a JSON object")
+    return value
+
+
+def regular_bytes(path: Path, maximum: int) -> bytes:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as error:
+        raise JobError(f"cannot open {path.name}: {error}") from error
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            raise JobError(f"{path.name} is not a regular file")
+        if info.st_size > maximum:
+            raise JobError(f"{path.name} exceeds {maximum} bytes")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            return stream.read()
+    except OSError as error:
+        raise JobError(f"cannot read {path.name}: {error}") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def load_job(job_id: str) -> dict[str, Any]:
+    raw = regular_bytes(job_dir(job_id) / "job.json", 64 * 1024)
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise JobError(f"invalid job.json: {error}") from error
+    if not isinstance(value, dict) or value.get("job_id") != job_id:
+        raise JobError("job.json does not match job_id")
+    return value
+
+
+def resolve_git_root(value: Any) -> Path:
+    if not isinstance(value, str) or not value:
+        raise JobError("project_root must be a nonempty string")
+    root = Path(value).resolve()
+    result = run(["git", "rev-parse", "--show-toplevel"], cwd=root)
+    actual = Path(result.stdout.decode().strip()).resolve()
+    if actual != root:
+        raise JobError("project_root must be the current Git root")
+    return root
+
+
+def git_text(root: Path, *args: str) -> str:
+    return run(["git", *args], cwd=root).stdout.decode("utf-8").strip()
+
+
+def selected_adapter(harness: str, model: Any, thinking: Any) -> tuple[str, str]:
+    defaults = {
+        "pi": ("openai/gpt-5.6-sol", "medium"),
+        "claude": ("opus", "xhigh"),
+    }
+    if not isinstance(harness, str) or harness not in defaults:
+        raise JobError("harness must be pi or claude")
+    default_model, default_thinking = defaults[harness]
+    selected_model = default_model if model is None else model
+    selected_thinking = default_thinking if thinking is None else thinking
+    if (
+        not isinstance(selected_model, str)
+        or not MODEL_RE.fullmatch(selected_model)
+        or len(selected_model.encode("utf-8")) > 200
+    ):
+        raise JobError("invalid model")
+    if not isinstance(selected_thinking, str) or selected_thinking not in THINKING:
+        raise JobError("invalid thinking level")
+    if harness == "pi" and selected_thinking == "max":
+        raise JobError("Pi does not support max thinking")
+    if harness == "claude" and selected_thinking in {"off", "minimal"}:
+        raise JobError("Claude does not support off or minimal effort")
+    return selected_model, selected_thinking
+
+
+def write_new(path: Path, data: bytes, mode: int) -> None:
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+
+
+def prompt_text(job_id: str, instructions: str) -> str:
+    directory = job_dir(job_id)
+    return f"""# Delegated Scufris job
+
+Follow the repository AGENTS.md files and project instructions.
+
+## Request
+
+{instructions}
+
+## Job protocol
+
+- Do not modify `{directory / "prompt.md"}`.
+- Append sparse LF-terminated status lines to `{directory / "status"}`.
+- Write the final or review result to `{directory / "report.md"}` before its status line.
+- Allowed states: working, needs-decision, blocked, review-ready, done, failed.
+- Format: `<state>: <one-line summary>`.
+- Do not put credentials, raw logs, absolute paths, or transcripts in status summaries.
+- Read repository instructions to select checks. Record commands, results, and limitations in the report and repository task record when required.
+- Commit coding work, run `sprout sync scufris-{job_id}` and applicable checks, then use `review-ready:`. Do not land or push.
+"""
+
+
+def tmux_windows() -> set[str]:
+    result = tmux(
+        ["list-windows", "-t", TMUX_SESSION, "-F", "#{window_name}"], check=False
+    )
+    if result.returncode != 0:
+        return set()
+    return {
+        line for line in result.stdout.decode("utf-8", "replace").splitlines() if line
+    }
+
+
+def window_name(job_id: str) -> str:
+    return f"job-{validate_job_id(job_id)}"
+
+
+def window_alive(job_id: str) -> bool:
+    return window_name(job_id) in tmux_windows()
+
+
+def create_window(job_id: str, worktree: Path) -> None:
+    script = Path(__file__).resolve()
+    command = (
+        f"exec {shlex.quote(sys.executable)} {shlex.quote(str(script))} launch {job_id}"
+    )
+    common = ["-d", "-c", str(worktree)]
+    if tmux(["has-session", "-t", TMUX_SESSION], check=False).returncode == 0:
+        tmux(
+            [
+                "new-window",
+                *common,
+                "-t",
+                TMUX_SESSION,
+                "-n",
+                window_name(job_id),
+                command,
+            ]
+        )
+    else:
+        tmux(
+            [
+                "new-session",
+                *common,
+                "-s",
+                TMUX_SESSION,
+                "-n",
+                window_name(job_id),
+                command,
+            ]
+        )
+
+
+def spawn(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(
+        request,
+        {"job_id", "harness", "instructions", "project_root"},
+        {"model", "thinking"},
+    )
+    job_id = validate_job_id(request["job_id"])
+    harness = request["harness"]
+    instructions = request["instructions"]
+    if not isinstance(instructions, str) or not instructions.strip():
+        raise JobError("instructions must be nonempty")
+    if len(instructions.encode("utf-8")) > MAX_INSTRUCTIONS or "\x00" in instructions:
+        raise JobError("instructions exceed the limit or contain NUL")
+    model, thinking = selected_adapter(
+        harness, request.get("model"), request.get("thinking")
+    )
+    if shutil.which(harness) is None:
+        raise JobError(f"harness executable not found: {harness}")
+    root = resolve_git_root(request["project_root"])
+    directory = job_dir(job_id)
+    if directory.exists():
+        raise JobError("job_id already exists")
+    feature = f"scufris-{job_id}"
+    created_worktree = False
+    try:
+        sprout(["new", feature], root)
+        created_worktree = True
+        worktree = Path(
+            sprout(["show", feature], root).stdout.decode().strip()
+        ).resolve()
+        directory.mkdir(mode=0o700, parents=True)
+        landing_branch = git_text(root, "branch", "--show-current")
+        landing_sha = git_text(root, "rev-parse", "HEAD")
+        record = {
+            "version": 1,
+            "job_id": job_id,
+            "harness": harness,
+            "model": model,
+            "thinking": thinking,
+            "feature": feature,
+            "landing_branch": landing_branch,
+            "landing_sha": landing_sha,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        prompt = prompt_text(job_id, instructions).encode("utf-8")
+        if len(prompt) > MAX_PROMPT:
+            raise JobError("generated prompt exceeds the limit")
+        write_new(
+            directory / "job.json",
+            json.dumps(record, sort_keys=True, indent=2).encode() + b"\n",
+            0o400,
+        )
+        write_new(directory / "prompt.md", prompt, 0o400)
+        write_new(directory / "status", b"", 0o600)
+        write_new(directory / "report.md", b"", 0o600)
+        create_window(job_id, worktree)
+    except Exception:
+        shutil.rmtree(directory, ignore_errors=True)
+        if created_worktree:
+            sprout(["rm", feature], root, check=False)
+        raise
+    return {
+        "job_id": job_id,
+        "state": "running",
+        "harness": harness,
+        "feature": feature,
+        "model": model,
+        "thinking": thinking,
+        "message": "Worker started in an isolated worktree. It runs independently.",
+    }
+
+
+def launch(job_id: str) -> NoReturn:
+    job = load_job(job_id)
+    harness = job.get("harness")
+    model = job.get("model")
+    thinking = job.get("thinking")
+    prompt = f"Read and follow {job_dir(job_id) / 'prompt.md'}"
+    if harness == "pi":
+        argv = [
+            "pi",
+            "--approve",
+            "--tui-mode",
+            "regular",
+            "--model",
+            str(model),
+            "--thinking",
+            str(thinking),
+            prompt,
+        ]
+        env = os.environ.copy()
+    elif harness == "claude":
+        argv = [
+            "claude",
+            "--dangerously-skip-permissions",
+            "--model",
+            str(model),
+            "--effort",
+            str(thinking),
+            prompt,
+        ]
+        env = os.environ.copy()
+        env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] = "false"
+    else:
+        raise JobError("invalid harness in job.json")
+    executable = shutil.which(argv[0], path=env.get("PATH"))
+    if executable is None:
+        raise JobError(f"harness executable not found: {argv[0]}")
+    os.execvpe(executable, argv, env)
+
+
+def submit(job_id: str, message: str) -> None:
+    if not window_alive(job_id):
+        raise JobError("worker window is not running")
+    buffer_name = f"scufris-{job_id}-{secrets.token_hex(4)}"
+    target = f"{TMUX_SESSION}:{window_name(job_id)}"
+    try:
+        tmux(
+            ["load-buffer", "-b", buffer_name, "-"], input_bytes=message.encode("utf-8")
+        )
+        tmux(["paste-buffer", "-b", buffer_name, "-t", target, "-d"])
+        time.sleep(0.3)
+        tmux(["send-keys", "-t", target, "Enter"])
+    finally:
+        tmux(["delete-buffer", "-b", buffer_name], check=False)
+
+
+def send(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id", "message"})
+    job_id = validate_job_id(request["job_id"])
+    message = request["message"]
+    if (
+        not isinstance(message, str)
+        or not message
+        or "\x00" in message
+        or "\n" in message
+        or "\r" in message
+    ):
+        raise JobError("message must be one nonempty line without NUL")
+    if len(message.encode("utf-8")) > 16 * 1024:
+        raise JobError("message exceeds 16 KiB")
+    load_job(job_id)
+    submit(job_id, message)
+    return {
+        "job_id": job_id,
+        "delivery": "submitted",
+        "message": "Text was pasted once and Enter was sent once. Harness processing is not acknowledged.",
+    }
+
+
+def stop(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id"})
+    job_id = validate_job_id(request["job_id"])
+    job = load_job(job_id)
+    if not window_alive(job_id):
+        return {"job_id": job_id, "state": "stopped"}
+    target = f"{TMUX_SESSION}:{window_name(job_id)}"
+    tmux(["send-keys", "-t", target, "Escape"], check=False)
+    time.sleep(2)
+    if window_alive(job_id):
+        command = "/quit" if job.get("harness") == "pi" else "/exit"
+        try:
+            submit(job_id, command)
+        except JobError:
+            pass
+    deadline = time.monotonic() + 5
+    while window_alive(job_id) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if window_alive(job_id):
+        tmux(["kill-window", "-t", target], check=False)
+    return {"job_id": job_id, "state": "stopped"}
+
+
+def classify_frame(frame: bytes) -> tuple[str | None, str | None]:
+    if len(frame) + 1 > MAX_STATUS_LINE:
+        return None, "status line exceeds 2 KiB"
+    try:
+        line = frame.decode("utf-8")
+    except UnicodeDecodeError:
+        return None, "status line is not valid UTF-8"
+    if line.endswith("\r"):
+        return None, "status uses CRLF"
+    if not line or any(ord(char) < 32 or ord(char) == 127 for char in line):
+        return None, "status line is empty or contains a control character"
+    state, separator, summary = line.partition(": ")
+    if not separator or state not in STATES or not summary:
+        return None, "status line has invalid grammar or state"
+    return line, None
+
+
+def poll_one(value: Any) -> dict[str, Any]:
+    item = validate_request(value, {"job_id", "offset", "tail", "inode"})
+    job_id = validate_job_id(item["job_id"])
+    offset = item["offset"]
+    inode = item["inode"]
+    if not isinstance(offset, int) or offset < 0:
+        raise JobError("poll offset must be a nonnegative integer")
+    if inode is not None and (not isinstance(inode, int) or inode < 0):
+        raise JobError("poll inode must be null or a nonnegative integer")
+    try:
+        tail = base64.b64decode(item["tail"], validate=True)
+    except (TypeError, ValueError) as error:
+        raise JobError("poll tail must be base64") from error
+    path = job_dir(job_id) / "status"
+    try:
+        info = path.lstat()
+    except OSError:
+        return {
+            "job_id": job_id,
+            "events": [],
+            "errors": ["cannot stat status"],
+            "offset": offset,
+            "tail": item["tail"],
+            "inode": inode,
+            "window_alive": window_alive(job_id),
+        }
+    errors: list[str] = []
+    if not stat.S_ISREG(info.st_mode):
+        return {
+            "job_id": job_id,
+            "events": [],
+            "errors": ["status is not a regular file"],
+            "offset": offset,
+            "tail": item["tail"],
+            "inode": inode,
+            "window_alive": window_alive(job_id),
+        }
+    if info.st_size > MAX_STATUS:
+        return {
+            "job_id": job_id,
+            "events": [],
+            "errors": ["status exceeds 256 KiB"],
+            "offset": offset,
+            "tail": item["tail"],
+            "inode": inode,
+            "window_alive": window_alive(job_id),
+        }
+    if inode is not None and inode != info.st_ino:
+        return {
+            "job_id": job_id,
+            "events": [],
+            "errors": ["status file was replaced"],
+            "offset": offset,
+            "tail": item["tail"],
+            "inode": inode,
+            "window_alive": window_alive(job_id),
+        }
+    if info.st_size < offset:
+        return {
+            "job_id": job_id,
+            "events": [],
+            "errors": ["status file was truncated"],
+            "offset": offset,
+            "tail": item["tail"],
+            "inode": info.st_ino,
+            "window_alive": window_alive(job_id),
+        }
+    with path.open("rb") as stream:
+        stream.seek(offset)
+        data = tail + stream.read()
+    frames = data.split(b"\n")
+    new_tail = frames.pop()
+    events: list[str] = []
+    for frame in frames:
+        event, error = classify_frame(frame)
+        if event is not None:
+            events.append(event)
+        if error is not None:
+            errors.append(error)
+    return {
+        "job_id": job_id,
+        "events": events,
+        "errors": list(dict.fromkeys(errors)),
+        "offset": info.st_size,
+        "tail": base64.b64encode(new_tail).decode("ascii"),
+        "inode": info.st_ino,
+        "window_alive": window_alive(job_id),
+    }
+
+
+def poll(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"jobs"})
+    values = request["jobs"]
+    if not isinstance(values, list) or len(values) > 64:
+        raise JobError("jobs must be an array with at most 64 items")
+    return {"jobs": [poll_one(value) for value in values]}
+
+
+def inspect(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id"}, {"include_report"})
+    job_id = validate_job_id(request["job_id"])
+    include_report = request.get("include_report", False)
+    if not isinstance(include_report, bool):
+        raise JobError("include_report must be boolean")
+    job = load_job(job_id)
+    raw = regular_bytes(job_dir(job_id) / "status", MAX_STATUS)
+    valid: list[str] = []
+    for frame in raw.splitlines(keepends=True):
+        if not frame.endswith(b"\n"):
+            continue
+        event, _ = classify_frame(frame[:-1])
+        if event is not None:
+            valid.append(event)
+    valid = valid[-100:]
+    while len("\n".join(valid).encode("utf-8")) > 32 * 1024:
+        valid.pop(0)
+    state = valid[-1].split(": ", 1)[0] if valid else "starting"
+    summary = valid[-1].split(": ", 1)[1] if valid else "worker starting"
+    result: dict[str, Any] = {
+        "job_id": job_id,
+        "harness": job.get("harness"),
+        "feature": job.get("feature"),
+        "state": state,
+        "summary": summary,
+        "window_alive": window_alive(job_id),
+        "events": valid,
+    }
+    if include_report:
+        try:
+            result["report"] = regular_bytes(
+                job_dir(job_id) / "report.md", MAX_REPORT
+            ).decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise JobError("report.md is not valid UTF-8") from error
+    return result
+
+
+def orphans(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, set())
+    windows = tmux_windows()
+    candidates: list[str] = []
+    root = jobs_root()
+    if root.exists():
+        for entry in root.iterdir():
+            if (
+                entry.is_dir()
+                and JOB_ID_RE.fullmatch(entry.name)
+                and window_name(entry.name) in windows
+            ):
+                candidates.append(entry.name)
+    return {"job_ids": sorted(candidates)}
+
+
+def dispatch(command: str, request: dict[str, Any]) -> dict[str, Any]:
+    handlers = {
+        "spawn": spawn,
+        "inspect": inspect,
+        "send": send,
+        "stop": stop,
+        "poll": poll,
+        "orphans": orphans,
+    }
+    handler = handlers.get(command)
+    if handler is None:
+        raise JobError("unknown command")
+    return handler(request)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "command",
+        choices=["spawn", "inspect", "send", "stop", "poll", "orphans", "launch"],
+    )
+    parser.add_argument("job_id", nargs="?")
+    args = parser.parse_args()
+    try:
+        if args.command == "launch":
+            if args.job_id is None:
+                raise JobError("launch requires job_id")
+            launch(validate_job_id(args.job_id))
+        if args.job_id is not None:
+            raise JobError("job_id argument is valid only for launch")
+        result = dispatch(args.command, read_request())
+        json.dump({"ok": True, "result": result}, sys.stdout, separators=(",", ":"))
+        sys.stdout.write("\n")
+        return 0
+    except JobError as error:
+        json.dump({"ok": False, "error": str(error)}, sys.stdout, separators=(",", ":"))
+        sys.stdout.write("\n")
+        return 1
+    except Exception as error:  # noqa: BLE001 - JSON is the CLI error boundary.
+        json.dump(
+            {"ok": False, "error": f"internal error: {error}"},
+            sys.stdout,
+            separators=(",", ":"),
+        )
+        sys.stdout.write("\n")
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

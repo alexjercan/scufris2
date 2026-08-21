@@ -91,7 +91,7 @@ scufris2/
 
 - Build the assistant in this repository, outside dashboardd. Use Pi as the fast foreground conversation harness.
 - Implement orchestration as one small TypeScript Pi extension. Do not add MCP, a supervisor daemon, an agent runner, or an RPC bridge.
-- Run the actual delegated Pi, Claude Code, or future harness process in a tmux window. Keep harness differences behind small launch, send, inspect, and stop adapters.
+- Run the actual delegated Pi, Claude Code, or future harness process in a tmux window on a dedicated Scufris server socket. Never target the user's default tmux server. Keep harness differences behind small launch, send, inspect, and stop adapters.
 - Give every delegated coding job its own Git worktree. Never let concurrent coding agents share a checkout.
 - Use `sprout` to create, synchronize, land, and remove isolated worktrees under its standard cache location.
 - Use Plannotator as the local pull-request surface for coding jobs. Call its public Pi event API with the `code-review` action in the isolated worktree and return requested changes to the same worker for another committed revision. Do not launch the CLI or use private Plannotator interfaces.
@@ -104,7 +104,7 @@ scufris2/
 - Give every job a directory containing immutable `prompt.md`, append-only `status`, and worker-written `report.md`. Require UTF-8 with LF line endings. A tmux window is eligible for orphan discovery only when its matching job directory exists.
 - Limit `prompt.md` and `report.md` to 1 MiB each, `status` to 256 KiB, and each status line to 2 KiB. Parse only complete newline-terminated `<state>: <summary>` lines. The worker writes `report.md` before publishing its related status line. Surface malformed, unknown, or oversized input as a protocol-error follow-up without interpreting it or automatically stopping the worker.
 - Put complete initial instructions in `prompt.md`. Keep later steering short enough for one tmux submission.
-- Submit steering literally through a tmux buffer: load and paste the text once, wait a short fixed delay, then send Enter once. Never automatically retype the text or retry Enter. A tmux failure fails the send; an uncertain harness result remains uncertain and requires explicit inspection or intervention.
+- Submit one-line steering literally through a tmux buffer: load and paste the text once, wait a short fixed delay, then send Enter once. Never automatically retype the text or retry Enter. A tmux failure fails the send; an uncertain harness result remains uncertain and requires explicit inspection or intervention.
 - Require delegated agents to append sparse `working:`, `needs-decision:`, `blocked:`, `review-ready:`, `done:`, or `failed:` lines to their status file. Coding agents use `review-ready:` only after committing the proposed revision and recording its checks in `report.md`; this starts or restarts the Plannotator review loop. Reserve `done:` for terminal work that requires no review or landing.
 - Show `working:` as a non-blocking Pi notification or compact status update. Let `review-ready:` start review and show a compact notification. Deliver `needs-decision:`, `blocked:`, `done:`, and `failed:` as Pi follow-up messages so the foreground assistant mediates between the user and worker.
 - Expose native Pi operations for spawn, list, inspect, send, and stop. Keep the exact schemas narrow and harness-neutral.

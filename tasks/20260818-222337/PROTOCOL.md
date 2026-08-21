@@ -45,8 +45,12 @@ ${XDG_STATE_HOME:-$HOME/.local/state}/scufris/jobs/<job_id>/report.md
 Tmux target:
 
 ```text
-scufris:job-<job_id>
+socket:  scufris
+session: jobs
+window:  job-<job_id>
 ```
+
+Every tmux invocation selects the dedicated socket explicitly. Every tmux and sprout subprocess removes inherited `TMUX` and uses a Scufris-owned socket directory. Never touch the user's default tmux server.
 
 ## Agent tools
 
@@ -178,7 +182,7 @@ Input:
 Schema:
 
 - `job_id`: required generated ID.
-- `message`: required nonempty UTF-8 string, maximum 16 KiB, no NUL.
+- `message`: required nonempty single-line UTF-8 string, maximum 16 KiB, no NUL, CR, or LF.
 
 Result:
 
@@ -243,6 +247,8 @@ Immutable extension-owned record:
   "version": 1,
   "job_id": "8k2m4p6q9s1v",
   "harness": "pi",
+  "model": "openai/gpt-5.6-sol",
+  "thinking": "medium",
   "feature": "scufris-8k2m4p6q9s1v",
   "landing_branch": "master",
   "landing_sha": "0123456789abcdef0123456789abcdef01234567",

@@ -173,9 +173,12 @@ ${XDG_CACHE_HOME:-$HOME/.cache}/sprouts/<project>/<feature>
 Tmux:
 
 ```text
-session: scufris
-window:  job-<job_id>
+server socket: scufris
+session:       jobs
+window:        job-<job_id>
 ```
+
+Every tmux and sprout subprocess uses an isolated socket directory and removes inherited `TMUX`. Scufris never creates, targets, or kills resources on the user's default tmux server.
 
 The matching job directory and exact tmux window are both required for orphan eligibility.
 
@@ -269,7 +272,7 @@ Custom messages identify Scufris as the source. They are not fake user messages.
 
 For ordinary steering:
 
-1. Resolve the owned job ID to an exact tmux window.
+1. Resolve the owned job ID to the dedicated tmux socket and exact window.
 2. Load literal UTF-8 text into a unique tmux buffer.
 3. Paste the buffer once.
 4. Wait a fixed short delay.
@@ -368,7 +371,7 @@ Normal shutdown:
 Startup orphan scan:
 
 1. Scan bounded job-directory names.
-2. List exact windows in tmux session `scufris`.
+2. List exact windows in session `jobs` on the dedicated Scufris tmux socket.
 3. Intersect job directories and windows.
 4. Report candidates once.
 5. Ask the user to retain or close them.

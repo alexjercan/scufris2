@@ -6,6 +6,10 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import {
+  createAgentDiagnosticsTool,
+  type DiagnosticsInvocation,
+} from "./diagnostics.ts";
 import { runPrivateHelper, toolResult } from "./shared/runtime.ts";
 
 const jobHelperPath = fileURLToPath(
@@ -308,7 +312,10 @@ function parseEvent(line: string): { state: string; summary: string } {
   };
 }
 
-export default function scufris(pi: ExtensionAPI): void {
+export default function scufris(
+  pi: ExtensionAPI,
+  options: { diagnosticsInvocation?: DiagnosticsInvocation } = {},
+): void {
   const jobs = new Map<string, OwnedJob>();
   let timer: ReturnType<typeof setInterval> | undefined;
   let pollRunning = false;
@@ -952,6 +959,9 @@ export default function scufris(pi: ExtensionAPI): void {
   pi.registerTool(projectsTool);
   pi.registerTool(spawnTool);
   pi.registerTool(listTool);
+  pi.registerTool(
+    createAgentDiagnosticsTool(jobs, options.diagnosticsInvocation),
+  );
   pi.registerTool(inspectTool);
   pi.registerTool(sendTool);
   pi.registerTool(retryReviewTool);

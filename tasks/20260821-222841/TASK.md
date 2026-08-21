@@ -1,6 +1,6 @@
 # Expose durable agent diagnostics tool
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: agents, diagnostics, tools
 
@@ -41,3 +41,31 @@ Expose the private durable job diagnostics through a narrow read-only native too
 - Focused Python tests where needed.
 - `nix flake check`.
 - `git diff --check`.
+
+## Implementation evidence
+
+- Registered `scufris_agent_diagnostics` without changing the existing list or inspect tool implementations.
+- The tool invokes the packaged sibling `scripts/scufris-jobs` executable with fixed argument arrays and `shell: false`. It accepts no helper path, state root, worktree, URL, tmux target, command, or desktop input.
+- Empty input uses `--json`; historical input uses `--all --json`; exact input uses `<job-id> --json`; report input adds only `--report`.
+- Strict native and helper-result schemas reject unknown fields, invalid combinations, malformed UTF-8 or JSON, semantic scope mismatches, process failures, oversized output, and timeouts.
+- Model-facing output reconstructs a whitelist. It omits helper, worktree, Git path, tmux identity, prompt, transcript, and environment fields. It bounds reports, events, diagnostics, job count, and text fields and redacts absolute paths, URLs, environment assignments, and credential patterns.
+- Ownership is observed through the existing current-session map. Diagnostics never inserts into that map. Existing inspect, send, retry-review, and stop checks remain restricted to map-owned jobs.
+- Resource packaging already copied `scripts/` and asserted that `scufris-jobs` is executable. The Nix resource check verifies the exact helper used by the extension.
+- Focused TypeScript tests cover strict schema and invocation, actual packaged-helper empty-state behavior, historical and malformed records, exact report detail, ownership, report bounds, sanitization, option rejection, malformed output, helper failure, timeout, output size, no adoption, restricted controls, and unchanged list and inspect results.
+- Existing Python integration tests continue to cover helper list, historical, malformed, stale, exact detail, report, bounds, symlinks, and invalid forms.
+- Changed files: `extensions/scufris/agents.ts`, `extensions/scufris/diagnostics.ts`, `tests/agent_diagnostics.test.ts`, and this task record.
+- Pre-sync checks:
+  - `npm run check` - passed: typecheck, 21 TypeScript tests, and Prettier.
+  - `python3 -m unittest discover -v -s tests -p 'test_*.py'` - 17 passed.
+  - `nix develop -c ruff check scripts tests` and `nix develop -c ruff format --check scripts tests` - passed.
+  - `nix flake check` - passed for x86_64-linux, including packaged resource checks. Configured incompatible systems were omitted.
+  - `git diff --check` - passed.
+- No durable protocol page needed. The accepted task contract defines this read-only native projection; the private helper protocol remains unchanged.
+- Limitation: no live foreground model playtest. Native registration tests and the actual packaged-helper test cover the extension boundary without changing durable user state.
+- `sprout sync agent-diagnostics-tool` merged landing revision `78a5702` into the feature without conflicts. Synchronized feature revision before this evidence update: `f46386a`.
+- Post-sync checks:
+  - `npm run check` - passed: typecheck, 21 TypeScript tests, and Prettier.
+  - `python3 -m unittest discover -v -s tests -p 'test_*.py'` - 17 passed.
+  - Ruff lint and format checks - passed.
+  - `nix flake check` - passed for x86_64-linux, including packaged resource checks. Configured incompatible systems were omitted.
+  - `git diff --check` - passed.

@@ -6,9 +6,11 @@ import {
   APPROVAL_INSTRUCTION,
   classifyReviewResponse,
   codeReviewPayload,
+  consumeReviewRetry,
   isApprovalDone,
   isDelegatedFeature,
   jobEventTriggersTurn,
+  reviewRetryRejection,
 } from "../extensions/scufris/agents.ts";
 
 test("delegated feature validation accepts only bounded lowercase slugs", () => {
@@ -84,6 +86,70 @@ test("structured feedback takes precedence and returns to the same worker", () =
     kind: "blocked",
     reason: "Plannotator review was unavailable",
   });
+});
+
+test("review retry requires and consumes the exact blocked lifecycle", () => {
+  const retryable = {
+    state: "blocked",
+    summary: "review precondition failed: main checkout has tracked changes",
+    reviewPhase: "idle" as const,
+    reviewRetryable: true,
+    reviewRequestId: "stale-request",
+  };
+  assert.equal(consumeReviewRetry(retryable), undefined);
+  assert.deepEqual(retryable, {
+    state: "review-ready",
+    summary: "retrying fresh review preconditions",
+    reviewPhase: "idle",
+    reviewRetryable: false,
+    reviewRequestId: undefined,
+    approval: undefined,
+  });
+  assert.equal(
+    reviewRetryRejection({
+      state: "blocked",
+      reviewPhase: "idle",
+      reviewRetryable: true,
+      hasApproval: false,
+    }),
+    undefined,
+  );
+  assert.equal(
+    reviewRetryRejection({
+      state: "working",
+      reviewPhase: "idle",
+      reviewRetryable: true,
+      hasApproval: false,
+    }),
+    "job is not lifecycle blocked",
+  );
+  assert.equal(
+    reviewRetryRejection({
+      state: "blocked",
+      reviewPhase: "reviewing",
+      reviewRetryable: true,
+      hasApproval: false,
+    }),
+    "review retry is invalid during reviewing",
+  );
+  assert.equal(
+    reviewRetryRejection({
+      state: "blocked",
+      reviewPhase: "idle",
+      reviewRetryable: false,
+      hasApproval: false,
+    }),
+    "job is not blocked by a retryable review precondition",
+  );
+  assert.equal(
+    reviewRetryRejection({
+      state: "blocked",
+      reviewPhase: "idle",
+      reviewRetryable: true,
+      hasApproval: true,
+    }),
+    "review retry cannot reuse an approval",
+  );
 });
 
 test("approval requires the exact done acknowledgment", () => {

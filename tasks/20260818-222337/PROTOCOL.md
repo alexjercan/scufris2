@@ -58,7 +58,7 @@ session: <project>_<feature>
 window:  job-<job_id>
 ```
 
-Session naming matches Sprout and the session starts in the selected worktree. Spawn rejects an existing matching session and creates the worker window detached. It never attaches, selects, or switches a client. The immutable job record stores exact session, window, and pane IDs. Stop resolves ownership by opaque job ID, kills only the recorded window, and never kills a session or server.
+Session naming matches Sprout and the session starts in the selected worktree. Spawn rejects an existing matching session and creates the worker window detached. It never attaches, selects, or switches a client. The immutable job record stores exact session, window, and pane IDs. User-created windows can remain in the same session. Review, landing, stop, and shutdown do not enumerate, inspect, target, or close those unrelated windows. Stop resolves ownership by opaque job ID, kills only the recorded window, and never kills a session or server.
 
 ## Agent tools
 
@@ -223,6 +223,20 @@ Mechanics:
 
 Messages over 16 KiB are rejected.
 
+### `scufris_agent_retry_review`
+
+Input:
+
+```json
+{
+  "job_id": "8k2m4p6q9s1v"
+}
+```
+
+Retries review only when the ID belongs to this Pi session and the job is lifecycle blocked by a retryable review-precondition failure. Foreground Scufris calls it after mediating the transient condition. It rejects active reviews, non-review blockers, review-result blockers, and any retained approval.
+
+The retry consumes the retryable transition, clears prior request and approval state, takes a fresh snapshot, and reruns all current exact tmux identity, worker liveness, worktree, cleanliness, revision, subject, and ancestry checks. It then opens a new `since-base` request with a new request ID. A failed fresh snapshot blocks again and opens no review. It never reuses an approval or stale snapshot. No new implementation commit is required because the failed precondition did not complete a review round.
+
 ### `scufris_agent_stop`
 
 Input:
@@ -386,13 +400,17 @@ This is an extension event for the foreground model. It is not appended to the w
 
 ## Review protocol
 
-Preconditions for every round:
+Preconditions for every round and explicit retry:
 
+- The recorded session, window, and pane identity is unchanged and the exact worker pane is running.
+- Unrelated windows in the recorded session are ignored and never enumerated or managed.
 - Feature worktree is clean.
 - `sprout sync <feature>` completed.
 - Current landing SHA is an ancestor of feature SHA.
 - `report.md` records synchronization, applicable checks, results, limitations, and current revisions.
 - `review-ready:` is newer than the prior round.
+
+A transient snapshot failure marks only that owned lifecycle as review-retryable. After foreground mediation, `scufris_agent_retry_review` consumes this marker and starts from a fresh snapshot. A prior request, snapshot, review response, or approval cannot satisfy the retry. Review-result failures and the new-commit guard do not set the marker.
 
 Review snapshot:
 
@@ -456,7 +474,9 @@ Candidate approval validation:
 6. Read the oldest feature-only commit subject and reject an empty, multiline, control-containing, or over-200-byte value.
 7. Run `sprout land <feature> --dry-run -m <subject>`.
 8. Recheck the exact approved revisions.
-9. Run `sprout land <feature> -m <subject>` and then stop the exact owned worker window.
+9. Perform the guarded squash commit, remove only the Git worktree and feature branch, and then stop the exact owned worker window.
+
+The final Git-only landing intentionally does not call Sprout's mutating `land` command because that command kills the complete worktree tmux session. The prior Sprout dry-run supplies its current guards. The helper repeats the exact snapshot after the dry-run, uses argument arrays for `git merge --squash`, commit, worktree removal, and branch removal, and resets a failed squash or commit. It never targets the session or unrelated windows.
 
 Pass the subject as one argument without a shell. Do not push. Approval is bound to the landing SHA, feature SHA, subject, and `since-base` request. Feedback is JSON-encoded into one bounded literal line and returned to the same worker. Feedback takes precedence over an inconsistent response that also sets approval.
 

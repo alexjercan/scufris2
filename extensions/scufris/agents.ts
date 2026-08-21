@@ -25,12 +25,60 @@ interface ApprovedReview extends ReviewSnapshot {
   request_id: string;
 }
 
-type ReviewPhase =
+export type ReviewPhase =
   | "idle"
   | "reviewing"
   | "feedback"
   | "awaiting-done"
   | "landing";
+
+export interface ReviewRetryState {
+  state: string;
+  reviewPhase: ReviewPhase;
+  reviewRetryable: boolean;
+  hasApproval: boolean;
+}
+
+interface MutableReviewRetryState {
+  state: string;
+  summary: string;
+  reviewPhase: ReviewPhase;
+  reviewRetryable: boolean;
+  reviewRequestId?: string;
+  approval?: unknown;
+}
+
+export function reviewRetryRejection(
+  state: ReviewRetryState,
+): string | undefined {
+  if (state.state !== "blocked") return "job is not lifecycle blocked";
+  if (state.reviewPhase !== "idle") {
+    return `review retry is invalid during ${state.reviewPhase}`;
+  }
+  if (state.hasApproval) return "review retry cannot reuse an approval";
+  if (!state.reviewRetryable) {
+    return "job is not blocked by a retryable review precondition";
+  }
+  return undefined;
+}
+
+export function consumeReviewRetry(
+  state: MutableReviewRetryState,
+): string | undefined {
+  const rejection = reviewRetryRejection({
+    state: state.state,
+    reviewPhase: state.reviewPhase,
+    reviewRetryable: state.reviewRetryable,
+    hasApproval: state.approval !== undefined,
+  });
+  if (rejection) return rejection;
+  state.reviewRetryable = false;
+  state.reviewRequestId = undefined;
+  state.approval = undefined;
+  state.state = "review-ready";
+  state.summary = "retrying fresh review preconditions";
+  return undefined;
+}
 
 interface OwnedJob {
   job_id: string;
@@ -48,6 +96,7 @@ interface OwnedJob {
   protocolErrors: Set<string>;
   exitReported: boolean;
   reviewPhase: ReviewPhase;
+  reviewRetryable: boolean;
   lastReviewedFeature?: string;
   reviewRequestId?: string;
   approval?: ApprovedReview;
@@ -236,8 +285,15 @@ export default function scufris(pi: ExtensionAPI): void {
     );
   };
 
-  const blockLifecycle = (job: OwnedJob, reason: string) => {
+  const blockLifecycle = (
+    job: OwnedJob,
+    reason: string,
+    reviewRetryable = false,
+  ) => {
     job.reviewPhase = "idle";
+    job.reviewRetryable = reviewRetryable;
+    job.reviewRequestId = undefined;
+    job.approval = undefined;
     job.state = "blocked";
     job.summary = reason;
     context?.ui.notify(`Job ${job.job_id}: ${reason}`, "error");
@@ -318,20 +374,33 @@ export default function scufris(pi: ExtensionAPI): void {
     }
   };
 
-  const beginReview = async (job: OwnedJob) => {
+  const beginReview = async (job: OwnedJob): Promise<boolean> => {
     if (job.reviewPhase !== "idle") {
       blockLifecycle(job, `review-ready is invalid during ${job.reviewPhase}`);
-      return;
+      return false;
     }
     job.reviewPhase = "reviewing";
+    job.reviewRetryable = false;
+    job.reviewRequestId = undefined;
+    job.approval = undefined;
+    let snapshot: ReviewSnapshot;
     try {
-      const snapshot = await currentSnapshot(job);
-      if (snapshot.feature_sha === job.lastReviewedFeature) {
-        throw new Error("review-ready requires a new committed revision");
-      }
-      const requestId = `scufris-${job.job_id}-${randomBytes(6).toString("hex")}`;
-      job.reviewRequestId = requestId;
-      job.lastReviewedFeature = snapshot.feature_sha;
+      snapshot = await currentSnapshot(job);
+    } catch (error) {
+      blockLifecycle(
+        job,
+        `review precondition failed: ${error instanceof Error ? error.message : String(error)}`,
+        true,
+      );
+      return false;
+    }
+    if (snapshot.feature_sha === job.lastReviewedFeature) {
+      blockLifecycle(job, "review-ready requires a new committed revision");
+      return false;
+    }
+    const requestId = `scufris-${job.job_id}-${randomBytes(6).toString("hex")}`;
+    job.reviewRequestId = requestId;
+    try {
       context?.ui.notify(`Opening review for job ${job.job_id}`, "info");
       pi.events.emit("plannotator:request", {
         requestId,
@@ -341,11 +410,14 @@ export default function scufris(pi: ExtensionAPI): void {
           void handleReviewResponse(job, requestId, snapshot, response);
         },
       });
+      job.lastReviewedFeature = snapshot.feature_sha;
+      return true;
     } catch (error) {
       blockLifecycle(
         job,
-        `review precondition failed: ${error instanceof Error ? error.message : String(error)}`,
+        `review request failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+      return false;
     }
   };
 
@@ -614,6 +686,7 @@ export default function scufris(pi: ExtensionAPI): void {
           protocolErrors: new Set(),
           exitReported: false,
           reviewPhase: "idle",
+          reviewRetryable: false,
         });
         void poll();
         const {
@@ -729,6 +802,40 @@ export default function scufris(pi: ExtensionAPI): void {
     },
   });
 
+  const retryReviewTool = defineTool({
+    name: "scufris_agent_retry_review",
+    label: "Retry delegated agent review",
+    description:
+      "Retry fresh review preconditions for one owned lifecycle-blocked job.",
+    parameters: Type.Object(
+      { job_id: Type.String({ pattern: "^[a-z0-9]{12}$" }) },
+      { additionalProperties: false },
+    ),
+    async execute(_id, params) {
+      const job = jobs.get(params.job_id);
+      if (!job) {
+        return toolResult(
+          { error: "job is not owned by this Pi session" },
+          true,
+        );
+      }
+      const rejection = consumeReviewRetry(job);
+      if (rejection) return toolResult({ error: rejection }, true);
+      const started = await beginReview(job);
+      if (!started) {
+        return toolResult(
+          { job_id: job.job_id, state: job.state, summary: job.summary },
+          true,
+        );
+      }
+      return toolResult({
+        job_id: job.job_id,
+        state: "reviewing",
+        message: "Fresh review snapshot accepted and review opened.",
+      });
+    },
+  });
+
   const stopTool = defineTool({
     name: "scufris_agent_stop",
     label: "Stop delegated agent",
@@ -771,6 +878,7 @@ export default function scufris(pi: ExtensionAPI): void {
   pi.registerTool(listTool);
   pi.registerTool(inspectTool);
   pi.registerTool(sendTool);
+  pi.registerTool(retryReviewTool);
   pi.registerTool(stopTool);
 
   pi.on("session_start", async (_event, ctx) => {

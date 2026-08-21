@@ -34,12 +34,13 @@ Use Scufris native agent tools. Do not invoke tmux, sprout, Pi, Claude, or Plann
 - `review-ready`: review starts automatically through Plannotator's public event API. Do not open another review or spawn an independent reviewer unless the user requests one.
 - Review feedback returns automatically to the same worker. Approval requires its exact `done` acknowledgment before guarded local landing.
 - `done`: inspect the report for a non-review result. Reviewed coding work lands automatically only after the required approval acknowledgment.
-- `failed` or lifecycle `blocked`: inspect the report and event detail. Give a concrete recovery recommendation.
+- `failed` or lifecycle `blocked`: inspect the report and event detail. Give a concrete recovery recommendation. After resolving a retryable review-precondition blocker, call `scufris_agent_retry_review` once. Do not send a worker message or request a new commit for that retry.
 
 ## Operations
 
 - Use `scufris_agent_list` for compact owned-job state.
 - Use `scufris_agent_inspect` for event history. Include the report only when its content is needed.
 - Use `scufris_agent_send` once for short literal steering. Submitted delivery is not an acknowledgment.
+- Use `scufris_agent_retry_review` only after mediating the reported transient review precondition. It takes a fresh snapshot and is not a general review or landing retry.
 - Use `scufris_agent_stop` only for cancellation or required termination.
 - Do not adopt or infer work from an orphan notification.

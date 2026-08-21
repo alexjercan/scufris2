@@ -348,13 +348,6 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         self.run_external(
             ["sprout", "sync", result["feature"]], cwd=self.project, env=self.env
         )
-        snapshot = self.cli(
-            "review-snapshot",
-            {"job_id": result["job_id"], "project_root": str(self.project)},
-        )["result"]
-        self.assertEqual(snapshot["subject"], "Add approved result")
-        self.assertEqual(snapshot["worktree"], str(worktree))
-
         extra_window = self.run_external(
             [
                 "tmux",
@@ -371,27 +364,12 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             ],
             env=self.env,
         ).stdout.strip()
-        unowned = self.cli(
-            "land",
-            {
-                "job_id": result["job_id"],
-                "project_root": str(self.project),
-                "landing_sha": snapshot["landing_sha"],
-                "feature_sha": snapshot["feature_sha"],
-                "subject": snapshot["subject"],
-            },
-            check=False,
-        )
-        self.assertFalse(unowned["ok"])
-        self.assertIn("unowned window", unowned["error"])
-        self.assertEqual(
-            self.run_external(
-                ["tmux", "display-message", "-p", "-t", extra_window, "#{window_id}"],
-                env=self.env,
-            ).stdout.strip(),
-            extra_window,
-        )
-        self.run_external(["tmux", "kill-window", "-t", extra_window], env=self.env)
+        snapshot = self.cli(
+            "review-snapshot",
+            {"job_id": result["job_id"], "project_root": str(self.project)},
+        )["result"]
+        self.assertEqual(snapshot["subject"], "Add approved result")
+        self.assertEqual(snapshot["worktree"], str(worktree))
 
         changed = self.cli(
             "land",
@@ -423,6 +401,18 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             (self.project / "result.txt").read_text(encoding="utf-8"), "approved\n"
         )
         self.assertFalse(worktree.exists())
+        self.assertEqual(
+            self.cli("stop", {"job_id": result["job_id"]})["result"]["state"],
+            "stopped",
+        )
+        self.assertEqual(
+            self.run_external(
+                ["tmux", "display-message", "-p", "-t", extra_window, "#{window_id}"],
+                env=self.env,
+            ).stdout.strip(),
+            extra_window,
+        )
+        self.run_external(["tmux", "kill-window", "-t", extra_window], env=self.env)
 
     def test_poll_waits_for_lf_and_consumes_malformed_frames_once(self) -> None:
         result = self.spawn("0123456789ab")

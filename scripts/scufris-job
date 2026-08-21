@@ -848,22 +848,15 @@ def validated_review_snapshot(job_id: str, project_root: Any) -> dict[str, str]:
                 "display-message",
                 "-p",
                 "-t",
-                window_id,
-                "#{session_id}\t#{window_id}\t#{pane_id}",
+                pane_id,
+                "#{session_id}\t#{window_id}\t#{pane_id}\t#{pane_dead}",
             ]
         )
         .stdout.decode("utf-8", "strict")
         .strip()
     )
-    if identity != f"{session_id}\t{window_id}\t{pane_id}":
-        raise JobError("worker tmux identity changed")
-    owned_windows = (
-        tmux(["list-windows", "-t", session_id, "-F", "#{window_id}"])
-        .stdout.decode("utf-8", "strict")
-        .splitlines()
-    )
-    if owned_windows != [window_id]:
-        raise JobError("worker tmux session contains an unowned window")
+    if identity != f"{session_id}\t{window_id}\t{pane_id}\t0":
+        raise JobError("worker tmux identity changed or process is not running")
     expected = (
         Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
         / "sprouts"
@@ -926,6 +919,35 @@ def review_snapshot(request: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def guarded_git_land(root: Path, worktree: Path, feature: str, subject: str) -> None:
+    merged = run(
+        ["git", "merge", "--squash", feature],
+        cwd=root,
+        timeout=60,
+        check=False,
+    )
+    if merged.returncode != 0:
+        run(["git", "reset", "--merge"], cwd=root, check=False)
+        if git_text(root, "status", "--porcelain", "--untracked-files=no"):
+            run(["git", "reset", "--hard"], cwd=root, check=False)
+        message = merged.stderr.decode("utf-8", "replace").strip()
+        raise JobError(f"feature squash failed: {message or merged.returncode}")
+    committed = run(
+        ["git", "commit", "--quiet", "-m", subject],
+        cwd=root,
+        timeout=60,
+        check=False,
+    )
+    if committed.returncode != 0:
+        run(["git", "reset", "--merge"], cwd=root, check=False)
+        if git_text(root, "status", "--porcelain", "--untracked-files=no"):
+            run(["git", "reset", "--hard"], cwd=root, check=False)
+        message = committed.stderr.decode("utf-8", "replace").strip()
+        raise JobError(f"landing commit failed: {message or committed.returncode}")
+    run(["git", "worktree", "remove", str(worktree)], cwd=root, timeout=60)
+    run(["git", "branch", "-D", feature], cwd=root)
+
+
 def land(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(
         request,
@@ -964,7 +986,12 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
         or snapshot["feature_sha"] != expected_feature
     ):
         raise JobError("approved revisions changed after landing dry-run")
-    sprout(["land", feature, "-m", subject], root)
+    guarded_git_land(
+        root,
+        Path(snapshot["worktree"]),
+        feature,
+        subject,
+    )
     landed_sha = git_text(root, "rev-parse", "HEAD")
     return {"job_id": job_id, "state": "landed", "landed_sha": landed_sha}
 

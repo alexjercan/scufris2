@@ -27,11 +27,13 @@ Job ID:
 [a-z0-9]{12}
 ```
 
-Feature name:
+Selected feature name:
 
 ```text
-scufris-<job_id>
+[a-z0-9]+(?:-[a-z0-9]+)*    maximum 48 characters
 ```
+
+Spawn uses an explicitly provided slug exactly. When omitted, it selects `scufris-<job_id>`. The job ID remains the opaque ownership identity in both cases. Feature and tmux names are display and Sprout identities, not ownership credentials.
 
 Files:
 
@@ -50,7 +52,7 @@ session: <project>_<feature>
 window:  job-<job_id>
 ```
 
-Session naming matches Sprout and the session starts in the generated worktree. Spawn creates or reuses the session and creates the worker window detached. It never attaches, selects, or switches a client. The immutable job record stores exact session, window, and pane IDs. Stop kills only the recorded window and never kills a session or server.
+Session naming matches Sprout and the session starts in the selected worktree. Spawn rejects an existing matching session and creates the worker window detached. It never attaches, selects, or switches a client. The immutable job record stores exact session, window, and pane IDs. Stop resolves ownership by opaque job ID, kills only the recorded window, and never kills a session or server.
 
 ## Agent tools
 
@@ -69,6 +71,7 @@ Input:
   "harness": "pi",
   "project": "personal/example",
   "instructions": "Investigate the failing check and implement the fix.",
+  "feature": "fix-login-timeout",
   "model": "openai-codex/gpt-5.6-sol",
   "thinking": "medium"
 }
@@ -79,10 +82,11 @@ Schema:
 - `harness`: required enum `pi | claude`.
 - `project`: optional opaque ID returned by `scufris_agent_projects`. Omit it to use the current Git repository.
 - `instructions`: required nonempty string, maximum 256 KiB UTF-8.
+- `feature`: optional lowercase alphanumeric slug with single hyphen separators, maximum 48 characters. The selected value is used exactly.
 - `model`: optional nonempty string, maximum 200 bytes, no control characters.
 - `thinking`: optional enum `off | minimal | low | medium | high | xhigh | max`.
 
-Omitted values use the harness defaults. Explicit input wins. The adapter validates thinking support. The harness validates its model name.
+Omitted model and thinking values use the harness defaults. An omitted feature selects `scufris-<job_id>`. Explicit input wins. The adapter validates thinking support. The harness validates its model name. Spawn rejects an invalid feature or any existing branch, worktree, or matching tmux session. It does not suffix names or reuse resources.
 
 Result:
 
@@ -91,8 +95,8 @@ Result:
   "job_id": "8k2m4p6q9s1v",
   "state": "running",
   "harness": "pi",
-  "feature": "scufris-8k2m4p6q9s1v",
-  "tmux_session": "example_scufris-8k2m4p6q9s1v",
+  "feature": "fix-login-timeout",
+  "tmux_session": "example_fix-login-timeout",
   "message": "Worker started in an isolated worktree. It runs independently."
 }
 ```
@@ -101,8 +105,8 @@ Spawn transaction:
 
 1. Resolve the explicit discovered project ID, or the current Git root when the ID is omitted.
 2. Verify the selected directory is an exact Git root.
-3. Generate job and feature IDs.
-4. Create the worktree with `sprout new`.
+3. Generate the opaque job ID and select the exact requested feature or fallback.
+4. Reject feature collisions, reserve a new branch atomically, and create the worktree with `sprout new`.
 5. Create the job directory with mode 0700.
 6. Write immutable `job.json` and `prompt.md` with mode 0400.
 7. Create empty `status` and `report.md` with mode 0600.
@@ -129,7 +133,7 @@ Result:
       "harness": "pi",
       "state": "working",
       "summary": "running project checks",
-      "feature": "scufris-8k2m4p6q9s1v"
+      "feature": "fix-login-timeout"
     }
   ]
 }
@@ -257,10 +261,10 @@ Immutable extension-owned record:
   "harness": "pi",
   "model": "openai-codex/gpt-5.6-sol",
   "thinking": "medium",
-  "feature": "scufris-8k2m4p6q9s1v",
+  "feature": "fix-login-timeout",
   "landing_branch": "master",
   "landing_sha": "0123456789abcdef0123456789abcdef01234567",
-  "tmux_session": "example_scufris-8k2m4p6q9s1v",
+  "tmux_session": "example_fix-login-timeout",
   "tmux_session_id": "$4",
   "tmux_window_id": "@9",
   "tmux_pane_id": "%12",
@@ -275,7 +279,8 @@ Do not store prompt text, credentials, environment values, or absolute paths in 
 - Written once before launch.
 - Maximum 1 MiB.
 - Mode 0400.
-- Contains the complete initial request, job paths, status grammar, report rules, Git rules, and a requirement to follow repository instructions and run applicable checks.
+- Contains the complete initial request, selected feature, job paths, status grammar, report rules, Git rules, and a requirement to follow repository instructions and run applicable checks.
+- Synchronization instructions name the selected feature exactly. They do not assume the generated fallback.
 - The worker must not modify it.
 
 ### `status`

@@ -85,7 +85,8 @@ Skills do not own persistent background processes.
 
 Own deterministic mechanics:
 
-- Create and validate job records.
+- Create and validate job records and optional descriptive feature slugs.
+- Reject feature branch, worktree, and tmux session collisions before launch.
 - Launch and address exact tmux windows through fixed helper verbs and generated IDs, then replace the helper process with the harness.
 - Read incremental status bytes.
 - Create, synchronize, and inspect sprout worktrees.
@@ -162,6 +163,8 @@ Scufris:
 - Defaults Pi to `openai-codex/gpt-5.6-sol` with medium thinking.
 - Defaults Claude to `opus` with xhigh thinking.
 - Lets the foreground orchestrator override model and thinking per spawn.
+- Accepts an optional lowercase hyphen-separated feature slug of at most 48 characters. Uses it exactly, or generates `scufris-<job_id>` when omitted.
+- Rejects existing feature branches, worktrees, and matching tmux sessions. Never suffixes a requested name or reuses another job's resources.
 - Does not sandbox filesystem or network access.
 - Runs workers with local-user authority.
 - Uses `--dangerously-skip-permissions` for Claude.
@@ -174,7 +177,7 @@ Workers read repository instructions and decide which checks apply. Scufris does
 
 The enabled extensions keep only their own state:
 
-- Delegation: owned job IDs, status offsets and tails, event identity, and worker-window state.
+- Delegation: opaque owned job IDs, selected feature display names, status offsets and tails, event identity, and worker-window state.
 - Widgets: the validated catalog and opened surface IDs.
 - Each: its own poll-in-progress and shutdown flags.
 
@@ -211,7 +214,7 @@ session: <project>_<feature>, matching Sprout session naming
 window:  job-<job_id>
 ```
 
-Scufris inherits the normal tmux server selection. It creates or reuses the worktree session without attaching, selecting, or switching the user's client. The worker window receives the current safe path and configuration environment, starts in the worktree, and invokes the ambient harness directly. Scufris records exact session, window, and pane IDs. It never kills a session or server.
+Scufris inherits the normal tmux server selection. The session name uses the exact selected feature and is rejected if it already exists. Scufris creates the session without attaching, selecting, or switching the user's client. The worker window receives the current safe path and configuration environment, starts in the worktree, and invokes the ambient harness directly. The opaque job ID and recorded exact session, window, and pane IDs define ownership; the descriptive feature and session names do not. Scufris never kills a session or server.
 
 The matching job directory and exact tmux window are both required for orphan eligibility. `remain-on-exit` retains a failed pane for manual debugging while pane-dead state marks the worker as exited.
 

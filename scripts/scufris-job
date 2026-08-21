@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 JOB_ID_RE = re.compile(r"[a-z0-9]{12}\Z")
+FEATURE_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 MODEL_RE = re.compile(r"[^\x00-\x1f\x7f]{1,200}\Z")
 PROJECT_ID_RE = re.compile(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\Z")
 TMUX_ID_RE = re.compile(r"[$@%][0-9]+\Z")
@@ -104,6 +105,16 @@ def sprout(
 def validate_job_id(value: Any) -> str:
     if not isinstance(value, str) or not JOB_ID_RE.fullmatch(value):
         raise JobError("invalid job_id")
+    return value
+
+
+def validate_feature(value: Any) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) > 48
+        or FEATURE_RE.fullmatch(value) is None
+    ):
+        raise JobError("invalid feature")
     return value
 
 
@@ -293,7 +304,7 @@ def write_new(path: Path, data: bytes, mode: int) -> None:
         raise
 
 
-def prompt_text(job_id: str, instructions: str) -> str:
+def prompt_text(job_id: str, feature: str, instructions: str) -> str:
     directory = job_dir(job_id)
     return f"""# Delegated Scufris job
 
@@ -312,7 +323,7 @@ Follow the repository AGENTS.md files and project instructions.
 - Format: `<state>: <one-line summary>`.
 - Do not put credentials, raw logs, absolute paths, or transcripts in status summaries.
 - Read repository instructions to select checks. Record commands, results, and limitations in the report and repository task record when required.
-- Commit coding work, run `sprout sync scufris-{job_id}` and applicable checks, then use `review-ready:`. Do not land or push.
+- Commit coding work, run `sprout sync {feature}` and applicable checks, then use `review-ready:`. Do not land or push.
 """
 
 
@@ -331,6 +342,37 @@ def window_name(job_id: str) -> str:
 
 def session_name(project_root: Path, feature: str) -> str:
     return f"{project_root.name}_{feature}".translate(str.maketrans("./ :", "____"))
+
+
+def claim_feature(project_root: Path, feature: str) -> None:
+    name = session_name(project_root, feature)
+    if tmux(["has-session", "-t", f"={name}"], check=False).returncode == 0:
+        raise JobError(f"feature already exists: {feature}")
+    if sprout(["show", feature], project_root, check=False).returncode == 0:
+        raise JobError(f"feature already exists: {feature}")
+    result = run(
+        [
+            "git",
+            "update-ref",
+            f"refs/heads/{feature}",
+            "HEAD",
+            "0000000000000000000000000000000000000000",
+        ],
+        cwd=project_root,
+        check=False,
+    )
+    if result.returncode != 0:
+        if (
+            run(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{feature}"],
+                cwd=project_root,
+                check=False,
+            ).returncode
+            == 0
+        ):
+            raise JobError(f"feature already exists: {feature}")
+        message = result.stderr.decode("utf-8", "replace").strip()
+        raise JobError(f"cannot reserve feature: {message or result.returncode}")
 
 
 def tmux_identity(job: dict[str, Any]) -> tuple[str, str, str]:
@@ -394,10 +436,7 @@ def create_window(
     ):
         if value := os.environ.get(key):
             common.extend(["-e", f"{key}={value}"])
-    if tmux(["has-session", "-t", f"={name}"], check=False).returncode == 0:
-        result = tmux(["new-window", *output, *common, "-t", f"={name}"])
-    else:
-        result = tmux(["new-session", *output, *common, "-s", name])
+    result = tmux(["new-session", *output, *common, "-s", name])
     identity = parse_tmux_identity(result)
     tmux(["set-option", "-w", "-t", identity[1], "remain-on-exit", "on"])
     return identity
@@ -415,7 +454,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(
         request,
         {"job_id", "harness", "instructions", "current_root"},
-        {"model", "thinking", "project"},
+        {"model", "thinking", "project", "feature"},
     )
     job_id = validate_job_id(request["job_id"])
     harness = request["harness"]
@@ -433,19 +472,25 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
     directory = job_dir(job_id)
     if directory.exists():
         raise JobError("job_id already exists")
-    feature = f"scufris-{job_id}"
-    created_worktree = False
+    feature = (
+        f"scufris-{job_id}"
+        if request.get("feature") is None
+        else validate_feature(request["feature"])
+    )
+    feature_claimed = False
+    worktree: Path | None = None
     worker_identity: tuple[str, str, str] | None = None
     try:
+        claim_feature(root, feature)
+        feature_claimed = True
         sprout(["new", feature], root)
-        created_worktree = True
         worktree = Path(
             sprout(["show", feature], root).stdout.decode().strip()
         ).resolve()
         directory.mkdir(mode=0o700, parents=True)
         landing_branch = git_text(root, "branch", "--show-current")
         landing_sha = git_text(root, "rev-parse", "HEAD")
-        prompt = prompt_text(job_id, instructions).encode("utf-8")
+        prompt = prompt_text(job_id, feature, instructions).encode("utf-8")
         if len(prompt) > MAX_PROMPT:
             raise JobError("generated prompt exceeds the limit")
         write_new(directory / "prompt.md", prompt, 0o400)
@@ -478,8 +523,14 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
         if worker_identity is not None:
             tmux(["kill-window", "-t", worker_identity[1]], check=False)
         shutil.rmtree(directory, ignore_errors=True)
-        if created_worktree:
-            sprout(["rm", feature], root, check=False)
+        if worktree is not None:
+            run(
+                ["git", "worktree", "remove", "--force", str(worktree)],
+                cwd=root,
+                check=False,
+            )
+        if feature_claimed:
+            run(["git", "branch", "-D", feature], cwd=root, check=False)
         raise
     return {
         "job_id": job_id,

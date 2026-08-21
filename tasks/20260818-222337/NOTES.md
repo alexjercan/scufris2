@@ -28,7 +28,7 @@ Scufris can run from any directory and delegate into a different discovered Git 
 
 ## Visible worktree sessions accepted 2026-08-21
 
-Delegated workers use detached Sprout-named worktree sessions on the user's normal tmux server. Scufris creates or reuses the session, creates an exact worker window, and leaves the current client unchanged. It never attaches, selects, switches, or kills a session or server. Exact session, window, and pane IDs bound steering and cleanup. Failed panes remain visible for manual debugging.
+Delegated workers use detached Sprout-named worktree sessions on the user's normal tmux server. Scufris rejects a matching existing session, creates the selected feature session and an exact worker window, and leaves the current client unchanged. It never attaches, selects, switches, or kills a session or server. The opaque job ID and exact session, window, and pane IDs bind steering and cleanup independently from display names. Failed panes remain visible for manual debugging.
 
 A Pi worker invokes ambient `pi` directly. It does not invoke the Scufris launcher and does not load Scufris extensions or skills. Safe path and configuration variables from the orchestrator environment are applied to the worker window so stale tmux-server environment does not select another Pi or state directory.
 

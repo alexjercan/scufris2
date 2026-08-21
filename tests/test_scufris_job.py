@@ -77,15 +77,15 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
                 "SCUFRIS_PROJECT_ROOTS": json.dumps([str(self.projects_root)]),
             }
         )
-        self.jobs: list[str] = []
+        self.jobs: dict[str, str] = {}
         Path("/tmp/scufris-must-not-exist").unlink(missing_ok=True)
         self.default_server = self.default_tmux_server()
 
     def tearDown(self) -> None:
-        for job_id in self.jobs:
+        for job_id, feature in self.jobs.items():
             self.cli("stop", {"job_id": job_id}, check=False)
             self.run_external(
-                ["sprout", "rm", f"scufris-{job_id}"],
+                ["sprout", "rm", feature],
                 cwd=self.project,
                 env=self.env,
                 check=False,
@@ -147,6 +147,7 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         *,
         project: str | None = None,
         current_root: Path | None = None,
+        feature: str | None = None,
     ) -> dict[str, Any]:
         request = {
             "job_id": job_id,
@@ -156,12 +157,15 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         }
         if project is not None:
             request["project"] = project
+        if feature is not None:
+            request["feature"] = feature
         envelope = self.cli(
             "spawn",
             request,
         )
-        self.jobs.append(job_id)
-        return envelope["result"]
+        result = envelope["result"]
+        self.jobs[job_id] = result["feature"]
+        return result
 
     def wait_for(self, path: Path, text: str, timeout: float = 8) -> None:
         deadline = time.monotonic() + timeout
@@ -193,6 +197,7 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         self.assertEqual(result["model"], "openai-codex/gpt-5.6-sol")
         self.assertEqual(result["thinking"], "medium")
         self.assertEqual(result["project"], "current")
+        self.assertEqual(result["feature"], f"scufris-{result['job_id']}")
         directory = self.state / "scufris" / "jobs" / result["job_id"]
         self.wait_for(directory / "status", "working: fake harness ready")
         pi_argv = json.loads((directory / "argv.json").read_text(encoding="utf-8"))
@@ -200,6 +205,10 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         self.assertNotIn("--skill", pi_argv)
 
         self.assertEqual(stat.S_IMODE((directory / "prompt.md").stat().st_mode), 0o400)
+        self.assertIn(
+            f"sprout sync {result['feature']}",
+            (directory / "prompt.md").read_text(encoding="utf-8"),
+        )
         self.assertEqual(stat.S_IMODE((directory / "job.json").stat().st_mode), 0o400)
         self.assertTrue(
             (self.cache / "sprouts" / self.project.name / result["feature"]).is_dir()
@@ -243,14 +252,21 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             "claude",
             project="projects/target",
             current_root=self.root,
+            feature="fix-cross-project-launch",
         )
         self.assertEqual(claude["project"], "projects/target")
+        self.assertEqual(claude["feature"], "fix-cross-project-launch")
+        self.assertEqual(claude["tmux_session"], "target_fix-cross-project-launch")
         claude_directory = self.state / "scufris" / "jobs" / claude["job_id"]
         self.wait_for(claude_directory / "status", "working: fake harness ready")
         claude_argv = json.loads(
             (claude_directory / "argv.json").read_text(encoding="utf-8")
         )
         self.assertIn("--dangerously-skip-permissions", claude_argv)
+        self.assertIn(
+            "sprout sync fix-cross-project-launch",
+            (claude_directory / "prompt.md").read_text(encoding="utf-8"),
+        )
         self.assertEqual(claude["model"], "opus")
         self.assertEqual(claude["thinking"], "xhigh")
 
@@ -376,6 +392,98 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             "kill-server",
         ):
             self.assertNotIn(f'"{command}"', source)
+
+    def test_rejects_invalid_features_and_feature_collisions(self) -> None:
+        for job_id, feature in (
+            ("111111111111", "Uppercase"),
+            ("222222222222", "two--hyphens"),
+            ("333333333333", "a" * 49),
+        ):
+            rejected = self.cli(
+                "spawn",
+                {
+                    "job_id": job_id,
+                    "harness": "pi",
+                    "instructions": "Do not run.",
+                    "current_root": str(self.project),
+                    "feature": feature,
+                },
+                check=False,
+            )
+            self.assertFalse(rejected["ok"])
+            self.assertEqual(rejected["error"], "invalid feature")
+
+        first = self.spawn("444444444444", feature="shared-feature")
+        collision = self.cli(
+            "spawn",
+            {
+                "job_id": "555555555555",
+                "harness": "pi",
+                "instructions": "Do not replace the first worker.",
+                "current_root": str(self.project),
+                "feature": "shared-feature",
+            },
+            check=False,
+        )
+        self.assertFalse(collision["ok"])
+        self.assertEqual(collision["error"], "feature already exists: shared-feature")
+        self.assertFalse((self.state / "scufris" / "jobs" / "555555555555").exists())
+        self.assertTrue(
+            self.cli("inspect", {"job_id": first["job_id"]})["result"]["window_alive"]
+        )
+
+        self.run_external(
+            ["git", "branch", "reserved-feature"], cwd=self.project, env=self.env
+        )
+        branch_collision = self.cli(
+            "spawn",
+            {
+                "job_id": "666666666666",
+                "harness": "pi",
+                "instructions": "Do not reuse an existing branch.",
+                "current_root": str(self.project),
+                "feature": "reserved-feature",
+            },
+            check=False,
+        )
+        self.assertFalse(branch_collision["ok"])
+        self.assertEqual(
+            branch_collision["error"], "feature already exists: reserved-feature"
+        )
+
+        session = "target_session-collision"
+        self.run_external(["tmux", "new-session", "-d", "-s", session], env=self.env)
+        try:
+            session_collision = self.cli(
+                "spawn",
+                {
+                    "job_id": "777777777777",
+                    "harness": "pi",
+                    "instructions": "Do not reuse an existing session.",
+                    "current_root": str(self.project),
+                    "feature": "session-collision",
+                },
+                check=False,
+            )
+            self.assertFalse(session_collision["ok"])
+            self.assertEqual(
+                session_collision["error"],
+                "feature already exists: session-collision",
+            )
+            self.assertEqual(
+                self.run_external(
+                    ["tmux", "has-session", "-t", f"={session}"],
+                    env=self.env,
+                    check=False,
+                ).returncode,
+                0,
+            )
+        finally:
+            self.run_external(
+                ["tmux", "kill-session", "-t", f"={session}"],
+                env=self.env,
+                check=False,
+            )
 
     def test_rejects_unknown_project_and_request_fields(self) -> None:
         unknown = self.cli(

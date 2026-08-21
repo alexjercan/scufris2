@@ -86,6 +86,12 @@ function generatedJobId(): string {
   return randomBytes(6).toString("hex");
 }
 
+export const delegatedFeaturePattern = "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])";
+
+export function isDelegatedFeature(value: string): boolean {
+  return value.length <= 48 && new RegExp(delegatedFeaturePattern).test(value);
+}
+
 export function jobEventTriggersTurn(state: string): boolean {
   return state !== "working";
 }
@@ -241,6 +247,15 @@ export default function scufris(pi: ExtensionAPI): void {
           }),
         ),
         instructions: Type.String({ minLength: 1, maxLength: 262_144 }),
+        feature: Type.Optional(
+          Type.String({
+            description:
+              "Concise descriptive Sprout feature slug. Omit when the task has no clear name.",
+            minLength: 1,
+            maxLength: 48,
+            pattern: delegatedFeaturePattern,
+          }),
+        ),
         model: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
         thinking: Type.Optional(
           StringEnum([
@@ -258,6 +273,12 @@ export default function scufris(pi: ExtensionAPI): void {
     ),
     async execute(_id, params, signal, _update, ctx) {
       try {
+        if (
+          params.feature !== undefined &&
+          !isDelegatedFeature(params.feature)
+        ) {
+          throw new Error("invalid feature");
+        }
         const result = await runHelper<SpawnResult>(
           "spawn",
           {
@@ -268,6 +289,9 @@ export default function scufris(pi: ExtensionAPI): void {
             ...(params.project === undefined
               ? {}
               : { project: params.project }),
+            ...(params.feature === undefined
+              ? {}
+              : { feature: params.feature }),
             ...(params.model === undefined ? {} : { model: params.model }),
             ...(params.thinking === undefined
               ? {}

@@ -13,9 +13,10 @@ Use Scufris native agent tools. Do not invoke tmux, sprout, Pi, or Claude direct
 2. Use the current repository when the request targets it. For another named repository, or when the session is outside Git, call `scufris_agent_projects` and select its exact opaque project ID.
 3. Choose `pi` unless the user requests Claude or a specific Claude model.
 4. Preserve the user's requirements in `instructions`. Never put filesystem paths or commands in tool arguments.
-5. Pass `project` only for a discovered cross-project target. Pass `model` or `thinking` only when the user requests an override.
-6. Call `scufris_agent_spawn` once and retain its `job_id`.
-7. Tell the user the worker is independent and the foreground conversation remains available.
+5. When the task has a clear name, derive a concise descriptive `feature` slug: lowercase alphanumeric words separated by single hyphens, maximum 48 characters. Omit `feature` when no clear name exists. Never use the job ID as a requested feature.
+6. Pass `project` only for a discovered cross-project target. Pass `model` or `thinking` only when the user requests an override.
+7. Call `scufris_agent_spawn` once and retain its `job_id`.
+8. Tell the user the worker is independent and the foreground conversation remains available.
 
 ## Follow-up
 

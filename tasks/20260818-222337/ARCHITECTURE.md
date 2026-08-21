@@ -4,7 +4,9 @@
 
 Build Scufris as one Pi package with:
 
-- One narrow TypeScript extension.
+- Independent delegation and widget TypeScript extensions.
+- A full launcher that enables both extensions by default.
+- A Home Manager module that can disable either extension and its matching skill.
 - Agent Skills for delegation and widget workflows.
 - Small Python and Bash helpers for job files, Git, tmux, and dashboardctl mechanics.
 - Direct Pi or Claude Code processes in tmux.
@@ -18,7 +20,7 @@ Do not add a daemon, MCP server, RPC bridge, embedded agent runtime, generic she
 ```mermaid
 flowchart LR
   U[User] --> P[Pi foreground]
-  P --> E[Scufris extension]
+  P --> E[Scufris extensions]
   P --> S[Agent Skills]
   S --> E
   E --> H[Small helpers]
@@ -50,18 +52,23 @@ Does not own:
 - Dashboard runtime instances.
 - Git landing semantics.
 
-### Scufris TypeScript extension
+### Scufris TypeScript extensions
 
-Owns only Pi-specific or in-memory concerns:
+The delegation extension owns:
 
-- Native and discovery-derived tool registration.
-- `session_start` and `session_shutdown`.
-- One fixed one-second timer.
-- In-memory job and opened-surface ownership.
-- Coalesced Pi notifications and custom follow-up messages.
-- Safe child-helper invocation with argument arrays.
+- Agent tool registration.
+- Job ownership and status mediation.
+- Its non-overlapping one-second job timer.
+- Worker shutdown and orphan reporting.
 
-It does not parse shell commands, implement Git, inspect arbitrary paths, or embed harness-specific process logic.
+The widget extension owns:
+
+- Discovery-derived widget tool registration.
+- Opened-surface ownership.
+- Its non-overlapping one-second surface timer.
+- External-close mediation.
+
+Both use the shared bounded helper runtime. Neither parses shell commands, implements Git, inspects arbitrary paths, or embeds harness-specific process logic.
 
 ### Skills
 
@@ -113,6 +120,33 @@ Owns:
 
 Scufris only invokes released `dashboardctl` operations and tracks returned surface IDs.
 
+### Nix launcher and module
+
+`nix run .#scufris` is the one flake app and enables delegation and widgets. The Home Manager module installs the same `scufris` command with host-specific composition:
+
+```nix
+programs.scufris = {
+  enable = true;
+  delegation.enable = true;
+  widgets = {
+    enable = true;
+    dashboardctlPackage = inputs.dashboardd.packages.${pkgs.stdenv.hostPlatform.system}.dashboardd-desktop;
+  };
+};
+```
+
+Both features default to enabled. Disabling a feature removes its extension, skill, and runtime dependency. A consuming flake makes Scufris follow its existing Pi, Home Manager, nixpkgs, and dashboardd inputs:
+
+```nix
+scufris = {
+  url = "github:alexjercan/scufris2/<release>";
+  inputs.nixpkgs.follows = "nixpkgs";
+  inputs.home-manager.follows = "home-manager";
+  inputs.pi.follows = "pi";
+  inputs.dashboardd.follows = "dashboardd";
+};
+```
+
 ### Plannotator and sprout
 
 Sprout owns worktree creation, synchronization, and guarded landing. Plannotator owns human review presentation. Scufris calls Plannotator through its public Pi event API and uses sprout commands without replacing either contract.
@@ -137,16 +171,13 @@ Workers read repository instructions and decide which checks apply. Scufris does
 
 ### Session state
 
-The extension keeps:
+The enabled extensions keep only their own state:
 
-- The session's validated dashboard widget catalog.
-- Owned job IDs and tmux window IDs.
-- Parsed status byte offsets and partial trailing bytes.
-- Last surfaced event identity.
-- Opened dashboard surface IDs.
-- Poll-in-progress and shutdown flags.
+- Delegation: owned job IDs, status offsets and tails, event identity, and worker-window state.
+- Widgets: the validated catalog and opened surface IDs.
+- Each: its own poll-in-progress and shutdown flags.
 
-No timer cycle overlaps another. One slow cycle causes the next cycle to wait, not run concurrently.
+No timer cycle overlaps another cycle from the same extension. A slow cycle waits instead of overlapping.
 
 ### Durable job state
 
@@ -238,20 +269,24 @@ Status lines are events, not authoritative process state. Current state is deriv
 
 A process exit without a valid terminal event becomes a foreground `failed` event. Scufris does not append a fake worker status line.
 
-## Polling loop
+## Polling loops
 
-Every second:
+Each enabled extension owns one non-overlapping one-second loop.
 
-1. Return immediately if shutdown is active or the prior cycle still runs.
-2. Read appended status bytes for all owned jobs.
-3. Parse only complete LF-terminated lines.
-4. Check exact tmux window existence.
-5. If Scufris owns any widget surfaces, call `dashboardctl list` once.
-6. Coalesce all changes found in the cycle.
-7. Update compact UI once.
-8. Queue actionable model follow-ups once.
+Delegation:
 
-Do not poll dashboardd when no tracked surface exists. Do not emit unchanged status.
+1. Return immediately if shutdown is active, no job is active, or the prior cycle still runs.
+2. Read and parse appended status bytes for all active jobs.
+3. Check exact tmux window existence.
+4. Coalesce changes, update compact UI, and queue actionable model follow-ups.
+
+Widgets:
+
+1. Return immediately if shutdown is active, no surface is owned, or the prior cycle still runs.
+2. Call `dashboardctl list` once.
+3. Remove absent owned surfaces and emit one external-close message for each.
+
+Do not emit unchanged status.
 
 ## Event presentation
 

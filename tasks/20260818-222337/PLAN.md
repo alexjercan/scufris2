@@ -43,7 +43,7 @@ Complete:
 ## Implementation rules
 
 - Add each skill or helper with its first tested behavior.
-- Keep TypeScript limited to Pi APIs, in-memory ownership, and timer coordination.
+- Keep the independent delegation and widget TypeScript extensions limited to Pi APIs, their own in-memory ownership, and timer coordination.
 - Use Python standard library for structured filesystem and process mechanics.
 - Use Bash only for small tmux or harness adapter operations where shell behavior is the subject.
 - Use argument arrays. Do not compose model text into shell commands.
@@ -63,7 +63,7 @@ Add:
 - One dedicated tmux server socket, one job session, exact window naming, and fixed job-ID-only launch helper.
 - Fake interactive harness fixture.
 - Append-only status parser with byte offsets and limits.
-- One extension-owned one-second loop.
+- One delegation-owned one-second loop.
 - Native agent tools.
 - Session shutdown cleanup.
 - Startup orphan reporting without adoption.
@@ -200,6 +200,7 @@ User outcome:
 
 Add:
 
+- Independent optional widget extension and matching skill.
 - dashboardctl process adapter.
 - Protocol version 2 response validation.
 - Widget discover, open, update, list, focus, and close tools.

@@ -10,12 +10,13 @@
     "check": "npm run typecheck && npm run format:check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "pi": "pi -e ./extensions/scufris/index.ts",
+    "pi": "pi -e ./extensions/scufris/agents.ts -e ./extensions/scufris/widgets.ts",
     "typecheck": "tsc --noEmit"
   },
   "pi": {
     "extensions": [
-      "./extensions/scufris/index.ts"
+      "./extensions/scufris/agents.ts",
+      "./extensions/scufris/widgets.ts"
     ],
     "skills": [
       "./skills"

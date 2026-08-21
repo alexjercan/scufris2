@@ -25,11 +25,11 @@ if not prompt_arg.startswith(prefix):
     raise SystemExit("missing prompt pointer")
 prompt = pathlib.Path(prompt_arg[len(prefix):])
 directory = prompt.parent
-(directory / "foreground-marker").write_text(os.environ.get("SCUFRIS_FOREGROUND", ""), encoding="utf-8")
+(directory / "role-marker").write_text(os.environ.get("SCUFRIS_ROLE", ""), encoding="utf-8")
 with (directory / "scufris-environment.json").open("w", encoding="utf-8") as stream:
     import json
     json.dump({key: os.environ.get(key) for key in (
-        "SCUFRIS_FOREGROUND",
+        "SCUFRIS_ROLE",
         "SCUFRIS_SPEECH",
         "SCUFRIS_CALM",
         "SCUFRIS_PIPER_MODEL",
@@ -105,7 +105,7 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
                 "XDG_CACHE_HOME": str(self.cache),
                 "TMUX_TMPDIR": str(self.tmux_root),
                 "SCUFRIS_PROJECT_ROOTS": json.dumps([str(self.projects_root)]),
-                "SCUFRIS_FOREGROUND": "1",
+                "SCUFRIS_ROLE": "orchestrator",
                 "SCUFRIS_SPEECH": "1",
                 "SCUFRIS_CALM": "1",
                 "SCUFRIS_PIPER_MODEL": "/trusted/model.onnx",
@@ -242,15 +242,13 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         pi_argv = json.loads((directory / "argv.json").read_text(encoding="utf-8"))
         self.assertNotIn("--extension", pi_argv)
         self.assertNotIn("--skill", pi_argv)
-        self.assertEqual(
-            (directory / "foreground-marker").read_text(encoding="utf-8"), ""
-        )
+        self.assertEqual((directory / "role-marker").read_text(encoding="utf-8"), "")
         self.assertEqual(
             json.loads(
                 (directory / "scufris-environment.json").read_text(encoding="utf-8")
             ),
             {
-                "SCUFRIS_FOREGROUND": None,
+                "SCUFRIS_ROLE": None,
                 "SCUFRIS_SPEECH": None,
                 "SCUFRIS_CALM": None,
                 "SCUFRIS_PIPER_MODEL": None,

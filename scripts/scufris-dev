@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+voice=false
+if [[ "${1-}" == "--voice" ]]; then
+  voice=true
+  shift
+fi
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+session_root="${XDG_STATE_HOME:-$HOME/.local/state}/scufris/dev-sessions"
+if [[ -z "${SCUFRIS_PROJECT_ROOTS+x}" ]]; then
+  export SCUFRIS_PROJECT_ROOTS='["~/personal","~/work","~/third-party"]'
+fi
+mkdir -p -- "$session_root"
+chmod 0700 "$session_root"
+
+IFS=: read -r -a path_entries <<<"$PATH"
+system_path_entries=()
+for entry in "${path_entries[@]}"; do
+  if [[ "$entry" != "$root/node_modules/.bin" ]]; then
+    system_path_entries+=("$entry")
+  fi
+done
+system_path="$(IFS=:; printf %s "${system_path_entries[*]}")"
+if ! system_pi="$(PATH="$system_path" type -P pi)"; then
+  printf 'scufris-dev: system Pi is unavailable\n' >&2
+  exit 2
+fi
+
+extensions=(
+  "$root/extensions/scufris/identity.ts"
+  "$root/extensions/scufris/calm.ts"
+)
+skills=()
+if [[ "$voice" == true ]]; then
+  if [[ "${SCUFRIS_DEV_VOICE:-}" != 1 ]] \
+    || [[ -z "${SCUFRIS_PIPER_MODEL:-}" ]] \
+    || [[ -z "${SCUFRIS_PIPER_CONFIG:-}" ]] \
+    || [[ ! -f "$SCUFRIS_PIPER_MODEL" ]] \
+    || [[ ! -f "$SCUFRIS_PIPER_CONFIG" ]] \
+    || ! type -P piper >/dev/null \
+    || ! type -P pw-play >/dev/null; then
+    printf 'scufris-dev: voice requires the repository nix develop shell\n' >&2
+    exit 2
+  fi
+  export SCUFRIS_SPEECH=1
+  export SCUFRIS_CALM=1
+  extensions+=("$root/extensions/scufris/speech.ts")
+else
+  unset SCUFRIS_SPEECH SCUFRIS_CALM SCUFRIS_PIPER_MODEL SCUFRIS_PIPER_CONFIG
+fi
+extensions+=(
+  "$root/extensions/scufris/agents.ts"
+  "$root/extensions/scufris/widgets.ts"
+)
+skills+=(
+  "$root/skills/delegation"
+  "$root/skills/widgets"
+)
+
+args=()
+for extension in "${extensions[@]}"; do
+  args+=(--extension "$extension")
+done
+for skill in "${skills[@]}"; do
+  args+=(--skill "$skill")
+done
+
+export SCUFRIS_ROLE=orchestrator
+exec "$system_pi" "${args[@]}" --session-dir "$session_root" --continue "$@"

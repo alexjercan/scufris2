@@ -190,9 +190,9 @@ test("last response extraction never falls back from an unsafe final response", 
 });
 
 test("speech on, off, once, and replay have deterministic turn behavior", async () => {
-  const originalForeground = process.env.SCUFRIS_FOREGROUND;
+  const originalRole = process.env.SCUFRIS_ROLE;
   const originalSpeech = process.env.SCUFRIS_SPEECH;
-  process.env.SCUFRIS_FOREGROUND = "1";
+  process.env.SCUFRIS_ROLE = "orchestrator";
   delete process.env.SCUFRIS_SPEECH;
   try {
     const playback = new FakePlayback();
@@ -267,17 +267,17 @@ test("speech on, off, once, and replay have deterministic turn behavior", async 
       ["Speech armed for one response.", "Speech mode on.", "Speech mode off."],
     );
   } finally {
-    if (originalForeground === undefined) delete process.env.SCUFRIS_FOREGROUND;
-    else process.env.SCUFRIS_FOREGROUND = originalForeground;
+    if (originalRole === undefined) delete process.env.SCUFRIS_ROLE;
+    else process.env.SCUFRIS_ROLE = originalRole;
     if (originalSpeech === undefined) delete process.env.SCUFRIS_SPEECH;
     else process.env.SCUFRIS_SPEECH = originalSpeech;
   }
 });
 
 test("settlement, input, reload state, unsafe output, and errors fail safely", async () => {
-  const originalForeground = process.env.SCUFRIS_FOREGROUND;
+  const originalRole = process.env.SCUFRIS_ROLE;
   const originalSpeech = process.env.SCUFRIS_SPEECH;
-  process.env.SCUFRIS_FOREGROUND = "1";
+  process.env.SCUFRIS_ROLE = "orchestrator";
   process.env.SCUFRIS_SPEECH = "1";
   try {
     const playback = new FakePlayback();
@@ -332,24 +332,24 @@ test("settlement, input, reload state, unsafe output, and errors fail safely", a
     await reloaded.emit("session_shutdown");
     assert.equal(reloadedPlayback.cancellations >= 2, true);
   } finally {
-    if (originalForeground === undefined) delete process.env.SCUFRIS_FOREGROUND;
-    else process.env.SCUFRIS_FOREGROUND = originalForeground;
+    if (originalRole === undefined) delete process.env.SCUFRIS_ROLE;
+    else process.env.SCUFRIS_ROLE = originalRole;
     if (originalSpeech === undefined) delete process.env.SCUFRIS_SPEECH;
     else process.env.SCUFRIS_SPEECH = originalSpeech;
   }
 });
 
 test("normal Pi and non-TUI Scufris modes never register or speak", async () => {
-  const originalForeground = process.env.SCUFRIS_FOREGROUND;
+  const originalRole = process.env.SCUFRIS_ROLE;
   const originalSpeech = process.env.SCUFRIS_SPEECH;
   process.env.SCUFRIS_SPEECH = "1";
   try {
-    delete process.env.SCUFRIS_FOREGROUND;
+    delete process.env.SCUFRIS_ROLE;
     const ordinary = harness(new FakePlayback());
     assert.equal(ordinary.commands.size, 0);
 
     for (const mode of ["rpc", "json", "print"]) {
-      process.env.SCUFRIS_FOREGROUND = "1";
+      process.env.SCUFRIS_ROLE = "orchestrator";
       const playback = new FakePlayback();
       const app = harness(playback, mode);
       await app.emit("session_start");
@@ -367,8 +367,8 @@ test("normal Pi and non-TUI Scufris modes never register or speak", async () => 
       );
     }
   } finally {
-    if (originalForeground === undefined) delete process.env.SCUFRIS_FOREGROUND;
-    else process.env.SCUFRIS_FOREGROUND = originalForeground;
+    if (originalRole === undefined) delete process.env.SCUFRIS_ROLE;
+    else process.env.SCUFRIS_ROLE = originalRole;
     if (originalSpeech === undefined) delete process.env.SCUFRIS_SPEECH;
     else process.env.SCUFRIS_SPEECH = originalSpeech;
   }

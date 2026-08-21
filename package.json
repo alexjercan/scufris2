@@ -10,7 +10,8 @@
     "check": "npm run typecheck && npm test && npm run format:check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "pi": "SCUFRIS_FOREGROUND=1 pi -e ./extensions/scufris/identity.ts -e ./extensions/scufris/calm.ts -e ./extensions/scufris/speech.ts -e ./extensions/scufris/agents.ts -e ./extensions/scufris/widgets.ts",
+    "dev": "./scripts/scufris-dev",
+    "dev:voice": "./scripts/scufris-dev --voice",
     "test": "node --experimental-strip-types --test --test-concurrency=1 tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -18,7 +19,6 @@
     "extensions": [
       "./extensions/scufris/identity.ts",
       "./extensions/scufris/calm.ts",
-      "./extensions/scufris/speech.ts",
       "./extensions/scufris/agents.ts",
       "./extensions/scufris/widgets.ts"
     ],

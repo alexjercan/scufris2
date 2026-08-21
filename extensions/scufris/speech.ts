@@ -299,7 +299,7 @@ export default function speech(
   pi: ExtensionAPI,
   options: { playback?: SpeechPlayback } = {},
 ): void {
-  if (process.env.SCUFRIS_FOREGROUND !== "1") return;
+  if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
 
   const playback = options.playback ?? new OwnedSpeechPlayback();
   const environmentMode: SpeechMode =

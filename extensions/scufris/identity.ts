@@ -23,7 +23,7 @@ export function appendPairPrompt(systemPrompt: string): string {
 }
 
 export default function identity(pi: ExtensionAPI): void {
-  if (process.env.SCUFRIS_FOREGROUND !== "1") return;
+  if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
 
   pi.on("before_agent_start", (event) => ({
     systemPrompt: appendPairPrompt(event.systemPrompt),

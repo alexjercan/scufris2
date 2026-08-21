@@ -58,7 +58,7 @@ The Scufris identity extension owns:
 
 - Loading the repository canonical Pair prompt.
 - Appending its complete canonical text in `before_agent_start` on every foreground agent run, including runs after compaction.
-- Activation only from the `SCUFRIS_FOREGROUND=1` launcher marker.
+- Activation only from the `SCUFRIS_ROLE=orchestrator` process role.
 
 The delegation extension owns:
 
@@ -76,7 +76,7 @@ The widget extension owns:
 
 Both use the shared bounded helper runtime. Neither parses shell commands, implements Git, inspects arbitrary paths, or embeds harness-specific process logic.
 
-The Nix launcher and local npm command set `SCUFRIS_FOREGROUND=1` and load the identity extension before the other Scufris extensions. The worker launcher removes that marker and invokes ambient Pi without Scufris extensions or skills. Normal Pi and direct package loading therefore do not receive the Scufris identity prompt.
+The Nix launcher and development runner set `SCUFRIS_ROLE=orchestrator` and load the identity extension before the other Scufris extensions. The worker launcher removes that role and invokes ambient Pi without Scufris extensions or skills. Normal Pi and direct package loading therefore do not receive the Scufris identity prompt.
 
 ### Skills
 

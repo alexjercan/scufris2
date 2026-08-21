@@ -17,7 +17,7 @@ test("canonical Pair prompt is exact, bounded ASCII", () => {
 });
 
 test("Pair prompt is added on every Scufris agent start only", () => {
-  const original = process.env.SCUFRIS_FOREGROUND;
+  const original = process.env.SCUFRIS_ROLE;
   const handlers: Array<(event: { systemPrompt: string }) => unknown> = [];
   const api = {
     on(event: string, handler: (event: { systemPrompt: string }) => unknown) {
@@ -26,11 +26,13 @@ test("Pair prompt is added on every Scufris agent start only", () => {
   } as unknown as ExtensionAPI;
 
   try {
-    delete process.env.SCUFRIS_FOREGROUND;
+    delete process.env.SCUFRIS_ROLE;
+    identity(api);
+    process.env.SCUFRIS_ROLE = "worker";
     identity(api);
     assert.equal(handlers.length, 0);
 
-    process.env.SCUFRIS_FOREGROUND = "1";
+    process.env.SCUFRIS_ROLE = "orchestrator";
     identity(api);
     assert.equal(handlers.length, 1);
     for (const base of ["first turn", "post-compaction turn"]) {
@@ -39,7 +41,7 @@ test("Pair prompt is added on every Scufris agent start only", () => {
       });
     }
   } finally {
-    if (original === undefined) delete process.env.SCUFRIS_FOREGROUND;
-    else process.env.SCUFRIS_FOREGROUND = original;
+    if (original === undefined) delete process.env.SCUFRIS_ROLE;
+    else process.env.SCUFRIS_ROLE = original;
   }
 });

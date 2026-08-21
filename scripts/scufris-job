@@ -570,7 +570,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
 def worker_environment() -> dict[str, str]:
     env = os.environ.copy()
     for variable in (
-        "SCUFRIS_FOREGROUND",
+        "SCUFRIS_ROLE",
         "SCUFRIS_SPEECH",
         "SCUFRIS_CALM",
         "SCUFRIS_PIPER_MODEL",

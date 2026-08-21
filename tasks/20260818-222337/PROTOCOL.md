@@ -12,7 +12,7 @@
 
 ## Scufris identity
 
-`prompts/pair.md` is the one canonical Pair prompt. It is LF-terminated ASCII and at most 500 bytes. The Scufris launcher sets `SCUFRIS_FOREGROUND=1`; `extensions/scufris/identity.ts` appends the complete canonical text in `before_agent_start` for every foreground agent run. This rebuilds it after compaction. The worker launcher removes the marker. Normal Pi sessions, direct package loading, and ambient delegated Pi workers do not receive the Scufris prompt.
+`prompts/pair.md` is the one canonical Pair prompt. It is LF-terminated ASCII and at most 500 bytes. The Scufris launcher sets `SCUFRIS_ROLE=orchestrator`; `extensions/scufris/identity.ts` appends the complete canonical text in `before_agent_start` for every orchestrator agent run. This rebuilds it after compaction. The worker launcher removes the role. Normal Pi sessions, direct package loading, and ambient delegated Pi workers do not receive the Scufris prompt.
 
 Pair is automatic. No Pair command exists. Readiness remains a Scufris prose judgment, not a deterministic routing tool.
 

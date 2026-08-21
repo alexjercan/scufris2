@@ -1,6 +1,6 @@
 # Move voice runtime and popup ownership into Scufris
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: voice, nix, architecture
 
@@ -113,3 +113,44 @@ continue running until phase two.
 - `nix flake check`.
 - `git diff --check`.
 - No live Home Manager activation in this phase.
+
+## Implementation evidence
+
+- Split packaged resources and launch composition. Default Scufris omits the speech extension and helper. `scufris-voice` adds them with Python, PipeWire, trusted model environment, and the private Piper package.
+- Added a private reduced Piper 1.4.2 derivation with the close-before-stdout-copy patch. The global `pkgs.piper-tts` remains unchanged. Pinned `en_US-lessac-medium` model and adjacent config hashes match the audited voice deployment.
+- Added Home Manager `programs.scufris.voice` and nested popup options. Model and config overrides must be Nix store paths. The module exposes public documented read-only final package, popup launcher, and `scufris-popup` service identity. A separate test module consumes all three outputs.
+- Added one direct Kitty popup launcher. It creates the dedicated session directory, defaults speech and Calm on, preserves inherited Pi and STT environment, and runs voice-capable Scufris with `--session-dir` and `--continue`.
+- Added `scufris-popup.service` without `Install`, target wants, startup policy, desktop criteria, or i3 configuration. Stable class, instance, initial title, and service name default to `Scufris`, `scufris-popup`, `Scufris`, and `scufris-popup`.
+- Removed speech from default npm package composition. Replaced the old development scripts with one array-based `scripts/scufris-dev` runner behind `npm run dev` and `npm run dev:voice`.
+- Replaced the foreground marker with `SCUFRIS_ROLE=orchestrator` in launchers, identity, speech, tests, and durable architecture records. Delegated workers strip the role.
+- Added a dedicated resumable development session and exact normal and voice development composition. The development runner preserves configured project roots or sets the accepted launcher default. The Nix development shell supplies private Piper, PipeWire, and trusted model paths. Voice development enables speech and Calm and inherits STT unchanged.
+- Moved substantial fixtures and check construction to focused `nix/checks.nix`; `flake.nix` now contains package and output composition.
+- Expanded README with the primary Home Manager interface, Scufris/STT/i3 ownership boundary, and development requirements.
+- Kept `scripts/scufris-speak` unchanged. Exact no-shell child ownership, bounded in-memory WAV handling, validation, and cancellation behavior remain intact.
+
+## Decisions and tradeoffs
+
+- Use separate normal and voice resource outputs. Merely omitting the speech CLI argument would still retain `speech.ts` in the default resource closure.
+- Keep trusted model and config paths adjacent because Piper 1.4.2 ignores its config argument while loading. Reject non-adjacent overrides before activation.
+- Build Piper without training, HTTP, or alignment extras. This keeps the voice closure on the required synthesis runtime.
+- Expose the direct popup launcher, not an i3 toggle or ownership query. The later desktop consumer can read stable class, instance, service name, and launcher without transferring presentation ownership.
+- Define the popup unit only when Scufris, voice, and popup are enabled. Omit all install targets so evaluation and activation do not start it.
+- Keep stable consumer outputs public even though they are computed and read-only. Home Manager `internal` would hide the accepted cross-repository interface.
+
+## Verification evidence
+
+- `sprout sync scufris-voice-feature` - passed before implementing the accepted development-role scope update; feature advanced from `584343f` to master `72df74b`.
+- Post-commit `sprout sync scufris-voice-feature` - passed, already up to date. Post-sync reruns of all checks below passed.
+- `npm install && npm run check` - passed: strict TypeScript, 33 tests, and Prettier, including exact working-tree development composition and process-role behavior.
+- Focused launcher, resource, closure, Home Manager, external consumer interface, popup unit, development shell, and worker-environment checks - passed.
+- `nix develop --command npm run dev:voice -- user-argument` with a fake system Pi - passed. It used working-tree resources, the dedicated session directory, private Piper and PipeWire shell runtime, speech and Calm defaults, and unchanged inherited STT.
+- Real private Piper 1.4.2 fixture - passed. `scufris-speak` accepted complete non-empty RIFF/WAVE synthesis and sent it to the exact fake `pw-play` sink.
+- Direct closure inspection - default had no Piper, PipeWire, Lessac assets, or speech resources; voice had only the private Piper output, PipeWire, and pinned model/config assets.
+- Initial `npm run check` before dependency installation failed because `tsc` was absent. No product defect.
+- Initial real fixture execution used the helper's `/usr/bin/env` shebang inside the Nix sandbox, where `/usr/bin` is absent. Invoking the unchanged helper through packaged Python fixed the fixture without changing runtime behavior.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` - passed, 22 tests.
+- Ruff check, Ruff format check, ShellCheck, and Python bytecode compilation for all helpers and tests - passed. The first post-scope-update format check found one worker-test line wrapping difference; formatting it fixed the check.
+- `nix fmt -- --check .` - passed.
+- `nix flake check` - passed, including the real Piper, closure, launcher, Home Manager, popup interface, and uninstalled unit checks.
+- `git diff --check` - passed.
+- No Home Manager activation was run.

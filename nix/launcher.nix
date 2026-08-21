@@ -5,14 +5,21 @@
   dashboardctlPackage,
   delegation ? true,
   widgets ? true,
+  voice ? false,
+  piperPackage ? null,
+  piperModel ? null,
+  piperConfig ? null,
   projectRoots ? ["~/personal" "~/work" "~/third-party"],
-}: let
+}:
+assert !voice || (piperPackage != null && piperModel != null && piperConfig != null); let
   extensionArgs =
     [
       "--extension"
       "${resources}/share/scufris/extensions/scufris/identity.ts"
       "--extension"
       "${resources}/share/scufris/extensions/scufris/calm.ts"
+    ]
+    ++ pkgs.lib.optionals voice [
       "--extension"
       "${resources}/share/scufris/extensions/scufris/speech.ts"
     ]
@@ -33,8 +40,9 @@ in
   pkgs.writeShellApplication {
     name = "scufris";
     runtimeInputs =
-      [
-        pkgs.piper-tts
+      pkgs.lib.optionals voice [
+        pkgs.python3
+        piperPackage
         pkgs.pipewire
       ]
       ++ pkgs.lib.optional widgets dashboardctlPackage;
@@ -42,7 +50,11 @@ in
       if [[ -z "''${SCUFRIS_PROJECT_ROOTS+x}" ]]; then
         export SCUFRIS_PROJECT_ROOTS=${pkgs.lib.escapeShellArg (builtins.toJSON projectRoots)}
       fi
-      export SCUFRIS_FOREGROUND=1
+      export SCUFRIS_ROLE=orchestrator
+      ${pkgs.lib.optionalString voice ''
+        export SCUFRIS_PIPER_MODEL=${pkgs.lib.escapeShellArg (toString piperModel)}
+        export SCUFRIS_PIPER_CONFIG=${pkgs.lib.escapeShellArg (toString piperConfig)}
+      ''}
 
       pi=${pkgs.lib.escapeShellArg "${piPackage}/bin/pi"}
       if system_pi="$(type -P pi)"; then

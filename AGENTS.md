@@ -10,7 +10,7 @@ Repository guidance. Global `~/AGENTS.md` applies.
 
 ## Agent workflow
 
-- Tracker/epics: task records under `tasks/`.
+- Tracker/epics: use the tatr skill and CLI for task records under `tasks/`; statuses are only `OPEN`, `IN_PROGRESS`, and `CLOSED`.
 - Examples/retention: keep runnable examples with the owning skill or task.
 - Domain docs: use `docs/` as an mdBook when needed; keep design evidence with its task.
 - Research/network: inspect installed Pi docs and local source first; record external evidence in the owning task.

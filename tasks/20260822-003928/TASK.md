@@ -66,11 +66,32 @@ Requirements:
 - Preserve exact no-shell process ownership and the existing validated WAV path.
 - Provide a standalone voice-capable package or equivalent flake checkable output when it makes the interface clearer.
 
+## Development and process role
+
+- Replace the unclear `SCUFRIS_FOREGROUND=1` marker with
+  `SCUFRIS_ROLE=orchestrator` everywhere. Do not preserve the old marker.
+- Identity and speech behavior require the orchestrator role.
+- Delegated workers remove the role from their environment.
+- Replace `npm run pi` with `npm run dev` and `npm run dev:voice`.
+- Keep package scripts small. Use one checked-in executable helper with a
+  `--voice` switch and Bash arrays for extension and skill arguments.
+- Both development commands load working-tree Scufris source through the
+  system Pi and use a dedicated development session directory.
+- `dev:voice` gets Piper, PipeWire, and trusted model paths from `nix develop`,
+  enables speech and Calm, and fails clearly outside the prepared shell.
+- The development runner inherits global STT configuration. It must not know or
+  set a Whisper endpoint or `PI_STT_CONFIG` path.
+- Add exact development composition and worker-environment tests.
+
 ## Breaking-change policy
 
-Do not preserve the current accidental always-on Piper composition. Do not add aliases for the later `services.localVoice` interface. That interface belongs to another repository and will be deleted in phase two.
+Do not preserve the current accidental always-on Piper composition. Do not
+preserve `SCUFRIS_FOREGROUND`, `npm run pi`, or aliases for the later
+`services.localVoice` interface. That interface belongs to another repository
+and will be deleted in phase two.
 
-Do not modify `nix.dotfiles` in this task. Its currently pinned generation must continue running until phase two.
+Do not modify `nix.dotfiles` in this task. Its currently pinned generation must
+continue running until phase two.
 
 ## Definition of done
 

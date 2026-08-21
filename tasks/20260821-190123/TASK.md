@@ -1,6 +1,6 @@
 # Add read-only Scufris job diagnostics
 
-- STATUS: OPEN
+- STATUS: IN_PROGRESS
 - PRIORITY: 100
 - TAGS: agents, diagnostics
 

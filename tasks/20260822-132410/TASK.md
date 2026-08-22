@@ -17,6 +17,7 @@ Run each independent preflight reviewer visibly in a dedicated window within its
 - Never attach, select, switch, or otherwise change the user's current tmux client.
 - Notify the foreground user of the reviewer window name when preflight starts.
 - Keep the finished pane visible with remain-on-exit until the owning lifecycle removes it.
+- Allow 1800 seconds for one independent reviewer run. Give the enclosing helper only a small fixed shutdown margin beyond that deadline.
 - Reuse the same reviewer window and saved Pi reviewer session for correction verification within one preflight sequence.
 - Human Plannotator feedback invalidates the sequence. Remove only the exact owned prior reviewer window before creating a fresh reviewer window and session for the next sequence.
 - Default post-landing remove cleanup continues through Sprout and can remove the complete feature session. Retain cleanup keeps reviewer evidence with the retained feature resources.
@@ -52,7 +53,7 @@ Update the delegation manual, skill, architecture, protocol, and task evidence t
 - Test stable naming, exact identity validation, disabled pane input, visible activity, and remain-on-exit behavior.
 - Test correction verification reuses the same reviewer window and reviewer session.
 - Test human feedback invalidates and removes only the exact prior reviewer window.
-- Test timeout, malformed output, reviewer failure, shutdown, remove cleanup, retain cleanup, and unrelated-window preservation.
+- Test the exact 1800-second reviewer deadline and enclosing shutdown margin, malformed output, reviewer failure, shutdown, remove cleanup, retain cleanup, and unrelated-window preservation.
 - Use an isolated tmux socket for automated tmux tests and verify the default server identity is unchanged.
 - Run TypeScript, Python integration, formatting, ShellCheck, Nix formatting, diff checks, and full Nix checks required by repository guidance.
 

@@ -41,7 +41,14 @@ function rendered(component: { render(width: number): string[] }): string {
   return component.render(100).join("\n");
 }
 
-test("Calm hides operational transcript rows and restores them on toggle", async () => {
+test("Calm hides operational transcript rows and restores them on toggle", async (t) => {
+  const originalCalm = process.env.SCUFRIS_CALM;
+  delete process.env.SCUFRIS_CALM;
+  t.after(() => {
+    if (originalCalm === undefined) delete process.env.SCUFRIS_CALM;
+    else process.env.SCUFRIS_CALM = originalCalm;
+  });
+
   const commands = new Map<
     string,
     { handler: (args: string, context: any) => Promise<void> }
@@ -150,22 +157,16 @@ test("Calm hides operational transcript rows and restores them on toggle", async
   assert.equal(rendered(intermediateComponent), "");
 
   await reloadedCommands.get("calm")?.handler("", context);
-  const originalCalm = process.env.SCUFRIS_CALM;
   process.env.SCUFRIS_CALM = "1";
-  try {
-    const popupStarts: Array<(event: unknown, context: any) => void> = [];
-    calm({
-      on(event: string, handler: (event: unknown, context: any) => void) {
-        if (event === "session_start") popupStarts.push(handler);
-      },
-      registerCommand() {},
-    } as unknown as ExtensionAPI);
-    popupStarts[0]?.({}, context);
-    intermediateComponent.invalidate();
-    assert.equal(labels.at(-1), "");
-    assert.equal(rendered(intermediateComponent), "");
-  } finally {
-    if (originalCalm === undefined) delete process.env.SCUFRIS_CALM;
-    else process.env.SCUFRIS_CALM = originalCalm;
-  }
+  const popupStarts: Array<(event: unknown, context: any) => void> = [];
+  calm({
+    on(event: string, handler: (event: unknown, context: any) => void) {
+      if (event === "session_start") popupStarts.push(handler);
+    },
+    registerCommand() {},
+  } as unknown as ExtensionAPI);
+  popupStarts[0]?.({}, context);
+  intermediateComponent.invalidate();
+  assert.equal(labels.at(-1), "");
+  assert.equal(rendered(intermediateComponent), "");
 });

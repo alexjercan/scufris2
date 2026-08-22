@@ -45,6 +45,11 @@ async function fixture() {
     TEST_STT_ENDPOINT: "inherited-endpoint",
   };
   delete env.SCUFRIS_PROJECT_ROOTS;
+  delete env.SCUFRIS_DEV_VOICE;
+  delete env.SCUFRIS_PIPER_MODEL;
+  delete env.SCUFRIS_PIPER_CONFIG;
+  delete env.SCUFRIS_SPEECH;
+  delete env.SCUFRIS_CALM;
   return { directory, bin, state, env };
 }
 

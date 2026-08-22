@@ -15,11 +15,39 @@ fi
 mkdir -p -- "$session_root"
 chmod 0700 "$session_root"
 
-IFS=: read -r -a path_entries <<<"$PATH"
+repository_npm_bin="$root/node_modules/.bin"
+repository_npm_bin_physical=""
+if [[ -d "$repository_npm_bin" ]]; then
+  repository_npm_bin_physical="$(CDPATH='' cd -- "$repository_npm_bin" && pwd -P)"
+fi
+
+path_remainder="$PATH"
 system_path_entries=()
-for entry in "${path_entries[@]}"; do
-  if [[ "$entry" != "$root/node_modules/.bin" ]]; then
+while true; do
+  if [[ "$path_remainder" == *:* ]]; then
+    entry="${path_remainder%%:*}"
+    path_remainder="${path_remainder#*:}"
+    final_entry=false
+  else
+    entry="$path_remainder"
+    final_entry=true
+  fi
+
+  is_repository_npm_bin=false
+  if [[ "$entry" == "$repository_npm_bin" || "$entry" == "$repository_npm_bin/" ]]; then
+    is_repository_npm_bin=true
+  elif [[ -n "$entry" && -n "$repository_npm_bin_physical" && -d "$entry" ]]; then
+    entry_physical="$(CDPATH='' cd -- "$entry" && pwd -P)"
+    if [[ "$entry_physical" == "$repository_npm_bin_physical" ]]; then
+      is_repository_npm_bin=true
+    fi
+  fi
+  if [[ "$is_repository_npm_bin" == false ]]; then
     system_path_entries+=("$entry")
+  fi
+
+  if [[ "$final_entry" == true ]]; then
+    break
   fi
 done
 system_path="$(IFS=:; printf %s "${system_path_entries[*]}")"
@@ -27,6 +55,7 @@ if ! system_pi="$(PATH="$system_path" type -P pi)"; then
   printf 'scufris-dev: system Pi is unavailable\n' >&2
   exit 2
 fi
+export PATH="$system_path"
 
 extensions=(
   "$root/extensions/scufris/identity.ts"

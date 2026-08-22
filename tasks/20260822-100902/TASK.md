@@ -1,6 +1,6 @@
 # Add CI and tagged GitHub releases
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: ci, release
 
@@ -45,3 +45,43 @@ Add GitHub Actions checks and automatic GitHub Release publication for future se
 - A future exact semantic-version tag runs checks, validates package version, and creates a GitHub Release.
 - Invalid or mismatched tags cannot publish.
 - `RELEASE.md` is sufficient to cut the next release without prior conversation context.
+
+## Implementation evidence
+
+Implementation:
+
+- Base revision: `60a1737` on `release-automation` and `master` before this work.
+- `.github/workflows/check.yml` is the reusable read-only suite. It runs for `master` pushes, pull requests, manual dispatch, and release workflow calls. Its branch-only push filter excludes tag pushes.
+- The check job uses Node 22, `npm ci`, the complete `npm run check`, flakes-enabled Nix, and `nix flake check -L`.
+- `.github/workflows/release.yml` triggers on stable numeric `vX.Y.Z` tags, calls the reusable suite first, and keeps default contents access read-only.
+- Only the publication job receives `contents: write`. It rejects non-canonical semantic versions and package-version mismatches before `gh release create --verify-tag --generate-notes` creates a source-only release.
+- `RELEASE.md` records clean `master` preparation, task and documentation review, package and lockfile versioning, relevant local environments, full checks, annotated immutable tags, ordered pushes, automatic verification, and source-only policy. Historical `v0.1.0` backfill context remains in this task instead of the generic checklist.
+- No release assets, product behavior, Nix outputs, deployment, tags, or remote state changed.
+
+Verification before synchronization:
+
+- `npm ci` - pass; installed the lockfile dependency graph with zero reported vulnerabilities.
+- `nix run nixpkgs#actionlint -- .github/workflows/check.yml .github/workflows/release.yml` - pass; both workflow files are syntactically and structurally valid.
+- Parsed both workflows through `yq` and asserted the complete check event set, exact `master` branch filter, absence of check tag filters, sole release tag event, and representative accepted and rejected tag names - pass.
+- Extracted the release version guard from the parsed workflow and executed it against the current `v0.1.0`, mismatched `v0.2.0`, and non-canonical `v01.1.0` cases - pass; only the matching canonical tag succeeded.
+- `env -u SCUFRIS_DEV_VOICE -u SCUFRIS_PIPER_MODEL -u SCUFRIS_PIPER_CONFIG -u SCUFRIS_SPEECH -u SCUFRIS_CALM npm run check` - pass; typecheck, 33 TypeScript tests, and Prettier passed in the clean ordinary environment.
+- `nix fmt -- --check .` - pass; all six Nix files comply with Alejandra.
+- `nix flake check -L` - pass for `x86_64-linux`, including the real Piper fixture. Nix omitted the configured incompatible systems.
+- `git diff --check` - pass.
+
+Setup note:
+
+- The first YAML conversion attempt used an unsupported `-o=json` flag with the available Python `yq`. Re-running its default JSON output form enabled all event assertions. No repository change was needed.
+
+Synchronization and final verification:
+
+- Committed the implementation as `78ed1a0` (`Add tagged release automation`).
+- `sprout sync release-automation` - pass; merged current `master` revision `ccc8379` and its unrelated mdBook planning task as merge revision `f07ab2f`.
+- Repeated the clean-environment `npm run check` after synchronization - pass; typecheck, 33 TypeScript tests, and Prettier passed.
+- Repeated `nix fmt -- --check .` and `nix flake check -L` after synchronization - pass with the same incompatible-system notice.
+- Repeated Actionlint and `git diff --check` after synchronization - pass.
+- Final review revision: `release-automation` HEAD after this evidence commit. The worktree is clean.
+
+Review correction:
+
+- Removed the historical `v0.1.0` backfill note from `RELEASE.md` so the checklist stays generic. The accepted backfill constraint remains recorded in this task.

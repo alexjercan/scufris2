@@ -202,6 +202,30 @@ function statusValue(value: unknown, name: string): string {
   return status;
 }
 
+function reviewValue(value: unknown, name: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Scufris diagnostics response: ${name}`);
+  }
+  const object = value as Record<string, unknown>;
+  const profile = stringValue(object.profile, `${name}.profile`, 10);
+  if (profile === "none") {
+    exactObject(value, ["profile"], name);
+    return { profile: "none" as const };
+  }
+  if (!new Set(["code", "consumer", "operations", "interface"]).has(profile)) {
+    throw new Error(`Invalid Scufris diagnostics response: ${name}.profile`);
+  }
+  exactObject(value, ["profile", "brief"], name);
+  return {
+    profile,
+    brief: sanitizeText(
+      stringValue(object.brief, `${name}.brief`, 4096),
+      4096,
+      false,
+    ),
+  };
+}
+
 function sanitizeList(
   value: unknown,
   ownership: OwnershipLookup,
@@ -251,6 +275,7 @@ function sanitizeList(
         "tmux_session",
         "pane_liveness",
         "cleanup",
+        "review",
         "diagnostics",
       ],
       prefix,
@@ -309,6 +334,7 @@ function sanitizeList(
         16,
         false,
       ),
+      review: reviewValue(job.review, `${prefix}.review`),
       ...diagnosticValues(job.diagnostics, `${prefix}.diagnostics`, 3),
     };
   });
@@ -345,6 +371,7 @@ function sanitizeDetail(value: unknown, ownership: OwnershipLookup) {
       "thinking",
       "feature",
       "cleanup",
+      "review",
       "project",
       "landing_branch",
       "landing_sha",
@@ -357,7 +384,7 @@ function sanitizeDetail(value: unknown, ownership: OwnershipLookup) {
     "metadata",
   );
   if (
-    metadata.version !== 1 ||
+    metadata.version !== 2 ||
     jobIdValue(metadata.job_id, "metadata.job_id") !== jobId
   ) {
     throw new Error("Invalid Scufris diagnostics response: metadata identity");
@@ -378,6 +405,7 @@ function sanitizeDetail(value: unknown, ownership: OwnershipLookup) {
   ]) {
     stringValue(metadata[key], `metadata.${key}`);
   }
+  const review = reviewValue(metadata.review, "metadata.review");
   shaValue(metadata.landing_sha, "metadata.landing_sha");
   const tmux = exactObject(
     root.tmux,
@@ -459,6 +487,7 @@ function sanitizeDetail(value: unknown, ownership: OwnershipLookup) {
       200,
       false,
     ),
+    review,
     thinking: sanitizeText(
       stringValue(metadata.thinking, "metadata.thinking", 16),
       16,

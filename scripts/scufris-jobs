@@ -26,6 +26,7 @@ STATES = {"working", "needs-decision", "blocked", "review-ready", "done", "faile
 HARNESSES = {"pi", "claude"}
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 CLEANUP = {"remove", "retain"}
+REVIEW_PROFILES = {"code", "consumer", "operations", "interface"}
 RECORD_KEYS = {
     "version",
     "job_id",
@@ -34,6 +35,7 @@ RECORD_KEYS = {
     "thinking",
     "feature",
     "cleanup",
+    "review",
     "project",
     "landing_branch",
     "landing_sha",
@@ -112,6 +114,18 @@ def validate_text(value: Any, name: str, maximum: int = 200) -> str:
     return value
 
 
+def validate_review(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise DiagnosticError("job.json: invalid review")
+    profile = value.get("profile")
+    if profile == "none" and set(value) == {"profile"}:
+        return {"profile": "none"}
+    if profile not in REVIEW_PROFILES or set(value) != {"profile", "brief"}:
+        raise DiagnosticError("job.json: invalid review")
+    brief = validate_text(value.get("brief"), "review brief", 4096)
+    return {"profile": profile, "brief": brief}
+
+
 def parse_created_at(value: Any) -> tuple[str, dt.datetime]:
     text = validate_text(value, "created_at", 20)
     try:
@@ -137,7 +151,7 @@ def validate_record(value: Any, job_id: str) -> tuple[dict[str, Any], dt.datetim
         if unknown:
             details.append(f"unknown {', '.join(unknown)}")
         raise DiagnosticError(f"job.json: invalid fields ({'; '.join(details)})")
-    if value["version"] != 1 or isinstance(value["version"], bool):
+    if value["version"] != 2 or isinstance(value["version"], bool):
         raise DiagnosticError("job.json: unsupported version")
     if value["job_id"] != job_id:
         raise DiagnosticError("job.json: job_id does not match directory")
@@ -158,6 +172,7 @@ def validate_record(value: Any, job_id: str) -> tuple[dict[str, Any], dt.datetim
         raise DiagnosticError("job.json: invalid feature")
     if value["cleanup"] not in CLEANUP:
         raise DiagnosticError("job.json: invalid cleanup")
+    review = validate_review(value["review"])
     project = value["project"]
     if not isinstance(project, str) or (
         project != "current"
@@ -190,6 +205,7 @@ def validate_record(value: Any, job_id: str) -> tuple[dict[str, Any], dt.datetim
             raise DiagnosticError(f"job.json: invalid {key}")
     created_at, created = parse_created_at(value["created_at"])
     sanitized = {key: value[key] for key in sorted(RECORD_KEYS)}
+    sanitized["review"] = review
     sanitized["created_at"] = created_at
     return sanitized, created
 
@@ -554,6 +570,7 @@ def base_job(
         "tmux_session": record["tmux_session"],
         "pane_liveness": liveness,
         "cleanup": record["cleanup"],
+        "review": record["review"],
         "diagnostics": [*diagnostics, *protocol_errors],
     }
 

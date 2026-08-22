@@ -22,6 +22,7 @@ FEATURE_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 MODEL_RE = re.compile(r"[^\x00-\x1f\x7f]{1,200}\Z")
 PROJECT_RE = re.compile(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\Z")
 TMUX_ID_RE = re.compile(r"[$@%][0-9]+\Z")
+REVIEWER_SESSION_RE = re.compile(r"reviewer-[a-z0-9]{12}\.jsonl\Z")
 KNOWN_FILES = ("job.json", "prompt.md", "report.md", "status")
 RECORD_KEYS = {
     "version",
@@ -31,6 +32,7 @@ RECORD_KEYS = {
     "thinking",
     "feature",
     "cleanup",
+    "review",
     "project",
     "landing_branch",
     "landing_sha",
@@ -43,6 +45,7 @@ RECORD_KEYS = {
 HARNESSES = {"pi", "claude"}
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 CLEANUP = {"remove", "retain"}
+REVIEW_PROFILES = {"code", "consumer", "operations", "interface"}
 MAX_DAYS = 36500
 MAX_ENTRIES = 256
 MAX_RECORD = 64 * 1024
@@ -217,9 +220,12 @@ def inspect_job(root_descriptor: int, root_device: int, job_id: str) -> Snapshot
             raise Refusal("job directory: not a non-symlink directory")
         if directory_info.st_dev != root_device:
             raise Refusal("job directory: crosses the jobs-root filesystem boundary")
-        names = bounded_names(descriptor, len(KNOWN_FILES), "job directory")
+        names = bounded_names(descriptor, len(KNOWN_FILES) + 1, "job directory")
+        reviewer_names = [name for name in names if REVIEWER_SESSION_RE.fullmatch(name)]
         missing = sorted(set(KNOWN_FILES) - set(names))
-        unknown = sorted(set(names) - set(KNOWN_FILES))
+        unknown = sorted(
+            set(names) - set(KNOWN_FILES) - set(reviewer_names)
+        )
         if missing or unknown:
             details = []
             if missing:
@@ -230,7 +236,7 @@ def inspect_job(root_descriptor: int, root_device: int, job_id: str) -> Snapshot
                 )
             raise Refusal(f"job directory: invalid entries ({'; '.join(details)})")
         file_snapshots: list[tuple[str, Fingerprint]] = []
-        for name in KNOWN_FILES:
+        for name in (*KNOWN_FILES, *reviewer_names):
             try:
                 info = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
             except OSError as error:
@@ -270,6 +276,17 @@ def validate_text(value: Any, name: str, maximum: int = 200) -> str:
     return value
 
 
+def validate_review(value: Any) -> None:
+    if not isinstance(value, dict):
+        raise ValueError("job.json has an invalid review")
+    profile = value.get("profile")
+    if profile == "none" and set(value) == {"profile"}:
+        return
+    if profile not in REVIEW_PROFILES or set(value) != {"profile", "brief"}:
+        raise ValueError("job.json has an invalid review")
+    validate_text(value.get("brief"), "review brief", 4096)
+
+
 def parse_created_at(value: Any) -> int:
     text = validate_text(value, "created_at", 20)
     parsed = dt.datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(
@@ -289,7 +306,7 @@ def validate_record(raw: bytes, job_id: str) -> tuple[dict[str, Any], int]:
         raise ValueError("job.json is not valid UTF-8 JSON") from error
     if not isinstance(value, dict) or set(value) != RECORD_KEYS:
         raise ValueError("job.json has invalid fields")
-    if value["version"] != 1 or isinstance(value["version"], bool):
+    if value["version"] != 2 or isinstance(value["version"], bool):
         raise ValueError("job.json has an unsupported version")
     if value["job_id"] != job_id:
         raise ValueError("job.json job_id does not match its directory")
@@ -309,6 +326,7 @@ def validate_record(raw: bytes, job_id: str) -> tuple[dict[str, Any], int]:
         raise ValueError("job.json has an invalid feature")
     if value["cleanup"] not in CLEANUP:
         raise ValueError("job.json has an invalid cleanup policy")
+    validate_review(value["review"])
     project = value["project"]
     if not isinstance(project, str) or (
         project != "current"
@@ -541,12 +559,12 @@ def delete_candidate(
         if fingerprint(os.fstat(descriptor)) != candidate.snapshot.directory:
             raise Refusal("changed before deletion")
         expected_files = dict(candidate.snapshot.files)
-        for name in KNOWN_FILES:
+        for name, _ in candidate.snapshot.files:
             verify_root(root, root_descriptor, root_fingerprint)
             current = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
             if fingerprint(current) != expected_files[name]:
                 raise Refusal(f"{name} changed before deletion")
-        for name in KNOWN_FILES:
+        for name, _ in candidate.snapshot.files:
             current = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
             if fingerprint(current) != expected_files[name]:
                 raise Refusal(f"{name} changed during deletion")

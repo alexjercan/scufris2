@@ -391,7 +391,9 @@ sequenceDiagram
 
 One committed revision is required per review round. An explicit retry after a transient review-precondition failure is the same round and does not require a new commit. It is accepted only for the owned blocked job marked retryable. It clears request and approval state, takes a fresh snapshot, and reruns every current tmux and Git precondition. Review outcomes and other lifecycle blockers are not retryable through this operation.
 
-Every landable delegated job selects one preflight profile at spawn: code, consumer, operations, or interface. A non-landable result selects none. After `review-ready`, Scufris starts a fresh headless Pi reviewer with Sol at medium thinking. The reviewer receives repository instructions, a concise accepted-outcome and audience brief, and the exact base-to-feature diff. It can inspect the feature worktree with read-only tools. It does not receive the implementation transcript, worker report, reasoning, or claims.
+Every landable delegated job selects one preflight profile at spawn: code, consumer, operations, or interface. A non-landable result selects none. After `review-ready`, Scufris starts a fresh headless Pi reviewer with Sol at medium thinking. The private helper owns the exact non-tmux child, dedicated session directory, read-only built-in tool allowlist, bounded patch and output, environment isolation, timeout, and pre/post snapshot checks. The extension owns review policy, feedback cycles, revision-bound approval, Plannotator ordering, and shutdown cancellation.
+
+The reviewer receives repository instructions, a concise accepted-outcome and audience brief, and the exact base-to-feature diff. It can inspect the feature worktree with read-only tools. It does not receive the implementation transcript, worker report, reasoning, or claims.
 
 Preflight findings contain only fix-worthy BLOCKER, MAJOR, or MINOR items with a relative path, line, reason, and concrete correction. Feedback returns to the implementation worker. The same reviewer session verifies corrections. A third request for changes blocks for Pair mediation. Preflight approval binds to the exact landing and feature revisions. Plannotator opens only after that approval. User feedback invalidates the preflight approval and starts a fresh preflight sequence before Plannotator reopens.
 
@@ -408,7 +410,7 @@ Approval is invalid if:
 - Landing-target SHA changed.
 - Worktree became dirty.
 - Target is no longer an ancestor.
-- Approval came from a focused review or the response is not structured `approved: true`.
+- The response is not structured `approved: true`.
 
 ## Widget lifecycle
 

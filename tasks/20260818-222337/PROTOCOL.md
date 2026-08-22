@@ -280,13 +280,18 @@ Immutable extension-owned record:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "job_id": "8k2m4p6q9s1v",
   "harness": "pi",
   "model": "openai-codex/gpt-5.6-sol",
   "thinking": "medium",
   "feature": "fix-login-timeout",
   "cleanup": "remove",
+  "review": {
+    "profile": "code",
+    "brief": "Audience: maintainers. Outcome: the login timeout fix preserves session state."
+  },
+  "project": "current",
   "landing_branch": "master",
   "landing_sha": "0123456789abcdef0123456789abcdef01234567",
   "tmux_session": "example_fix-login-timeout",
@@ -298,6 +303,8 @@ Immutable extension-owned record:
 ```
 
 Do not store prompt text, credentials, environment values, or absolute paths in this record.
+
+An active landable preflight sequence can add one `reviewer-<review_id>.jsonl` file beside the fixed job files. It is the dedicated reviewer session and never the implementation-worker session. A fresh sequence removes the invalidated reviewer session first. Stale-job pruning verifies and removes this optional exact regular file with the other owned job evidence.
 
 ### `prompt.md`
 
@@ -443,7 +450,7 @@ Every spawn declares one review policy:
 
 Landable profiles are `code`, `consumer`, `operations`, and `interface`. The brief is bounded plain text that states the accepted outcome and audience. Requested non-landable results use `{ "profile": "none" }`.
 
-After the normal review snapshot passes, Scufris starts a fresh headless Pi reviewer with model `openai-codex/gpt-5.6-sol`, medium thinking, a dedicated session, and read-only built-in tools. The reviewer receives:
+After the normal review snapshot passes, Scufris starts Pi as an exact owned non-tmux child. It uses print mode, model `openai-codex/gpt-5.6-sol`, medium thinking, `--tools read,grep,find,ls`, a dedicated session directory, and disables extensions, skills, prompt templates, themes, and project trust. Correction review uses the exact saved reviewer session file. Scufris strips implementation-session and Scufris role variables from the reviewer environment. The reviewer receives:
 
 - Repository instructions from the feature worktree.
 - The review profile and brief.
@@ -503,11 +510,7 @@ Use the plain event-channel string. Do not import Plannotator internals. The cal
 }
 ```
 
-Review types:
-
-- Initial and final review: `since-base`.
-- Optional focused fix review: `last-commit`.
-- Approval from `last-commit` is ignored. Start a new `since-base` request for approval.
+Every user review uses `since-base`. Plannotator opens only after preflight approval for the same exact landing and feature revisions.
 
 Outcomes:
 

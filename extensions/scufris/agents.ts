@@ -29,8 +29,143 @@ interface ApprovedReview extends ReviewSnapshot {
   request_id: string;
 }
 
+export type LandableReviewProfile =
+  | "code"
+  | "consumer"
+  | "operations"
+  | "interface";
+export type ReviewPolicy =
+  | { profile: "none" }
+  | { profile: LandableReviewProfile; brief: string };
+
+export interface PreflightFinding {
+  severity: "BLOCKER" | "MAJOR" | "MINOR";
+  path: string;
+  line: number;
+  reason: string;
+  change: string;
+}
+
+interface PreflightResult {
+  verdict: "approve" | "request_changes";
+  findings: PreflightFinding[];
+  review_id: string;
+  landing_sha: string;
+  feature_sha: string;
+}
+
+export type PreflightOutcome =
+  | { kind: "approved" }
+  | { kind: "feedback"; findings: PreflightFinding[] }
+  | { kind: "blocked"; reason: string };
+
+export function classifyPreflightResult(value: unknown): PreflightOutcome {
+  if (!value || typeof value !== "object") {
+    return { kind: "blocked", reason: "preflight returned malformed output" };
+  }
+  const result = value as Partial<PreflightResult>;
+  if (result.verdict !== "approve" && result.verdict !== "request_changes") {
+    return { kind: "blocked", reason: "preflight verdict is invalid" };
+  }
+  if (!Array.isArray(result.findings)) {
+    return { kind: "blocked", reason: "preflight findings are invalid" };
+  }
+  const findings: PreflightFinding[] = [];
+  for (const finding of result.findings) {
+    if (!finding || typeof finding !== "object") {
+      return { kind: "blocked", reason: "preflight finding is malformed" };
+    }
+    const item = finding as Partial<PreflightFinding>;
+    if (
+      !["BLOCKER", "MAJOR", "MINOR"].includes(String(item.severity)) ||
+      typeof item.path !== "string" ||
+      !item.path ||
+      item.path.startsWith("/") ||
+      item.path
+        .split("/")
+        .some((part) => !part || part === "." || part === "..") ||
+      !Number.isSafeInteger(item.line) ||
+      Number(item.line) <= 0 ||
+      typeof item.reason !== "string" ||
+      !item.reason ||
+      typeof item.change !== "string" ||
+      !item.change
+    ) {
+      return { kind: "blocked", reason: "preflight finding is invalid" };
+    }
+    findings.push(item as PreflightFinding);
+  }
+  if (result.verdict === "approve") {
+    return findings.length === 0
+      ? { kind: "approved" }
+      : { kind: "blocked", reason: "preflight approval contains findings" };
+  }
+  return findings.length > 0
+    ? { kind: "feedback", findings }
+    : {
+        kind: "blocked",
+        reason: "preflight change request has no findings",
+      };
+}
+
+export function preflightFindingsMessage(findings: PreflightFinding[]): string {
+  return `Independent preflight requested changes: ${JSON.stringify({ findings })}`;
+}
+
+export function nextPreflightFeedbackCycle(
+  completedCycles: number,
+): number | undefined {
+  return Number.isInteger(completedCycles) &&
+    completedCycles >= 0 &&
+    completedCycles < 2
+    ? completedCycles + 1
+    : undefined;
+}
+
+export interface MutablePreflightState {
+  preflightReviewId?: string;
+  preflightFeedbackCycles: number;
+  preflightApproval?: unknown;
+}
+
+export function invalidatePreflight(state: MutablePreflightState): void {
+  state.preflightReviewId = undefined;
+  state.preflightFeedbackCycles = 0;
+  state.preflightApproval = undefined;
+}
+
+export function sameReviewRevisions(
+  left: ReviewSnapshot,
+  right: ReviewSnapshot,
+): boolean {
+  return (
+    left.landing_sha === right.landing_sha &&
+    left.feature_sha === right.feature_sha &&
+    left.subject === right.subject
+  );
+}
+
+export function reviewEventRejection(
+  policy: ReviewPolicy,
+  eventState: string,
+  phase: ReviewPhase,
+): string | undefined {
+  if (eventState === "review-ready" && policy.profile === "none") {
+    return "non-landable jobs cannot enter review-ready";
+  }
+  if (
+    eventState === "done" &&
+    policy.profile !== "none" &&
+    phase !== "awaiting-done"
+  ) {
+    return "landable jobs require review approval before done";
+  }
+  return undefined;
+}
+
 export type ReviewPhase =
   | "idle"
+  | "preflight"
   | "reviewing"
   | "feedback"
   | "awaiting-done"
@@ -130,6 +265,7 @@ interface OwnedJob {
   worktree: string;
   feature: string;
   cleanup: CleanupPolicy;
+  review: ReviewPolicy;
   state: string;
   summary: string;
   offset: number;
@@ -142,6 +278,10 @@ interface OwnedJob {
   reviewRetryable: boolean;
   lastReviewedFeature?: string;
   reviewRequestId?: string;
+  preflightReviewId?: string;
+  preflightFeedbackCycles: number;
+  preflightApproval?: ReviewSnapshot;
+  reviewAbort?: AbortController;
   approval?: ApprovedReview;
 }
 
@@ -154,6 +294,7 @@ interface SpawnResult {
   project: string;
   feature: string;
   cleanup: CleanupPolicy;
+  review: ReviewPolicy;
   tmux_session: string;
   model: string;
   thinking: string;
@@ -178,6 +319,7 @@ interface InspectResult {
   project: string;
   feature: string;
   cleanup: CleanupPolicy;
+  review: ReviewPolicy;
   state: string;
   summary: string;
   window_alive: boolean;
@@ -343,6 +485,7 @@ export default function scufris(
     job.reviewPhase = "idle";
     job.reviewRetryable = reviewRetryable;
     job.reviewRequestId = undefined;
+    job.preflightApproval = undefined;
     job.approval = undefined;
     job.state = "blocked";
     job.summary = reason;
@@ -355,11 +498,6 @@ export default function scufris(
       job_id: job.job_id,
       project_root: job.project_root,
     });
-
-  const sameReviewRevisions = (left: ReviewSnapshot, right: ReviewSnapshot) =>
-    left.landing_sha === right.landing_sha &&
-    left.feature_sha === right.feature_sha &&
-    left.subject === right.subject;
 
   const handleReviewResponse = async (
     job: OwnedJob,
@@ -382,6 +520,7 @@ export default function scufris(
     }
     if (outcome.kind === "feedback") {
       job.reviewPhase = "feedback";
+      invalidatePreflight(job);
       try {
         await runHelper("send", {
           job_id: job.job_id,
@@ -401,7 +540,11 @@ export default function scufris(
     }
     try {
       const verified = await currentSnapshot(job);
-      if (!sameReviewRevisions(snapshot, verified)) {
+      if (
+        !job.preflightApproval ||
+        !sameReviewRevisions(snapshot, job.preflightApproval) ||
+        !sameReviewRevisions(snapshot, verified)
+      ) {
         throw new Error(
           "reviewed revisions changed before approval acknowledgment",
         );
@@ -424,14 +567,46 @@ export default function scufris(
     }
   };
 
+  const beginUserReview = async (
+    job: OwnedJob,
+    snapshot: ReviewSnapshot,
+  ): Promise<boolean> => {
+    job.reviewPhase = "reviewing";
+    const requestId = `scufris-${job.job_id}-${randomBytes(6).toString("hex")}`;
+    job.reviewRequestId = requestId;
+    try {
+      context?.ui.notify(`Opening review for job ${job.job_id}`, "info");
+      pi.events.emit("plannotator:request", {
+        requestId,
+        action: "code-review",
+        payload: codeReviewPayload(snapshot),
+        respond: (response: unknown) => {
+          void handleReviewResponse(job, requestId, snapshot, response);
+        },
+      });
+      return true;
+    } catch (error) {
+      blockLifecycle(
+        job,
+        `review request failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+  };
+
   const beginReview = async (job: OwnedJob): Promise<boolean> => {
     if (job.reviewPhase !== "idle") {
       blockLifecycle(job, `review-ready is invalid during ${job.reviewPhase}`);
       return false;
     }
-    job.reviewPhase = "reviewing";
+    if (job.review.profile === "none") {
+      blockLifecycle(job, "non-landable jobs cannot enter review-ready");
+      return false;
+    }
+    job.reviewPhase = "preflight";
     job.reviewRetryable = false;
     job.reviewRequestId = undefined;
+    job.preflightApproval = undefined;
     job.approval = undefined;
     let snapshot: ReviewSnapshot;
     try {
@@ -448,25 +623,84 @@ export default function scufris(
       blockLifecycle(job, "review-ready requires a new committed revision");
       return false;
     }
-    const requestId = `scufris-${job.job_id}-${randomBytes(6).toString("hex")}`;
-    job.reviewRequestId = requestId;
+    job.lastReviewedFeature = snapshot.feature_sha;
+    const reviewId = job.preflightReviewId ?? randomBytes(6).toString("hex");
+    const continued = job.preflightReviewId !== undefined;
+    const controller = new AbortController();
+    job.reviewAbort = controller;
     try {
-      context?.ui.notify(`Opening review for job ${job.job_id}`, "info");
-      pi.events.emit("plannotator:request", {
-        requestId,
-        action: "code-review",
-        payload: codeReviewPayload(snapshot),
-        respond: (response: unknown) => {
-          void handleReviewResponse(job, requestId, snapshot, response);
+      context?.ui.notify(`Running preflight for job ${job.job_id}`, "info");
+      const result = await runHelper<PreflightResult>(
+        "preflight-review",
+        {
+          job_id: job.job_id,
+          project_root: job.project_root,
+          review_id: reviewId,
+          landing_sha: snapshot.landing_sha,
+          feature_sha: snapshot.feature_sha,
+          ...(continued ? { continue_session: true } : {}),
         },
-      });
-      job.lastReviewedFeature = snapshot.feature_sha;
-      return true;
-    } catch (error) {
-      blockLifecycle(
-        job,
-        `review request failed: ${error instanceof Error ? error.message : String(error)}`,
+        controller.signal,
+        135_000,
       );
+      if (shuttingDown || jobs.get(job.job_id) !== job) return false;
+      job.reviewAbort = undefined;
+      if (
+        result.review_id !== reviewId ||
+        result.landing_sha !== snapshot.landing_sha ||
+        result.feature_sha !== snapshot.feature_sha
+      ) {
+        blockLifecycle(
+          job,
+          "preflight result does not match the exact snapshot",
+        );
+        return false;
+      }
+      const verified = await currentSnapshot(job);
+      if (!sameReviewRevisions(snapshot, verified)) {
+        blockLifecycle(job, "review revisions changed after preflight");
+        return false;
+      }
+      const outcome = classifyPreflightResult(result);
+      if (outcome.kind === "blocked") {
+        blockLifecycle(job, outcome.reason);
+        return false;
+      }
+      job.preflightReviewId = reviewId;
+      if (outcome.kind === "feedback") {
+        const nextCycle = nextPreflightFeedbackCycle(
+          job.preflightFeedbackCycles,
+        );
+        if (nextCycle === undefined) {
+          blockLifecycle(
+            job,
+            "preflight requested a third correction cycle; Pair mediation is required",
+          );
+          return false;
+        }
+        job.preflightFeedbackCycles = nextCycle;
+        job.reviewPhase = "feedback";
+        const message = preflightFindingsMessage(outcome.findings);
+        await runHelper("send", { job_id: job.job_id, message });
+        job.reviewPhase = "idle";
+        job.state = "working";
+        job.summary = "preflight findings submitted to worker";
+        context?.ui.notify(
+          `Preflight findings sent to job ${job.job_id}`,
+          "info",
+        );
+        return true;
+      }
+      job.preflightApproval = snapshot;
+      return await beginUserReview(job, snapshot);
+    } catch (error) {
+      job.reviewAbort = undefined;
+      if (!shuttingDown && !controller.signal.aborted) {
+        blockLifecycle(
+          job,
+          `preflight failed closed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       return false;
     }
   };
@@ -575,6 +809,26 @@ export default function scufris(
         }
         for (const line of update.events) {
           const event = parseEvent(line);
+          const rejection = reviewEventRejection(
+            job.review,
+            event.state,
+            job.reviewPhase,
+          );
+          if (rejection) {
+            blockLifecycle(job, rejection);
+            continue;
+          }
+          if (
+            ["needs-decision", "blocked", "failed"].includes(event.state) &&
+            job.reviewPhase !== "idle"
+          ) {
+            job.reviewAbort?.abort();
+            job.reviewAbort = undefined;
+            job.reviewPhase = "idle";
+            job.reviewRequestId = undefined;
+            job.preflightApproval = undefined;
+            job.approval = undefined;
+          }
           if (event.state === "done" && job.reviewPhase === "awaiting-done") {
             if (!isApprovalDone(event.state, event.summary)) {
               blockLifecycle(
@@ -591,7 +845,9 @@ export default function scufris(
           }
           if (
             event.state === "done" &&
-            ["reviewing", "feedback", "landing"].includes(job.reviewPhase)
+            ["preflight", "reviewing", "feedback", "landing"].includes(
+              job.reviewPhase,
+            )
           ) {
             blockLifecycle(job, `done is invalid during ${job.reviewPhase}`);
             continue;
@@ -690,6 +946,30 @@ export default function scufris(
           }),
         ),
         instructions: Type.String({ minLength: 1, maxLength: 262_144 }),
+        review: Type.Union([
+          Type.Object(
+            { profile: Type.Literal("none") },
+            { additionalProperties: false },
+          ),
+          Type.Object(
+            {
+              profile: StringEnum([
+                "code",
+                "consumer",
+                "operations",
+                "interface",
+              ] as const),
+              brief: Type.String({
+                description:
+                  "Concise accepted outcome and audience for independent preflight review.",
+                minLength: 1,
+                maxLength: 4096,
+                pattern: "^[^\\x00-\\x1f\\x7f]+$",
+              }),
+            },
+            { additionalProperties: false },
+          ),
+        ]),
         feature: Type.Optional(
           Type.String({
             description:
@@ -729,6 +1009,7 @@ export default function scufris(
             job_id: generatedJobId(),
             harness: params.harness,
             instructions: params.instructions,
+            review: params.review,
             current_root: ctx.cwd,
             ...(params.project === undefined
               ? {}
@@ -759,6 +1040,7 @@ export default function scufris(
           worktree: result.worktree,
           feature: result.feature,
           cleanup: result.cleanup,
+          review: result.review,
           state: result.state,
           summary: "worker starting",
           offset: 0,
@@ -769,6 +1051,7 @@ export default function scufris(
           exitReported: false,
           reviewPhase: "idle",
           reviewRetryable: false,
+          preflightFeedbackCycles: 0,
         });
         void poll();
         const {
@@ -801,6 +1084,7 @@ export default function scufris(
           summary: job.summary,
           feature: job.feature,
           cleanup: job.cleanup,
+          review: job.review,
           window_alive: job.window_alive,
         })),
       });
@@ -914,7 +1198,7 @@ export default function scufris(
       return toolResult({
         job_id: job.job_id,
         state: "reviewing",
-        message: "Fresh review snapshot accepted and review opened.",
+        message: "Fresh review sequence started.",
       });
     },
   });
@@ -937,6 +1221,8 @@ export default function scufris(
         );
       }
       try {
+        job.reviewAbort?.abort();
+        job.reviewAbort = undefined;
         const result = await runHelper<{ job_id: string; state: string }>(
           "stop",
           params,
@@ -996,6 +1282,7 @@ export default function scufris(
 
   pi.on("session_shutdown", async () => {
     shuttingDown = true;
+    for (const job of jobs.values()) job.reviewAbort?.abort();
     if (timer) clearInterval(timer);
     timer = undefined;
     while (pollRunning) {

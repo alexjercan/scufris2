@@ -151,13 +151,14 @@ class ScufrisJobsPruneIntegrationTest(unittest.TestCase):
                 identity = self.tmux_identity(job_id, alive=alive)
             session_id, window_id, pane_id, session = identity
             record = {
-                "version": 1,
+                "version": 2,
                 "job_id": job_id,
                 "harness": "pi",
                 "model": "openai-codex/test-model",
                 "thinking": "medium",
                 "feature": f"fixture-{job_id}",
                 "cleanup": "remove",
+                "review": {"profile": "none"},
                 "project": "current",
                 "landing_branch": "master",
                 "landing_sha": "1" * 40,
@@ -222,6 +223,9 @@ class ScufrisJobsPruneIntegrationTest(unittest.TestCase):
 
     def test_apply_zero_deletes_only_dead_and_old_malformed_metadata(self) -> None:
         dead_directory, dead_record = self.create_job("111111111111", alive=False)
+        (dead_directory / "reviewer-aaa111bbb222.jsonl").write_text(
+            '{"type":"session"}\n', encoding="utf-8"
+        )
         old_malformed, _ = self.create_job(
             "222222222222", malformed=True, directory_age_seconds=3605
         )

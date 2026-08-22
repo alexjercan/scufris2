@@ -31,6 +31,10 @@ function validListJob(overrides: Record<string, unknown> = {}) {
     tmux_session: "scufris2_agent-diagnostics-tool",
     pane_liveness: "alive",
     cleanup: "remove",
+    review: {
+      profile: "code",
+      brief: "Audience: maintainers. Outcome: diagnostics remain correct.",
+    },
     diagnostics: [],
     ...overrides,
   };
@@ -40,13 +44,17 @@ function detail(overrides: Record<string, unknown> = {}) {
   return {
     job_id: jobId,
     metadata: {
-      version: 1,
+      version: 2,
       job_id: jobId,
       harness: "pi",
       model: "openai/test",
       thinking: "high",
       feature: "agent-diagnostics-tool",
       cleanup: "remove",
+      review: {
+        profile: "code",
+        brief: "Audience: maintainers. Outcome: diagnostics remain correct.",
+      },
       project: "current",
       landing_branch: "master",
       landing_sha: "1".repeat(40),
@@ -117,6 +125,7 @@ test("diagnostics schema is narrow and list invokes only packaged JSON mode", as
   assert.deepEqual(calls, [["--json"]]);
   assert.equal(output.jobs[0]?.owned_by_current_session, true);
   assert.equal(output.jobs[0]?.valid, true);
+  assert.equal(output.jobs[0]?.review.profile, "code");
   assert.equal("tmux_session" in (output.jobs[0] ?? {}), false);
 });
 
@@ -199,6 +208,7 @@ test("exact detail and report are bounded, sanitized, and ownership-only", async
   )) as any;
   assert.deepEqual(calls, [[jobId, "--report", "--json"]]);
   assert.equal(output.owned_by_current_session, true);
+  assert.equal(output.review.profile, "code");
   assert.equal(output.report.content_truncated, true);
   assert.match(output.report.content ?? "", /extensions\/scufris\/agents\.ts/);
   assert.match(output.report.content ?? "", /\[redacted-path\]/);

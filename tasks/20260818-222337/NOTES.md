@@ -37,3 +37,23 @@ The live cross-project playtest also corrected the Sol provider from `openai/gpt
 ## Review-ready mediation accepted 2026-08-21
 
 `review-ready` is actionable and triggers one foreground model turn. The prior notification-only behavior assumed automated Plannotator review that was not implemented and left completed work waiting until the user spoke. `working` remains notification-only. Poll offsets ensure each review-ready event triggers once.
+
+## Independent preflight implementation 2026-08-22
+
+Every spawn now stores an immutable narrow review policy. Landable jobs run the exact clean snapshot through a separate read-only Sol session before Plannotator. Non-landable jobs can only finish with `done`.
+
+The private helper owns patch generation, Pi process limits, session identity, environment stripping, strict JSON validation, and pre/post mutation checks. The extension owns feedback-cycle state, exact revision binding, findings routing, Plannotator ordering, approval invalidation, and shutdown cancellation. This split keeps model-facing orchestration narrow and deterministic process mechanics testable without exposing paths or commands through native tools.
+
+The current reviewer session remains as bounded job evidence and verifies correction commits. A fresh sequence deletes the invalidated session before creating a new dedicated session. Reviewer prompt and output scratch data use temporary files or bounded memory and do not remain in job state.
+
+The first fake-Pi fixture wrote escaped newline text instead of JSONL frames. The integration test exposed the error on continued-session parsing. The fixture now emits real LF records. Future process integrations should test the first and second invocation together before adding failure cases.
+
+Verification after `sprout sync preflight-review` reported already up to date:
+
+- `npm run check` - pass, 38 TypeScript tests.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` - pass, 26 Python tests.
+- `ruff check .` and `ruff format --check .` - pass.
+- `shellcheck scripts/scufris-dev` - pass. Other packaged helpers are Python, not ShellCheck inputs.
+- `nix fmt -- --check .` - pass.
+- `nix flake check` - pass on x86_64-linux. Nix reported the expected unsupported-system omissions and existing unknown custom output warnings.
+- `git diff --check` - pass.

@@ -4,14 +4,20 @@ import test from "node:test";
 import {
   APPROVAL_DONE_SUMMARY,
   APPROVAL_INSTRUCTION,
+  classifyPreflightResult,
   classifyReviewResponse,
   codeReviewPayload,
   completeApprovedLanding,
   consumeReviewRetry,
   isApprovalDone,
+  invalidatePreflight,
   isDelegatedFeature,
   jobEventTriggersTurn,
+  nextPreflightFeedbackCycle,
+  preflightFindingsMessage,
+  reviewEventRejection,
   reviewRetryRejection,
+  sameReviewRevisions,
 } from "../extensions/scufris/agents.ts";
 
 test("delegated feature validation accepts only bounded lowercase slugs", () => {
@@ -122,6 +128,113 @@ test("annotations remain actionable and return to the same worker", () => {
       kind: "blocked",
       reason: "Plannotator feedback exceeds the steering limit",
     },
+  );
+});
+
+test("preflight classification accepts only consistent fix-worthy results", () => {
+  assert.deepEqual(
+    classifyPreflightResult({ verdict: "approve", findings: [] }),
+    { kind: "approved" },
+  );
+  const finding = {
+    severity: "MAJOR" as const,
+    path: "src/run.ts",
+    line: 12,
+    reason: "Failure loses committed state.",
+    change: "Persist state before returning.",
+  };
+  assert.deepEqual(
+    classifyPreflightResult({
+      verdict: "request_changes",
+      findings: [finding],
+    }),
+    { kind: "feedback", findings: [finding] },
+  );
+  assert.equal(
+    preflightFindingsMessage([finding]),
+    'Independent preflight requested changes: {"findings":[{"severity":"MAJOR","path":"src/run.ts","line":12,"reason":"Failure loses committed state.","change":"Persist state before returning."}]}',
+  );
+  for (const malformed of [
+    { verdict: "approve", findings: [finding] },
+    { verdict: "request_changes", findings: [] },
+    {
+      verdict: "request_changes",
+      findings: [{ ...finding, severity: "NIT" }],
+    },
+    {
+      verdict: "request_changes",
+      findings: [{ ...finding, path: "../escape" }],
+    },
+  ]) {
+    assert.equal(classifyPreflightResult(malformed).kind, "blocked");
+  }
+});
+
+test("preflight lifecycle permits two feedback cycles then requires mediation", () => {
+  assert.equal(nextPreflightFeedbackCycle(0), 1);
+  assert.equal(nextPreflightFeedbackCycle(1), 2);
+  assert.equal(nextPreflightFeedbackCycle(2), undefined);
+  assert.equal(nextPreflightFeedbackCycle(-1), undefined);
+});
+
+test("preflight approval binds Plannotator ordering to exact revisions", () => {
+  const snapshot = {
+    job_id: "abc123def456",
+    worktree: "/trusted/worktree",
+    landing_branch: "master",
+    landing_sha: "1".repeat(40),
+    feature_sha: "2".repeat(40),
+    subject: "Change",
+  };
+  assert.equal(sameReviewRevisions(snapshot, { ...snapshot }), true);
+  assert.equal(
+    sameReviewRevisions(snapshot, { ...snapshot, feature_sha: "3".repeat(40) }),
+    false,
+  );
+  assert.equal(
+    sameReviewRevisions(snapshot, { ...snapshot, landing_sha: "3".repeat(40) }),
+    false,
+  );
+});
+
+test("human feedback invalidates approval and the reviewer session", () => {
+  const state = {
+    preflightReviewId: "abc123def456",
+    preflightFeedbackCycles: 2,
+    preflightApproval: { landing_sha: "1".repeat(40) },
+  };
+  invalidatePreflight(state);
+  assert.deepEqual(state, {
+    preflightReviewId: undefined,
+    preflightFeedbackCycles: 0,
+    preflightApproval: undefined,
+  });
+});
+
+test("review policy enforces landable and non-landable terminal states", () => {
+  assert.equal(
+    reviewEventRejection({ profile: "none" }, "review-ready", "idle"),
+    "non-landable jobs cannot enter review-ready",
+  );
+  assert.equal(
+    reviewEventRejection(
+      { profile: "code", brief: "Audience and outcome" },
+      "done",
+      "idle",
+    ),
+    "landable jobs require review approval before done",
+  );
+  assert.equal(
+    reviewEventRejection(
+      { profile: "code", brief: "Audience and outcome" },
+      "done",
+      "awaiting-done",
+    ),
+    undefined,
+  );
+  assert.equal(
+    reviewEventRejection({ profile: "none" }, "done", "idle"),
+    undefined,
   );
 });
 

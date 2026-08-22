@@ -151,13 +151,17 @@ class ScufrisJobsIntegrationTest(unittest.TestCase):
         directory = self.jobs / job_id
         directory.mkdir()
         record = {
-            "version": 1,
+            "version": 2,
             "job_id": job_id,
             "harness": "pi",
             "model": "openai-codex/test-model",
             "thinking": "medium",
             "feature": feature,
             "cleanup": "remove",
+            "review": {
+                "profile": "code",
+                "brief": "Audience: maintainers. Outcome: inspect the fixture.",
+            },
             "project": "current",
             "landing_branch": "master",
             "landing_sha": revision,
@@ -205,6 +209,7 @@ class ScufrisJobsIntegrationTest(unittest.TestCase):
         }
         detail = json.loads(self.cli("abc123def456", "--report", "--json").stdout)
         self.assertEqual(detail["state"], "review-ready")
+        self.assertEqual(detail["metadata"]["review"]["profile"], "code")
         self.assertEqual(detail["status"]["events"][-1], "review-ready: review me")
         self.assertEqual(detail["report"]["content"], "# Fixture report\n")
         self.assertEqual(detail["git"]["branch"], "live-feature")

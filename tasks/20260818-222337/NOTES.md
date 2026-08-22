@@ -60,10 +60,16 @@ Verification after `sprout sync preflight-review` reported already up to date:
 
 ## Visible preflight implementation 2026-08-22
 
-The actual Sol reviewer now runs in one input-disabled `preflight-<review_id>` window in the worker's exact feature tmux session. A narrow launcher mirrors bounded stdout and stderr to the remain-on-exit pane while a separate scratch result file carries strict JSON to the controller. Pane content is presentation only.
+The actual Sol reviewer initially ran in one input-disabled `preflight-<review_id>` window in the worker's exact feature tmux session. A narrow launcher mirrored bounded stdout and stderr to the remain-on-exit pane while a separate scratch result file carried strict JSON to the controller. Pane content remained presentation only.
 
 Paired ownership and Pi session records bind the job and review IDs to the exact session, window, pane, launcher PID, and reviewer PID. Correction review respawns the same pane and continues the saved Pi session. Plannotator feedback validates and removes only that reviewer window before a new sequence. Direct stop and shutdown stop the exact reviewer process before removing its window. Landing preserves the reviewer for retain cleanup or subsequent Sprout removal.
 
 The integration fixture initially exposed two tmux details: `remain-on-exit` is formatted as `#{remain-on-exit}`, and respawn needs an explicit safe environment because the tmux server environment can be stale. The result channel remains independent from pane capture. Tests use isolated `TMUX_TMPDIR` servers and compare the default server identity before and after each case.
 
 The final synchronization merged the independently landed 1800-second deadline. The non-tmux implementation emitted readiness directly after child creation. The visible design needs two hops: the pane launcher starts the deadline and writes the exact reviewer PID, then the parent helper validates that PID before emitting the private readiness line to the extension. A matching parent deadline remains as a fail-closed backup and keeps the short timeout integration test deterministic.
+
+## Interactive preflight implementation 2026-08-22
+
+The reviewer now runs Pi's regular interactive TUI directly on the owned pane terminal. The pane remains input-capable by explicit user acceptance. Scufris still owns sequence creation, exact result consumption, correction routing, cancellation, invalidation, and landing. Foreground policy does not expose reviewer control.
+
+A private explicit Pi extension adds only `submit_preflight`. The model uses read-only repository tools, submits the final structured verdict through that tool, and the extension writes one bounded scratch result before graceful TUI shutdown. The controller still applies the existing strict JSON parser and never parses pane output. The TUI now shows the prompt, progress, tool calls, and final verdict while the paired ownership and session records preserve exact lifecycle behavior.

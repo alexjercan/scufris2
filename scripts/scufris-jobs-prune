@@ -548,7 +548,7 @@ def reviewer_liveness(raw: bytes, record: dict[str, Any], job_id: str) -> str:
         owner["tmux_pane_id"],
         str(owner["launcher_pid"]),
     )
-    if len(row) != 9 or row[:6] != expected or row[7:] != ("1", "on"):
+    if len(row) != 9 or row[:6] != expected or row[7:] != ("0", "on"):
         raise Refusal("tmux: recorded reviewer identity does not match exactly")
     if row[6] == "0":
         return "alive"

@@ -18,8 +18,8 @@ A landable policy includes a concise accepted-outcome and audience brief. A `non
 
 1. The worker commits, synchronizes, checks, and reports `review-ready`.
 2. Scufris verifies the exact clean base and feature revisions.
-3. A fresh Pi reviewer runs in an input-disabled `preflight-<review_id>` window in the worker's feature tmux session. Scufris announces the window without selecting a client. The reviewer has a separate cold session and does not receive the worker transcript, report, reasoning, or claims.
-4. The actual reviewer output and read-only tool activity remain visible in that window. Fix-worthy BLOCKER, MAJOR, or MINOR findings return through bounded structured files, not pane scraping. The same window and reviewer session verify correction commits. A third change request stops for Pair mediation.
+3. A fresh Pi reviewer runs in its visible interactive TUI in an input-capable `preflight-<review_id>` window in the worker's feature tmux session. Scufris announces the window without selecting a client. The reviewer has a separate cold session and does not receive the worker transcript, report, reasoning, or claims.
+4. The review prompt, progress, read-only tool activity, and final result remain visible in that window. User input is technically possible, but Scufris remains the only review owner and result consumer. Fix-worthy BLOCKER, MAJOR, or MINOR findings return through a bounded structured file, not pane scraping. The same window and reviewer session verify correction commits. A third change request stops for Pair mediation.
 5. Exact preflight approval opens the Plannotator since-base review.
 6. Plannotator feedback invalidates preflight approval. Scufris removes only the exact owned reviewer window and session. The next worker revision starts a fresh reviewer window and session.
 7. Human Plannotator approval remains the only landing approval. Scufris lands only the exact approved revisions after the worker's required acknowledgment.

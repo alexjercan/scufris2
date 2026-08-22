@@ -247,7 +247,6 @@ class ScufrisJobsPruneIntegrationTest(unittest.TestCase):
         self.external(
             ["tmux", "set-option", "-w", "-t", reviewer_window, "remain-on-exit", "on"]
         )
-        self.external(["tmux", "select-pane", "-d", "-t", reviewer_pane])
         self.external(["tmux", "respawn-pane", "-k", "-t", reviewer_pane, "true"])
         reviewer_pid = self.external(
             ["tmux", "display-message", "-p", "-t", reviewer_pane, "#{pane_pid}"]

@@ -238,7 +238,7 @@ function reviewerValue(value: unknown, name: string) {
       "launcher_pid",
       "reviewer_pid",
       "liveness",
-      "input_disabled",
+      "input_capable",
       "remain_on_exit",
     ],
     name,
@@ -262,9 +262,9 @@ function reviewerValue(value: unknown, name: string) {
     launcher_pid: integerValue(reviewer.launcher_pid, `${name}.launcher_pid`),
     reviewer_pid: integerValue(reviewer.reviewer_pid, `${name}.reviewer_pid`),
     liveness: statusValue(reviewer.liveness, `${name}.liveness`),
-    input_disabled: booleanValue(
-      reviewer.input_disabled,
-      `${name}.input_disabled`,
+    input_capable: booleanValue(
+      reviewer.input_capable,
+      `${name}.input_capable`,
     ),
     remain_on_exit: booleanValue(
       reviewer.remain_on_exit,

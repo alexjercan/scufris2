@@ -502,7 +502,7 @@ def inspect_reviewer(
             owner["tmux_pane_id"],
             str(owner["launcher_pid"]),
         )
-        if len(row) != 9 or row[:6] != expected or row[7:] != ("1", "on"):
+        if len(row) != 9 or row[:6] != expected or row[7:] != ("0", "on"):
             return None, [
                 "reviewer: exact tmux, process, or input policy identity mismatch"
             ]
@@ -515,7 +515,7 @@ def inspect_reviewer(
         "launcher_pid": owner["launcher_pid"],
         "reviewer_pid": owner["reviewer_pid"],
         "liveness": liveness,
-        "input_disabled": True,
+        "input_capable": True,
         "remain_on_exit": True,
     }, []
 

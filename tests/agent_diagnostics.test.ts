@@ -121,14 +121,31 @@ test("diagnostics schema is narrow and list invokes only packaged JSON mode", as
   const calls: string[][] = [];
   const invoke: DiagnosticsInvocation = async (args) => {
     calls.push(args);
-    return result({ scope: "live", jobs: [validListJob()] });
+    return result({
+      scope: "live",
+      jobs: [
+        validListJob({
+          reviewer: {
+            review_id: "111aaa222bbb",
+            window_name: "preflight-111aaa222bbb",
+            window_id: "@4",
+            pane_id: "%5",
+            launcher_pid: 100,
+            reviewer_pid: 101,
+            liveness: "alive",
+            input_capable: true,
+            remain_on_exit: true,
+          },
+        }),
+      ],
+    });
   };
   const output = (await agentDiagnostics({}, new Set([jobId]), invoke)) as any;
   assert.deepEqual(calls, [["--json"]]);
   assert.equal(output.jobs[0]?.owned_by_current_session, true);
   assert.equal(output.jobs[0]?.valid, true);
   assert.equal(output.jobs[0]?.review.profile, "code");
-  assert.equal(output.jobs[0]?.reviewer, null);
+  assert.equal(output.jobs[0]?.reviewer.input_capable, true);
   assert.equal("tmux_session" in (output.jobs[0] ?? {}), false);
 });
 

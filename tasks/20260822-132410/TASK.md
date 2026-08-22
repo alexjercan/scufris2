@@ -13,7 +13,7 @@ Run each independent preflight reviewer visibly in a dedicated window within its
 - Create one exact owned reviewer window named `preflight-<review_id>` in the existing feature tmux session.
 - Run the actual reviewer process in that window. Do not present a copied transcript from a separate hidden reviewer.
 - Show bounded live reviewer activity, read-only tool use, the final verdict or findings, and failure or timeout state.
-- Disable keyboard input to the reviewer pane. The user can inspect it but cannot steer or contaminate the independent review.
+- The original implementation disabled keyboard input to the reviewer pane. The later interactive-TUI contract supersedes this restriction and accepts an input-capable pane.
 - Never attach, select, switch, or otherwise change the user's current tmux client.
 - Notify the foreground user of the reviewer window name when preflight starts.
 - Keep the finished pane visible with remain-on-exit until the owning lifecycle removes it.
@@ -45,12 +45,12 @@ Run each independent preflight reviewer visibly in a dedicated window within its
 
 ## Documentation
 
-Update the delegation manual, skill, architecture, protocol, and task evidence to describe the visible input-disabled reviewer window and its lifecycle.
+Update the delegation manual, skill, architecture, protocol, and task evidence to describe the visible reviewer window and its lifecycle.
 
 ## Verification
 
 - Test reviewer window creation in the worker's exact tmux session without selecting a client.
-- Test stable naming, exact identity validation, disabled pane input, visible activity, and remain-on-exit behavior.
+- Test stable naming, exact identity validation, pane input policy, visible activity, and remain-on-exit behavior.
 - Test correction verification reuses the same reviewer window and reviewer session.
 - Test human feedback invalidates and removes only the exact prior reviewer window.
 - Test the exact 1800-second reviewer deadline and enclosing shutdown margin, malformed output, reviewer failure, shutdown, remove cleanup, retain cleanup, and unrelated-window preservation.
@@ -95,7 +95,7 @@ Preflight correction verification:
 ## Completion criteria
 
 - A user can enter the feature tmux session and watch the independent preflight reviewer in its own window.
-- User input cannot alter the reviewer.
+- The original accepted contract prevented user input. The later interactive-TUI contract explicitly accepts technical input capability while keeping automated review ownership unchanged.
 - Findings and approvals continue through the existing automated correction and Plannotator lifecycle.
 - Exact ownership and cleanup remain safe for worker, reviewer, and unrelated tmux windows.
 
@@ -123,7 +123,7 @@ Preflight correction verification:
 ## One-time manual review preparation
 
 - `sprout sync visible-preflight-review` merged master `08f7575`, including the landed exact 1800-second reviewer deadline.
-- Conflict resolution preserved the actual reviewer in the input-disabled owned tmux window. The pane launcher now starts the exact 1800-second child deadline, publishes exact child readiness, and the parent helper validates it before resetting the enclosing 1810-second deadline.
+- Conflict resolution preserved the actual reviewer in the owned tmux window with the original input-disabled policy. The pane launcher now starts the exact 1800-second child deadline, publishes exact child readiness, and the parent helper validates it before resetting the enclosing 1810-second deadline. The later interactive-TUI contract supersedes only that input policy and launch mode.
 - `npm run check` - pass, 40 TypeScript tests.
 - `python3 -m unittest discover -s tests -p 'test_*.py'` - pass, 27 Python integration tests.
 - `ruff check .` and `ruff format --check .` - pass.

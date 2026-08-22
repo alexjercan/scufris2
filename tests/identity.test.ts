@@ -2,27 +2,32 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import identity, {
-  appendPairPrompt,
-  pairPrompt,
+  appendScufrisIdentityPrompt,
+  scufrisIdentityPrompt,
 } from "../extensions/scufris/identity.ts";
 
 const canonical =
-  "You are Scufris, the foreground conversational orchestrator. Answer conversation and product decisions directly. Handle narrow project work directly when it should take seconds, including reading one named file, a small task record, or a focused repository question. Delegate work expected to take minutes, such as broad codebase review, substantial research, implementation, full checks, releases, or deployment. Route by scope and latency, not the presence of project tools. Require workers to inspect applicable instructions, context, code, history, and checks. Keep tools and skills loaded. Native delegation and widget orchestration remain available. Preserve decision depth in private detail and keep spoken output short. Workers and reviewers do not receive this foreground policy.";
+  "You are Scufris, the user's foreground pair-programming companion. Keep the conversation in the foreground even when tools or delegated workers gather context. Synthesize their evidence in your own voice instead of relaying reports. Work one meaningful decision at a time. Continue through investigation and mechanical work when no user decision is needed. When a choice can change the direction, explain the tradeoff, recommend an option, and ask one focused question. Treat approved designs and explicit implementation requests as permission to complete the agreed work. Answer conversation and narrow project questions directly. Delegate work expected to take minutes. Route by scope and latency, not by tool availability. Require workers to inspect applicable instructions, context, code, history, and checks. Keep tools and skills loaded. Native delegation and widget orchestration remain available. Preserve decision depth in private detail and keep spoken responses concise, natural, and useful. Workers and reviewers do not receive this foreground policy.";
 
-test("embedded canonical Pair prompt is exact, bounded ASCII", () => {
-  assert.equal(pairPrompt, `${canonical}\n`);
-  assert.equal(Buffer.byteLength(pairPrompt, "ascii") <= 800, true);
-  assert.match(pairPrompt, /Handle narrow project work directly/);
-  assert.match(pairPrompt, /reading one named file/);
-  assert.match(pairPrompt, /Delegate work expected to take minutes/);
-  assert.match(pairPrompt, /Route by scope and latency/);
-  assert.match(pairPrompt, /Keep tools and skills loaded/);
-  assert.match(pairPrompt, /Workers and reviewers do not receive/);
-  assert.match(pairPrompt, /^[\x00-\x7f]+$/);
-  assert.equal(appendPairPrompt("base"), `base\n\n${canonical}`);
+test("embedded canonical Scufris identity is exact, bounded ASCII", () => {
+  assert.equal(scufrisIdentityPrompt, `${canonical}\n`);
+  assert.equal(
+    Buffer.byteLength(scufrisIdentityPrompt, "ascii") <= 1_200,
+    true,
+  );
+  assert.match(scufrisIdentityPrompt, /pair-programming companion/);
+  assert.match(scufrisIdentityPrompt, /Synthesize their evidence/);
+  assert.match(scufrisIdentityPrompt, /one meaningful decision at a time/);
+  assert.match(scufrisIdentityPrompt, /recommend an option/);
+  assert.match(scufrisIdentityPrompt, /Delegate work expected to take minutes/);
+  assert.match(scufrisIdentityPrompt, /Route by scope and latency/);
+  assert.match(scufrisIdentityPrompt, /Keep tools and skills loaded/);
+  assert.match(scufrisIdentityPrompt, /Workers and reviewers do not receive/);
+  assert.match(scufrisIdentityPrompt, /^[\x00-\x7f]+$/);
+  assert.equal(appendScufrisIdentityPrompt("base"), `base\n\n${canonical}`);
 });
 
-test("Pair prompt is added on every Scufris agent start only", () => {
+test("Scufris identity is added on every foreground agent start only", () => {
   const original = process.env.SCUFRIS_ROLE;
   const handlers: Array<(event: { systemPrompt: string }) => unknown> = [];
   const api = {

@@ -20,7 +20,10 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { pairPrompt, appendPairPrompt } from "./identity.ts";
+import {
+  appendScufrisIdentityPrompt,
+  scufrisIdentityPrompt,
+} from "./identity.ts";
 
 export const spokenResponseInstruction =
   "The spoken field must be one short natural prose paragraph in complete sentences without Markdown, paths, hashes, URLs, or code.";
@@ -250,7 +253,7 @@ export function responseText(entry: ResponseEntry): string {
 }
 
 export function assembleScufrisPrompt(base: string): string {
-  return `${appendPairPrompt(base)}\n\n${finalResponsePolicy}`;
+  return `${appendScufrisIdentityPrompt(base)}\n\n${finalResponsePolicy}`;
 }
 
 function assistantText(message: AssistantMessage): string {
@@ -318,10 +321,10 @@ export function promptInspectionMarkdown(
     "2. Context files in Pi order",
     "3. Active tool descriptions and guidelines",
     "4. Loaded skills",
-    "5. Embedded canonical Scufris orchestration policy",
+    "5. Embedded canonical Scufris identity policy",
     "6. Scufris final-response policy",
   ];
-  return `# Scufris effective system prompt\n\n## Ordered provenance\n\n${provenance.map((item) => `- ${item}`).join("\n")}\n\n## Pi inputs\n\n\`\`\`json\n${JSON.stringify({ systemPromptOptions: options, tools }, null, 2)}\n\`\`\`\n\n## Embedded canonical orchestration policy\n\n${pairPrompt}\n## Final-response policy\n\n${finalResponsePolicy}\n\n## Exact assembled prompt\n\n\`\`\`text\n${effectivePrompt}\n\`\`\`\n`;
+  return `# Scufris effective system prompt\n\n## Ordered provenance\n\n${provenance.map((item) => `- ${item}`).join("\n")}\n\n## Pi inputs\n\n\`\`\`json\n${JSON.stringify({ systemPromptOptions: options, tools }, null, 2)}\n\`\`\`\n\n## Embedded canonical identity policy\n\n${scufrisIdentityPrompt}\n## Final-response policy\n\n${finalResponsePolicy}\n\n## Exact assembled prompt\n\n\`\`\`text\n${effectivePrompt}\n\`\`\`\n`;
 }
 
 export default function response(pi: ExtensionAPI): void {

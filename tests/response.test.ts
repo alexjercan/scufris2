@@ -501,11 +501,11 @@ test("persistence failure preserves spoken output", async (t) => {
 test("prompt inspection composition is exact and direct splitting is deterministic", () => {
   const prompt = assembleScufrisPrompt("Pi base");
   assert.match(prompt, /^Pi base/);
-  assert.match(prompt, /foreground conversational orchestrator/);
+  assert.match(prompt, /foreground pair-programming companion/);
   assert.match(prompt, /Use scufris_final_response/);
   const inspection = promptInspectionMarkdown("effective", {}, []);
-  assert.match(inspection, /Embedded canonical Scufris orchestration policy/);
-  assert.match(inspection, /## Embedded canonical orchestration policy/);
+  assert.match(inspection, /Embedded canonical Scufris identity policy/);
+  assert.match(inspection, /## Embedded canonical identity policy/);
   assert.deepEqual(splitDirectResponse("A safe answer."), {
     spoken: "A safe answer.",
   });

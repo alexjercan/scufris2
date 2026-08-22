@@ -35,6 +35,7 @@ function validListJob(overrides: Record<string, unknown> = {}) {
       profile: "code",
       brief: "Audience: maintainers. Outcome: diagnostics remain correct.",
     },
+    reviewer: null,
     diagnostics: [],
     ...overrides,
   };
@@ -75,6 +76,7 @@ function detail(overrides: Record<string, unknown> = {}) {
       window_id: "@2",
       pane_id: "%3",
     },
+    reviewer: null,
     status: {
       size_bytes: 40,
       events: ["working: started", "review-ready: ready for review"],
@@ -126,6 +128,7 @@ test("diagnostics schema is narrow and list invokes only packaged JSON mode", as
   assert.equal(output.jobs[0]?.owned_by_current_session, true);
   assert.equal(output.jobs[0]?.valid, true);
   assert.equal(output.jobs[0]?.review.profile, "code");
+  assert.equal(output.jobs[0]?.reviewer, null);
   assert.equal("tmux_session" in (output.jobs[0] ?? {}), false);
 });
 

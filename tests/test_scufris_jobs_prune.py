@@ -223,6 +223,50 @@ class ScufrisJobsPruneIntegrationTest(unittest.TestCase):
 
     def test_apply_zero_deletes_only_dead_and_old_malformed_metadata(self) -> None:
         dead_directory, dead_record = self.create_job("111111111111", alive=False)
+        assert dead_record is not None
+        reviewer_identity = (
+            self.external(
+                [
+                    "tmux",
+                    "new-window",
+                    "-d",
+                    "-P",
+                    "-F",
+                    "#{window_id}\t#{pane_id}\t#{pane_pid}",
+                    "-t",
+                    dead_record["tmux_session_id"],
+                    "-n",
+                    "preflight-aaa111bbb222",
+                    "sleep 60",
+                ]
+            )
+            .stdout.strip()
+            .split("\t")
+        )
+        reviewer_window, reviewer_pane, _ = reviewer_identity
+        self.external(
+            ["tmux", "set-option", "-w", "-t", reviewer_window, "remain-on-exit", "on"]
+        )
+        self.external(["tmux", "select-pane", "-d", "-t", reviewer_pane])
+        self.external(["tmux", "respawn-pane", "-k", "-t", reviewer_pane, "true"])
+        reviewer_pid = self.external(
+            ["tmux", "display-message", "-p", "-t", reviewer_pane, "#{pane_pid}"]
+        ).stdout.strip()
+        reviewer_owner = {
+            "version": 1,
+            "job_id": "111111111111",
+            "review_id": "aaa111bbb222",
+            "tmux_session": dead_record["tmux_session"],
+            "tmux_session_id": dead_record["tmux_session_id"],
+            "tmux_window_name": "preflight-aaa111bbb222",
+            "tmux_window_id": reviewer_window,
+            "tmux_pane_id": reviewer_pane,
+            "launcher_pid": int(reviewer_pid),
+            "reviewer_pid": int(reviewer_pid),
+        }
+        (dead_directory / "reviewer-aaa111bbb222.json").write_text(
+            json.dumps(reviewer_owner), encoding="utf-8"
+        )
         (dead_directory / "reviewer-aaa111bbb222.jsonl").write_text(
             '{"type":"session"}\n', encoding="utf-8"
         )

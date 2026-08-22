@@ -616,6 +616,36 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         self.assertEqual(review_process.stderr, "scufris-preflight-reviewer-started\n")
         approved = approved_envelope["result"]
         self.assertEqual(approved["verdict"], "approve")
+        owner_path = directory / "reviewer-111aaa222bbb.json"
+        owner = json.loads(owner_path.read_text(encoding="utf-8"))
+        self.assertEqual(owner["review_id"], "111aaa222bbb")
+        self.assertEqual(owner["tmux_session"], result["tmux_session"])
+        reviewer_state = self.run_external(
+            [
+                "tmux",
+                "display-message",
+                "-p",
+                "-t",
+                owner["tmux_pane_id"],
+                "#{window_name}\t#{pane_dead}\t#{pane_input_off}\t#{remain-on-exit}",
+            ],
+            env=self.env,
+        ).stdout.strip()
+        self.assertEqual(reviewer_state, "preflight-111aaa222bbb\t1\t1\ton")
+        visible = self.run_external(
+            [
+                "tmux",
+                "capture-pane",
+                "-p",
+                "-S",
+                "-",
+                "-t",
+                owner["tmux_pane_id"],
+            ],
+            env=self.env,
+        ).stdout
+        self.assertIn('"verdict":"approve"', visible)
+        self.assertIn("Structured result saved", visible)
         calls = [
             json.loads(line)
             for line in (self.root / "reviewer-calls.jsonl")
@@ -700,6 +730,40 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
         )["result"]
         self.env.pop("SCUFRIS_FAKE_REVIEW_OUTPUT")
         self.assertEqual(continued["verdict"], "request_changes")
+        continued_owner = json.loads(owner_path.read_text(encoding="utf-8"))
+        self.assertEqual(continued_owner["tmux_window_id"], owner["tmux_window_id"])
+        self.assertEqual(continued_owner["tmux_pane_id"], owner["tmux_pane_id"])
+        self.assertNotEqual(continued_owner["launcher_pid"], owner["launcher_pid"])
+        unrelated = self.run_external(
+            [
+                "tmux",
+                "new-window",
+                "-d",
+                "-P",
+                "-F",
+                "#{window_id}",
+                "-t",
+                f"={result['tmux_session']}",
+                "-n",
+                "user-review-notes",
+                "sleep 30",
+            ],
+            env=self.env,
+        ).stdout.strip()
+        removed = self.cli(
+            "remove-reviewer",
+            {"job_id": result["job_id"], "review_id": "111aaa222bbb"},
+        )["result"]
+        self.assertEqual(removed["state"], "removed")
+        self.assertFalse(owner_path.exists())
+        self.assertFalse((directory / "reviewer-111aaa222bbb.jsonl").exists())
+        self.assertEqual(
+            self.run_external(
+                ["tmux", "display-message", "-p", "-t", unrelated, "#{window_id}"],
+                env=self.env,
+            ).stdout.strip(),
+            unrelated,
+        )
         calls = [
             json.loads(line)
             for line in (self.root / "reviewer-calls.jsonl")

@@ -304,7 +304,7 @@ Immutable extension-owned record:
 
 Do not store prompt text, credentials, environment values, or absolute paths in this record.
 
-An active landable preflight sequence can add one `reviewer-<review_id>.jsonl` file beside the fixed job files. It is the dedicated reviewer session and never the implementation-worker session. A fresh sequence removes the invalidated reviewer session first. Stale-job pruning verifies and removes this optional exact regular file with the other owned job evidence.
+An active landable preflight sequence adds paired `reviewer-<review_id>.json` ownership evidence and `reviewer-<review_id>.jsonl` Pi session evidence beside the fixed job files. The ownership record binds version 1, job ID, review ID, exact feature session name and ID, `preflight-<review_id>` window name and ID, pane ID, launcher PID, and actual reviewer PID. The Pi session is dedicated to review and never uses the implementation-worker session. Dot-prefixed prompt, result, exit, and fresh-session scratch files exist only during one invocation. Diagnostics and stale-job pruning require matched ownership and session evidence and validate exact tmux, process, input-disable, remain-on-exit, and liveness state.
 
 ### `prompt.md`
 
@@ -450,14 +450,14 @@ Every spawn declares one review policy:
 
 Landable profiles are `code`, `consumer`, `operations`, and `interface`. The brief is bounded plain text that states the accepted outcome and audience. Requested non-landable results use `{ "profile": "none" }`.
 
-After the normal review snapshot passes, Scufris starts Pi as an exact owned non-tmux child. It uses print mode, model `openai-codex/gpt-5.6-sol`, medium thinking, `--tools read,grep,find,ls`, a dedicated session directory, and disables extensions, skills, prompt templates, themes, and project trust. One reviewer execution has an exact 1800-second deadline that starts immediately after child creation. The helper emits one private readiness line after it installs exact-child interruption handling. Receipt resets the enclosing extension deadline to 1810 seconds. The helper therefore has a fixed 10-second margin to stop the exact child and return its fail-closed response. Correction review uses the exact saved reviewer session file. Scufris strips implementation-session and Scufris role variables from the reviewer environment. The reviewer receives:
+After the normal review snapshot passes, Scufris creates a detached `preflight-<review_id>` window in the recorded exact feature session. It disables pane input, enables remain-on-exit, verifies the exact session, window, pane, launcher PID, and reviewer PID, and starts Pi inside that pane. It never attaches, selects, or switches a client. Pi uses print mode, model `openai-codex/gpt-5.6-sol`, medium thinking, `--tools read,grep,find,ls`, a dedicated session directory, and disabled extensions, skills, prompt templates, themes, and project trust. One reviewer execution has an exact 1800-second deadline that starts immediately after child creation. After exact-child interruption handling is installed, the pane launcher writes exact readiness evidence. The parent helper validates that evidence and emits one private readiness line. Receipt resets the enclosing extension deadline to 1810 seconds. The helper therefore has a fixed 10-second margin to stop the exact child and return its fail-closed response. Correction review respawns the exact same dead pane and uses the exact saved reviewer session file. Scufris strips implementation-session and Scufris role variables from the reviewer environment. The reviewer receives:
 
 - Repository instructions from the feature worktree.
 - The review profile and brief.
 - A bounded exact base-to-feature patch.
 - Access to surrounding feature-worktree files through read-only tools.
 
-The reviewer does not receive the implementation transcript, worker report, reasoning, or claims. It returns one bounded JSON result:
+The reviewer does not receive the implementation transcript, worker report, reasoning, or claims. The pane shows live stdout, stderr, tool activity, and final state. A separate bounded result file carries stdout to strict JSON validation; pane capture is never parsed. It returns one bounded JSON result:
 
 ```json
 {
@@ -476,9 +476,9 @@ The reviewer does not receive the implementation transcript, worker report, reas
 
 Valid severities are `BLOCKER`, `MAJOR`, and `MINOR`. The reviewer reports only fix-worthy findings. `approve` requires an empty finding list. Malformed, oversized, inconsistent, failed, timed-out, or mutating review runs block the lifecycle.
 
-Findings return to the same implementation worker as one bounded literal message. The reviewer session remains isolated from that worker and verifies the next committed revision. Two feedback cycles are allowed. A third `request_changes` result blocks for Pair mediation. Approval binds to the exact snapshot.
+Findings return to the same implementation worker as one bounded literal message. The reviewer window and Pi session remain isolated from that worker and verify the next committed revision. Two feedback cycles are allowed. A third `request_changes` result blocks for Pair mediation. Approval binds to the exact snapshot.
 
-A Plannotator request starts only after exact preflight approval. Plannotator feedback invalidates that approval and the prior reviewer session. The worker's next `review-ready` event starts a fresh preflight sequence before another user review.
+A Plannotator request starts only after exact preflight approval. Plannotator feedback invalidates that approval. Scufris validates and kills only the exact owned prior reviewer window, then removes its ownership and Pi session files. The worker's next `review-ready` event starts a fresh preflight sequence before another user review. Cancellation and normal shutdown use the same exact removal. Landing stop preserves the reviewer window: retain keeps it and remove lets `sprout rm` remove the complete feature session.
 
 ### User review
 

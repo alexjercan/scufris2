@@ -240,8 +240,10 @@ class ScufrisJobsIntegrationTest(unittest.TestCase):
         (worktree / "dirty.txt").write_text("dirty\n", encoding="utf-8")
         record["landing_sha"] = "0" * 40
         (directory / "job.json").write_text(json.dumps(record), encoding="utf-8")
+        (directory / "reviewer-aaa111bbb222.json").write_text("{}\n", encoding="utf-8")
         detail = json.loads(self.cli("111111111111", "--json").stdout)
         self.assertEqual(detail["status"]["events"], ["working: accepted"])
+        self.assertIsNone(detail["reviewer"])
         self.assertFalse(detail["git"]["clean"])
         self.assertFalse(detail["git"]["recorded_landing_revision_valid"])
         diagnostics = "\n".join(detail["diagnostics"])
@@ -249,6 +251,9 @@ class ScufrisJobsIntegrationTest(unittest.TestCase):
         self.assertIn("uses CRLF", diagnostics)
         self.assertIn("incomplete final line", diagnostics)
         self.assertIn("recorded landing revision is missing", diagnostics)
+        self.assertIn(
+            "reviewer: ownership and session evidence do not match", diagnostics
+        )
 
         recorded_window = record["tmux_window_id"]
         record["tmux_window_id"] = "@999999"

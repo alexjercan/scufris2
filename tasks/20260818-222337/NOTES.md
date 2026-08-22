@@ -57,3 +57,13 @@ Verification after `sprout sync preflight-review` reported already up to date:
 - `nix fmt -- --check .` - pass.
 - `nix flake check` - pass on x86_64-linux. Nix reported the expected unsupported-system omissions and existing unknown custom output warnings.
 - `git diff --check` - pass.
+
+## Visible preflight implementation 2026-08-22
+
+The actual Sol reviewer now runs in one input-disabled `preflight-<review_id>` window in the worker's exact feature tmux session. A narrow launcher mirrors bounded stdout and stderr to the remain-on-exit pane while a separate scratch result file carries strict JSON to the controller. Pane content is presentation only.
+
+Paired ownership and Pi session records bind the job and review IDs to the exact session, window, pane, launcher PID, and reviewer PID. Correction review respawns the same pane and continues the saved Pi session. Plannotator feedback validates and removes only that reviewer window before a new sequence. Direct stop and shutdown stop the exact reviewer process before removing its window. Landing preserves the reviewer for retain cleanup or subsequent Sprout removal.
+
+The integration fixture initially exposed two tmux details: `remain-on-exit` is formatted as `#{remain-on-exit}`, and respawn needs an explicit safe environment because the tmux server environment can be stale. The result channel remains independent from pane capture. Tests use isolated `TMUX_TMPDIR` servers and compare the default server identity before and after each case.
+
+The final synchronization merged the independently landed 1800-second deadline. The non-tmux implementation emitted readiness directly after child creation. The visible design needs two hops: the pane launcher starts the deadline and writes the exact reviewer PID, then the parent helper validates that PID before emitting the private readiness line to the extension. A matching parent deadline remains as a fail-closed backup and keeps the short timeout integration test deterministic.

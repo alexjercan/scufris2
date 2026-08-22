@@ -529,8 +529,16 @@ export default function scufris(
     }
     if (outcome.kind === "feedback") {
       job.reviewPhase = "feedback";
-      invalidatePreflight(job);
+      const invalidatedReviewId = job.preflightReviewId;
       try {
+        if (!invalidatedReviewId) {
+          throw new Error("human feedback has no owned preflight reviewer");
+        }
+        await runHelper("remove-reviewer", {
+          job_id: job.job_id,
+          review_id: invalidatedReviewId,
+        });
+        invalidatePreflight(job);
         await runHelper("send", {
           job_id: job.job_id,
           message: outcome.message,
@@ -638,7 +646,10 @@ export default function scufris(
     const controller = new AbortController();
     job.reviewAbort = controller;
     try {
-      context?.ui.notify(`Running preflight for job ${job.job_id}`, "info");
+      context?.ui.notify(
+        `Preflight for job ${job.job_id} is visible in window preflight-${reviewId}`,
+        "info",
+      );
       const result = await runHelper<PreflightResult>(
         "preflight-review",
         {
@@ -742,7 +753,12 @@ export default function scufris(
           );
         },
         stop: async () => {
-          await runHelper("stop", { job_id: job.job_id }, undefined, 15_000);
+          await runHelper(
+            "stop",
+            { job_id: job.job_id, retain_reviewer: true },
+            undefined,
+            15_000,
+          );
           job.window_alive = false;
         },
         remove: async () => {

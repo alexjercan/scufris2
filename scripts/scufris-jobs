@@ -409,6 +409,117 @@ def exact_pane_liveness(record: dict[str, Any], job_id: str) -> tuple[str, list[
     return "unknown", ["tmux: invalid pane_dead value"]
 
 
+def inspect_reviewer(
+    job_id: str, record: dict[str, Any]
+) -> tuple[dict[str, Any] | None, list[str]]:
+    directory = jobs_root() / job_id
+    try:
+        names: list[str] = []
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if len(names) >= 16:
+                    return None, [
+                        "reviewer: job directory exceeds the evidence scan limit"
+                    ]
+                names.append(entry.name)
+    except OSError as error:
+        return None, [f"reviewer: cannot scan evidence: {error.strerror}"]
+    owners = sorted(
+        name for name in names if re.fullmatch(r"reviewer-[a-z0-9]{12}\.json", name)
+    )
+    sessions = sorted(
+        name for name in names if re.fullmatch(r"reviewer-[a-z0-9]{12}\.jsonl", name)
+    )
+    if not owners and not sessions:
+        return None, []
+    if len(owners) != 1 or [owners[0][:-5] + ".jsonl"] != sessions:
+        return None, ["reviewer: ownership and session evidence do not match"]
+    try:
+        raw, _ = bounded_regular_file(directory / owners[0], MAX_RECORD)
+        owner = json.loads(raw)
+    except (DiagnosticError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        return None, [f"reviewer: invalid ownership record: {error}"]
+    keys = {
+        "version",
+        "job_id",
+        "review_id",
+        "tmux_session",
+        "tmux_session_id",
+        "tmux_window_name",
+        "tmux_window_id",
+        "tmux_pane_id",
+        "launcher_pid",
+        "reviewer_pid",
+    }
+    review_id = owner.get("review_id") if isinstance(owner, dict) else None
+    if (
+        not isinstance(owner, dict)
+        or set(owner) != keys
+        or owner.get("version") != 1
+        or owner.get("job_id") != job_id
+        or not isinstance(review_id, str)
+        or re.fullmatch(r"[a-z0-9]{12}", review_id) is None
+        or owner.get("tmux_session") != record["tmux_session"]
+        or owner.get("tmux_session_id") != record["tmux_session_id"]
+        or owner.get("tmux_window_name") != f"preflight-{review_id}"
+        or not isinstance(owner.get("launcher_pid"), int)
+        or owner["launcher_pid"] <= 0
+        or not isinstance(owner.get("reviewer_pid"), int)
+        or owner["reviewer_pid"] <= 0
+    ):
+        return None, ["reviewer: ownership identity does not match"]
+    for key, prefix in (("tmux_window_id", "@"), ("tmux_pane_id", "%")):
+        value = owner.get(key)
+        if (
+            not isinstance(value, str)
+            or not value.startswith(prefix)
+            or TMUX_ID_RE.fullmatch(value) is None
+        ):
+            return None, ["reviewer: invalid tmux identity"]
+    format_text = (
+        "#{session_id}\t#{session_name}\t#{window_id}\t#{window_name}\t"
+        "#{pane_id}\t#{pane_pid}\t#{pane_dead}\t#{pane_input_off}\t#{remain-on-exit}"
+    )
+    try:
+        code, stdout, stderr = run_bounded(
+            ["tmux", "display-message", "-p", "-t", owner["tmux_pane_id"], format_text]
+        )
+    except DiagnosticError as error:
+        return None, [f"reviewer: {error}"]
+    if code != 0:
+        message = stderr.decode("utf-8", "replace").strip()
+        if "can't find pane" in message or "no server running" in message:
+            liveness = "missing"
+        else:
+            return None, [f"reviewer: tmux unavailable: {message or code}"]
+    else:
+        row = tuple(stdout.decode("utf-8", "replace").strip().split("\t"))
+        expected = (
+            owner["tmux_session_id"],
+            owner["tmux_session"],
+            owner["tmux_window_id"],
+            owner["tmux_window_name"],
+            owner["tmux_pane_id"],
+            str(owner["launcher_pid"]),
+        )
+        if len(row) != 9 or row[:6] != expected or row[7:] != ("1", "on"):
+            return None, [
+                "reviewer: exact tmux, process, or input policy identity mismatch"
+            ]
+        liveness = "alive" if row[6] == "0" else "dead" if row[6] == "1" else "unknown"
+    return {
+        "review_id": review_id,
+        "window_name": owner["tmux_window_name"],
+        "window_id": owner["tmux_window_id"],
+        "pane_id": owner["tmux_pane_id"],
+        "launcher_pid": owner["launcher_pid"],
+        "reviewer_pid": owner["reviewer_pid"],
+        "liveness": liveness,
+        "input_disabled": True,
+        "remain_on_exit": True,
+    }, []
+
+
 def worktree_path(record: dict[str, Any]) -> tuple[Path | None, list[str]]:
     feature = record["feature"]
     suffix = f"_{feature}"
@@ -556,6 +667,7 @@ def base_job(
     events, protocol_errors, _ = read_status(job_id)
     latest = events[-1] if events else "starting: worker starting"
     state, summary = latest.split(": ", 1)
+    reviewer, reviewer_errors = inspect_reviewer(job_id, record)
     return {
         "job_id": job_id,
         "valid": True,
@@ -571,7 +683,8 @@ def base_job(
         "pane_liveness": liveness,
         "cleanup": record["cleanup"],
         "review": record["review"],
-        "diagnostics": [*diagnostics, *protocol_errors],
+        "reviewer": reviewer,
+        "diagnostics": [*diagnostics, *reviewer_errors, *protocol_errors],
     }
 
 
@@ -654,6 +767,7 @@ def detail_job(job_id: str, include_report: bool) -> dict[str, Any]:
     events, protocol_errors, status_size = read_status(job_id)
     report, report_errors = report_info(job_id, include_report)
     git, git_errors = inspect_git(record)
+    reviewer, reviewer_errors = inspect_reviewer(job_id, record)
     latest = events[-1] if events else "starting: worker starting"
     state, summary = latest.split(": ", 1)
     return {
@@ -670,6 +784,7 @@ def detail_job(job_id: str, include_report: bool) -> dict[str, Any]:
             "window_id": record["tmux_window_id"],
             "pane_id": record["tmux_pane_id"],
         },
+        "reviewer": reviewer,
         "status": {
             "size_bytes": status_size,
             "events": events,
@@ -677,7 +792,13 @@ def detail_job(job_id: str, include_report: bool) -> dict[str, Any]:
         },
         "report": report,
         "git": git,
-        "diagnostics": [*tmux_errors, *protocol_errors, *report_errors, *git_errors],
+        "diagnostics": [
+            *tmux_errors,
+            *reviewer_errors,
+            *protocol_errors,
+            *report_errors,
+            *git_errors,
+        ],
     }
 
 

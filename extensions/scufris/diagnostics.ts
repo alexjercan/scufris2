@@ -226,6 +226,53 @@ function reviewValue(value: unknown, name: string) {
   };
 }
 
+function reviewerValue(value: unknown, name: string) {
+  if (value === null) return null;
+  const reviewer = exactObject(
+    value,
+    [
+      "review_id",
+      "window_name",
+      "window_id",
+      "pane_id",
+      "launcher_pid",
+      "reviewer_pid",
+      "liveness",
+      "input_disabled",
+      "remain_on_exit",
+    ],
+    name,
+  );
+  const reviewId = jobIdValue(reviewer.review_id, `${name}.review_id`);
+  const windowName = stringValue(
+    reviewer.window_name,
+    `${name}.window_name`,
+    32,
+  );
+  if (windowName !== `preflight-${reviewId}`) {
+    throw new Error(
+      `Invalid Scufris diagnostics response: ${name}.window_name`,
+    );
+  }
+  return {
+    review_id: reviewId,
+    window_name: windowName,
+    window_id: stringValue(reviewer.window_id, `${name}.window_id`, 32),
+    pane_id: stringValue(reviewer.pane_id, `${name}.pane_id`, 32),
+    launcher_pid: integerValue(reviewer.launcher_pid, `${name}.launcher_pid`),
+    reviewer_pid: integerValue(reviewer.reviewer_pid, `${name}.reviewer_pid`),
+    liveness: statusValue(reviewer.liveness, `${name}.liveness`),
+    input_disabled: booleanValue(
+      reviewer.input_disabled,
+      `${name}.input_disabled`,
+    ),
+    remain_on_exit: booleanValue(
+      reviewer.remain_on_exit,
+      `${name}.remain_on_exit`,
+    ),
+  };
+}
+
 function sanitizeList(
   value: unknown,
   ownership: OwnershipLookup,
@@ -276,6 +323,7 @@ function sanitizeList(
         "pane_liveness",
         "cleanup",
         "review",
+        "reviewer",
         "diagnostics",
       ],
       prefix,
@@ -335,6 +383,7 @@ function sanitizeList(
         false,
       ),
       review: reviewValue(job.review, `${prefix}.review`),
+      reviewer: reviewerValue(job.reviewer, `${prefix}.reviewer`),
       ...diagnosticValues(job.diagnostics, `${prefix}.diagnostics`, 3),
     };
   });
@@ -353,6 +402,7 @@ function sanitizeDetail(value: unknown, ownership: OwnershipLookup) {
       "elapsed_seconds",
       "pane_liveness",
       "tmux",
+      "reviewer",
       "status",
       "report",
       "git",
@@ -488,6 +538,7 @@ function sanitizeDetail(value: unknown, ownership: OwnershipLookup) {
       false,
     ),
     review,
+    reviewer: reviewerValue(root.reviewer, "reviewer"),
     thinking: sanitizeText(
       stringValue(metadata.thinking, "metadata.thinking", 16),
       16,

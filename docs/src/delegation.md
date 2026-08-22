@@ -16,10 +16,10 @@ A landable policy includes a concise accepted-outcome and audience brief. A `non
 
 1. The worker commits, synchronizes, checks, and reports `review-ready`.
 2. Scufris verifies the exact clean base and feature revisions.
-3. A fresh headless Pi reviewer inspects the exact patch with read-only tools. It has a separate session and does not receive the worker transcript, report, reasoning, or claims.
-4. Fix-worthy BLOCKER, MAJOR, or MINOR findings return once to the same worker. The same reviewer session verifies correction commits. A third change request stops for Pair mediation.
+3. A fresh Pi reviewer runs in an input-disabled `preflight-<review_id>` window in the worker's feature tmux session. Scufris announces the window without selecting a client. The reviewer has a separate cold session and does not receive the worker transcript, report, reasoning, or claims.
+4. The actual reviewer output and read-only tool activity remain visible in that window. Fix-worthy BLOCKER, MAJOR, or MINOR findings return through bounded structured files, not pane scraping. The same window and reviewer session verify correction commits. A third change request stops for Pair mediation.
 5. Exact preflight approval opens the Plannotator since-base review.
-6. Plannotator feedback invalidates preflight approval. The next worker revision starts a fresh preflight reviewer session.
+6. Plannotator feedback invalidates preflight approval. Scufris removes only the exact owned reviewer window and session. The next worker revision starts a fresh reviewer window and session.
 7. Human Plannotator approval remains the only landing approval. Scufris lands only the exact approved revisions after the worker's required acknowledgment.
 
-One reviewer run has an exact 1800-second execution deadline. When the exact reviewer child starts, the helper sends a private readiness signal that resets the enclosing process deadline to 1810 seconds. This gives a fixed 10-second margin to stop the child and return the fail-closed result. Review failure, timeout, malformed output, repository mutation, or revision drift fails closed. Scufris stops only reviewer and worker processes that the foreground session owns.
+One reviewer run has an exact 1800-second execution deadline. When the exact reviewer child starts in the pane, the helper sends a private readiness signal that resets the enclosing process deadline to 1810 seconds. This gives a fixed 10-second margin to stop the child and return the fail-closed result. Review failure, timeout, malformed output, identity drift, repository mutation, or revision drift fails closed. The finished pane remains visible with `remain-on-exit`. Scufris records exact reviewer window, pane, launcher, child, session, and review identities. Cancellation and shutdown remove only that owned reviewer window. Retain cleanup keeps reviewer evidence; remove cleanup lets Sprout remove the complete feature session.

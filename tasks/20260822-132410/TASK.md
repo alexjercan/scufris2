@@ -1,6 +1,6 @@
 # Show preflight reviewers in worker tmux sessions
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: agents, review, tmux, visibility
 
@@ -59,7 +59,7 @@ Update the delegation manual, skill, architecture, protocol, and task evidence t
 
 ## Deadline implementation evidence
 
-The timeout-only accepted contract was implemented independently on 2026-08-22. Reviewer execution now stops after exactly 1800 seconds. When the exact reviewer child starts, a private readiness line resets the enclosing extension/helper deadline to 1810 seconds. This leaves a fixed 10-second margin for exact-child cleanup and the fail-closed response without charging helper setup against reviewer execution. Focused tests inspect both values, readiness reset, timeout diagnostics, and ordering without waiting 1800 seconds. The blocked visible-review implementation was not included; the rest of this task remains open.
+The timeout-only accepted contract was implemented independently on 2026-08-22. Reviewer execution now stops after exactly 1800 seconds. When the exact reviewer child starts, a private readiness line resets the enclosing extension/helper deadline to 1810 seconds. This leaves a fixed 10-second margin for exact-child cleanup and the fail-closed response without charging helper setup against reviewer execution. Focused tests inspect both values, readiness reset, timeout diagnostics, and ordering without waiting 1800 seconds. That landed revision did not include the visible-review implementation; this feature now integrates both accepted behaviors.
 
 Pre-synchronization verification:
 
@@ -98,3 +98,36 @@ Preflight correction verification:
 - User input cannot alter the reviewer.
 - Findings and approvals continue through the existing automated correction and Plannotator lifecycle.
 - Exact ownership and cleanup remain safe for worker, reviewer, and unrelated tmux windows.
+
+## Implementation record
+
+- The private job helper creates and supervises the actual Pi reviewer in the exact feature session.
+- Paired reviewer ownership and Pi session evidence supports correction continuity, diagnostics, stale pruning, invalidation, shutdown, landing cleanup, and retention.
+- The extension announces the visible window and removes it only after human feedback, cancellation, or shutdown. Landing retains it until the selected cleanup policy runs.
+- Integration tests cover exact identity, disabled input, visible output, remain-on-exit, same-window continuation, exact removal, unrelated-window preservation, timeout, malformed output, failure, mutation, shutdown, remove, retain, and isolated tmux servers.
+
+## Verification evidence
+
+- Implementation revision before synchronization: `641a33d`.
+- `sprout sync visible-preflight-review` - pass; merged current master at `a7e254b` and preserved its unrelated accepted tasks.
+- Synchronized feature revision before this evidence update: `8977210`.
+- `npm run check` - pass, 38 TypeScript tests.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` - pass, 26 Python integration tests.
+- `ruff check .` and `ruff format --check .` - pass.
+- `shellcheck scripts/scufris-dev` - pass. The other changed helpers are Python and are checked by Ruff.
+- `nix fmt -- --check .` - pass.
+- `git diff --check` - pass.
+- `nix flake check` - pass on x86_64-linux. Nix reports the existing unsupported-system omissions and unknown custom-output warnings.
+- Tmux integration tests use isolated `TMUX_TMPDIR` servers and verify that the caller's default server identity is unchanged during teardown.
+
+## One-time manual review preparation
+
+- `sprout sync visible-preflight-review` merged master `08f7575`, including the landed exact 1800-second reviewer deadline.
+- Conflict resolution preserved the actual reviewer in the input-disabled owned tmux window. The pane launcher now starts the exact 1800-second child deadline, publishes exact child readiness, and the parent helper validates it before resetting the enclosing 1810-second deadline.
+- `npm run check` - pass, 40 TypeScript tests.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` - pass, 27 Python integration tests.
+- `ruff check .` and `ruff format --check .` - pass.
+- `shellcheck scripts/scufris-dev` - pass.
+- `nix fmt -- --check .` - pass.
+- `git diff --check` - pass.
+- `nix flake check` - pass on x86_64-linux with the existing unsupported-system omissions, deprecated platform warnings, and unknown custom-output warnings.

@@ -365,6 +365,100 @@ Limitations:
 - Open file remains safe exact-revision context in the review page. Plannotator
   remains the exhaustive full-diff view.
 
+## Review comments UX iteration
+
+The quick-review surface now uses a fast review model:
+
+- Mark viewed persists the section state and collapses the card to a compact
+  summary. Reopen restores the complete section.
+- Add comment records a non-blocking note with a stable identity and the
+  section's validated file and line anchor. Notes remain visible in the final
+  review summary.
+- Request change records separate blocking feedback. Only the explicit final
+  Request changes action routes that feedback to the worker.
+- The final area reports viewed progress, note count, and blocking-change count.
+  It offers Approve only with no notes, and Approve with comments only when
+  notes exist. Blocking feedback prevents both approval paths.
+- Approve with comments is still approval. It sends no code changes and includes
+  the bounded anchored notes in the approval instruction.
+- Per the revised accepted scope, quick-review has no follow-up task action or
+  task-creation protocol. Later task creation remains a normal Scufris action.
+
+The TypeScript extension remains authoritative for action validation, stable
+comment identity, anchors, persistence, exact-revision ownership, serialization,
+approval guards, approval-message routing, and blocking-feedback routing. Python
+only renders the state and performs bounded asynchronous browser transport.
+
+Iteration coverage includes collapse and reopen, anchored comments, escaped note
+content, conditional approval variants, approval guards, explicit blocking
+routing, malformed and oversized input, stale ownership, bridge bounds,
+correlated shutdown, and no-refresh browser updates.
+
+Iteration changed files:
+
+- `extensions/scufris/agents.ts`
+- `extensions/scufris/walkthrough.ts`
+- `tools/quick-review/quick_review.py`
+- `tests/test_quick_review.py`
+- `tests/walkthrough.test.ts`
+- `tasks/20260822-212422/TASK.md`
+
+Verification after implementation commit `0d1106ae78587a3b5c91c9f9a526dfb4d44d2f51`:
+
+- `sprout sync review-comments-workflow` - already up to date.
+- `npm run check` - passed all 71 TypeScript tests, type checking, and
+  Prettier validation.
+- `nix flake check` - passed all 25 checks.
+- Ruff check and format validation passed for the Python tool and tests.
+- Python compilation and all six quick-review unit tests passed.
+- `git diff --check` passed.
+- The production renderer was opened in headless Chromium and its screenshot was
+  inspected for the viewed summary, reopen affordance, anchored note, action
+  hierarchy, final counts, conditional approval action, and absence of a
+  follow-up task action.
+
+Limitations remain the same as the local renderer: browser launch uses the
+user's configured browser, and Plannotator remains the exhaustive diff view.
+
+Preflight cleanup correction:
+
+- Successful approval now detaches the owned walkthrough and starts its existing
+  graceful close only after the approval instruction and ownership checks
+  succeed. It does not await close inside the HTTP callback, so the correlated
+  authoritative approval response finishes before Python exits.
+- Added direct lifecycle coverage for detach and close initiation. Existing
+  production bridge coverage verifies that close from a terminal callback still
+  returns HTTP 200 before server exit.
+- The preflight request to add follow-up task creation was not applied because it
+  conflicts with the user's later explicit instruction to remove that action
+  from this iteration.
+
+Second preflight correction:
+
+- Comment admission, persisted-state validation, and final approval now use one
+  shared exact approval-instruction serializer and 16 KiB UTF-8 budget.
+- The budget includes fixed instruction text, section IDs, file and line anchors,
+  JSON structure, and JSON escaping. An overflowing note is rejected before the
+  comments array is mutated or persisted.
+- Added regression coverage where escape-heavy raw bodies fit the former 12 KiB
+  aggregate limit but overflow the actual serialized approval instruction.
+- The repeated follow-up-task finding remains superseded by the user's explicit
+  scope change.
+
+Blocking-feedback budget correction:
+
+- One serializer now constructs the exact final worker instruction as bounded
+  JSON. Embedded newlines are escaped rather than rejected after admission.
+- Candidate blocking feedback is serialized and checked against the 16 KiB
+  steering limit before state mutation or persistence. Persisted-state loading
+  and final Request changes routing use the same serializer and budget.
+- Regression coverage verifies multiline feedback, aggregate overflow without
+  mutation or persistence, persisted aggregate rejection, and exact final
+  routing.
+- `npm run check`, `nix flake check`, focused Python tests, Ruff, and
+  `git diff --check` passed before synchronization. Exact correction revision
+  and post-synchronization verification are recorded in the delegated report.
+
 ## Non-goals for the first version
 
 - Replacing Plannotator.

@@ -13,10 +13,13 @@ import {
 } from "./diagnostics.ts";
 import { runPrivateHelper, toolResult } from "./shared/runtime.ts";
 import {
+  APPROVAL_INSTRUCTION,
+  approvalInstruction,
   initialWalkthroughState,
   parseWalkthrough,
   saveWalkthroughState,
   startWalkthroughServer,
+  type ReviewComment,
   type WalkthroughState,
 } from "./walkthrough.ts";
 
@@ -125,17 +128,6 @@ export function classifyPreflightResult(value: unknown): PreflightOutcome {
 
 export function preflightFindingsMessage(findings: PreflightFinding[]): string {
   return `Independent preflight requested changes: ${JSON.stringify({ findings })}`;
-}
-
-export function boundedWalkthroughFeedback(feedback: string): string {
-  const message = `Walkthrough review requested changes: ${feedback.trim()}`;
-  if (
-    !feedback.trim() ||
-    /[\x00\r\n]/.test(feedback) ||
-    Buffer.byteLength(message, "utf8") > 16 * 1024
-  )
-    throw new Error("walkthrough feedback must be one bounded line");
-  return message;
 }
 
 export function nextPreflightFeedbackCycle(
@@ -276,6 +268,14 @@ export async function cancelReviewForWorkerEvent(
 
 export interface WalkthroughStartupServer {
   close(): Promise<void>;
+}
+
+export function detachApprovedWalkthrough(state: {
+  walkthrough?: WalkthroughStartupServer;
+}): void {
+  const walkthrough = state.walkthrough;
+  state.walkthrough = undefined;
+  if (walkthrough) void walkthrough.close().catch(() => undefined);
 }
 
 export async function attachWalkthroughServerIfOwned(
@@ -445,8 +445,7 @@ export function jobEventTriggersTurn(state: string): boolean {
   return state !== "working";
 }
 
-export const APPROVAL_INSTRUCTION =
-  "Review approved. Do not make repository changes. Finalize report.md, append exactly `done: review approved with no changes requested`, then wait.";
+export { APPROVAL_INSTRUCTION, approvalInstruction };
 export const APPROVAL_DONE_SUMMARY =
   "review approved with no changes requested";
 
@@ -601,6 +600,7 @@ export default function scufris(
     requestId: string,
     snapshot: ReviewSnapshot,
     assertActive: () => void,
+    comments: ReviewComment[],
   ) => {
     assertActive();
     const verified = await currentSnapshot(job);
@@ -614,14 +614,12 @@ export default function scufris(
         "reviewed revisions changed before approval acknowledgment",
       );
     }
-    const active = job.walkthrough;
-    job.walkthrough = undefined;
-    if (active) void active.close();
+    const instruction = approvalInstruction(comments);
     job.reviewPhase = "awaiting-done";
     job.approval = { ...snapshot, request_id: requestId };
     await runHelper("send", {
       job_id: job.job_id,
-      message: APPROVAL_INSTRUCTION,
+      message: instruction,
     });
     if (
       jobs.get(job.job_id) !== job ||
@@ -629,6 +627,7 @@ export default function scufris(
       job.approval?.request_id !== requestId
     )
       throw new Error("walkthrough is no longer active");
+    detachApprovedWalkthrough(job);
     job.state = "working";
     job.summary = "waiting for required review approval acknowledgment";
     context?.ui.notify(`Review approved for job ${job.job_id}`, "info");
@@ -748,7 +747,6 @@ export default function scufris(
         requestChanges: async (feedback) => {
           try {
             assertActive();
-            const message = boundedWalkthroughFeedback(feedback);
             job.reviewPhase = "feedback";
             const reviewId = job.preflightReviewId;
             if (!reviewId)
@@ -766,7 +764,7 @@ export default function scufris(
               job.reviewRequestId !== requestId
             )
               throw new Error("walkthrough is no longer active");
-            await runHelper("send", { job_id: job.job_id, message });
+            await runHelper("send", { job_id: job.job_id, message: feedback });
             const active = job.walkthrough;
             job.walkthrough = undefined;
             if (active) void active.close();
@@ -807,9 +805,15 @@ export default function scufris(
             respond: () => undefined,
           });
         },
-        approved: async () => {
+        approved: async (comments) => {
           try {
-            await approveSnapshot(job, requestId, snapshot, assertActive);
+            await approveSnapshot(
+              job,
+              requestId,
+              snapshot,
+              assertActive,
+              comments,
+            );
           } catch (error) {
             const reason = `approval could not be finalized: ${error instanceof Error ? error.message : String(error)}`;
             if (

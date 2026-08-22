@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -49,13 +49,56 @@ export interface WalkthroughDocument {
   source: string;
   identity: string;
 }
+export interface ReviewComment {
+  id: string;
+  sectionId: string;
+  file: string;
+  lines: string;
+  body: string;
+}
+export interface BlockingChangeRequest {
+  sectionId: string;
+  feedback: string;
+}
+export const APPROVAL_INSTRUCTION =
+  "Review approved. Do not make repository changes. Finalize report.md, append exactly `done: review approved with no changes requested`, then wait.";
+const MAX_APPROVAL_INSTRUCTION_BYTES = 16 * 1024;
+
+export function approvalInstruction(comments: ReviewComment[]): string {
+  if (comments.length === 0) return APPROVAL_INSTRUCTION;
+  const notes = comments.map(({ sectionId, file, lines, body }) => ({
+    sectionId,
+    anchor: `${file}:${lines}`,
+    body,
+  }));
+  const message = `${APPROVAL_INSTRUCTION}\n\nNon-blocking review notes to include in the approval: ${JSON.stringify({ notes })}`;
+  if (Buffer.byteLength(message, "utf8") > MAX_APPROVAL_INSTRUCTION_BYTES)
+    throw new Error("approval notes exceed the steering limit");
+  return message;
+}
+
+const CHANGE_REQUEST_INSTRUCTION = "Walkthrough review requested changes.";
+const MAX_CHANGE_REQUEST_INSTRUCTION_BYTES = 16 * 1024;
+
+export function changeRequestInstruction(
+  changeRequests: BlockingChangeRequest[],
+): string {
+  if (changeRequests.length === 0) return CHANGE_REQUEST_INSTRUCTION;
+  const message = `${CHANGE_REQUEST_INSTRUCTION.slice(0, -1)}: ${JSON.stringify({ changeRequests })}`;
+  if (Buffer.byteLength(message, "utf8") > MAX_CHANGE_REQUEST_INSTRUCTION_BYTES)
+    throw new Error("blocking feedback exceeds the steering limit");
+  return message;
+}
+
 export interface WalkthroughState {
   version: 1;
   identity: string;
   revision: string;
   sections: Record<string, SectionState>;
+  viewed: Record<string, boolean>;
   questions: Array<{ sectionId: string; question: string; answer?: string }>;
-  changeRequests: Array<{ sectionId: string; feedback: string }>;
+  comments: ReviewComment[];
+  changeRequests: BlockingChangeRequest[];
   approved: boolean;
 }
 
@@ -210,7 +253,11 @@ export function initialWalkthroughState(
     sections: Object.fromEntries(
       document.sections.map((section) => [section.id, "not-reviewed"]),
     ),
+    viewed: Object.fromEntries(
+      document.sections.map((section) => [section.id, false]),
+    ),
     questions: [],
+    comments: [],
     changeRequests: [],
     approved: false,
   };
@@ -227,25 +274,34 @@ export function validateWalkthroughState(
       [
         "approved",
         "changeRequests",
+        "comments",
         "identity",
         "questions",
         "revision",
         "sections",
         "version",
-      ].join("\0") ||
+        "viewed",
+      ]
+        .sort()
+        .join("\0") ||
     state.version !== 1 ||
     state.identity !== document.identity ||
     state.revision !== document.revision ||
     typeof state.approved !== "boolean" ||
     !state.sections ||
     typeof state.sections !== "object" ||
+    !state.viewed ||
+    typeof state.viewed !== "object" ||
     !Array.isArray(state.questions) ||
+    !Array.isArray(state.comments) ||
     !Array.isArray(state.changeRequests)
   )
     throw new Error("review state does not match the artifact");
   const expected = document.sections.map((section) => section.id).sort();
   if (
     Object.keys(state.sections).sort().join("\0") !== expected.join("\0") ||
+    Object.keys(state.viewed).sort().join("\0") !== expected.join("\0") ||
+    Object.values(state.viewed).some((item) => typeof item !== "boolean") ||
     Object.values(state.sections).some(
       (item) =>
         ![
@@ -278,6 +334,23 @@ export function validateWalkthroughState(
         !validText(item.question) ||
         (item.answer !== undefined && !validText(item.answer)),
     ) ||
+    state.comments.length > MAX_SECTIONS ||
+    new Set(state.comments.map((item) => item?.id)).size !==
+      state.comments.length ||
+    state.comments.some(
+      (item) =>
+        !item ||
+        typeof item !== "object" ||
+        Object.keys(item).sort().join("\0") !==
+          "body\0file\0id\0lines\0sectionId" ||
+        !(item.sectionId in state.sections) ||
+        !/^[0-9a-f]{24}$/.test(item.id) ||
+        document.sections.find((section) => section.id === item.sectionId)
+          ?.file !== item.file ||
+        document.sections.find((section) => section.id === item.sectionId)
+          ?.lines !== item.lines ||
+        !validText(item.body),
+    ) ||
     state.changeRequests.length > MAX_SECTIONS ||
     state.changeRequests.some(
       (item) =>
@@ -289,9 +362,12 @@ export function validateWalkthroughState(
     )
   )
     throw new Error("review questions or change requests are invalid");
+  approvalInstruction(state.comments);
+  changeRequestInstruction(state.changeRequests);
   if (
     state.approved &&
-    Object.values(state.sections).some((item) => item !== "looks-good")
+    (Object.values(state.viewed).some((item) => !item) ||
+      state.changeRequests.length > 0)
   )
     throw new Error("approval has unresolved sections");
   return state;
@@ -311,8 +387,10 @@ export function applySectionAction(
         : "change-requested";
 }
 export function approveWalkthrough(state: WalkthroughState): void {
-  if (Object.values(state.sections).some((item) => item !== "looks-good"))
-    throw new Error("all sections must be marked Looks good before approval");
+  if (Object.values(state.viewed).some((item) => !item))
+    throw new Error("all sections must be marked viewed before approval");
+  if (state.changeRequests.length > 0)
+    throw new Error("blocking feedback must be sent as requested changes");
   state.approved = true;
 }
 
@@ -322,7 +400,7 @@ export interface WalkthroughActions {
   explain(section: string, question: string): Promise<string>;
   requestChanges(feedback: string): Promise<void>;
   fullDiff(): Promise<void>;
-  approved(): Promise<void>;
+  approved(comments: ReviewComment[]): Promise<void>;
   context(section: WalkthroughSection): string;
 }
 type BridgeAction = {
@@ -423,7 +501,9 @@ export function startWalkthroughServer(
       const sectionId = request.section ?? "";
       const section = document.sections.find((item) => item.id === sectionId);
       const sectionAction = [
-        "looks-good",
+        "mark-viewed",
+        "reopen",
+        "add-comment",
         "explain",
         "request-change",
         "context",
@@ -431,7 +511,12 @@ export function startWalkthroughServer(
       ].includes(action);
       if (
         !sectionAction &&
-        !["approve", "request-changes", "full-diff"].includes(action)
+        ![
+          "approve",
+          "approve-with-comments",
+          "request-changes",
+          "full-diff",
+        ].includes(action)
       )
         throw new Error("unknown action");
       if (sectionAction && !section) throw new Error("unknown section");
@@ -444,53 +529,74 @@ export function startWalkthroughServer(
         action === "request-change" ? comment || section!.prompt : undefined;
       const finalFeedback =
         action === "request-changes"
-          ? state.changeRequests
-              .map((item) => `${item.sectionId}: ${item.feedback}`)
-              .join("; ") || "Walkthrough review requested changes."
+          ? changeRequestInstruction(state.changeRequests)
           : undefined;
       const terminalAction = [
-        "request-change",
         "request-changes",
         "approve",
+        "approve-with-comments",
       ].includes(action);
-      if (action === "approve") {
+      if (["approve", "approve-with-comments"].includes(action)) {
+        if (action === "approve" && state.comments.length > 0)
+          throw new Error("non-blocking notes require Approve with comments");
+        if (action === "approve-with-comments" && state.comments.length === 0)
+          throw new Error("there are no review notes to include");
         approveWalkthrough(state);
         rollbackPending = () => void (state.approved = false);
-      } else if (action === "request-change") {
-        const previousSectionState = state.sections[sectionId]!;
-        const previousRequestCount = state.changeRequests.length;
-        rollbackPending = () => {
-          state.sections[sectionId] = previousSectionState;
-          state.changeRequests.length = previousRequestCount;
-        };
       }
       if (terminalAction) {
         try {
           await actions.verify();
         } catch (error) {
-          if (action === "approve") state.approved = false;
+          if (["approve", "approve-with-comments"].includes(action))
+            state.approved = false;
           throw error;
         }
         terminal = "pending";
       }
-      if (["looks-good", "explain", "request-change"].includes(action)) {
-        applySectionAction(
-          state,
+      if (action === "mark-viewed") {
+        state.approved = false;
+        state.viewed[sectionId] = true;
+        if (state.sections[sectionId] !== "change-requested")
+          state.sections[sectionId] = "looks-good";
+        actions.persist(state);
+      } else if (action === "reopen") {
+        state.approved = false;
+        state.viewed[sectionId] = false;
+        if (state.sections[sectionId] === "looks-good")
+          state.sections[sectionId] = "not-reviewed";
+        actions.persist(state);
+      } else if (action === "add-comment") {
+        if (!comment) throw new Error("Add comment requires a review note");
+        if (state.comments.length >= MAX_SECTIONS)
+          throw new Error("review notes exceed the bounded review limit");
+        const nextComment = {
+          id: randomBytes(12).toString("hex"),
           sectionId,
-          action as "looks-good" | "explain" | "request-change",
-        );
+          file: section!.file,
+          lines: section!.lines,
+          body: comment,
+        };
+        approvalInstruction([...state.comments, nextComment]);
+        state.comments.push(nextComment);
+        actions.persist(state);
+      } else if (["explain", "request-change"].includes(action)) {
         if (action === "explain") {
+          applySectionAction(state, sectionId, "explain");
           const question = comment || section!.prompt;
           const answer = await actions.explain(sectionId, question);
           await actions.verify();
           state.questions.push({ sectionId, question, answer });
+        } else {
+          const nextChangeRequest = { sectionId, feedback: feedback! };
+          changeRequestInstruction([
+            ...state.changeRequests,
+            nextChangeRequest,
+          ]);
+          applySectionAction(state, sectionId, "request-change");
+          state.changeRequests.push(nextChangeRequest);
         }
-        if (action === "request-change") {
-          state.changeRequests.push({ sectionId, feedback: feedback! });
-          actions.persist(state);
-          terminal = "committed";
-          await actions.requestChanges(`${sectionId}: ${feedback}`);
-        } else actions.persist(state);
+        actions.persist(state);
       } else if (action === "ask") {
         if (!comment) throw new Error("Ask reviewer requires a question");
         const answer = await actions.explain(sectionId, comment);
@@ -509,7 +615,7 @@ export function startWalkthroughServer(
       else if (action === "request-changes") {
         terminal = "committed";
         await actions.requestChanges(finalFeedback!);
-      } else if (action === "approve") {
+      } else if (["approve", "approve-with-comments"].includes(action)) {
         try {
           actions.persist(state);
         } catch (error) {
@@ -518,7 +624,7 @@ export function startWalkthroughServer(
         }
         terminal = "committed";
         try {
-          await actions.approved();
+          await actions.approved([...state.comments]);
         } catch (error) {
           state.approved = false;
           throw error;

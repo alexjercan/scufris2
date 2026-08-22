@@ -49,7 +49,9 @@ def descriptor() -> dict[str, object]:
             "identity": "a" * 64,
             "revision": revision,
             "sections": {"safe-change": "not-reviewed"},
+            "viewed": {"safe-change": False},
             "questions": [],
+            "comments": [],
             "changeRequests": [],
             "approved": False,
         },
@@ -76,6 +78,33 @@ class QuickReviewTest(unittest.TestCase):
             "view.querySelector('code').textContent=result.context", quick_review.JS
         )
         self.assertIn("fetch('action'", quick_review.JS)
+        self.assertIn('data-action="add-comment"', page)
+        self.assertIn('data-action="mark-viewed"', page)
+        self.assertIn('data-action="reopen"', page)
+        self.assertIn("Approve with comments", page)
+        self.assertNotIn("Create follow-up task", page)
+        self.assertIn("classList.toggle('viewed'", quick_review.JS)
+
+    def test_anchored_comments_are_bounded_and_escaped(self) -> None:
+        value = descriptor()
+        value["state"]["comments"] = [
+            {
+                "id": "b" * 24,
+                "sectionId": "safe-change",
+                "file": "src/safe.py",
+                "lines": "1-2",
+                "body": "Note <img onerror=alert(1)>",
+            }
+        ]
+        page = quick_review.render_page(
+            quick_review.validate_init(value)["document"], value["state"]
+        )
+        self.assertIn("src/safe.py:1-2", page)
+        self.assertIn("Note &lt;img onerror=alert(1)&gt;", page)
+        self.assertNotIn("<img onerror", page)
+        value["state"]["comments"][0]["file"] = "other.py"
+        with self.assertRaisesRegex(ValueError, "comments"):
+            quick_review.validate_init(value)
 
     def test_malformed_and_oversized_bridge_messages_fail(self) -> None:
         with self.assertRaisesRegex(ValueError, "malformed"):
@@ -162,7 +191,7 @@ class QuickReviewTest(unittest.TestCase):
             request = urllib.request.Request(
                 f"http://127.0.0.1:{server.server_port}/{server.token}/action",
                 data=json.dumps(
-                    {"action": "looks-good", "section": "safe-change"}
+                    {"action": "mark-viewed", "section": "safe-change"}
                 ).encode(),
                 headers={"Content-Type": "application/json"},
                 method="POST",
@@ -213,7 +242,7 @@ class QuickReviewTest(unittest.TestCase):
         result: list[dict[str, object]] = []
         request_thread = threading.Thread(
             target=lambda: result.append(
-                bridge.request({"action": "looks-good", "section": "safe-change"})
+                bridge.request({"action": "mark-viewed", "section": "safe-change"})
             )
         )
         request_thread.start()

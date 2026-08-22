@@ -29,6 +29,7 @@ MAX_SECTIONS = 40
 CSS = r"""
 :root{color-scheme:light dark;--bg:#f6f8fa;--panel:#fff;--text:#1f2328;--muted:#656d76;--border:#d0d7de;--blue:#0969da;--green:#1a7f37;--red:#cf222e;--purple:#8250df;--orange:#bc4c00;--add:#dafbe1;--del:#ffebe9;--hunk:#ddf4ff;--code:#f6f8fa;--shadow:0 1px 2px rgba(31,35,40,.08)}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1120px;margin:auto;padding:40px 24px 80px}.hero,.card,.final{background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}.hero{padding:28px 32px;margin-bottom:22px}.eyebrow{color:var(--muted);font-weight:600;margin:0 0 5px}.hero h1{font-size:30px;line-height:1.25;margin:0 0 16px}.chips,.meta,.actions{display:flex;flex-wrap:wrap;gap:8px}.chip,.badge{display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:999px;padding:3px 9px;font-size:12px;font-weight:600;background:var(--bg)}.chip.good{color:var(--green);background:#dafbe1;border-color:#aceebb}.chip.add{color:var(--green)}.chip.del{color:var(--red)}.built{border-top:1px solid var(--border);margin-top:20px;padding-top:18px}.built h2{font-size:16px;margin:0 0 7px}.built p,.prose p{margin:6px 0}.progress-wrap{margin:20px 0}.progress-label{display:flex;justify-content:space-between;color:var(--muted);margin-bottom:7px}.progress{appearance:none;width:100%;height:8px;border:0;border-radius:99px;background:#d8dee4;overflow:hidden}.progress::-webkit-progress-bar{background:#d8dee4}.progress::-webkit-progress-value{background:var(--green)}.progress::-moz-progress-bar{background:var(--green)}.card{margin:16px 0;overflow:hidden}.card-head{padding:20px 24px 14px;display:flex;gap:16px;justify-content:space-between;align-items:flex-start}.card h2{font-size:19px;margin:0 0 7px}.number{color:var(--muted);font-weight:500}.meta{color:var(--muted);font-size:13px}.meta code{background:var(--code);border-radius:5px;padding:2px 6px}.importance-critical{color:var(--red);background:#ffebe9}.importance-important{color:var(--orange);background:#fff8c5}.importance-supporting{color:var(--purple);background:#fbefff}.state-not-reviewed{color:var(--muted)}.state-looks-good{color:var(--green);background:#dafbe1}.state-needs-explanation{color:var(--blue);background:#ddf4ff}.state-change-requested{color:var(--red);background:#ffebe9}.prose{padding:0 24px 16px;font-size:15px}.diff{margin:0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);overflow:auto;background:var(--code);font:12px/20px ui-monospace,SFMono-Regular,Consolas,monospace}.diff-line{display:block;white-space:pre;min-width:max-content;padding:0 16px;border-left:3px solid transparent}.diff-add{background:var(--add);border-color:var(--green)}.diff-del{background:var(--del);border-color:var(--red)}.diff-hunk{background:var(--hunk);color:var(--blue)}.diff-file{font-weight:600;color:var(--muted)}.prompt{margin:18px 24px;padding:12px 14px;border-left:4px solid var(--blue);background:#ddf4ff;border-radius:0 6px 6px 0}.prompt strong{display:block;color:var(--blue);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.answers{padding:0 24px}.answer{border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin:10px 0;background:var(--bg)}.answer strong{display:block;margin-bottom:4px}.controls{padding:16px 24px 22px}.comment{width:100%;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text);padding:9px 11px;margin:0 0 10px;font:inherit}.button{appearance:none;border:1px solid rgba(31,35,40,.15);border-radius:6px;background:#f6f8fa;color:#24292f;font-weight:600;padding:7px 13px;cursor:pointer;box-shadow:0 1px 0 rgba(31,35,40,.04)}.button:hover{background:#f3f4f6}.button:disabled{opacity:.55;cursor:wait}.button.primary{color:#fff;background:#1f883d}.button.danger{color:#fff;background:#cf222e}.button.link{color:var(--blue);background:var(--panel)}.feedback{min-height:22px;margin-top:8px;color:var(--muted)}.feedback.error{color:var(--red)}.feedback.success{color:var(--green)}.context-view{max-height:420px;overflow:auto;margin:10px 0 0;padding:12px 14px;border:1px solid var(--border);border-radius:6px;background:var(--code);color:var(--text);font:12px/20px ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre}.final{padding:24px 28px;margin-top:24px}.final h2{margin:0 0 4px}.final .actions{margin-top:16px}.warnings{color:var(--orange);margin:12px 0}.revision{font-family:ui-monospace,monospace}.spinner{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;margin-right:6px;vertical-align:-2px}@keyframes spin{to{transform:rotate(360deg)}}
+.card.viewed .card-details{display:none}.card.viewed{border-color:#aceebb}.viewed-summary{display:none;padding:0 24px 18px;align-items:center;justify-content:space-between;gap:12px}.card.viewed .viewed-summary{display:flex}.button.subtle{background:transparent;color:var(--muted);box-shadow:none}.button.comment-action{color:#fff;background:var(--blue)}.review-note{border-left:3px solid var(--blue);padding:8px 10px;margin:8px 0;background:var(--bg);border-radius:0 6px 6px 0}.review-note strong{display:block;font:12px ui-monospace,monospace;color:var(--muted);margin-bottom:4px}.review-summary:empty{display:none}.final-counts{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-weight:600;margin-top:10px}
 @media(max-width:650px){main{padding:18px 10px 50px}.hero{padding:21px}.card-head{padding:17px;display:block}.card-head>.badge{margin-top:10px}.prose,.controls,.answers{padding-left:17px;padding-right:17px}.prompt{margin-left:17px;margin-right:17px}.actions .button{flex:1}}
 @media(prefers-color-scheme:dark){:root{--bg:#0d1117;--panel:#161b22;--text:#e6edf3;--muted:#8b949e;--border:#30363d;--blue:#58a6ff;--green:#3fb950;--red:#f85149;--purple:#bc8cff;--orange:#d29922;--add:#12261e;--del:#2d1619;--hunk:#13283a;--code:#0d1117}.button{background:#21262d;color:#e6edf3;border-color:#30363d}.chip.good,.state-looks-good{background:#12261e;border-color:#238636}.importance-critical,.state-change-requested{background:#2d1619}.importance-important{background:#302b13}.importance-supporting{background:#21183c}.state-needs-explanation,.prompt{background:#13283a}}
 """
@@ -36,27 +37,32 @@ CSS = r"""
 JS = r"""
 const root=document.querySelector('main');
 let currentState=null;
-const stateLabels={'not-reviewed':'Not reviewed','looks-good':'Looks good','needs-explanation':'Needs explanation','change-requested':'Change requested'};
+const stateLabels={'not-reviewed':'Not viewed','looks-good':'Viewed','needs-explanation':'Needs explanation','change-requested':'Change requested'};
 function escapeText(value){return document.createTextNode(value)}
+function noteBox(item){const box=document.createElement('div');box.className='review-note';const anchor=document.createElement('strong');anchor.textContent=`${item.file}:${item.lines}`;const text=document.createElement('div');text.textContent=item.body;box.append(anchor,text);return box}
 function renderState(state){
   currentState=state;
-  let reviewed=0;
+  let viewed=0;
   for(const [id,value] of Object.entries(state.sections)){
-    if(value==='looks-good')reviewed++;
+    if(state.viewed[id])viewed++;
+    const card=document.querySelector(`[data-card="${CSS.escape(id)}"]`);if(card)card.classList.toggle('viewed',state.viewed[id]);
     const badge=document.querySelector(`[data-state="${CSS.escape(id)}"]`);
     if(badge){badge.className=`badge state-${value}`;badge.replaceChildren(escapeText(stateLabels[value]||value));}
     const answers=document.querySelector(`[data-answers="${CSS.escape(id)}"]`);
     if(answers){answers.replaceChildren();for(const item of state.questions.filter(q=>q.sectionId===id&&q.answer)){
       const box=document.createElement('div');box.className='answer';const strong=document.createElement('strong');strong.textContent=item.question;const text=document.createElement('div');text.textContent=item.answer;box.append(strong,text);answers.append(box);
     }}
+    for(const notes of document.querySelectorAll(`[data-notes="${CSS.escape(id)}"]`)){notes.replaceChildren();for(const item of state.comments.filter(n=>n.sectionId===id))notes.append(noteBox(item));}
   }
-  const total=Object.keys(state.sections).length;document.querySelectorAll('[data-reviewed]').forEach(x=>x.textContent=reviewed);document.querySelectorAll('[data-total]').forEach(x=>x.textContent=total);document.querySelectorAll('[data-progress]').forEach(x=>{x.max=total;x.value=reviewed});
-  const approve=document.querySelector('[data-action="approve"]');if(approve)approve.disabled=reviewed!==total||state.approved;
+  const total=Object.keys(state.sections).length,notes=state.comments.length,blocks=state.changeRequests.length;
+  document.querySelectorAll('[data-reviewed]').forEach(x=>x.textContent=viewed);document.querySelectorAll('[data-total]').forEach(x=>x.textContent=total);document.querySelectorAll('[data-note-count]').forEach(x=>x.textContent=notes);document.querySelectorAll('[data-block-count]').forEach(x=>x.textContent=blocks);document.querySelectorAll('[data-progress]').forEach(x=>{x.max=total;x.value=viewed});
+  const summary=document.querySelector('[data-review-summary]');if(summary){summary.replaceChildren();for(const item of state.comments)summary.append(noteBox(item));}
+  const canApprove=viewed===total&&blocks===0&&!state.approved;const approve=document.querySelector('[data-action="approve"]'),withComments=document.querySelector('[data-action="approve-with-comments"]');if(approve){approve.hidden=notes>0;approve.disabled=!canApprove}if(withComments){withComments.hidden=notes===0;withComments.disabled=!canApprove}
 }
 async function act(button){
   const scope=button.closest('[data-scope]');const feedback=scope.querySelector('.feedback');const buttons=scope.querySelectorAll('button');buttons.forEach(x=>x.disabled=true);feedback.className='feedback';feedback.innerHTML='<span class="spinner"></span>Working...';
   const comment=scope.querySelector('.comment');const payload={action:button.dataset.action};if(scope.dataset.section)payload.section=scope.dataset.section;if(comment)payload.comment=comment.value;
-  try{const response=await fetch('action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});let result;try{result=await response.json()}catch{throw new Error(`Request failed (${response.status})`)}if(result.state)renderState(result.state);if(!response.ok||!result.ok)throw new Error(result.error||`Request failed (${response.status})`);if(typeof result.context==='string'){const view=scope.querySelector('.context-view');if(view){view.querySelector('code').textContent=result.context;view.hidden=false;}}feedback.textContent=result.message||'Updated.';feedback.className='feedback success';if(comment&&['ask','request-change'].includes(payload.action))comment.value='';}
+  try{const response=await fetch('action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});let result;try{result=await response.json()}catch{throw new Error(`Request failed (${response.status})`)}if(result.state)renderState(result.state);if(!response.ok||!result.ok)throw new Error(result.error||`Request failed (${response.status})`);if(typeof result.context==='string'){const view=scope.querySelector('.context-view');if(view){view.querySelector('code').textContent=result.context;view.hidden=false;}}feedback.textContent=result.message||'Updated.';feedback.className='feedback success';if(comment&&['ask','request-change','add-comment'].includes(payload.action))comment.value='';}
   catch(error){feedback.textContent=error instanceof Error?error.message:String(error);feedback.className='feedback error';}
   finally{buttons.forEach(x=>x.disabled=false);if(currentState)renderState(currentState);}
 }
@@ -133,7 +139,9 @@ def validate_init(message: Any) -> dict[str, Any]:
         "identity",
         "revision",
         "sections",
+        "viewed",
         "questions",
+        "comments",
         "changeRequests",
         "approved",
     }
@@ -145,6 +153,9 @@ def validate_init(message: Any) -> dict[str, Any]:
         or state["revision"] != document["revision"]
         or not isinstance(section_states, dict)
         or set(section_states) != ids
+        or not isinstance(state["viewed"], dict)
+        or set(state["viewed"]) != ids
+        or any(not isinstance(item, bool) for item in state["viewed"].values())
         or any(
             value
             not in {
@@ -156,6 +167,7 @@ def validate_init(message: Any) -> dict[str, Any]:
             for value in section_states.values()
         )
         or not isinstance(state["questions"], list)
+        or not isinstance(state["comments"], list)
         or not isinstance(state["changeRequests"], list)
         or not isinstance(state["approved"], bool)
     ):
@@ -170,6 +182,26 @@ def validate_init(message: Any) -> dict[str, Any]:
             or ("answer" in question and not isinstance(question["answer"], str))
         ):
             raise ValueError("state questions are invalid")
+    if len(state["comments"]) > MAX_SECTIONS or len(
+        {item.get("id") for item in state["comments"] if isinstance(item, dict)}
+    ) != len(state["comments"]):
+        raise ValueError("state comments exceed limit")
+    section_by_id = {section["id"]: section for section in sections}
+    for comment in state["comments"]:
+        if (
+            not isinstance(comment, dict)
+            or set(comment) != {"id", "sectionId", "file", "lines", "body"}
+            or not re.fullmatch(r"[0-9a-f]{24}", comment.get("id", ""))
+            or comment.get("sectionId") not in ids
+            or comment.get("file")
+            != section_by_id[comment.get("sectionId", "")]["file"]
+            or comment.get("lines")
+            != section_by_id[comment.get("sectionId", "")]["lines"]
+            or not isinstance(comment.get("body"), str)
+            or not comment["body"].strip()
+            or len(comment["body"].encode("utf-8")) > MAX_COMMENT_BYTES
+        ):
+            raise ValueError("state comments are invalid")
     for request in state["changeRequests"]:
         if (
             not isinstance(request, dict)
@@ -178,8 +210,8 @@ def validate_init(message: Any) -> dict[str, Any]:
             or not isinstance(request["feedback"], str)
         ):
             raise ValueError("state change requests are invalid")
-    if state["approved"] and any(
-        value != "looks-good" for value in section_states.values()
+    if state["approved"] and (
+        any(not value for value in state["viewed"].values()) or state["changeRequests"]
     ):
         raise ValueError("approved state has unresolved sections")
     return message
@@ -256,12 +288,12 @@ def diff_html(value: str) -> str:
 
 
 def render_page(document: dict[str, Any], state: dict[str, Any]) -> str:
-    reviewed = sum(value == "looks-good" for value in state["sections"].values())
+    reviewed = sum(state["viewed"].values())
     total = len(document["sections"])
     cards = []
     labels = {
-        "not-reviewed": "Not reviewed",
-        "looks-good": "Looks good",
+        "not-reviewed": "Not viewed",
+        "looks-good": "Viewed",
         "needs-explanation": "Needs explanation",
         "change-requested": "Change requested",
     }
@@ -273,14 +305,27 @@ def render_page(document: dict[str, Any], state: dict[str, Any]) -> str:
             for item in state.get("questions", [])
             if item.get("sectionId") == section["id"] and item.get("answer")
         )
+        notes = "".join(
+            f'<div class="review-note"><strong>{html.escape(item["file"])}:{html.escape(item["lines"])}</strong><div>{html.escape(item["body"])}</div></div>'
+            for item in state.get("comments", [])
+            if item.get("sectionId") == section["id"]
+        )
+        viewed_class = " viewed" if state["viewed"][section["id"]] else ""
         cards.append(
-            f'''<article class="card" id="change-{section_id}"><header class="card-head"><div><h2><span class="number">{index}.</span> {html.escape(section["id"].replace("-", " ").title())}</h2><div class="meta"><span class="badge importance-{section["importance"]}">{html.escape(section["importance"].title())}</span><code>{html.escape(section["file"])}:{html.escape(section["lines"])}</code></div></div><span class="badge state-{value}" data-state="{section_id}">{labels[value]}</span></header><div class="prose">{prose(section["markdown"])}</div><pre class="diff" aria-label="Git diff">{diff_html(section["diff"])}</pre><div class="prompt"><strong>Review prompt</strong>{html.escape(section["prompt"])}</div><div class="answers" data-answers="{section_id}">{answers}</div><div class="controls" data-scope data-section="{section_id}"><input class="comment" maxlength="4096" placeholder="Optional question or change details" aria-label="Question or change details"><div class="actions"><button class="button primary" data-action="looks-good">Looks good</button><button class="button" data-action="explain">Explain</button><button class="button danger" data-action="request-change">Request change</button><button class="button" data-action="context">Show context</button><button class="button link" data-action="ask">Ask reviewer</button></div><div class="feedback" role="status" aria-live="polite"></div><pre class="context-view" aria-label="Exact-revision file context" hidden><code></code></pre></div></article>'''
+            f'''<article class="card{viewed_class}" id="change-{section_id}" data-card="{section_id}"><header class="card-head"><div><h2><span class="number">{index}.</span> {html.escape(section["id"].replace("-", " ").title())}</h2><div class="meta"><span class="badge importance-{section["importance"]}">{html.escape(section["importance"].title())}</span><code>{html.escape(section["file"])}:{html.escape(section["lines"])}</code></div></div><span class="badge state-{value}" data-state="{section_id}">{labels[value]}</span></header><div class="viewed-summary" data-scope data-section="{section_id}"><div><strong>Viewed section</strong><div data-notes="{section_id}">{notes}</div></div><button class="button subtle" data-action="reopen">Reopen</button><div class="feedback" role="status" aria-live="polite"></div></div><div class="card-details"><div class="prose">{prose(section["markdown"])}</div><pre class="diff" aria-label="Git diff">{diff_html(section["diff"])}</pre><div class="prompt"><strong>Review prompt</strong>{html.escape(section["prompt"])}</div><div class="answers" data-answers="{section_id}">{answers}</div><div class="controls" data-scope data-section="{section_id}"><div data-notes="{section_id}">{notes}</div><input class="comment" maxlength="4096" placeholder="Write a review note or blocking change" aria-label="Review note or blocking change"><div class="actions"><button class="button comment-action" data-action="add-comment">Add comment</button><button class="button subtle" data-action="mark-viewed">Mark viewed</button><button class="button" data-action="explain">Explain</button><button class="button danger" data-action="request-change">Request change</button><button class="button" data-action="context">Show context</button><button class="button link" data-action="ask">Ask reviewer</button></div><div class="feedback" role="status" aria-live="polite"></div><pre class="context-view" aria-label="Exact-revision file context" hidden><code></code></pre></div></div></article>'''
         )
     warnings = "".join(
         f'<div class="warnings">Warning: {html.escape(item)}</div>'
         for item in document["warnings"]
     )
-    return f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>{html.escape(document["title"])}</title><link rel="stylesheet" href="style.css"></head><body><main><section class="hero"><p class="eyebrow">Scufris implementation walkthrough</p><h1>{html.escape(document["title"])}</h1><div class="chips"><span class="chip good">Preflight passed</span><span class="chip">{document["files"]} files</span><span class="chip add">+{document["added"]}</span><span class="chip del">-{document["removed"]}</span><span class="chip revision">{html.escape(document["revision"][:12])}</span></div><div class="built"><h2>What was built</h2>{prose(document["summary"])}</div>{warnings}</section><div class="progress-wrap"><div class="progress-label"><strong>Review progress</strong><span><span data-reviewed>{reviewed}</span>/<span data-total>{total}</span> sections</span></div><progress class="progress" data-progress value="{reviewed}" max="{total}"></progress></div>{"".join(cards)}<section class="final" data-scope><h2>Final review</h2><p>Approve after every section looks good, return consolidated feedback, or inspect the exact full diff in Plannotator.</p><div class="actions"><button class="button primary" data-action="approve" {"disabled" if reviewed != total else ""}>Approve</button><button class="button danger" data-action="request-changes">Request changes</button><button class="button" data-action="full-diff">View full diff</button></div><div class="feedback" role="status" aria-live="polite"></div></section></main><script src="app.js" defer></script></body></html>"""
+    comments = state.get("comments", [])
+    blocks = state.get("changeRequests", [])
+    summary_notes = "".join(
+        f'<div class="review-note"><strong>{html.escape(item["file"])}:{html.escape(item["lines"])}</strong><div>{html.escape(item["body"])}</div></div>'
+        for item in comments
+    )
+    can_approve = reviewed == total and not blocks and not state["approved"]
+    return f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>{html.escape(document["title"])}</title><link rel="stylesheet" href="style.css"></head><body><main><section class="hero"><p class="eyebrow">Scufris implementation walkthrough</p><h1>{html.escape(document["title"])}</h1><div class="chips"><span class="chip good">Preflight passed</span><span class="chip">{document["files"]} files</span><span class="chip add">+{document["added"]}</span><span class="chip del">-{document["removed"]}</span><span class="chip revision">{html.escape(document["revision"][:12])}</span></div><div class="built"><h2>What was built</h2>{prose(document["summary"])}</div>{warnings}</section><div class="progress-wrap"><div class="progress-label"><strong>Review progress</strong><span><span data-reviewed>{reviewed}</span>/<span data-total>{total}</span> sections viewed</span></div><progress class="progress" data-progress value="{reviewed}" max="{total}"></progress></div>{"".join(cards)}<section class="final" data-scope><h2>Final review</h2><div class="final-counts"><span><span data-reviewed>{reviewed}</span>/<span data-total>{total}</span> viewed</span><span><span data-note-count>{len(comments)}</span> notes</span><span><span data-block-count>{len(blocks)}</span> blocking changes</span></div><div class="review-summary" data-review-summary>{summary_notes}</div><p>Approve after every section is viewed, request explicit blocking changes, or inspect the exact full diff in Plannotator.</p><div class="actions"><button class="button primary" data-action="approve" {"" if not comments else "hidden"} {"" if can_approve else "disabled"}>Approve</button><button class="button primary" data-action="approve-with-comments" {"" if comments else "hidden"} {"" if can_approve else "disabled"}>Approve with comments</button><button class="button danger" data-action="request-changes">Request changes</button><button class="button" data-action="full-diff">View full diff</button></div><div class="feedback" role="status" aria-live="polite"></div></section></main><script src="app.js" defer></script></body></html>"""
 
 
 @dataclass

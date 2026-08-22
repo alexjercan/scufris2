@@ -5,7 +5,6 @@ import {
   APPROVAL_DONE_SUMMARY,
   APPROVAL_INSTRUCTION,
   attachWalkthroughServerIfOwned,
-  boundedWalkthroughFeedback,
   cancelReviewForWorkerEvent,
   classifyPreflightResult,
   PREFLIGHT_HELPER_SHUTDOWN_MARGIN_MS,
@@ -16,6 +15,7 @@ import {
   codeReviewPayload,
   completeApprovedLanding,
   consumeReviewRetry,
+  detachApprovedWalkthrough,
   isApprovalDone,
   invalidatePreflight,
   isDelegatedFeature,
@@ -226,21 +226,6 @@ test("preflight classification accepts only consistent fix-worthy results", () =
   }
 });
 
-test("walkthrough feedback fits the worker steering contract before transition", () => {
-  assert.equal(
-    boundedWalkthroughFeedback("runtime-filter: preserve AND semantics"),
-    "Walkthrough review requested changes: runtime-filter: preserve AND semantics",
-  );
-  assert.throws(
-    () => boundedWalkthroughFeedback("line one\nline two"),
-    /bounded line/,
-  );
-  assert.throws(
-    () => boundedWalkthroughFeedback("x".repeat(16 * 1024)),
-    /bounded line/,
-  );
-});
-
 test("preflight lifecycle permits two feedback cycles then requires mediation", () => {
   assert.equal(nextPreflightFeedbackCycle(0), 1);
   assert.equal(nextPreflightFeedbackCycle(1), 2);
@@ -304,6 +289,21 @@ test("owned startup attaches without cleanup", async () => {
   );
   assert.equal(attached, true);
   assert.deepEqual(events, ["attach"]);
+});
+
+test("successful approval detaches and starts graceful walkthrough cleanup", async () => {
+  let closed!: () => void;
+  const closeStarted = new Promise<void>((resolve) => (closed = resolve));
+  const state: { walkthrough?: { close(): Promise<void> } } = {
+    walkthrough: {
+      close: async () => {
+        closed();
+      },
+    },
+  };
+  detachApprovedWalkthrough(state);
+  assert.equal(state.walkthrough, undefined);
+  await closeStarted;
 });
 
 test("worker terminal events clear review ownership before walkthrough cleanup", async () => {

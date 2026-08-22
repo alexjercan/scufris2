@@ -7,7 +7,7 @@ Pin a release tag and share `nixpkgs` with the parent flake:
 ```nix
 {
   inputs.scufris = {
-    url = "github:alexjercan/scufris2/v0.1.0";
+    url = "github:alexjercan/scufris2/v0.2.0";
     inputs.nixpkgs.follows = "nixpkgs";
   };
 }

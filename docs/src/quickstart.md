@@ -9,13 +9,13 @@ Install Nix with flakes enabled.
 Run the normal package from the current release tag:
 
 ```bash
-nix run github:alexjercan/scufris2/v0.1.0#scufris
+nix run github:alexjercan/scufris2/v0.2.0#scufris
 ```
 
 Run the voice-capable package on Linux:
 
 ```bash
-nix run github:alexjercan/scufris2/v0.1.0#scufris-voice
+nix run github:alexjercan/scufris2/v0.2.0#scufris-voice
 ```
 
 The voice-capable package starts silent. Use `/speech on` for persistent speech, `/speech once` for one response, and `/speech replay` to repeat the last safe paragraph.

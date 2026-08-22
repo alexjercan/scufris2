@@ -57,6 +57,9 @@
         resources = mkResources false;
         voiceResources = mkResources true;
         voice = import ./nix/voice.nix {inherit pkgs;};
+        docs = import ./nix/docs.nix {
+          inherit inputs self pkgs;
+        };
         launcher = import ./nix/launcher.nix {
           inherit pkgs resources;
           piPackage = inputs.pi.packages.${system}.default;
@@ -79,6 +82,7 @@
                 bashInteractive
                 git
                 alejandra
+                mdbook
                 nodejs_22
                 python3
                 ruff
@@ -100,7 +104,7 @@
           {
             default = launcher;
             scufris = launcher;
-            inherit resources;
+            inherit docs resources;
             voice-resources = voiceResources;
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
@@ -123,9 +127,11 @@
             };
           };
 
-        checks = import ./nix/checks.nix {
-          inherit inputs self pkgs system resources voiceResources launcher voiceLauncher voice devShell;
-        };
+        checks =
+          import ./nix/checks.nix {
+            inherit inputs self pkgs system resources voiceResources launcher voiceLauncher voice devShell;
+          }
+          // {inherit docs;};
 
         devShells.default = devShell;
       };

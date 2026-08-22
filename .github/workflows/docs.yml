@@ -1,0 +1,67 @@
+name: Documentation
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/docs.yml"
+      - "docs/**"
+      - "nix/**"
+      - "README.md"
+      - "RELEASE.md"
+      - "flake.nix"
+      - "flake.lock"
+      - "package.json"
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/docs.yml"
+      - "docs/**"
+      - "nix/**"
+      - "README.md"
+      - "RELEASE.md"
+      - "flake.nix"
+      - "flake.lock"
+      - "package.json"
+  workflow_dispatch:
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v17
+      - name: Build mdBook
+        run: nix build .#docs
+      - name: Prepare Pages artifact
+        if: github.event_name != 'pull_request'
+        run: cp --dereference --recursive result _site
+      - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request'
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: _site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

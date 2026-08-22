@@ -1,0 +1,8 @@
+[book]
+authors = ["Alex Jercan"]
+language = "en"
+src = "src"
+title = "Scufris Manual"
+
+[output.html]
+git-repository-url = "https://github.com/alexjercan/scufris2"

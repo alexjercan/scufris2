@@ -410,12 +410,7 @@ export default function response(pi: ExtensionAPI): void {
             item === call
               ? {
                   ...call,
-                  arguments: {
-                    spoken,
-                    ...(entry.artifact_id
-                      ? { artifact_id: entry.artifact_id }
-                      : {}),
-                  },
+                  arguments: { spoken },
                 }
               : item,
           ),
@@ -439,12 +434,7 @@ export default function response(pi: ExtensionAPI): void {
               item.type === "toolCall" && item.name === FINAL_TOOL
                 ? {
                     ...item,
-                    arguments: {
-                      spoken: fallbackSentence,
-                      ...(entry.artifact_id
-                        ? { artifact_id: entry.artifact_id }
-                        : {}),
-                    },
+                    arguments: { spoken: fallbackSentence },
                   }
                 : item,
             ),

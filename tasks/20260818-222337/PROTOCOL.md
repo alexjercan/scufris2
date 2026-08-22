@@ -14,11 +14,11 @@
 
 `extensions/scufris/identity.ts` embeds the one canonical Pair prompt as LF-terminated ASCII of at most 800 bytes. The Scufris launcher sets `SCUFRIS_ROLE=orchestrator`; the identity extension appends the complete canonical text in `before_agent_start` for every orchestrator agent run. This rebuilds it after compaction. The worker launcher removes the role. Normal Pi sessions, direct package loading, and ambient delegated Pi workers do not receive the Scufris prompt.
 
-Pair is automatic. No Pair command exists. Foreground Scufris delegates project work before project inspection. Readiness remains a prose judgment, not a deterministic routing tool. Workers and preflight reviewers do not receive the foreground policy or response extension.
+Pair is automatic. No Pair command exists. Foreground Scufris handles narrow project work expected to take seconds and delegates work expected to take minutes. Scope and latency control this prose judgment; project tool use does not. Workers and preflight reviewers do not receive the foreground policy or response extension.
 
 ## Foreground responses
 
-`scufris_final_response` accepts one required `spoken` string and one optional `detail` Markdown string. It validates `spoken` as complete plain prose within the 1,000-byte Piper limit. A successful result sets `terminate: true`. The assistant tool-call record is scrubbed of `detail` before durable session storage.
+`scufris_final_response` accepts one required `spoken` string and one optional `detail` Markdown string. It validates `spoken` as complete plain prose within the 1,000-byte Piper limit. A successful result sets `terminate: true`. Before Pi validates and executes the call, the assistant tool-call record is scrubbed to the schema-valid `spoken` argument. This removes `detail` from durable session storage without preventing termination.
 
 A structured response renders from one private custom entry containing the spoken paragraph and optional `/detail <artifact_id>` line. Direct assistant streaming is hidden. Final direct text is split at its first blank line and renders only from the finalized assistant record, not from an additional custom entry. A valid first paragraph becomes `spoken`; the remainder becomes an artifact. Invalid text is stored in full and replaced with one safe sentence.
 

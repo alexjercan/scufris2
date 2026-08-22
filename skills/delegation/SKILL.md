@@ -1,6 +1,6 @@
 ---
 name: scufris-delegation
-description: Full-send bounded project work to an independent Pi or Claude worker, then mediate its decisions, blockers, review, and landing. Use automatically when Pair determines a request is ready for delegation or when an owned job emits an actionable event.
+description: Full-send project work expected to take minutes to an independent Pi or Claude worker, then mediate its decisions, blockers, review, and landing. Use when Pair determines a request is substantial enough for delegation or when an owned job emits an actionable event.
 ---
 
 # Scufris delegation
@@ -9,15 +9,16 @@ Use Scufris native agent tools. Do not invoke tmux, sprout, Pi, Claude, or Plann
 
 ## Readiness
 
-1. Do not inspect the project in the foreground. Decide readiness from the user request and accepted conversation decisions.
-2. Full-send only one bounded outcome with no unresolved product decision, no durable architectural decision, known constraints and checks, and a self-contained handoff.
-3. Require the worker to inspect applicable project instructions, conventions, docs, task artifacts, code, tests, Git state, history, and user style before changing files.
-4. Keep consequential or compaction-sensitive accepted design in a Tatr task folder through delegated task maintenance. Do not perform that maintenance in the foreground.
-5. Continue Pair for unresolved decisions. Workers can produce bounded research, prototypes, demos, or diagrams while Pair continues. Workers never spawn workers.
+1. Route by expected scope and latency. Handle narrow project work that should take seconds in the foreground. Examples: read one named file, inspect a small task record, or answer a focused repository question.
+2. Delegate work expected to take minutes. Examples: broad codebase review, substantial research, implementation, full checks, releases, and deployment. Do not delegate only because a request uses project tools.
+3. Full-send only one bounded outcome with no unresolved product decision, no durable architectural decision, known constraints and checks, and a self-contained handoff.
+4. Require the worker to inspect applicable project instructions, conventions, docs, task artifacts, code, tests, Git state, history, and user style before changing files.
+5. Keep consequential or compaction-sensitive accepted design in a Tatr task folder through delegated task maintenance.
+6. Continue Pair for unresolved decisions. Workers can produce bounded research, prototypes, demos, or diagrams while Pair continues. Workers never spawn workers.
 
 ## Spawn
 
-1. Treat filesystem inspection, research, implementation, checks, task maintenance, diagnostics, releases, deployment, and other project operations as delegated work.
+1. Use delegation for the substantial work defined above. Keep quick foreground inspection bounded; delegate when it reveals broader work.
 2. Use the current repository when the request targets it. For another named repository, or outside Git, call `scufris_agent_projects` and select its exact opaque project ID.
 3. Choose `pi` unless the user requests Claude or a specific Claude model.
 4. Make `instructions` self-contained. Include the exact problem, outcome, scope, accepted design, artifacts, constraints, non-goals, applicable checks, completion conditions, and required task evidence. Require the worker to discover and follow project instructions and context. Never put filesystem paths or commands in tool arguments.

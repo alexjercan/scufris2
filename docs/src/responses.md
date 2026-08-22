@@ -1,6 +1,6 @@
 # Spoken responses and private detail
 
-Foreground Scufris is a conversational orchestrator. It answers ordinary conversation and product decisions directly. It delegates project inspection, research, implementation, checks, maintenance, diagnostics, releases, and deployment before it inspects the project.
+Foreground Scufris is a conversational orchestrator. It answers conversation, product decisions, and project work that should take seconds directly. It delegates work expected to take minutes. Scope and latency control routing, not the use of project tools.
 
 Every final answer has one short plain-prose paragraph. Optional Markdown detail is stored in a private sidecar beside the active Pi session. The transcript then shows one compact command:
 

@@ -11,6 +11,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Check } from "typebox/value";
 import response, {
   ArtifactStore,
   FINAL_TOOL,
@@ -200,7 +201,7 @@ test("direct output is split, hidden detail is persisted, and malformed output f
   assert.doesNotMatch(malformed.message.content[0].text, /unsafe|path/);
 });
 
-test("final tool scrubs detail from the assistant record and terminates", async (t) => {
+test("final tool keeps scrubbed arguments executable and terminates", async (t) => {
   const previous = process.env.SCUFRIS_ROLE;
   process.env.SCUFRIS_ROLE = "orchestrator";
   t.after(() =>
@@ -224,11 +225,28 @@ test("final tool scrubs detail from the assistant record and terminates", async 
     stopReason: "toolUse" as const,
   };
   const replaced = await app.emit("message_end", { message });
-  assert.equal("detail" in replaced.message.content[0].arguments, false);
-  assert.equal("artifact_id" in replaced.message.content[0].arguments, true);
-  const toolResult = await app.tools
-    .get(FINAL_TOOL)
-    .execute("final-call", call.arguments, undefined, undefined, app.context);
+  assert.deepEqual(replaced.message.content[0].arguments, {
+    spoken: "The work is ready for review.",
+  });
+  const finalTool = app.tools.get(FINAL_TOOL);
+  assert.equal(
+    Check(finalTool.parameters, replaced.message.content[0].arguments),
+    true,
+  );
+  assert.equal(
+    Check(finalTool.parameters, {
+      spoken: "The work is ready for review.",
+      artifact_id: "0123456789abcdef01234567",
+    }),
+    false,
+  );
+  const toolResult = await finalTool.execute(
+    "final-call",
+    replaced.message.content[0].arguments,
+    undefined,
+    undefined,
+    app.context,
+  );
   assert.equal(toolResult.terminate, true);
   assert.deepEqual(toolResult.content, [
     { type: "text", text: "Final response recorded." },

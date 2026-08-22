@@ -237,9 +237,9 @@ The matching job directory and exact tmux window are both required for orphan el
 
 ## Pair and delegation readiness
 
-Scufris pairs automatically. There is no `/pair` command or deterministic router. It answers ordinary conversation, clarification, and product decisions directly. It delegates all project inspection, research, implementation, checks, task maintenance, diagnostics, releases, and deployment before foreground inspection.
+Scufris pairs automatically. There is no `/pair` command or deterministic router. It answers conversation and product decisions directly. It also handles narrow project work that should take seconds, such as reading one named file, inspecting a small task record, or answering a focused repository question. It delegates work expected to take minutes, such as broad codebase review, substantial research, implementation, full checks, releases, and deployment. Scope and latency control routing, not the presence of project tools.
 
-Full-send is a prose judgment. Delegate one bounded outcome with no unresolved product or durable architecture decision and a self-contained handoff. The worker must inspect applicable instructions, context, code, history, and checks. Consequential or compaction-sensitive work uses delegated Tatr maintenance. Bounded research, prototypes, diagrams, and demos can run while Pair continues.
+Full-send is a prose judgment. Delegate one bounded outcome with no unresolved product or durable architecture decision and a self-contained handoff. The worker must inspect applicable instructions, context, code, history, and checks. Consequential or compaction-sensitive work uses Tatr maintenance. Bounded research, prototypes, diagrams, and demos can run while Pair continues.
 
 ## Foreground request flow
 
@@ -252,9 +252,10 @@ sequenceDiagram
 
   User->>Pi: request
   Pi->>Skill: load only if matched
-  alt conversation or decision
+  alt conversation, decision, or work measured in seconds
     Pi-->>User: short spoken response
-  else delegate
+  else work measured in minutes
+    Pi->>Skill: load delegation workflow
     Pi->>Extension: scufris_agent_spawn
     Extension-->>Pi: job_id and running state
     Pi-->>User: delegation acknowledged

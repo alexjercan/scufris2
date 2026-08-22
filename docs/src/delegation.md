@@ -1,6 +1,8 @@
 # Delegated work and review
 
-Scufris delegates project work to an independent Pi or Claude worker in a Sprout worktree before foreground project inspection. The worker receives the request and must inspect applicable repository instructions, context, code, history, and checks. The foreground session owns the job, mediates decisions and blockers, and keeps landing local.
+Scufris handles narrow project work directly when it should take seconds. This includes reading one named file, inspecting a small task record, and answering a focused repository question. It delegates work expected to take minutes, such as broad codebase review, substantial research, implementation, full checks, releases, and deployment. Routing uses expected scope and latency, not the presence of project tools.
+
+A delegated Pi or Claude worker runs in a Sprout worktree. The worker receives the request and must inspect applicable repository instructions, context, code, history, and checks. The foreground session owns the job, mediates decisions and blockers, and keeps landing local.
 
 Every job declares one review policy at spawn:
 

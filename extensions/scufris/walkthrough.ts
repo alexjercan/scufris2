@@ -1,9 +1,5 @@
-import { createHash, randomBytes } from "node:crypto";
-import {
-  createServer,
-  type IncomingMessage,
-  type ServerResponse,
-} from "node:http";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -12,8 +8,12 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 
 const MAX_MARKDOWN_BYTES = 256 * 1024;
+const MAX_INIT_LINE_BYTES = 4 * 1024 * 1024;
+const MAX_RESULT_LINE_BYTES = 32 * 1024 * 1024;
 const MAX_SECTIONS = 40;
 const SHA = /^[0-9a-f]{40}$/;
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -37,6 +37,7 @@ export interface WalkthroughSection {
 }
 export interface WalkthroughDocument {
   title: string;
+  summary: string;
   revision: string;
   baseRevision: string;
   files: number;
@@ -180,8 +181,12 @@ export function parseWalkthrough(source: string): WalkthroughDocument {
   if (sections.length === 0)
     throw new Error("walkthrough has no valid changes");
   const identity = createHash("sha256").update(source).digest("hex");
+  const headingEnd = source.indexOf("\n") + 1;
+  const metadataStart = source.indexOf(":::walkthrough", headingEnd);
+  const summary = source.slice(headingEnd, metadataStart).trim();
   return {
     title: top[1]!,
+    summary: summary || "Review the important implementation changes below.",
     revision,
     baseRevision,
     files,
@@ -311,44 +316,6 @@ export function approveWalkthrough(state: WalkthroughState): void {
   state.approved = true;
 }
 
-function escapeHtml(value: string): string {
-  return value.replace(
-    /[&<>"']/g,
-    (char) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        char
-      ]!,
-  );
-}
-function readableMarkdown(value: string): string {
-  return value
-    .split(/\n\n+/)
-    .map((part) => `<p>${escapeHtml(part).replace(/\n/g, "<br>")}</p>`)
-    .join("");
-}
-export function renderWalkthrough(
-  document: WalkthroughDocument,
-  state: WalkthroughState,
-  token: string,
-): string {
-  const reviewed = Object.values(state.sections).filter(
-    (value) => value === "looks-good",
-  ).length;
-  const cards = document.sections
-    .map((section) => {
-      const answers = state.questions
-        .filter((item) => item.sectionId === section.id && item.answer)
-        .map(
-          (item) =>
-            `<aside><strong>${escapeHtml(item.question)}</strong>${readableMarkdown(item.answer!)}</aside>`,
-        )
-        .join("");
-      return `<article><h2>${escapeHtml(section.id)} <small>${section.importance}</small></h2><p><code>${escapeHtml(section.file)}:${escapeHtml(section.lines)}</code></p>${readableMarkdown(section.markdown)}<pre><code>${escapeHtml(section.diff)}</code></pre><blockquote>${escapeHtml(section.prompt)}</blockquote>${answers}<p>State: <strong>${escapeHtml(state.sections[section.id]!)}</strong></p><form method="post" action="/${token}/action"><input type="hidden" name="section" value="${escapeHtml(section.id)}"><button name="action" value="looks-good">Looks good</button><button name="action" value="explain">Explain</button><button name="action" value="request-change">Request change</button><button name="action" value="context">Show context / open file</button><label>Question or change details <input name="comment" maxlength="4096"></label><button name="action" value="ask">Ask reviewer</button></form></article>`;
-    })
-    .join("");
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'"><title>${escapeHtml(document.title)}</title><style>body{font:16px system-ui;max-width:1000px;margin:auto;padding:2rem;background:#fafafa;color:#171717}article{background:white;border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0}pre{overflow:auto;background:#111;color:#eee;padding:1rem}button{margin:.25rem;padding:.5rem}small{color:#666}.warning{color:#8a4b00}</style></head><body><h1>${escapeHtml(document.title)}</h1><p>${document.files} files, +${document.added}, -${document.removed}. Revision <code>${document.revision}</code>. Preflight passed.</p>${document.warnings.map((warning) => `<p class="warning">Warning: ${escapeHtml(warning)}</p>`).join("")} ${cards}<footer><h2>Final review</h2><p>${reviewed}/${document.sections.length} sections look good.</p><form method="post" action="/${token}/action"><button name="action" value="approve">Approve</button><button name="action" value="request-changes">Request changes</button><button name="action" value="full-diff">View full diff</button></form></footer></body></html>`;
-}
-
 export interface WalkthroughActions {
   verify(): Promise<void>;
   persist(state: WalkthroughState): void;
@@ -358,188 +325,337 @@ export interface WalkthroughActions {
   approved(): Promise<void>;
   context(section: WalkthroughSection): string;
 }
+type BridgeAction = {
+  type: "action";
+  id: string;
+  action: string;
+  section?: string;
+  comment?: string;
+};
+
+export interface WalkthroughServerOptions {
+  openBrowser?: boolean;
+  python?: string;
+  toolPath?: string;
+}
+
+const quickReviewPath = fileURLToPath(
+  new URL("../../tools/quick-review/quick_review.py", import.meta.url),
+);
+
+function bridgeDocument(document: WalkthroughDocument) {
+  const { source: _source, identity: _identity, ...descriptor } = document;
+  return descriptor;
+}
+
+export function encodeBridgeInit(
+  document: WalkthroughDocument,
+  state: WalkthroughState,
+): string {
+  const line = `${JSON.stringify({ type: "init", version: 1, document: bridgeDocument(document), state })}\n`;
+  if (Buffer.byteLength(line, "utf8") > MAX_INIT_LINE_BYTES)
+    throw new Error("quick review init message exceeds 4 MiB");
+  return line;
+}
+
+export function encodeBridgeResult(value: object): string {
+  const line = `${JSON.stringify(value)}\n`;
+  if (Buffer.byteLength(line, "utf8") > MAX_RESULT_LINE_BYTES)
+    throw new Error("quick review result message exceeds 32 MiB");
+  return line;
+}
+
+export function parseBridgeAction(line: string): BridgeAction {
+  if (Buffer.byteLength(line, "utf8") > 512 * 1024)
+    throw new Error("quick review bridge message exceeds 512 KiB");
+  const value: unknown = JSON.parse(line);
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("quick review bridge message is invalid");
+  const action = value as Partial<BridgeAction>;
+  if (
+    action.type !== "action" ||
+    typeof action.id !== "string" ||
+    !/^[0-9a-f]{24}$/.test(action.id) ||
+    typeof action.action !== "string" ||
+    (action.section !== undefined && typeof action.section !== "string") ||
+    (action.comment !== undefined && typeof action.comment !== "string") ||
+    Object.keys(action).some(
+      (key) => !["type", "id", "action", "section", "comment"].includes(key),
+    )
+  )
+    throw new Error("quick review action schema is invalid");
+  return action as BridgeAction;
+}
+
 export function startWalkthroughServer(
   document: WalkthroughDocument,
   state: WalkthroughState,
   actions: WalkthroughActions,
-): Promise<{ url: string; close(): Promise<void> }> {
-  const token = randomBytes(24).toString("hex");
+  options: WalkthroughServerOptions = {},
+): Promise<{ url: string; open(): void; close(): Promise<void> }> {
   let actionTail = Promise.resolve();
   let terminal: "open" | "pending" | "committed" = "open";
-  const server = createServer(
-    async (request: IncomingMessage, response: ServerResponse) => {
-      const send = (
-        status: number,
-        body: string,
-        type = "text/html; charset=utf-8",
-      ) => {
-        response.writeHead(status, {
-          "content-type": type,
-          "cache-control": "no-store",
-          "x-content-type-options": "nosniff",
-          "content-security-policy":
-            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'",
-        });
-        response.end(body);
-      };
-      if (request.url === `/${token}/` && request.method === "GET")
-        return send(200, renderWalkthrough(document, state, token));
-      if (request.url !== `/${token}/action` || request.method !== "POST")
-        return send(404, "Not found", "text/plain");
-      let body = "";
-      for await (const chunk of request) {
-        body += chunk;
-        if (Buffer.byteLength(body) > 16 * 1024) {
-          request.destroy();
-          return;
+  const initLine = encodeBridgeInit(document, state);
+  const child: ChildProcessWithoutNullStreams = spawn(
+    options.python ?? "python3",
+    [
+      options.toolPath ?? quickReviewPath,
+      ...(options.openBrowser === false ? ["--no-open"] : []),
+    ],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  );
+  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  let stderr = "";
+  child.stdin.on("error", () => undefined);
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    stderr = (stderr + chunk).slice(-4096);
+  });
+  child.stdin.write(initLine);
+
+  const execute = async (
+    request: BridgeAction,
+  ): Promise<{ message: string; context?: string }> => {
+    let rollbackPending: (() => void) | undefined;
+    try {
+      await actions.verify();
+      const action = request.action;
+      const sectionId = request.section ?? "";
+      const section = document.sections.find((item) => item.id === sectionId);
+      const sectionAction = [
+        "looks-good",
+        "explain",
+        "request-change",
+        "context",
+        "ask",
+      ].includes(action);
+      if (
+        !sectionAction &&
+        !["approve", "request-changes", "full-diff"].includes(action)
+      )
+        throw new Error("unknown action");
+      if (sectionAction && !section) throw new Error("unknown section");
+      if (terminal !== "open")
+        throw new Error("review already has a terminal action");
+      const comment = (request.comment ?? "").trim();
+      if (Buffer.byteLength(comment, "utf8") > 4096)
+        throw new Error("review comment exceeds 4 KiB");
+      const feedback =
+        action === "request-change" ? comment || section!.prompt : undefined;
+      const finalFeedback =
+        action === "request-changes"
+          ? state.changeRequests
+              .map((item) => `${item.sectionId}: ${item.feedback}`)
+              .join("; ") || "Walkthrough review requested changes."
+          : undefined;
+      const terminalAction = [
+        "request-change",
+        "request-changes",
+        "approve",
+      ].includes(action);
+      if (action === "approve") {
+        approveWalkthrough(state);
+        rollbackPending = () => void (state.approved = false);
+      } else if (action === "request-change") {
+        const previousSectionState = state.sections[sectionId]!;
+        const previousRequestCount = state.changeRequests.length;
+        rollbackPending = () => {
+          state.sections[sectionId] = previousSectionState;
+          state.changeRequests.length = previousRequestCount;
+        };
+      }
+      if (terminalAction) {
+        try {
+          await actions.verify();
+        } catch (error) {
+          if (action === "approve") state.approved = false;
+          throw error;
+        }
+        terminal = "pending";
+      }
+      if (["looks-good", "explain", "request-change"].includes(action)) {
+        applySectionAction(
+          state,
+          sectionId,
+          action as "looks-good" | "explain" | "request-change",
+        );
+        if (action === "explain") {
+          const question = comment || section!.prompt;
+          const answer = await actions.explain(sectionId, question);
+          await actions.verify();
+          state.questions.push({ sectionId, question, answer });
+        }
+        if (action === "request-change") {
+          state.changeRequests.push({ sectionId, feedback: feedback! });
+          actions.persist(state);
+          terminal = "committed";
+          await actions.requestChanges(`${sectionId}: ${feedback}`);
+        } else actions.persist(state);
+      } else if (action === "ask") {
+        if (!comment) throw new Error("Ask reviewer requires a question");
+        const answer = await actions.explain(sectionId, comment);
+        await actions.verify();
+        state.questions.push({ sectionId, question: comment, answer });
+        actions.persist(state);
+      } else if (action === "context") {
+        const context = actions.context(section!);
+        if (Buffer.byteLength(context, "utf8") > 256 * 1024)
+          throw new Error("exact-revision context exceeds 256 KiB");
+        return {
+          message: "Exact-revision context loaded.",
+          context,
+        };
+      } else if (action === "full-diff") await actions.fullDiff();
+      else if (action === "request-changes") {
+        terminal = "committed";
+        await actions.requestChanges(finalFeedback!);
+      } else if (action === "approve") {
+        try {
+          actions.persist(state);
+        } catch (error) {
+          state.approved = false;
+          throw error;
+        }
+        terminal = "committed";
+        try {
+          await actions.approved();
+        } catch (error) {
+          state.approved = false;
+          throw error;
         }
       }
-      const previousAction = actionTail;
-      let releaseAction!: () => void;
-      actionTail = new Promise<void>((resolve) => {
-        releaseAction = resolve;
-      });
-      await previousAction;
-      let rollbackPending: (() => void) | undefined;
+      return {
+        message:
+          action === "full-diff"
+            ? "Opened the exact full diff."
+            : "Review updated.",
+      };
+    } catch (error) {
+      if (terminal === "pending") {
+        rollbackPending?.();
+        terminal = "open";
+      }
+      throw error;
+    }
+  };
+
+  return new Promise((resolve, reject) => {
+    let ready = false;
+    let settled = false;
+    let pendingActions = 0;
+    let closeRequested = false;
+    let shutdownSent = false;
+    const exited = new Promise<void>((done) =>
+      child.once("exit", () => done()),
+    );
+    const sendShutdownIfReady = () => {
+      if (
+        closeRequested &&
+        pendingActions === 0 &&
+        !shutdownSent &&
+        child.exitCode === null &&
+        !child.stdin.destroyed
+      ) {
+        shutdownSent = true;
+        child.stdin.write(`${JSON.stringify({ type: "shutdown" })}\n`);
+      }
+    };
+    const close = () => {
+      closeRequested = true;
+      sendShutdownIfReady();
+      return exited;
+    };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      child.kill();
+      reject(error);
+    };
+    child.once("error", fail);
+    child.once("exit", (code) => {
+      if (!ready)
+        fail(
+          new Error(
+            `quick review exited before ready (${code}): ${stderr.trim()}`,
+          ),
+        );
+    });
+    lines.on("line", (line) => {
+      if (!ready) {
+        try {
+          if (Buffer.byteLength(line, "utf8") > 4096)
+            throw new Error("quick review ready message is oversized");
+          const message: unknown = JSON.parse(line);
+          if (!message || typeof message !== "object" || Array.isArray(message))
+            throw new Error("quick review ready message is invalid");
+          const value = message as { type?: unknown; url?: unknown };
+          if (
+            value.type !== "ready" ||
+            typeof value.url !== "string" ||
+            !/^http:\/\/127\.0\.0\.1:[0-9]+\/[A-Za-z0-9_-]+\/$/.test(value.url)
+          )
+            throw new Error("quick review returned an unsafe URL");
+          ready = true;
+          settled = true;
+          resolve({
+            url: value.url,
+            open: () =>
+              child.stdin.write(`${JSON.stringify({ type: "activate" })}\n`),
+            close,
+          });
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error(String(error)));
+        }
+        return;
+      }
+      let request: BridgeAction;
       try {
-        await actions.verify();
-        const form = new URLSearchParams(body);
-        const action = form.get("action") ?? "";
-        const sectionId = form.get("section") ?? "";
-        const section = document.sections.find((item) => item.id === sectionId);
-        const sectionAction = [
-          "looks-good",
-          "explain",
-          "request-change",
-          "context",
-          "ask",
-        ].includes(action);
-        const supportedAction =
-          sectionAction ||
-          ["approve", "request-changes", "full-diff"].includes(action);
-        if (!supportedAction) throw new Error("unknown action");
-        if (sectionAction && !section) throw new Error("unknown section");
-        if (terminal !== "open")
-          throw new Error("review already has a terminal action");
-        const comment = (form.get("comment") ?? "").trim();
-        if (Buffer.byteLength(comment, "utf8") > 4096)
-          throw new Error("review comment exceeds 4 KiB");
-        const feedback =
-          action === "request-change" ? comment || section!.prompt : undefined;
-        const finalFeedback =
-          action === "request-changes"
-            ? state.changeRequests
-                .map((item) => `${item.sectionId}: ${item.feedback}`)
-                .join("; ") || "Walkthrough review requested changes."
-            : undefined;
-        const terminalAction = [
-          "request-change",
-          "request-changes",
-          "approve",
-        ].includes(action);
-        if (action === "approve") {
-          approveWalkthrough(state);
-          rollbackPending = () => void (state.approved = false);
-        } else if (action === "request-change") {
-          const previousSectionState = state.sections[sectionId]!;
-          const previousRequestCount = state.changeRequests.length;
-          rollbackPending = () => {
-            state.sections[sectionId] = previousSectionState;
-            state.changeRequests.length = previousRequestCount;
+        request = parseBridgeAction(line);
+      } catch {
+        child.kill();
+        return;
+      }
+      pendingActions++;
+      const previous = actionTail;
+      let release!: () => void;
+      actionTail = new Promise<void>((done) => (release = done));
+      void previous.then(async () => {
+        let payload: object;
+        try {
+          const result = await execute(request);
+          payload = {
+            type: "result",
+            id: request.id,
+            ok: true,
+            state,
+            ...result,
+          };
+        } catch (error) {
+          payload = {
+            type: "result",
+            id: request.id,
+            ok: false,
+            state,
+            error: error instanceof Error ? error.message : String(error),
           };
         }
-        if (terminalAction) {
-          try {
-            await actions.verify();
-          } catch (error) {
-            if (action === "approve") state.approved = false;
-            throw error;
-          }
-          terminal = "pending";
-        }
-        if (["looks-good", "explain", "request-change"].includes(action)) {
-          if (!section) throw new Error("unknown section");
-          applySectionAction(
+        let result: string;
+        try {
+          result = encodeBridgeResult(payload);
+        } catch (error) {
+          result = encodeBridgeResult({
+            type: "result",
+            id: request.id,
+            ok: false,
             state,
-            sectionId,
-            action as "looks-good" | "explain" | "request-change",
-          );
-          if (action === "explain") {
-            const question = comment || section.prompt;
-            const answer = await actions.explain(sectionId, question);
-            await actions.verify();
-            state.questions.push({ sectionId, question, answer });
-          }
-          if (action === "request-change") {
-            state.changeRequests.push({ sectionId, feedback: feedback! });
-            actions.persist(state);
-            terminal = "committed";
-            await actions.requestChanges(`${sectionId}: ${feedback}`);
-          } else actions.persist(state);
-        } else if (action === "ask") {
-          if (!section) throw new Error("unknown section");
-          if (!comment) throw new Error("Ask reviewer requires a question");
-          const answer = await actions.explain(sectionId, comment);
-          await actions.verify();
-          state.questions.push({ sectionId, question: comment, answer });
-          actions.persist(state);
-        } else if (action === "context") {
-          if (!section) throw new Error("unknown section");
-          return send(
-            200,
-            `<pre>${escapeHtml(actions.context(section))}</pre><p><a href="/${token}/">Back</a></p>`,
-          );
-        } else if (action === "full-diff") await actions.fullDiff();
-        else if (action === "request-changes") {
-          terminal = "committed";
-          await actions.requestChanges(finalFeedback!);
-        } else if (action === "approve") {
-          try {
-            actions.persist(state);
-          } catch (error) {
-            state.approved = false;
-            throw error;
-          }
-          terminal = "committed";
-          try {
-            await actions.approved();
-          } catch (error) {
-            state.approved = false;
-            throw error;
-          }
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
-        response.writeHead(303, {
-          location: `/${token}/`,
-          "cache-control": "no-store",
+        child.stdin.write(result, () => {
+          pendingActions--;
+          release();
+          sendShutdownIfReady();
         });
-        response.end();
-      } catch (error) {
-        if (terminal === "pending") {
-          rollbackPending?.();
-          terminal = "open";
-        }
-        send(
-          400,
-          escapeHtml(error instanceof Error ? error.message : String(error)),
-          "text/plain; charset=utf-8",
-        );
-      } finally {
-        releaseAction();
-      }
-    },
-  );
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string")
-        return reject(new Error("review server has no local address"));
-      resolve({
-        url: `http://127.0.0.1:${address.port}/${token}/`,
-        close: () =>
-          new Promise<void>((done, fail) =>
-            server.close((error) => (error ? fail(error) : done())),
-          ),
       });
     });
   });

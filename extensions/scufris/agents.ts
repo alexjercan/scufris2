@@ -839,6 +839,7 @@ export default function scufris(
           job.reviewRequestId = requestId;
           job.state = "reviewing";
           job.summary = "interactive walkthrough ready";
+          server.open();
         },
       );
       if (!attached) return false;

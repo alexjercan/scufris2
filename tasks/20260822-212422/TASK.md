@@ -256,11 +256,114 @@ Walkthrough startup cancellation correction evidence:
 - Added deterministic regression coverage for cancelled post-listen cleanup ordering
   and successful owned attachment.
 
+## Quick review UI follow-up
+
+The production HTTP renderer now lives in
+`tools/quick-review/quick_review.py`. The Python 3 standard-library process owns
+only the tokenized loopback server, browser activation, escaped HTML/CSS/JS,
+diff presentation, and transport. The TypeScript extension still owns parsed
+walkthrough data, exact-revision and ownership checks, persistence, serialized
+section and terminal transitions, question and feedback routing, Plannotator,
+approval, invalidation, and process cleanup.
+
+Bridge protocol:
+
+- TypeScript starts the tool and sends one bounded `init` JSON line with protocol
+  version 1, a validated document descriptor, and the authoritative initial
+  state.
+- Python returns one strict `ready` line containing only its generated tokenized
+  `http://127.0.0.1` URL.
+- After startup ownership is attached atomically, TypeScript sends `activate`.
+  Python then opens only that generated URL. `--no-open` keeps integration tests
+  deterministic.
+- Python emits bounded typed `action` lines with an opaque request ID, known
+  action, optional section ID, and bounded comment. TypeScript serializes and
+  executes them through the existing policy callbacks.
+- TypeScript returns a correlated success or failure `result` with the complete
+  authoritative state. Python validates it and answers the browser with JSON.
+  Browser JavaScript uses `fetch` and updates badges, progress, answers, button
+  guards, and inline feedback without navigation.
+
+The GitHub-like interface includes summary chips, a What was built section,
+ordered importance cards, file and line metadata, review prompts, status badges,
+responsive light and dark styling, and escaped git-diff rows for file headers,
+hunks, removals, additions, and context. External same-origin CSS and JavaScript
+work with a restrictive CSP and no arbitrary HTML.
+
+Follow-up changed files:
+
+- `extensions/scufris/agents.ts`
+- `extensions/scufris/walkthrough.ts`
+- `flake.nix`
+- `nix/checks.nix`
+- `tests/test_quick_review.py`
+- `tests/walkthrough.test.ts`
+- `tools/quick-review/quick_review.py`
+- `tasks/20260822-212422/TASK.md`
+
+Follow-up verification evidence:
+
+- Focused TypeScript walkthrough and lifecycle tests passed.
+- Python quick-review unit tests passed, including protocol bounds, escaping,
+  diff rendering, and injected browser activation.
+- Ruff check and format passed for the Python tool and tests.
+- Python compilation passed.
+- The actual Python-rendered HTML was fetched from the integrated subprocess and
+  inspected for escaped content, CSP, metadata, controls, and diff classes.
+- `npm run check`, `nix flake check`, and `git diff --check` passed.
+- Implementation commit: `da5867663f6f9b5cfa54e40b509ed0e7f60cd327`.
+- `sprout sync quick-review-ui` reported `Already up to date` at that revision.
+- The exact evidence-only follow-up revision is recorded in the delegated job
+  report.
+
+Preflight correction evidence:
+
+- UI cleanup is now a graceful bridge shutdown. TypeScript records a close
+  request, finishes every queued correlated result write, and then sends a
+  bounded `shutdown` message. Python stops accepting actions, waits for active
+  action responses to finish, and only then exits the loopback server.
+- Production-shaped approval and request-change tests call the returned
+  server's `close()` from inside the terminal callback and still receive the
+  authoritative HTTP 200 JSON result.
+- The encoded init line now has an explicit 4 MiB contract on both sides. It is
+  validated before process spawn. An escape-heavy parser-valid walkthrough
+  that exceeds the former 512 KiB reader limit starts successfully.
+
+Second preflight correction evidence:
+
+- Python now marks shutdown synchronously but runs the active-action wait and
+  HTTP server shutdown on one owned non-daemon thread. The bridge-reader thread
+  continues reading correlated results after a shutdown message.
+- Deterministic tests delay a result after an HTTP action is accepted, request
+  shutdown, prove shutdown initiation does not block, and then verify the JSON
+  response and clean server exit. Bridge correlation is also tested with a
+  shutdown message arriving before its eventual result.
+- Result lines now have a shared 32 MiB limit. TypeScript measures the complete
+  encoded result before every write. Python uses the same bound for result
+  reads, while retaining narrower action and result-text bounds.
+- A runtime integration test sends a schema-valid history of 100 maximum-size
+  escaped questions and answers. Its result exceeds the old 512 KiB limit and
+  returns successfully. Explicit over-limit encoding fails before write.
+
+Context rendering correction evidence:
+
+- Successful bridge results now have an optional bounded `context` field.
+  Context actions return exact file text there and keep a short status in
+  `message`; ordinary success feedback no longer contains file content.
+- The browser writes context with `textContent` into a dedicated hidden
+  `pre > code` region, reveals it on success, and preserves whitespace and
+  indentation with independent neutral styling and scrolling.
+- Integration coverage verifies exact multiline indented context, the short
+  status, the dedicated PRE/code markup, and the text-only browser update path.
+
 Limitations:
 
-- The first renderer is local web only. It does not auto-open a browser.
-- Open file is implemented as safe exact-revision file context in the review page.
-  Plannotator remains the exhaustive full-diff view.
+- The renderer remains local web only.
+- Browser launch depends on the user's standard browser configuration. A launch
+  failure does not expand desktop access; Pi still reports the generated local
+  URL.
+- Open file remains safe exact-revision context in the review page. Plannotator
+  remains the exhaustive full-diff view.
 
 ## Non-goals for the first version
 

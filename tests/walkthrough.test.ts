@@ -6,11 +6,14 @@ import test from "node:test";
 
 import {
   approveWalkthrough,
+  encodeBridgeInit,
+  encodeBridgeResult,
   initialWalkthroughState,
+  parseBridgeAction,
   parseWalkthrough,
-  renderWalkthrough,
   saveWalkthroughState,
   startWalkthroughServer,
+  type WalkthroughState,
   validateWalkthroughState,
 } from "../extensions/scufris/walkthrough.ts";
 import { submitWalkthroughTool } from "../extensions/scufris/walkthrough-reviewer.ts";
@@ -52,6 +55,136 @@ Verify AND semantics.
 :::
 `;
 
+function postAction(url: string, body: string | URLSearchParams) {
+  const values =
+    body instanceof URLSearchParams ? body : new URLSearchParams(body);
+  return fetch(new URL("action", url), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(Object.fromEntries(values)),
+  });
+}
+
+test("quick review bridge accepts only bounded typed actions", () => {
+  assert.deepEqual(
+    parseBridgeAction(
+      JSON.stringify({
+        type: "action",
+        id: "a".repeat(24),
+        action: "looks-good",
+        section: "runtime-filter",
+      }),
+    ),
+    {
+      type: "action",
+      id: "a".repeat(24),
+      action: "looks-good",
+      section: "runtime-filter",
+    },
+  );
+  assert.throws(() => parseBridgeAction("not json"));
+  assert.throws(
+    () =>
+      parseBridgeAction(
+        JSON.stringify({ type: "action", id: "bad", action: "approve" }),
+      ),
+    /schema/,
+  );
+  assert.throws(() => parseBridgeAction("x".repeat(512 * 1024 + 1)), /exceeds/);
+});
+
+test("escape-heavy parser-valid walkthrough fits the explicit init wire contract", async () => {
+  const document = parseWalkthrough(
+    valid.replace("-return all;\n+return safe;", `+${"\x01".repeat(100_000)}`),
+  );
+  const state = initialWalkthroughState(document);
+  const encoded = encodeBridgeInit(document, state);
+  assert.ok(Buffer.byteLength(encoded) > 512 * 1024);
+  assert.ok(Buffer.byteLength(encoded) < 4 * 1024 * 1024);
+  assert.throws(
+    () =>
+      encodeBridgeInit(
+        {
+          ...document,
+          sections: [
+            { ...document.sections[0]!, diff: "\x01".repeat(700_000) },
+          ],
+        },
+        state,
+      ),
+    /exceeds 4 MiB/,
+  );
+  const server = await startWalkthroughServer(
+    document,
+    state,
+    {
+      verify: async () => undefined,
+      persist: () => undefined,
+      explain: async () => "answer",
+      requestChanges: async () => undefined,
+      fullDiff: async () => undefined,
+      approved: async () => undefined,
+      context: () => "context",
+    },
+    { openBrowser: false },
+  );
+  await server.close();
+});
+
+test("large schema-valid question history fits the result wire contract", async () => {
+  const document = parseWalkthrough(valid);
+  const state = initialWalkthroughState(document);
+  const boundedText = '\\\"'.repeat(8192);
+  const server = await startWalkthroughServer(
+    document,
+    state,
+    {
+      verify: async () => undefined,
+      persist: () => undefined,
+      explain: async () => "answer",
+      requestChanges: async () => undefined,
+      fullDiff: async () => undefined,
+      approved: async () => undefined,
+      context: () => "context",
+    },
+    { openBrowser: false },
+  );
+  try {
+    state.questions = Array.from({ length: 100 }, () => ({
+      sectionId: "runtime-filter",
+      question: boundedText,
+      answer: boundedText,
+    }));
+    validateWalkthroughState(document, state);
+    const encoded = encodeBridgeResult({
+      type: "result",
+      id: "a".repeat(24),
+      ok: true,
+      state,
+      message: "Review updated.",
+    });
+    assert.ok(Buffer.byteLength(encoded) > 512 * 1024);
+    assert.ok(Buffer.byteLength(encoded) < 32 * 1024 * 1024);
+    assert.throws(
+      () => encodeBridgeResult({ message: "\x01".repeat(6 * 1024 * 1024) }),
+      /exceeds 32 MiB/,
+    );
+    const response = await postAction(
+      server.url,
+      "action=looks-good&section=runtime-filter",
+    );
+    assert.equal(response.status, 200);
+    const result = (await response.json()) as {
+      ok: boolean;
+      state: WalkthroughState;
+    };
+    assert.equal(result.ok, true);
+    assert.equal(result.state.questions.length, 100);
+  } finally {
+    await server.close();
+  }
+});
+
 test("strict walkthrough parsing binds revisions and preserves literal diff", () => {
   const document = parseWalkthrough(valid);
   assert.equal(document.revision, revision);
@@ -64,7 +197,7 @@ test("strict walkthrough parsing binds revisions and preserves literal diff", ()
   assert.equal(validateWalkthroughState(document, state).approved, true);
 });
 
-test("malformed and unsupported directives warn without HTML injection", () => {
+test("malformed and unsupported directives warn", () => {
   const malformed = valid
     .replace("lines: 42-61", "lines: ../bad")
     .replace(
@@ -79,15 +212,6 @@ test("malformed and unsupported directives warn without HTML injection", () => {
     ),
   );
   assert.deepEqual(document.warnings, ["Unsupported directive: widget"]);
-  const html = renderWalkthrough(
-    document,
-    initialWalkthroughState(document),
-    "token",
-  );
-  assert.doesNotMatch(html, /<script>alert/);
-  assert.match(html, /&lt;script&gt;alert/);
-  assert.doesNotMatch(html, /javascript:alert/);
-  assert.match(html, /default-src 'none'/);
 });
 
 test("persisted review state is separate and stale identities fail closed", async () => {
@@ -121,26 +245,26 @@ test("local review server routes bounded actions and approval guard", async () =
   const state = initialWalkthroughState(document);
   let approvals = 0;
   let approvalFailure = true;
-  const server = await startWalkthroughServer(document, state, {
-    verify: async () => undefined,
-    persist: () => undefined,
-    explain: async (_section, question) => `Answer to ${question}`,
-    requestChanges: async () => undefined,
-    fullDiff: async () => undefined,
-    approved: async () => {
-      if (approvalFailure) throw new Error("finalization failed");
-      approvals++;
+  const server = await startWalkthroughServer(
+    document,
+    state,
+    {
+      verify: async () => undefined,
+      persist: () => undefined,
+      explain: async (_section, question) => `Answer to ${question}`,
+      requestChanges: async () => undefined,
+      fullDiff: async () => undefined,
+      approved: async () => {
+        if (approvalFailure) throw new Error("finalization failed");
+        approvals++;
+      },
+      context: () =>
+        "function example(): void {\n    const indented = '<unsafe>';\n}\n",
     },
-    context: () => "<script>unsafe()</script>",
-  });
+    { openBrowser: false },
+  );
   try {
-    const action = async (body: string) =>
-      fetch(new URL("action", server.url), {
-        method: "POST",
-        redirect: "manual",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body,
-      });
+    const action = (body: string) => postAction(server.url, body);
     assert.equal((await action("action=approve")).status, 400);
     assert.equal(
       (
@@ -148,14 +272,37 @@ test("local review server routes bounded actions and approval guard", async () =
           "action=ask&section=runtime-filter&comment=%3Cimg%20onerror%3Dx%3E",
         )
       ).status,
-      303,
+      200,
     );
-    const page = await (await fetch(server.url)).text();
-    assert.match(page, /&lt;img onerror=x&gt;/);
-    assert.doesNotMatch(page, /<img onerror/);
+    const pageResponse = await fetch(server.url);
+    const page = await pageResponse.text();
+    assert.match(page, /&lt;script&gt;alert/);
+    assert.doesNotMatch(page, /<script>alert/);
+    assert.match(page, /diff-del/);
+    assert.match(page, /diff-add/);
+    assert.match(page, /<pre class="context-view"[^>]*><code><\/code><\/pre>/);
+    const script = await (await fetch(new URL("app.js", server.url))).text();
+    assert.match(script, /textContent=result\.context/);
+    const contextResponse = await action(
+      "action=context&section=runtime-filter",
+    );
+    assert.equal(contextResponse.status, 200);
+    const contextResult = (await contextResponse.json()) as {
+      message: string;
+      context: string;
+    };
+    assert.equal(contextResult.message, "Exact-revision context loaded.");
+    assert.equal(
+      contextResult.context,
+      "function example(): void {\n    const indented = '<unsafe>';\n}\n",
+    );
+    assert.match(
+      pageResponse.headers.get("content-security-policy") ?? "",
+      /default-src 'none'/,
+    );
     assert.equal(
       (await action("action=looks-good&section=runtime-filter")).status,
-      303,
+      200,
     );
     assert.equal((await action("action=approve")).status, 400);
     assert.equal(state.approved, false);
@@ -172,27 +319,30 @@ test("in-flight explanation rechecks stale ownership before persistence", async 
   const state = initialWalkthroughState(document);
   let active = true;
   let persisted = 0;
-  const server = await startWalkthroughServer(document, state, {
-    verify: async () => {
-      if (!active) throw new Error("walkthrough is no longer active");
+  const server = await startWalkthroughServer(
+    document,
+    state,
+    {
+      verify: async () => {
+        if (!active) throw new Error("walkthrough is no longer active");
+      },
+      persist: () => void persisted++,
+      explain: async () => {
+        active = false;
+        return "stale answer";
+      },
+      requestChanges: async () => undefined,
+      fullDiff: async () => undefined,
+      approved: async () => undefined,
+      context: () => "context",
     },
-    persist: () => void persisted++,
-    explain: async () => {
-      active = false;
-      return "stale answer";
-    },
-    requestChanges: async () => undefined,
-    fullDiff: async () => undefined,
-    approved: async () => undefined,
-    context: () => "context",
-  });
+    { openBrowser: false },
+  );
   try {
-    const response = await fetch(new URL("action", server.url), {
-      method: "POST",
-      redirect: "manual",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: "action=explain&section=runtime-filter",
-    });
+    const response = await postAction(
+      server.url,
+      "action=explain&section=runtime-filter",
+    );
     assert.equal(response.status, 400);
     assert.equal(persisted, 0);
     assert.equal(state.questions.length, 0);
@@ -205,30 +355,33 @@ test("invalid terminal input releases the review for a corrected action", async 
   const document = parseWalkthrough(valid);
   const state = initialWalkthroughState(document);
   let changeRequests = 0;
-  const server = await startWalkthroughServer(document, state, {
-    verify: async () => undefined,
-    persist: () => undefined,
-    explain: async () => "answer",
-    requestChanges: async () => void changeRequests++,
-    fullDiff: async () => undefined,
-    approved: async () => undefined,
-    context: () => "context",
-  });
+  const server = await startWalkthroughServer(
+    document,
+    state,
+    {
+      verify: async () => undefined,
+      persist: () => undefined,
+      explain: async () => "answer",
+      requestChanges: async () => void changeRequests++,
+      fullDiff: async () => undefined,
+      approved: async () => undefined,
+      context: () => "context",
+    },
+    { openBrowser: false },
+  );
   try {
     const post = (comment: string) =>
-      fetch(new URL("action", server.url), {
-        method: "POST",
-        redirect: "manual",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
+      postAction(
+        server.url,
+        new URLSearchParams({
           action: "request-change",
           section: "runtime-filter",
           comment,
         }),
-      });
+      );
     assert.equal((await post(`${"a".repeat(4095)}é`)).status, 400);
     assert.equal(changeRequests, 0);
-    assert.equal((await post("Use OR semantics.")).status, 303);
+    assert.equal((await post("Use OR semantics.")).status, 200);
     assert.equal(changeRequests, 1);
   } finally {
     await server.close();
@@ -241,31 +394,30 @@ test("approval persistence completes before routing and can retry on local failu
   state.sections["runtime-filter"] = "looks-good";
   let persistenceFails = true;
   const sequence: string[] = [];
-  const server = await startWalkthroughServer(document, state, {
-    verify: async () => undefined,
-    persist: () => {
-      sequence.push("persist");
-      if (persistenceFails) throw new Error("disk full");
+  const server = await startWalkthroughServer(
+    document,
+    state,
+    {
+      verify: async () => undefined,
+      persist: () => {
+        sequence.push("persist");
+        if (persistenceFails) throw new Error("disk full");
+      },
+      explain: async () => "answer",
+      requestChanges: async () => undefined,
+      fullDiff: async () => undefined,
+      approved: async () => void sequence.push("approved"),
+      context: () => "context",
     },
-    explain: async () => "answer",
-    requestChanges: async () => undefined,
-    fullDiff: async () => undefined,
-    approved: async () => void sequence.push("approved"),
-    context: () => "context",
-  });
+    { openBrowser: false },
+  );
   try {
-    const approve = () =>
-      fetch(new URL("action", server.url), {
-        method: "POST",
-        redirect: "manual",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: "action=approve",
-      });
+    const approve = () => postAction(server.url, "action=approve");
     assert.equal((await approve()).status, 400);
     assert.deepEqual(sequence, ["persist"]);
     assert.equal(state.approved, false);
     persistenceFails = false;
-    assert.equal((await approve()).status, 303);
+    assert.equal((await approve()).status, 200);
     assert.deepEqual(sequence, ["persist", "persist", "approved"]);
   } finally {
     await server.close();
@@ -281,34 +433,76 @@ test("local review server serializes one terminal action", async () => {
   const started = new Promise<void>((resolve) => (approvalStarted = resolve));
   const gate = new Promise<void>((resolve) => (releaseApproval = resolve));
   let changeRequests = 0;
-  const server = await startWalkthroughServer(document, state, {
-    verify: async () => undefined,
-    persist: () => undefined,
-    explain: async () => "answer",
-    requestChanges: async () => void changeRequests++,
-    fullDiff: async () => undefined,
-    approved: async () => {
-      approvalStarted();
-      await gate;
+  const server = await startWalkthroughServer(
+    document,
+    state,
+    {
+      verify: async () => undefined,
+      persist: () => undefined,
+      explain: async () => "answer",
+      requestChanges: async () => void changeRequests++,
+      fullDiff: async () => undefined,
+      approved: async () => {
+        approvalStarted();
+        await gate;
+      },
+      context: () => "context",
     },
-    context: () => "context",
-  });
+    { openBrowser: false },
+  );
   try {
-    const post = (body: string) =>
-      fetch(new URL("action", server.url), {
-        method: "POST",
-        redirect: "manual",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body,
-      });
+    const post = (body: string) => postAction(server.url, body);
     const approval = post("action=approve");
     await started;
     const change = post("action=request-changes");
     releaseApproval();
-    assert.equal((await approval).status, 303);
+    assert.equal((await approval).status, 200);
     assert.equal((await change).status, 400);
     assert.equal(changeRequests, 0);
   } finally {
+    await server.close();
+  }
+});
+
+test("terminal callbacks can close the production server after correlated results", async () => {
+  for (const terminalAction of ["approve", "request-change"] as const) {
+    const document = parseWalkthrough(valid);
+    const state = initialWalkthroughState(document);
+    if (terminalAction === "approve")
+      state.sections["runtime-filter"] = "looks-good";
+    let server!: Awaited<ReturnType<typeof startWalkthroughServer>>;
+    server = await startWalkthroughServer(
+      document,
+      state,
+      {
+        verify: async () => undefined,
+        persist: () => undefined,
+        explain: async () => "answer",
+        requestChanges: async () => void server.close(),
+        fullDiff: async () => undefined,
+        approved: async () => void server.close(),
+        context: () => "context",
+      },
+      { openBrowser: false },
+    );
+    const response = await postAction(
+      server.url,
+      terminalAction === "approve"
+        ? "action=approve"
+        : "action=request-change&section=runtime-filter&comment=Change+this",
+    );
+    assert.equal(response.status, 200);
+    const result = (await response.json()) as {
+      ok: boolean;
+      state: WalkthroughState;
+    };
+    assert.equal(result.ok, true);
+    assert.equal(
+      terminalAction === "approve"
+        ? result.state.approved
+        : result.state.sections["runtime-filter"] === "change-requested",
+      true,
+    );
     await server.close();
   }
 });

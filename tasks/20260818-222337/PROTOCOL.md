@@ -450,7 +450,7 @@ Every spawn declares one review policy:
 
 Landable profiles are `code`, `consumer`, `operations`, and `interface`. The brief is bounded plain text that states the accepted outcome and audience. Requested non-landable results use `{ "profile": "none" }`.
 
-After the normal review snapshot passes, Scufris starts Pi as an exact owned non-tmux child. It uses print mode, model `openai-codex/gpt-5.6-sol`, medium thinking, `--tools read,grep,find,ls`, a dedicated session directory, and disables extensions, skills, prompt templates, themes, and project trust. Correction review uses the exact saved reviewer session file. Scufris strips implementation-session and Scufris role variables from the reviewer environment. The reviewer receives:
+After the normal review snapshot passes, Scufris starts Pi as an exact owned non-tmux child. It uses print mode, model `openai-codex/gpt-5.6-sol`, medium thinking, `--tools read,grep,find,ls`, a dedicated session directory, and disables extensions, skills, prompt templates, themes, and project trust. One reviewer execution has an exact 1800-second deadline that starts immediately after child creation. The helper emits one private readiness line after it installs exact-child interruption handling. Receipt resets the enclosing extension deadline to 1810 seconds. The helper therefore has a fixed 10-second margin to stop the exact child and return its fail-closed response. Correction review uses the exact saved reviewer session file. Scufris strips implementation-session and Scufris role variables from the reviewer environment. The reviewer receives:
 
 - Repository instructions from the feature worktree.
 - The review profile and brief.

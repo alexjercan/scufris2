@@ -5,6 +5,10 @@ import {
   APPROVAL_DONE_SUMMARY,
   APPROVAL_INSTRUCTION,
   classifyPreflightResult,
+  PREFLIGHT_HELPER_SHUTDOWN_MARGIN_MS,
+  PREFLIGHT_HELPER_TIMEOUT_MS,
+  PREFLIGHT_REVIEW_READY_LINE,
+  PREFLIGHT_REVIEW_TIMEOUT_MS,
   classifyReviewResponse,
   codeReviewPayload,
   completeApprovedLanding,
@@ -19,6 +23,7 @@ import {
   reviewRetryRejection,
   sameReviewRevisions,
 } from "../extensions/scufris/agents.ts";
+import { createRestartableDeadline } from "../extensions/scufris/shared/runtime.ts";
 
 test("delegated feature validation accepts only bounded lowercase slugs", () => {
   for (const feature of ["fix-login-timeout", "protocol-v2", "a".repeat(48)]) {
@@ -129,6 +134,53 @@ test("annotations remain actionable and return to the same worker", () => {
       reason: "Plannotator feedback exceeds the steering limit",
     },
   );
+});
+
+test("preflight helper deadline follows the exact reviewer deadline", () => {
+  assert.equal(PREFLIGHT_REVIEW_TIMEOUT_MS, 1_800_000);
+  assert.equal(PREFLIGHT_HELPER_SHUTDOWN_MARGIN_MS, 10_000);
+  assert.equal(PREFLIGHT_HELPER_TIMEOUT_MS, 1_810_000);
+  assert.equal(
+    PREFLIGHT_REVIEW_READY_LINE,
+    "scufris-preflight-reviewer-started",
+  );
+  assert.equal(
+    PREFLIGHT_HELPER_TIMEOUT_MS,
+    PREFLIGHT_REVIEW_TIMEOUT_MS + PREFLIGHT_HELPER_SHUTDOWN_MARGIN_MS,
+  );
+  assert.ok(PREFLIGHT_HELPER_TIMEOUT_MS > PREFLIGHT_REVIEW_TIMEOUT_MS);
+});
+
+test("reviewer readiness resets the outer deadline after delayed setup", () => {
+  const scheduled: Array<{
+    callback: () => void;
+    delayMs: number;
+    cancelled: boolean;
+  }> = [];
+  const diagnostics: string[] = [];
+  const deadline = createRestartableDeadline(
+    PREFLIGHT_HELPER_TIMEOUT_MS,
+    () => diagnostics.push("preflight helper timed out"),
+    (callback, delayMs) => {
+      const item = { callback, delayMs, cancelled: false };
+      scheduled.push(item);
+      return item as unknown as ReturnType<typeof setTimeout>;
+    },
+    (handle) => {
+      (handle as unknown as (typeof scheduled)[number]).cancelled = true;
+    },
+  );
+
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0]?.delayMs, 1_810_000);
+  deadline.restart();
+  assert.equal(scheduled[0]?.cancelled, true);
+  assert.equal(scheduled[1]?.delayMs, 1_810_000);
+  scheduled[0]?.callback();
+  assert.deepEqual(diagnostics, []);
+  scheduled[1]?.callback();
+  assert.deepEqual(diagnostics, ["preflight helper timed out"]);
+  deadline.clear();
 });
 
 test("preflight classification accepts only consistent fix-worthy results", () => {

@@ -22,4 +22,4 @@ A landable policy includes a concise accepted-outcome and audience brief. A `non
 6. Plannotator feedback invalidates preflight approval. The next worker revision starts a fresh preflight reviewer session.
 7. Human Plannotator approval remains the only landing approval. Scufris lands only the exact approved revisions after the worker's required acknowledgment.
 
-Review failure, timeout, malformed output, repository mutation, or revision drift fails closed. Scufris stops only reviewer and worker processes that the foreground session owns.
+One reviewer run has an exact 1800-second execution deadline. When the exact reviewer child starts, the helper sends a private readiness signal that resets the enclosing process deadline to 1810 seconds. This gives a fixed 10-second margin to stop the child and return the fail-closed result. Review failure, timeout, malformed output, repository mutation, or revision drift fails closed. Scufris stops only reviewer and worker processes that the foreground session owns.

@@ -57,6 +57,41 @@ Update the delegation manual, skill, architecture, protocol, and task evidence t
 - Use an isolated tmux socket for automated tmux tests and verify the default server identity is unchanged.
 - Run TypeScript, Python integration, formatting, ShellCheck, Nix formatting, diff checks, and full Nix checks required by repository guidance.
 
+## Deadline implementation evidence
+
+The timeout-only accepted contract was implemented independently on 2026-08-22. Reviewer execution now stops after exactly 1800 seconds. When the exact reviewer child starts, a private readiness line resets the enclosing extension/helper deadline to 1810 seconds. This leaves a fixed 10-second margin for exact-child cleanup and the fail-closed response without charging helper setup against reviewer execution. Focused tests inspect both values, readiness reset, timeout diagnostics, and ordering without waiting 1800 seconds. The blocked visible-review implementation was not included; the rest of this task remains open.
+
+Pre-synchronization verification:
+
+- `npm run check` - pass, including 39 TypeScript tests.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` - pass, 27 Python tests.
+- `ruff check .` and `ruff format --check .` - pass.
+- `shellcheck scripts/scufris-dev` - pass. Other packaged helpers are Python.
+- `nix fmt -- --check .` - pass.
+- `git diff --check` - pass.
+- `nix flake check` - pass on x86_64-linux. It reported expected unsupported-system omissions, deprecated upstream platform accessors, and existing unknown custom output warnings.
+
+Post-commit synchronization and verification:
+
+- `sprout sync preflight-review-timeout` - already up to date.
+- `npm run check` - pass, including 39 TypeScript tests.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` - pass, 27 Python tests.
+- `ruff check .` and `ruff format --check .` - pass.
+- `shellcheck scripts/scufris-dev` - pass.
+- `nix fmt -- --check .` - pass.
+- `git diff --check` - pass.
+- `nix flake check` - pass on x86_64-linux with the same expected warnings and unsupported-system omissions.
+
+Preflight correction verification:
+
+- Moved the inner deadline start to exact reviewer child creation.
+- Added the private readiness signal and outer deadline reset after delayed setup.
+- Preserved the 10-second cleanup margin and helper timeout diagnostic.
+- `npm run check` - pass, including 40 TypeScript tests.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` - pass, 27 Python tests.
+- Ruff checks and formatting, ShellCheck, Nix formatting, and `git diff --check` - pass.
+- `nix flake check` - pass on x86_64-linux with the same expected warnings and unsupported-system omissions.
+
 ## Completion criteria
 
 - A user can enter the feature tmux session and watch the independent preflight reviewer in its own window.

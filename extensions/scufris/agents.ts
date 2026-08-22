@@ -16,6 +16,13 @@ const jobHelperPath = fileURLToPath(
   new URL("../../scripts/scufris-job", import.meta.url),
 );
 
+export const PREFLIGHT_REVIEW_TIMEOUT_MS = 1_800_000;
+// Preserve time for exact-child shutdown and the fail-closed helper response.
+export const PREFLIGHT_HELPER_SHUTDOWN_MARGIN_MS = 10_000;
+export const PREFLIGHT_HELPER_TIMEOUT_MS =
+  PREFLIGHT_REVIEW_TIMEOUT_MS + PREFLIGHT_HELPER_SHUTDOWN_MARGIN_MS;
+export const PREFLIGHT_REVIEW_READY_LINE = "scufris-preflight-reviewer-started";
+
 interface ReviewSnapshot {
   job_id: string;
   worktree: string;
@@ -332,6 +339,7 @@ async function runHelper<T>(
   request: unknown,
   signal?: AbortSignal,
   timeoutMs = 30_000,
+  readyLine?: string,
 ): Promise<T> {
   const envelope = await runPrivateHelper<T>(
     jobHelperPath,
@@ -339,6 +347,7 @@ async function runHelper<T>(
     request,
     signal,
     timeoutMs,
+    readyLine,
   );
   if (!envelope.ok || envelope.result === undefined) {
     throw new Error(envelope.error ?? "Scufris helper failed");
@@ -641,7 +650,8 @@ export default function scufris(
           ...(continued ? { continue_session: true } : {}),
         },
         controller.signal,
-        135_000,
+        PREFLIGHT_HELPER_TIMEOUT_MS,
+        PREFLIGHT_REVIEW_READY_LINE,
       );
       if (shuttingDown || jobs.get(job.job_id) !== job) return false;
       job.reviewAbort = undefined;

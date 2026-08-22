@@ -35,6 +35,7 @@ if "-p" in sys.argv:
             "environment": {key: os.environ.get(key) for key in (
                 "SCUFRIS_ROLE", "PI_SESSION_ID", "PI_SESSION_FILE",
                 "PI_PROVIDER", "PI_MODEL", "PI_REASONING_LEVEL",
+                "SCUFRIS_HELPER_READY_LINE",
             )},
         }) + "\n")
     if "--session-dir" in sys.argv:
@@ -566,6 +567,10 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             0,
         )
 
+    def test_preflight_reviewer_deadline_is_exact(self) -> None:
+        timeout_module = runpy.run_path(str(CLI), run_name="scufris_job_test")
+        self.assertEqual(timeout_module["REVIEW_TIMEOUT"], 1800)
+
     def test_preflight_isolated_fresh_and_continued_reviewer_sessions(self) -> None:
         result = self.spawn("abababababab", feature="independent-preflight")
         directory = self.state / "scufris" / "jobs" / result["job_id"]
@@ -595,7 +600,21 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             "landing_sha": snapshot["landing_sha"],
             "feature_sha": snapshot["feature_sha"],
         }
-        approved = self.cli("preflight-review", request)["result"]
+        ready_env = self.env.copy()
+        ready_env["SCUFRIS_HELPER_READY_LINE"] = "scufris-preflight-reviewer-started"
+        review_process = subprocess.run(
+            [str(CLI), "preflight-review"],
+            input=json.dumps(request),
+            env=ready_env,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=90,
+        )
+        approved_envelope = json.loads(review_process.stdout)
+        self.assertTrue(approved_envelope["ok"])
+        self.assertEqual(review_process.stderr, "scufris-preflight-reviewer-started\n")
+        approved = approved_envelope["result"]
         self.assertEqual(approved["verdict"], "approve")
         calls = [
             json.loads(line)
@@ -638,6 +657,7 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
                 "PI_PROVIDER": None,
                 "PI_MODEL": None,
                 "PI_REASONING_LEVEL": None,
+                "SCUFRIS_HELPER_READY_LINE": None,
             },
         )
 

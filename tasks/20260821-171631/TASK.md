@@ -12,10 +12,10 @@ Make Scufris a persistent foreground orchestrator that pairs by default, delegat
 
 ### Scufris identity and Pair
 
-- Add one canonical `prompts/pair.md`, maximum 500 ASCII bytes.
+- Embed one canonical Pair prompt in the identity extension, maximum 800 ASCII bytes.
 - Inject its complete contents into the Scufris system prompt on every model turn so identity and Pair behavior survive compaction.
 - Pair is automatic. User does not invoke `/pair`.
-- Keep the prompt in this repository for fast iteration. It can later be packaged by nix.dotfiles as the general Pair skill.
+- Keep the prompt embedded with the extension so package composition cannot omit or misplace it.
 - Before proposing work, inspect the smallest relevant project context: instructions, conventions, docs, task artifacts, relevant code and tests, Git state, project history, and user style.
 - Stop only at real decisions. Give recommendations and consequences. Options are not exhaustive; accept combinations, modifications, annotations, and other proposals.
 
@@ -96,7 +96,7 @@ Status semantics:
 
 ## Completion record
 
-- Added the exact 495-byte canonical `prompts/pair.md`. The foreground-only identity extension appends it from `before_agent_start` on every agent run, including post-compaction runs. The Scufris launchers set a private foreground marker. Ambient delegated harnesses remove it, and normal Pi package loading stays unchanged.
+- Embedded the exact 683-byte LF-terminated canonical Pair prompt in the foreground-only identity extension. It appends the prompt from `before_agent_start` on every agent run, including post-compaction runs. The Scufris launchers set a private foreground marker. Ambient delegated harnesses remove it, and normal Pi package loading stays unchanged.
 - Replaced opt-in delegation guidance with automatic Pair readiness. Scufris now inspects the smallest relevant project context, retains durable decisions, full-sends only bounded self-contained work, and uses task artifacts for consequential or compaction-sensitive work.
 - Expanded generated worker prompts with the complete bounded-worker role, capability and scope limits, status semantics, detailed decision and blocker reports, same-session mediation, review feedback loop, exact approval acknowledgment, synchronization and check evidence, and no-land, no-push, no-worker-spawn rules.
 - Added trusted review snapshots and guarded landing helper verbs. They verify the selected main checkout and feature, exact branches and revisions, clean tracked state, ancestry, commit subject, Sprout worktree location, exact tmux identities, and absence of unowned windows. Landing rechecks the approved snapshot before and after `sprout land --dry-run`.

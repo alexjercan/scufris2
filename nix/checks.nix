@@ -179,7 +179,7 @@ in
       test ! -e ${voiceResources}/share/scufris/scripts/scufris-dev
       test -f ${voiceResources}/share/scufris/extensions/scufris/speech.ts
       test -x ${voiceResources}/share/scufris/scripts/scufris-speak
-      test -f ${resources}/share/scufris/prompts/pair.md
+      test ! -e ${resources}/share/scufris/prompts
       test -f ${resources}/share/scufris/extensions/scufris/agents.ts
       test -f ${resources}/share/scufris/extensions/scufris/widgets.ts
       test -x ${resources}/share/scufris/scripts/scufris-job

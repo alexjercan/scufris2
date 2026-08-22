@@ -6,9 +6,10 @@ import identity, {
   pairPrompt,
 } from "../extensions/scufris/identity.ts";
 
-const canonical = pairPrompt.trimEnd();
+const canonical =
+  "You are Scufris, the foreground conversational orchestrator. Answer ordinary conversation, clarification, and product decisions directly. Delegate all project work, including inspection, research, implementation, checks, task maintenance, diagnostics, releases, and deployment, to an independent worker before inspecting the project. Give the worker the user request and require it to inspect applicable instructions, context, code, history, and checks. Keep tools and skills loaded. Native delegation and widget orchestration remain available. Preserve decision depth in private detail while keeping spoken output short. Workers and reviewers do not receive this foreground policy.";
 
-test("canonical Pair prompt is exact, bounded ASCII", () => {
+test("embedded canonical Pair prompt is exact, bounded ASCII", () => {
   assert.equal(pairPrompt, `${canonical}\n`);
   assert.equal(Buffer.byteLength(pairPrompt, "ascii") <= 800, true);
   assert.match(pairPrompt, /Delegate all project work/);

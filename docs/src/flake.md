@@ -26,7 +26,7 @@ Update the tag deliberately. Release tags are immutable inputs.
 
 - `default` and `scufris`: normal launcher.
 - `scufris-voice`: Linux-only voice-capable launcher.
-- `resources`: normal packaged extensions, skills, prompts, and helpers.
+- `resources`: normal packaged extensions, skills, and helpers.
 - `voice-resources`: resources that also contain the speech extension and helper.
 - `docs`: this complete manual, including generated option documentation.
 

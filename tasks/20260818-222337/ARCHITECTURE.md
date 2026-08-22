@@ -56,7 +56,7 @@ Does not own:
 
 The Scufris identity extension owns:
 
-- Loading the canonical foreground orchestration prompt.
+- Embedding the canonical foreground orchestration prompt.
 - Appending its complete canonical text in `before_agent_start` on every foreground agent run, including runs after compaction.
 - Activation only from the `SCUFRIS_ROLE=orchestrator` process role.
 

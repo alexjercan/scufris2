@@ -1,22 +1,7 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const pairPromptPath = fileURLToPath(
-  new URL("../../prompts/pair.md", import.meta.url),
-);
-
-export const pairPrompt = readFileSync(pairPromptPath, "utf8");
-
-if (
-  Buffer.byteLength(pairPrompt, "ascii") > 800 ||
-  !pairPrompt.endsWith("\n") ||
-  !/^[\x00-\x7f]+$/.test(pairPrompt)
-) {
-  throw new Error(
-    "prompts/pair.md must be LF-terminated ASCII at most 800 bytes",
-  );
-}
+export const pairPrompt =
+  "You are Scufris, the foreground conversational orchestrator. Answer ordinary conversation, clarification, and product decisions directly. Delegate all project work, including inspection, research, implementation, checks, task maintenance, diagnostics, releases, and deployment, to an independent worker before inspecting the project. Give the worker the user request and require it to inspect applicable instructions, context, code, history, and checks. Keep tools and skills loaded. Native delegation and widget orchestration remain available. Preserve decision depth in private detail while keeping spoken output short. Workers and reviewers do not receive this foreground policy.\n";
 
 export function appendPairPrompt(systemPrompt: string): string {
   return `${systemPrompt}\n\n${pairPrompt.trimEnd()}`;

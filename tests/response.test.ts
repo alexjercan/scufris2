@@ -17,6 +17,7 @@ import response, {
   RESPONSE_ENTRY,
   assembleScufrisPrompt,
   maxArtifacts,
+  promptInspectionMarkdown,
   responseText,
   splitDirectResponse,
 } from "../extensions/scufris/response.ts";
@@ -177,14 +178,17 @@ test("direct output is split, hidden detail is persisted, and malformed output f
     /^The implementation is ready\.\n\n\/detail [a-f0-9]{24}$/,
   );
   assert.doesNotMatch(text, /Tests pass|# Detail/);
-  const entry = app.entries.at(-1)!;
-  assert.equal(entry.customType, RESPONSE_ENTRY);
-  assert.equal(responseText(entry.data), text);
+  assert.equal(
+    app.entries.some((entry) => entry.customType === RESPONSE_ENTRY),
+    false,
+  );
+  const artifactId = text.match(/\/detail ([a-f0-9]{24})$/)?.[1];
+  assert.ok(artifactId);
   const store = new ArtifactStore({
     sessionFile: app.context.sessionManager.getSessionFile(),
     sessionId: "session-owned-id",
   });
-  assert.match(store.read(entry.data.artifact_id).markdown, /Tests pass/);
+  assert.match(store.read(artifactId).markdown, /Tests pass/);
 
   const malformed = await app.emit("message_end", {
     message: assistant("# unsafe\n/path"),
@@ -336,7 +340,7 @@ test("detail uses public Plannotator annotate gate and stores compact feedback",
   assert.equal(app.entries.at(-1)?.data.outcome, "closed");
 });
 
-test("persistence failure preserves spoken output and restored rows stay compact", async (t) => {
+test("live fallback and restored structured responses each render once", async (t) => {
   const previous = process.env.SCUFRIS_ROLE;
   process.env.SCUFRIS_ROLE = "orchestrator";
   t.after(() =>
@@ -345,17 +349,22 @@ test("persistence failure preserves spoken output and restored rows stay compact
       : (process.env.SCUFRIS_ROLE = previous),
   );
   const app = harness();
-  app.context.sessionManager.getSessionFile = () => undefined as never;
   const result = await app.emit("message_end", {
-    message: assistant(
-      "The spoken result remains available.\n\n# Unsaved detail",
-    ),
+    message: assistant("One visible response.\n\n# Private detail"),
   });
-  assert.equal(
-    result.message.content[0].text,
-    "The spoken result remains available.",
+  const liveRows = [
+    ...app.entries
+      .filter((entry) => entry.customType === RESPONSE_ENTRY)
+      .map((entry) => responseText(entry.data)),
+    ...result.message.content
+      .filter((item: any) => item.type === "text")
+      .map((item: any) => item.text),
+  ];
+  assert.equal(liveRows.length, 1);
+  assert.match(
+    liveRows[0]!,
+    /^One visible response\.\n\n\/detail [a-f0-9]{24}$/,
   );
-  assert.match(app.notices.at(-1) ?? "", /detail was not saved/);
 
   const renderer = app.renderers.get(RESPONSE_ENTRY)!;
   const component = renderer(
@@ -382,11 +391,40 @@ test("persistence failure preserves spoken output and restored rows stay compact
   );
 });
 
+test("persistence failure preserves spoken output", async (t) => {
+  const previous = process.env.SCUFRIS_ROLE;
+  process.env.SCUFRIS_ROLE = "orchestrator";
+  t.after(() =>
+    previous === undefined
+      ? delete process.env.SCUFRIS_ROLE
+      : (process.env.SCUFRIS_ROLE = previous),
+  );
+  const app = harness();
+  app.context.sessionManager.getSessionFile = () => undefined as never;
+  const result = await app.emit("message_end", {
+    message: assistant(
+      "The spoken result remains available.\n\n# Unsaved detail",
+    ),
+  });
+  assert.equal(
+    result.message.content[0].text,
+    "The spoken result remains available.",
+  );
+  assert.match(app.notices.at(-1) ?? "", /detail was not saved/);
+  assert.equal(
+    app.entries.some((entry) => entry.customType === RESPONSE_ENTRY),
+    false,
+  );
+});
+
 test("prompt inspection composition is exact and direct splitting is deterministic", () => {
   const prompt = assembleScufrisPrompt("Pi base");
   assert.match(prompt, /^Pi base/);
   assert.match(prompt, /foreground conversational orchestrator/);
   assert.match(prompt, /Use scufris_final_response/);
+  const inspection = promptInspectionMarkdown("effective", {}, []);
+  assert.match(inspection, /Embedded canonical Scufris orchestration policy/);
+  assert.match(inspection, /## Embedded canonical orchestration policy/);
   assert.deepEqual(splitDirectResponse("A safe answer."), {
     spoken: "A safe answer.",
   });

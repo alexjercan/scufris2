@@ -273,8 +273,7 @@ function activeStore(context: ExtensionContext): ArtifactStore {
   });
 }
 
-function appendResponse(
-  pi: ExtensionAPI,
+function prepareResponse(
   context: ExtensionContext,
   spoken: string,
   detail?: string,
@@ -295,6 +294,16 @@ function appendResponse(
     spoken,
     ...(artifact_id ? { artifact_id } : {}),
   };
+  return entry;
+}
+
+function appendResponse(
+  pi: ExtensionAPI,
+  context: ExtensionContext,
+  spoken: string,
+  detail?: string,
+): ResponseEntry {
+  const entry = prepareResponse(context, spoken, detail);
   pi.appendEntry(RESPONSE_ENTRY, entry);
   return entry;
 }
@@ -309,10 +318,10 @@ export function promptInspectionMarkdown(
     "2. Context files in Pi order",
     "3. Active tool descriptions and guidelines",
     "4. Loaded skills",
-    "5. Canonical Scufris orchestration policy",
+    "5. Embedded canonical Scufris orchestration policy",
     "6. Scufris final-response policy",
   ];
-  return `# Scufris effective system prompt\n\n## Ordered provenance\n\n${provenance.map((item) => `- ${item}`).join("\n")}\n\n## Pi inputs\n\n\`\`\`json\n${JSON.stringify({ systemPromptOptions: options, tools }, null, 2)}\n\`\`\`\n\n## Canonical orchestration policy\n\n${pairPrompt}\n## Final-response policy\n\n${finalResponsePolicy}\n\n## Exact assembled prompt\n\n\`\`\`text\n${effectivePrompt}\n\`\`\`\n`;
+  return `# Scufris effective system prompt\n\n## Ordered provenance\n\n${provenance.map((item) => `- ${item}`).join("\n")}\n\n## Pi inputs\n\n\`\`\`json\n${JSON.stringify({ systemPromptOptions: options, tools }, null, 2)}\n\`\`\`\n\n## Embedded canonical orchestration policy\n\n${pairPrompt}\n## Final-response policy\n\n${finalResponsePolicy}\n\n## Exact assembled prompt\n\n\`\`\`text\n${effectivePrompt}\n\`\`\`\n`;
 }
 
 export default function response(pi: ExtensionAPI): void {
@@ -452,7 +461,7 @@ export default function response(pi: ExtensionAPI): void {
     }
     if (message.stopReason !== "stop") return;
     const split = splitDirectResponse(assistantText(message));
-    const entry = appendResponse(pi, context, split.spoken, split.detail);
+    const entry = prepareResponse(context, split.spoken, split.detail);
     return {
       message: {
         ...message,

@@ -54,10 +54,45 @@ if "--system-prompt" in sys.argv:
         pathlib.Path("reviewer-mutation").write_text("mutated\n", encoding="utf-8")
     if os.environ.get("SCUFRIS_FAKE_REVIEW_SLEEP"):
         time.sleep(float(os.environ["SCUFRIS_FAKE_REVIEW_SLEEP"]))
-    output = os.environ.get(
-        "SCUFRIS_FAKE_REVIEW_OUTPUT", '{"verdict":"approve","findings":[]}'
-    )
-    pathlib.Path(os.environ["SCUFRIS_REVIEW_RESULT"]).write_text(output, encoding="utf-8")
+    if result_path := os.environ.get("SCUFRIS_WALKTHROUGH_RESULT"):
+        revision = os.environ["SCUFRIS_WALKTHROUGH_REVISION"]
+        base = prompt.split("Exact base revision: ", 1)[1].splitlines()[0]
+        markdown = f'''# Deletion walkthrough
+
+:::walkthrough
+status: ready
+revision: {revision}
+baseRevision: {base}
+files: 1
+added: 0
+removed: 1
+preflight: passed
+:::
+
+:::change
+id: deleted-readme
+importance: important
+file: README.md
+lines: 1
+:::
+
+Code-confirmed fact: the file is deleted.
+
+```diff
+-# Fixture
+```
+
+:::review
+Verify the deletion is intended.
+:::
+'''
+        output = json.dumps({"revision": revision, "markdown": markdown, "sectionCount": 1})
+        pathlib.Path(result_path).write_text(output, encoding="utf-8")
+    else:
+        output = os.environ.get(
+            "SCUFRIS_FAKE_REVIEW_OUTPUT", '{"verdict":"approve","findings":[]}'
+        )
+        pathlib.Path(os.environ["SCUFRIS_REVIEW_RESULT"]).write_text(output, encoding="utf-8")
     print(output)
     raise SystemExit(int(os.environ.get("SCUFRIS_FAKE_REVIEW_EXIT", "0")))
 
@@ -576,6 +611,55 @@ class ScufrisJobIntegrationTest(unittest.TestCase):
             ).returncode,
             0,
         )
+
+    def test_walkthrough_reviewer_uses_feature_cwd_and_deleted_file_base_context(self) -> None:
+        result = self.spawn("abc111def222", feature="walkthrough-deletion")
+        directory = self.state / "scufris" / "jobs" / result["job_id"]
+        self.wait_for(directory / "status", "working: fake harness ready")
+        worktree = Path(result["worktree"])
+        (worktree / "README.md").unlink()
+        self.run_external(["git", "add", "README.md"], cwd=worktree, env=self.env)
+        self.run_external(
+            ["git", "commit", "-m", "Delete fixture readme"],
+            cwd=worktree,
+            env=self.env,
+        )
+        self.run_external(
+            ["sprout", "sync", result["feature"]], cwd=self.project, env=self.env
+        )
+        snapshot = self.cli(
+            "review-snapshot",
+            {"job_id": result["job_id"], "project_root": str(self.project)},
+        )["result"]
+        walkthrough = self.cli(
+            "walkthrough-review",
+            {
+                "job_id": result["job_id"],
+                "project_root": str(self.project),
+                "landing_sha": snapshot["landing_sha"],
+                "feature_sha": snapshot["feature_sha"],
+            },
+        )["result"]
+        self.assertEqual(walkthrough["feature_sha"], snapshot["feature_sha"])
+        calls = [
+            json.loads(line)
+            for line in Path(self.env["SCUFRIS_TEST_REVIEW_LOG"])
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        self.assertEqual(calls[-1]["cwd"], str(worktree))
+        context = self.cli(
+            "walkthrough-context",
+            {
+                "job_id": result["job_id"],
+                "project_root": str(self.project),
+                "landing_sha": snapshot["landing_sha"],
+                "feature_sha": snapshot["feature_sha"],
+                "file": "README.md",
+            },
+        )["result"]["content"]
+        self.assertIn("base (file absent from implementation revision)", context)
+        self.assertIn("# Fixture", context)
 
     def test_preflight_reviewer_deadline_is_exact(self) -> None:
         timeout_module = runpy.run_path(str(CLI), run_name="scufris_job_test")

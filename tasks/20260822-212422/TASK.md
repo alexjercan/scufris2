@@ -1,6 +1,6 @@
 # Interactive review walkthrough extension
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: review, walkthrough, pi, scufris
 
@@ -26,7 +26,7 @@ This is not a replacement for preflight review. Preflight remains an independent
 
 The generated file must remain useful as ordinary Markdown when opened directly. Custom directives add semantics only for the renderer. The initial format should support:
 
-```markdown
+````markdown
 # Assessment Available Actions
 
 :::walkthrough
@@ -58,10 +58,12 @@ This is the central behavioral change.
 +    )
 +]
 ```
+````
 
 :::review
 Verify that multiple preconditions intentionally use AND semantics.
 :::
+
 ```
 
 Required semantics:
@@ -170,6 +172,96 @@ A section can move from `not-reviewed` to `looks-good`, `needs-explanation`, or 
 - Interaction tests: Looks good persists state; Explain creates a bounded reviewer question; Request changes routes feedback and blocks landing; View full diff opens the exact reviewed revision; Approve is rejected while critical sections are unresolved.
 - End-to-end fixture: generate a walkthrough from a small fake implementation, render it, exercise all actions, and verify the final guarded decision.
 
+## Implementation evidence
+
+Implemented the post-preflight walkthrough in the existing Scufris lifecycle.
+The walkthrough reviewer receives the exact patch and a bounded request/report
+handoff. Its structured completion tool validates the exact revision and Markdown
+before the local extension accepts it. The local-only tokenized HTTP surface escapes
+all content, applies a restrictive CSP, keeps state separate, checks the revision on
+every action, and routes questions, implementation feedback, full-diff fallback, and
+guarded approval.
+
+Changed files:
+
+- `extensions/scufris/agents.ts`
+- `extensions/scufris/walkthrough-reviewer.ts`
+- `extensions/scufris/walkthrough.ts`
+- `scripts/scufris-job`
+- `tests/walkthrough.test.ts`
+- `tasks/20260822-212422/valid-walkthrough.md`
+- `tasks/20260822-212422/TASK.md`
+
+Verification evidence:
+
+- Reviewed base revision: `efa295240595d9bda8b214110b5afd7d63edbb79`.
+- Implementation revision synchronized before this evidence-only update: `02d7e19ce237d92f0145d6d11acc9065f2e6311f`.
+- `npm run check` - passed after task formatting.
+- `nix develop --command ruff check scripts/scufris-job` - passed.
+- `python3 -m py_compile scripts/scufris-job` - passed.
+- `git diff --check` - passed.
+- `nix flake check` - passed.
+- The valid task fixture was parsed and rendered to HTML, then the generated output
+  was inspected for the title, exact revision, CSP, escaped content, actions, and
+  literal diff.
+
+Preflight correction evidence:
+
+- Walkthrough generation and bounded reviewer questions now run with the validated
+  feature worktree as their process directory.
+- Exact context falls back to the reviewed base revision for deleted paths and keeps
+  unavailable context local to its section.
+- Walkthrough feedback is validated against the worker send contract before any
+  destructive transition. All helper failures now enter the blocked lifecycle.
+- Failed approval is not persisted and returns an HTTP failure after fail-closed
+  lifecycle handling.
+- Added regression coverage for feature-worktree reviewer execution, deleted-file
+  context, bounded feedback, and approval rollback.
+
+Second preflight correction evidence:
+
+- Local POST actions now run through one per-server queue. Approval and both
+  request-change routes claim an irreversible terminal transition after a second
+  ownership check, so concurrent accepted requests cannot route conflicting outcomes.
+- In-flight explanation and question actions recheck ownership before persistence.
+- Walkthrough ownership now includes the job object, review phase, request identity,
+  artifact revision, and session liveness. Approval and feedback transitions recheck
+  ownership around helper waits.
+- Worker `needs-decision`, `blocked`, and `failed` events clear ownership before they
+  close and invalidate the local server and artifacts.
+- Added concurrent approval/change-request and stale in-flight action regression tests.
+
+Third preflight correction evidence:
+
+- Terminal action input, including UTF-8 byte limits and constructed feedback, is now
+  validated before a terminal claim.
+- Terminal state has explicit open, pending, and committed phases. Local failures in
+  the pending phase restore section state and release the review for correction;
+  decision callbacks commit the terminal state immediately before routing.
+- Approval state persistence now completes before the irreversible approval callback.
+  A persistence failure clears approval, releases the pending terminal claim, routes no
+  instruction, and permits a corrected retry.
+- Added regression coverage for oversized multibyte feedback, persistence failure and
+  retry, callback ordering, and terminal conflict serialization.
+
+Walkthrough startup cancellation correction evidence:
+
+- The startup AbortController remains job-owned through generation, every context
+  helper, server listen, and atomic server attachment.
+- Context helpers receive the startup signal. Ownership is rechecked after generation,
+  after each context helper, and immediately after listen.
+- Cancellation before attachment invalidates generated artifacts. Cancellation that
+  wins the listen/attachment race closes the new server before invalidating artifacts,
+  and no server is attached to the job.
+- Added deterministic regression coverage for cancelled post-listen cleanup ordering
+  and successful owned attachment.
+
+Limitations:
+
+- The first renderer is local web only. It does not auto-open a browser.
+- Open file is implemented as safe exact-revision file context in the review page.
+  Plannotator remains the exhaustive full-diff view.
+
 ## Non-goals for the first version
 
 - Replacing Plannotator.
@@ -185,3 +277,4 @@ A section can move from `not-reviewed` to `looks-good`, `needs-explanation`, or 
 - The exact Markdown directive grammar and whether metadata should use YAML front matter or fenced directives. -> fenced is fine.
 - How much implementation conversation to include in the structured handoff. -> depends on task and the reviewer.
 - Whether all sections must be marked Looks good or only critical sections before Approve is enabled. -> all.
+```

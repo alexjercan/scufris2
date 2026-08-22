@@ -4,6 +4,9 @@ import test from "node:test";
 import {
   APPROVAL_DONE_SUMMARY,
   APPROVAL_INSTRUCTION,
+  attachWalkthroughServerIfOwned,
+  boundedWalkthroughFeedback,
+  cancelReviewForWorkerEvent,
   classifyPreflightResult,
   PREFLIGHT_HELPER_SHUTDOWN_MARGIN_MS,
   PREFLIGHT_HELPER_TIMEOUT_MS,
@@ -21,6 +24,7 @@ import {
   preflightFindingsMessage,
   reviewEventRejection,
   reviewRetryRejection,
+  type ReviewPhase,
   sameReviewRevisions,
 } from "../extensions/scufris/agents.ts";
 import { createRestartableDeadline } from "../extensions/scufris/shared/runtime.ts";
@@ -222,6 +226,21 @@ test("preflight classification accepts only consistent fix-worthy results", () =
   }
 });
 
+test("walkthrough feedback fits the worker steering contract before transition", () => {
+  assert.equal(
+    boundedWalkthroughFeedback("runtime-filter: preserve AND semantics"),
+    "Walkthrough review requested changes: runtime-filter: preserve AND semantics",
+  );
+  assert.throws(
+    () => boundedWalkthroughFeedback("line one\nline two"),
+    /bounded line/,
+  );
+  assert.throws(
+    () => boundedWalkthroughFeedback("x".repeat(16 * 1024)),
+    /bounded line/,
+  );
+});
+
 test("preflight lifecycle permits two feedback cycles then requires mediation", () => {
   assert.equal(nextPreflightFeedbackCycle(0), 1);
   assert.equal(nextPreflightFeedbackCycle(1), 2);
@@ -261,6 +280,54 @@ test("human feedback invalidates approval and the reviewer session", () => {
     preflightFeedbackCycles: 0,
     preflightApproval: undefined,
   });
+});
+
+test("cancelled startup closes a newly listening server before invalidation", async () => {
+  const events: string[] = [];
+  const attached = await attachWalkthroughServerIfOwned(
+    () => false,
+    { close: async () => void events.push("close") },
+    async () => void events.push("invalidate"),
+    () => void events.push("attach"),
+  );
+  assert.equal(attached, false);
+  assert.deepEqual(events, ["close", "invalidate"]);
+});
+
+test("owned startup attaches without cleanup", async () => {
+  const events: string[] = [];
+  const attached = await attachWalkthroughServerIfOwned(
+    () => true,
+    { close: async () => void events.push("close") },
+    async () => void events.push("invalidate"),
+    () => void events.push("attach"),
+  );
+  assert.equal(attached, true);
+  assert.deepEqual(events, ["attach"]);
+});
+
+test("worker terminal events clear review ownership before walkthrough cleanup", async () => {
+  const controller = new AbortController();
+  const state = {
+    reviewPhase: "reviewing" as ReviewPhase,
+    reviewRequestId: "walkthrough-request",
+    preflightApproval: {},
+    approval: {},
+    reviewAbort: controller,
+  };
+  let cleaned = false;
+  assert.equal(
+    await cancelReviewForWorkerEvent(state, "blocked", async () => {
+      assert.equal(state.reviewPhase, "idle");
+      assert.equal(state.reviewRequestId, undefined);
+      assert.equal(state.preflightApproval, undefined);
+      assert.equal(state.approval, undefined);
+      assert.equal(controller.signal.aborted, true);
+      cleaned = true;
+    }),
+    true,
+  );
+  assert.equal(cleaned, true);
 });
 
 test("review policy enforces landable and non-landable terminal states", () => {

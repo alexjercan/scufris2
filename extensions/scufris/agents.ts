@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import {
@@ -11,6 +12,13 @@ import {
   type DiagnosticsInvocation,
 } from "./diagnostics.ts";
 import { runPrivateHelper, toolResult } from "./shared/runtime.ts";
+import {
+  initialWalkthroughState,
+  parseWalkthrough,
+  saveWalkthroughState,
+  startWalkthroughServer,
+  type WalkthroughState,
+} from "./walkthrough.ts";
 
 const jobHelperPath = fileURLToPath(
   new URL("../../scripts/scufris-job", import.meta.url),
@@ -119,6 +127,17 @@ export function preflightFindingsMessage(findings: PreflightFinding[]): string {
   return `Independent preflight requested changes: ${JSON.stringify({ findings })}`;
 }
 
+export function boundedWalkthroughFeedback(feedback: string): string {
+  const message = `Walkthrough review requested changes: ${feedback.trim()}`;
+  if (
+    !feedback.trim() ||
+    /[\x00\r\n]/.test(feedback) ||
+    Buffer.byteLength(message, "utf8") > 16 * 1024
+  )
+    throw new Error("walkthrough feedback must be one bounded line");
+  return message;
+}
+
 export function nextPreflightFeedbackCycle(
   completedCycles: number,
 ): number | undefined {
@@ -173,6 +192,7 @@ export function reviewEventRejection(
 export type ReviewPhase =
   | "idle"
   | "preflight"
+  | "walkthrough"
   | "reviewing"
   | "feedback"
   | "awaiting-done"
@@ -224,6 +244,56 @@ export function consumeReviewRetry(
   state.state = "review-ready";
   state.summary = "retrying fresh review preconditions";
   return undefined;
+}
+
+export interface MutableWorkerEventReviewState {
+  reviewPhase: ReviewPhase;
+  reviewRequestId?: string;
+  preflightApproval?: unknown;
+  approval?: unknown;
+  reviewAbort?: AbortController;
+}
+
+export async function cancelReviewForWorkerEvent(
+  state: MutableWorkerEventReviewState,
+  eventState: string,
+  closeAndInvalidate: () => Promise<void>,
+): Promise<boolean> {
+  if (
+    !["needs-decision", "blocked", "failed"].includes(eventState) ||
+    state.reviewPhase === "idle"
+  )
+    return false;
+  state.reviewAbort?.abort();
+  state.reviewAbort = undefined;
+  state.reviewPhase = "idle";
+  state.reviewRequestId = undefined;
+  state.preflightApproval = undefined;
+  state.approval = undefined;
+  await closeAndInvalidate();
+  return true;
+}
+
+export interface WalkthroughStartupServer {
+  close(): Promise<void>;
+}
+
+export async function attachWalkthroughServerIfOwned(
+  isOwned: () => boolean,
+  server: WalkthroughStartupServer,
+  invalidate: () => Promise<void>,
+  attach: () => void,
+): Promise<boolean> {
+  if (isOwned()) {
+    attach();
+    return true;
+  }
+  try {
+    await server.close();
+  } finally {
+    await invalidate();
+  }
+  return false;
 }
 
 export type CleanupPolicy = "remove" | "retain";
@@ -289,6 +359,12 @@ interface OwnedJob {
   preflightFeedbackCycles: number;
   preflightApproval?: ReviewSnapshot;
   reviewAbort?: AbortController;
+  walkthrough?: {
+    close(): Promise<void>;
+    statePath: string;
+    revision: string;
+    requestId: string;
+  };
   approval?: ApprovedReview;
 }
 
@@ -486,11 +562,23 @@ export default function scufris(
     );
   };
 
+  const closeWalkthrough = async (job: OwnedJob, invalidate = false) => {
+    const walkthrough = job.walkthrough;
+    job.walkthrough = undefined;
+    if (walkthrough) await walkthrough.close().catch(() => undefined);
+    if (invalidate) {
+      await runHelper("invalidate-walkthrough", { job_id: job.job_id }).catch(
+        () => undefined,
+      );
+    }
+  };
+
   const blockLifecycle = (
     job: OwnedJob,
     reason: string,
     reviewRetryable = false,
   ) => {
+    void closeWalkthrough(job, true);
     job.reviewPhase = "idle";
     job.reviewRetryable = reviewRetryable;
     job.reviewRequestId = undefined;
@@ -508,106 +596,262 @@ export default function scufris(
       project_root: job.project_root,
     });
 
-  const handleReviewResponse = async (
+  const approveSnapshot = async (
     job: OwnedJob,
     requestId: string,
     snapshot: ReviewSnapshot,
-    response: unknown,
+    assertActive: () => void,
   ) => {
+    assertActive();
+    const verified = await currentSnapshot(job);
+    assertActive();
     if (
-      shuttingDown ||
-      jobs.get(job.job_id) !== job ||
-      job.reviewPhase !== "reviewing" ||
-      job.reviewRequestId !== requestId
+      !job.preflightApproval ||
+      !sameReviewRevisions(snapshot, job.preflightApproval) ||
+      !sameReviewRevisions(snapshot, verified)
     ) {
-      return;
-    }
-    const outcome = classifyReviewResponse(response);
-    if (outcome.kind === "blocked") {
-      blockLifecycle(job, outcome.reason);
-      return;
-    }
-    if (outcome.kind === "feedback") {
-      job.reviewPhase = "feedback";
-      const invalidatedReviewId = job.preflightReviewId;
-      try {
-        if (!invalidatedReviewId) {
-          throw new Error("human feedback has no owned preflight reviewer");
-        }
-        await runHelper("remove-reviewer", {
-          job_id: job.job_id,
-          review_id: invalidatedReviewId,
-        });
-        invalidatePreflight(job);
-        await runHelper("send", {
-          job_id: job.job_id,
-          message: outcome.message,
-        });
-        job.reviewPhase = "idle";
-        job.state = "working";
-        job.summary = "review feedback submitted to worker";
-        context?.ui.notify(`Review feedback sent to job ${job.job_id}`, "info");
-      } catch (error) {
-        blockLifecycle(
-          job,
-          `could not return review feedback: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      return;
-    }
-    try {
-      const verified = await currentSnapshot(job);
-      if (
-        !job.preflightApproval ||
-        !sameReviewRevisions(snapshot, job.preflightApproval) ||
-        !sameReviewRevisions(snapshot, verified)
-      ) {
-        throw new Error(
-          "reviewed revisions changed before approval acknowledgment",
-        );
-      }
-      job.reviewPhase = "awaiting-done";
-      job.approval = { ...snapshot, request_id: requestId };
-      await runHelper("send", {
-        job_id: job.job_id,
-        message: APPROVAL_INSTRUCTION,
-      });
-      job.state = "working";
-      job.summary = "waiting for required review approval acknowledgment";
-      context?.ui.notify(`Review approved for job ${job.job_id}`, "info");
-    } catch (error) {
-      job.approval = undefined;
-      blockLifecycle(
-        job,
-        `approval could not be finalized: ${error instanceof Error ? error.message : String(error)}`,
+      throw new Error(
+        "reviewed revisions changed before approval acknowledgment",
       );
     }
+    const active = job.walkthrough;
+    job.walkthrough = undefined;
+    if (active) void active.close();
+    job.reviewPhase = "awaiting-done";
+    job.approval = { ...snapshot, request_id: requestId };
+    await runHelper("send", {
+      job_id: job.job_id,
+      message: APPROVAL_INSTRUCTION,
+    });
+    if (
+      jobs.get(job.job_id) !== job ||
+      job.reviewPhase !== "awaiting-done" ||
+      job.approval?.request_id !== requestId
+    )
+      throw new Error("walkthrough is no longer active");
+    job.state = "working";
+    job.summary = "waiting for required review approval acknowledgment";
+    context?.ui.notify(`Review approved for job ${job.job_id}`, "info");
   };
 
-  const beginUserReview = async (
+  const beginWalkthrough = async (
     job: OwnedJob,
     snapshot: ReviewSnapshot,
   ): Promise<boolean> => {
-    job.reviewPhase = "reviewing";
-    const requestId = `scufris-${job.job_id}-${randomBytes(6).toString("hex")}`;
-    job.reviewRequestId = requestId;
+    job.reviewPhase = "walkthrough";
+    const controller = new AbortController();
+    job.reviewAbort = controller;
+    const startupOwned = () =>
+      !shuttingDown &&
+      !controller.signal.aborted &&
+      jobs.get(job.job_id) === job &&
+      job.reviewPhase === "walkthrough" &&
+      job.reviewAbort === controller;
+    const invalidateStartup = () =>
+      runHelper("invalidate-walkthrough", { job_id: job.job_id }).then(
+        () => undefined,
+      );
+    let result: { artifact: string; state: string; feature_sha: string };
     try {
-      context?.ui.notify(`Opening review for job ${job.job_id}`, "info");
-      pi.events.emit("plannotator:request", {
-        requestId,
-        action: "code-review",
-        payload: codeReviewPayload(snapshot),
-        respond: (response: unknown) => {
-          void handleReviewResponse(job, requestId, snapshot, response);
+      result = await runHelper(
+        "walkthrough-review",
+        {
+          job_id: job.job_id,
+          project_root: job.project_root,
+          landing_sha: snapshot.landing_sha,
+          feature_sha: snapshot.feature_sha,
+        },
+        controller.signal,
+        920_000,
+      );
+      if (!startupOwned()) {
+        await invalidateStartup();
+        return false;
+      }
+      if (result.feature_sha !== snapshot.feature_sha)
+        throw new Error("walkthrough result does not match the exact snapshot");
+      const document = parseWalkthrough(readFileSync(result.artifact, "utf8"));
+      if (
+        document.revision !== snapshot.feature_sha ||
+        document.baseRevision !== snapshot.landing_sha
+      )
+        throw new Error("walkthrough artifact revisions do not match");
+      const state: WalkthroughState = initialWalkthroughState(document);
+      saveWalkthroughState(result.state, state);
+      const contexts = new Map<string, string>();
+      for (const section of document.sections) {
+        const value = await runHelper<{ content: string }>(
+          "walkthrough-context",
+          {
+            job_id: job.job_id,
+            project_root: job.project_root,
+            landing_sha: snapshot.landing_sha,
+            feature_sha: snapshot.feature_sha,
+            file: section.file,
+          },
+          controller.signal,
+        );
+        if (!startupOwned()) {
+          await invalidateStartup();
+          return false;
+        }
+        contexts.set(section.id, value.content);
+      }
+      const requestId = `walkthrough-${job.job_id}-${randomBytes(6).toString("hex")}`;
+      const assertActive = () => {
+        if (
+          shuttingDown ||
+          jobs.get(job.job_id) !== job ||
+          job.reviewPhase !== "reviewing" ||
+          job.reviewRequestId !== requestId ||
+          job.walkthrough?.requestId !== requestId ||
+          job.walkthrough.revision !== snapshot.feature_sha
+        )
+          throw new Error("walkthrough is no longer active");
+      };
+      const server = await startWalkthroughServer(document, state, {
+        verify: async () => {
+          assertActive();
+          const verified = await currentSnapshot(job);
+          assertActive();
+          if (!sameReviewRevisions(snapshot, verified)) {
+            const active = job.walkthrough;
+            job.walkthrough = undefined;
+            if (active) void active.close();
+            await runHelper("invalidate-walkthrough", { job_id: job.job_id });
+            invalidatePreflight(job);
+            job.reviewPhase = "idle";
+            job.state = "blocked";
+            job.summary =
+              "walkthrough invalidated because the revision changed";
+            throw new Error(job.summary);
+          }
+        },
+        persist: (next) => saveWalkthroughState(result.state, next),
+        context: (section) =>
+          contexts.get(section.id) ?? "Context unavailable.",
+        explain: async (section, question) => {
+          const answer = await runHelper<{ answer: string }>(
+            "walkthrough-question",
+            {
+              job_id: job.job_id,
+              project_root: job.project_root,
+              feature_sha: snapshot.feature_sha,
+              section,
+              question,
+            },
+            undefined,
+            200_000,
+          );
+          return answer.answer;
+        },
+        requestChanges: async (feedback) => {
+          try {
+            assertActive();
+            const message = boundedWalkthroughFeedback(feedback);
+            job.reviewPhase = "feedback";
+            const reviewId = job.preflightReviewId;
+            if (!reviewId)
+              throw new Error(
+                "walkthrough feedback has no owned preflight reviewer",
+              );
+            await runHelper("remove-reviewer", {
+              job_id: job.job_id,
+              review_id: reviewId,
+            });
+            if (
+              shuttingDown ||
+              jobs.get(job.job_id) !== job ||
+              job.reviewPhase !== "feedback" ||
+              job.reviewRequestId !== requestId
+            )
+              throw new Error("walkthrough is no longer active");
+            await runHelper("send", { job_id: job.job_id, message });
+            const active = job.walkthrough;
+            job.walkthrough = undefined;
+            if (active) void active.close();
+            await runHelper("invalidate-walkthrough", { job_id: job.job_id });
+            if (
+              jobs.get(job.job_id) !== job ||
+              job.reviewPhase !== "feedback" ||
+              job.reviewRequestId !== requestId
+            )
+              throw new Error("walkthrough is no longer active");
+            invalidatePreflight(job);
+            job.reviewPhase = "idle";
+            job.state = "working";
+            job.summary = "walkthrough feedback submitted to worker";
+          } catch (error) {
+            const reason = `could not return walkthrough feedback: ${error instanceof Error ? error.message : String(error)}`;
+            if (
+              jobs.get(job.job_id) === job &&
+              ["reviewing", "feedback"].includes(job.reviewPhase) &&
+              job.reviewRequestId === requestId
+            )
+              blockLifecycle(job, reason);
+            throw new Error(reason, { cause: error });
+          }
+        },
+        fullDiff: async () => {
+          assertActive();
+          const verified = await currentSnapshot(job);
+          assertActive();
+          if (!sameReviewRevisions(snapshot, verified)) {
+            await closeWalkthrough(job, true);
+            throw new Error("walkthrough revision changed before full diff");
+          }
+          pi.events.emit("plannotator:request", {
+            requestId: `${requestId}-full-diff`,
+            action: "code-review",
+            payload: codeReviewPayload(snapshot),
+            respond: () => undefined,
+          });
+        },
+        approved: async () => {
+          try {
+            await approveSnapshot(job, requestId, snapshot, assertActive);
+          } catch (error) {
+            const reason = `approval could not be finalized: ${error instanceof Error ? error.message : String(error)}`;
+            if (
+              jobs.get(job.job_id) === job &&
+              ((job.reviewPhase === "reviewing" &&
+                job.reviewRequestId === requestId) ||
+                (job.reviewPhase === "awaiting-done" &&
+                  job.approval?.request_id === requestId))
+            )
+              blockLifecycle(job, reason);
+            throw new Error(reason, { cause: error });
+          }
         },
       });
+      const attached = await attachWalkthroughServerIfOwned(
+        startupOwned,
+        server,
+        invalidateStartup,
+        () => {
+          job.walkthrough = {
+            close: server.close,
+            statePath: result.state,
+            revision: snapshot.feature_sha,
+            requestId,
+          };
+          job.reviewPhase = "reviewing";
+          job.reviewRequestId = requestId;
+          job.state = "reviewing";
+          job.summary = "interactive walkthrough ready";
+        },
+      );
+      if (!attached) return false;
+      context?.ui.notify(`Review job ${job.job_id} at ${server.url}`, "info");
       return true;
     } catch (error) {
-      blockLifecycle(
-        job,
-        `review request failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return false;
+      if (!startupOwned()) {
+        await invalidateStartup().catch(() => undefined);
+        return false;
+      }
+      throw error;
+    } finally {
+      if (job.reviewAbort === controller) job.reviewAbort = undefined;
     }
   };
 
@@ -713,7 +957,7 @@ export default function scufris(
         return true;
       }
       job.preflightApproval = snapshot;
-      return await beginUserReview(job, snapshot);
+      return await beginWalkthrough(job, snapshot);
     } catch (error) {
       job.reviewAbort = undefined;
       if (!shuttingDown && !controller.signal.aborted) {
@@ -844,17 +1088,9 @@ export default function scufris(
             blockLifecycle(job, rejection);
             continue;
           }
-          if (
-            ["needs-decision", "blocked", "failed"].includes(event.state) &&
-            job.reviewPhase !== "idle"
-          ) {
-            job.reviewAbort?.abort();
-            job.reviewAbort = undefined;
-            job.reviewPhase = "idle";
-            job.reviewRequestId = undefined;
-            job.preflightApproval = undefined;
-            job.approval = undefined;
-          }
+          await cancelReviewForWorkerEvent(job, event.state, () =>
+            closeWalkthrough(job, true),
+          );
           if (event.state === "done" && job.reviewPhase === "awaiting-done") {
             if (!isApprovalDone(event.state, event.summary)) {
               blockLifecycle(
@@ -871,9 +1107,13 @@ export default function scufris(
           }
           if (
             event.state === "done" &&
-            ["preflight", "reviewing", "feedback", "landing"].includes(
-              job.reviewPhase,
-            )
+            [
+              "preflight",
+              "walkthrough",
+              "reviewing",
+              "feedback",
+              "landing",
+            ].includes(job.reviewPhase)
           ) {
             blockLifecycle(job, `done is invalid during ${job.reviewPhase}`);
             continue;
@@ -1249,6 +1489,7 @@ export default function scufris(
       try {
         job.reviewAbort?.abort();
         job.reviewAbort = undefined;
+        await closeWalkthrough(job, true);
         const result = await runHelper<{ job_id: string; state: string }>(
           "stop",
           params,
@@ -1308,7 +1549,10 @@ export default function scufris(
 
   pi.on("session_shutdown", async () => {
     shuttingDown = true;
-    for (const job of jobs.values()) job.reviewAbort?.abort();
+    for (const job of jobs.values()) {
+      job.reviewAbort?.abort();
+      await closeWalkthrough(job, true);
+    }
     if (timer) clearInterval(timer);
     timer = undefined;
     while (pollRunning) {

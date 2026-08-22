@@ -327,6 +327,7 @@ export function promptInspectionMarkdown(
 export default function response(pi: ExtensionAPI): void {
   if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
   const prepared = new Map<string, ResponseEntry>();
+  const appendedResponses = new WeakSet<ResponseEntry>();
   let lastEffectivePrompt: string | undefined;
 
   pi.registerMarkdownTransformer((markdown, context) => {
@@ -401,7 +402,7 @@ export default function response(pi: ExtensionAPI): void {
           ? input.detail
           : undefined
         : `# Rejected final response\n\n${typeof input.spoken === "string" ? input.spoken : "Missing spoken response."}\n\n${typeof input.detail === "string" ? input.detail : ""}`;
-      const entry = appendResponse(pi, context, spoken, detail);
+      const entry = prepareResponse(context, spoken, detail);
       prepared.set(call.id, entry);
       return {
         message: {
@@ -423,7 +424,7 @@ export default function response(pi: ExtensionAPI): void {
         null,
         2,
       )}\n\`\`\``;
-      const entry = appendResponse(pi, context, fallbackSentence, detail);
+      const entry = prepareResponse(context, fallbackSentence, detail);
       for (const call of finalCalls) prepared.set(call.id, entry);
       return {
         message: {
@@ -488,6 +489,9 @@ export default function response(pi: ExtensionAPI): void {
           if (!spoken || spoken !== params.spoken.trim())
             throw new Error("spoken must be complete safe plain prose");
           entry = appendResponse(pi, context, spoken, params.detail);
+        } else if (!appendedResponses.has(entry)) {
+          pi.appendEntry(RESPONSE_ENTRY, entry);
+          appendedResponses.add(entry);
         }
         return {
           content: [{ type: "text", text: "Final response recorded." }],

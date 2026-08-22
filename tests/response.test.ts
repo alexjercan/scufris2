@@ -22,6 +22,7 @@ import response, {
   responseText,
   splitDirectResponse,
 } from "../extensions/scufris/response.ts";
+import { lastSafeAssistantParagraph } from "../extensions/scufris/speech.ts";
 
 const usage = {
   input: 0,
@@ -55,7 +56,7 @@ function fixture() {
 function harness() {
   const { sessionFile } = fixture();
   const handlers = new Map<string, Array<(event: any, context: any) => any>>();
-  const entries: Array<{ customType: string; data: any }> = [];
+  const entries: any[] = [];
   const tools = new Map<string, any>();
   const commands = new Map<string, any>();
   const renderers = new Map<string, any>();
@@ -77,7 +78,12 @@ function harness() {
     },
     registerMarkdownTransformer() {},
     appendEntry(customType: string, data: any) {
-      entries.push({ customType, data });
+      entries.push({
+        type: "custom",
+        id: `custom-${entries.length}`,
+        customType,
+        data,
+      });
     },
     sendMessage(message: any) {
       messages.push(message);
@@ -108,7 +114,7 @@ function harness() {
         return "session-owned-id";
       },
       getBranch() {
-        return [];
+        return entries;
       },
     },
     getSystemPrompt() {
@@ -273,6 +279,63 @@ test("final tool keeps scrubbed arguments executable and terminates", async (t) 
   assert.equal(
     hidden.message.content.some((item: any) => item.type === "text"),
     false,
+  );
+});
+
+test("structured spoken-only response remains available to settled speech", async (t) => {
+  const previous = process.env.SCUFRIS_ROLE;
+  process.env.SCUFRIS_ROLE = "orchestrator";
+  t.after(() =>
+    previous === undefined
+      ? delete process.env.SCUFRIS_ROLE
+      : (process.env.SCUFRIS_ROLE = previous),
+  );
+  const app = harness();
+  const call = {
+    type: "toolCall" as const,
+    id: "spoken-only-final",
+    name: FINAL_TOOL,
+    arguments: { spoken: "This prose-only response is ready to speak." },
+  };
+  const replaced = await app.emit("message_end", {
+    message: {
+      ...assistant(""),
+      content: [call],
+      stopReason: "toolUse" as const,
+    },
+  });
+  app.entries.push({
+    type: "message",
+    id: "assistant-final",
+    message: replaced.message,
+  });
+
+  const toolResult = await app.tools
+    .get(FINAL_TOOL)
+    .execute(
+      call.id,
+      replaced.message.content[0].arguments,
+      undefined,
+      undefined,
+      app.context,
+    );
+  app.entries.push({
+    type: "message",
+    id: "tool-result",
+    message: {
+      role: "toolResult",
+      toolCallId: call.id,
+      toolName: FINAL_TOOL,
+      content: toolResult.content,
+      details: toolResult.details,
+      isError: false,
+      timestamp: 0,
+    },
+  });
+
+  assert.equal(
+    lastSafeAssistantParagraph(app.entries)?.paragraph,
+    "This prose-only response is ready to speak.",
   );
 });
 

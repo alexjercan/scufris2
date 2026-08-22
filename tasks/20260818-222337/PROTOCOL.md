@@ -18,7 +18,7 @@ Pair is automatic. No Pair command exists. Foreground Scufris handles narrow pro
 
 ## Foreground responses
 
-`scufris_final_response` accepts one required `spoken` string and one optional `detail` Markdown string. It validates `spoken` as complete plain prose within the 1,000-byte Piper limit. A successful result sets `terminate: true`. Before Pi validates and executes the call, the assistant tool-call record is scrubbed to the schema-valid `spoken` argument. This removes `detail` from durable session storage without preventing termination.
+`scufris_final_response` accepts one required `spoken` string and one optional `detail` Markdown string. It validates `spoken` as complete plain prose within the 1,000-byte Piper limit. A successful result sets `terminate: true`. Before Pi validates and executes the call, the response handler prepares the private response and scrubs the assistant tool-call record to the schema-valid `spoken` argument. Pi persists that tool call before tool execution appends the custom response entry. This removes `detail` from durable session storage, keeps the safe response latest for settled speech extraction, and does not prevent termination.
 
 A structured response renders from one private custom entry containing the spoken paragraph and optional `/detail <artifact_id>` line. Direct assistant streaming is hidden. Final direct text is split at its first blank line and renders only from the finalized assistant record, not from an additional custom entry. A valid first paragraph becomes `spoken`; the remainder becomes an artifact. Invalid text is stored in full and replaced with one safe sentence.
 

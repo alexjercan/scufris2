@@ -213,18 +213,12 @@ test("speech on, off, once, and replay have deterministic turn behavior", async 
     const app = harness(playback);
     await app.emit("session_start");
 
-    assert.equal(
-      await app.emit("before_agent_start", { systemPrompt: "base" }),
-      undefined,
-    );
+    assert.equal(await app.emit("agent_start"), undefined);
     await app.emit("agent_settled");
     assert.deepEqual(playback.played, []);
 
     await app.command("once");
-    assert.equal(
-      await app.emit("before_agent_start", { systemPrompt: "base" }),
-      undefined,
-    );
+    assert.equal(await app.emit("agent_start"), undefined);
     addAssistant(
       app.entries,
       "This response is spoken once.\n\nVisual detail remains here.",
@@ -240,29 +234,20 @@ test("speech on, off, once, and replay have deterministic turn behavior", async 
       "off",
     );
 
-    assert.equal(
-      await app.emit("before_agent_start", { systemPrompt: "next" }),
-      undefined,
-    );
+    assert.equal(await app.emit("agent_start"), undefined);
     addAssistant(app.entries, "This response stays silent.");
     await app.emit("agent_settled");
     assert.equal(playback.played.length, 1);
 
     await app.command("on");
-    assert.equal(
-      await app.emit("before_agent_start", { systemPrompt: "base" }),
-      undefined,
-    );
+    assert.equal(await app.emit("agent_start"), undefined);
     addAssistant(app.entries, "Speech mode remains enabled.");
     await app.emit("agent_settled");
     assert.equal(playback.played.at(-1), "Speech mode remains enabled.");
 
     await app.command("off");
     assert.equal(playback.cancellations >= 2, true);
-    assert.equal(
-      await app.emit("before_agent_start", { systemPrompt: "base" }),
-      undefined,
-    );
+    assert.equal(await app.emit("agent_start"), undefined);
     addAssistant(app.entries, "This response also stays silent.");
     await app.emit("agent_settled");
 
@@ -274,6 +259,101 @@ test("speech on, off, once, and replay have deterministic turn behavior", async 
         .filter((message) => message.startsWith("Speech")),
       ["Speech armed for one response.", "Speech mode on.", "Speech mode off."],
     );
+  } finally {
+    if (originalRole === undefined) delete process.env.SCUFRIS_ROLE;
+    else process.env.SCUFRIS_ROLE = originalRole;
+    if (originalSpeech === undefined) delete process.env.SCUFRIS_SPEECH;
+    else process.env.SCUFRIS_SPEECH = originalSpeech;
+  }
+});
+
+test("ordinary and extension-triggered turns each speak only their settled response", async () => {
+  const originalRole = process.env.SCUFRIS_ROLE;
+  const originalSpeech = process.env.SCUFRIS_SPEECH;
+  process.env.SCUFRIS_ROLE = "orchestrator";
+  process.env.SCUFRIS_SPEECH = "1";
+  try {
+    const playback = new FakePlayback();
+    const app = harness(playback);
+    await app.emit("session_start");
+
+    await app.emit("before_agent_start", { systemPrompt: "base" });
+    await app.emit("agent_start");
+    addAssistant(app.entries, "The ordinary response is settled and safe.");
+    await app.emit("agent_settled");
+
+    const wakes = [
+      {
+        customType: "scufris-job-event",
+        payload: "review-ready: raw lifecycle payload",
+        response: "The review-ready response is settled and safe.",
+      },
+      {
+        customType: "scufris-job-event",
+        payload: "done: raw lifecycle payload",
+        response: "The done response is settled and safe.",
+      },
+      {
+        customType: "scufris-detail-feedback",
+        payload: "raw human review feedback",
+        response: "The review feedback response is settled and safe.",
+      },
+    ];
+    for (const wake of wakes) {
+      app.entries.push({
+        type: "message",
+        id: `wake-${app.entries.length}`,
+        message: {
+          role: "custom",
+          customType: wake.customType,
+          content: wake.payload,
+        },
+      });
+      await app.emit("agent_start");
+      addAssistant(app.entries, wake.response);
+      await app.emit("agent_settled");
+    }
+
+    assert.deepEqual(playback.played, [
+      "The ordinary response is settled and safe.",
+      ...wakes.map((wake) => wake.response),
+    ]);
+  } finally {
+    if (originalRole === undefined) delete process.env.SCUFRIS_ROLE;
+    else process.env.SCUFRIS_ROLE = originalRole;
+    if (originalSpeech === undefined) delete process.env.SCUFRIS_SPEECH;
+    else process.env.SCUFRIS_SPEECH = originalSpeech;
+  }
+});
+
+test("wake settlement without a new response never replays prior speech", async () => {
+  const originalRole = process.env.SCUFRIS_ROLE;
+  const originalSpeech = process.env.SCUFRIS_SPEECH;
+  process.env.SCUFRIS_ROLE = "orchestrator";
+  process.env.SCUFRIS_SPEECH = "1";
+  try {
+    const playback = new FakePlayback();
+    const app = harness(playback);
+    await app.emit("session_start");
+
+    await app.emit("agent_start");
+    addAssistant(app.entries, "The prior response is spoken once.");
+    await app.emit("agent_settled");
+
+    app.entries.push({
+      type: "message",
+      id: "failed-wake",
+      message: {
+        role: "custom",
+        customType: "scufris-job-event",
+        content: "done: raw wake without a response",
+      },
+    });
+    await app.emit("agent_start");
+    await app.emit("agent_settled");
+
+    assert.deepEqual(playback.played, ["The prior response is spoken once."]);
+    assert.equal(app.notices.at(-1)?.message, "No safe response to speak.");
   } finally {
     if (originalRole === undefined) delete process.env.SCUFRIS_ROLE;
     else process.env.SCUFRIS_ROLE = originalRole;
@@ -294,7 +374,7 @@ test("settlement, input, reload state, unsafe output, and errors fail safely", a
     await app.emit("input", { text: "new request", source: "interactive" });
     assert.equal(playback.cancellations, 2);
 
-    await app.emit("before_agent_start", { systemPrompt: "base" });
+    await app.emit("agent_start");
     addAssistant(app.entries, "I will inspect the result.", {
       stopReason: "toolUse",
       toolCall: true,
@@ -309,14 +389,11 @@ test("settlement, input, reload state, unsafe output, and errors fail safely", a
     const reloaded = harness(reloadedPlayback);
     reloaded.entries.push(...app.entries);
     await reloaded.emit("session_start", { reason: "reload" });
-    assert.equal(
-      await reloaded.emit("before_agent_start", { systemPrompt: "base" }),
-      undefined,
-    );
+    assert.equal(await reloaded.emit("agent_start"), undefined);
     await reloaded.emit("agent_settled");
 
     await reloaded.command("on");
-    await reloaded.emit("before_agent_start", { systemPrompt: "base" });
+    await reloaded.emit("agent_start");
     addAssistant(reloaded.entries, "See /tmp/private for the result.");
     await reloaded.emit("agent_settled");
     assert.equal(reloadedPlayback.played.length, 0);
@@ -328,7 +405,7 @@ test("settlement, input, reload state, unsafe output, and errors fail safely", a
     reloadedPlayback.error = new SpeechPlaybackError(
       "Speech synthesis failed.",
     );
-    await reloaded.emit("before_agent_start", { systemPrompt: "base" });
+    await reloaded.emit("agent_start");
     addAssistant(reloaded.entries, "This safe response reaches playback.");
     await reloaded.emit("agent_settled");
     await flushPromises();
@@ -361,10 +438,7 @@ test("normal Pi and non-TUI Scufris modes never register or speak", async () => 
       const playback = new FakePlayback();
       const app = harness(playback, mode);
       await app.emit("session_start");
-      assert.equal(
-        await app.emit("before_agent_start", { systemPrompt: "base" }),
-        undefined,
-      );
+      assert.equal(await app.emit("agent_start"), undefined);
       addAssistant(app.entries, "This response must stay silent.");
       await app.emit("agent_settled");
       await app.command("on");

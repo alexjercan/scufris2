@@ -283,6 +283,7 @@ export default function speech(
   let tuiActive = false;
   let awaitingSettlement = false;
   let speakAtSettlement = false;
+  let runEntryBoundary = 0;
   let playbackGeneration = 0;
   let sessionGeneration = 0;
 
@@ -376,6 +377,7 @@ export default function speech(
     sessionGeneration += 1;
     awaitingSettlement = false;
     speakAtSettlement = false;
+    runEntryBoundary = 0;
     await cancelPlayback();
     tuiActive = context.mode === "tui";
     mode = tuiActive ? restoredMode(context, environmentMode) : "off";
@@ -384,6 +386,7 @@ export default function speech(
   pi.on("session_tree", async (_event, context) => {
     awaitingSettlement = false;
     speakAtSettlement = false;
+    runEntryBoundary = 0;
     await cancelPlayback();
     if (context.mode === "tui") mode = restoredMode(context, environmentMode);
   });
@@ -393,27 +396,27 @@ export default function speech(
     return { action: "continue" };
   });
 
-  pi.on("before_agent_start", (_event, context) => {
-    if (!tuiActive || context.mode !== "tui") return;
-    if (!awaitingSettlement) {
-      awaitingSettlement = true;
-      speakAtSettlement = mode !== "off";
-      if (mode === "once") {
-        mode = "off";
-        persistMode();
-      }
+  pi.on("agent_start", (_event, context) => {
+    if (!tuiActive || context.mode !== "tui" || awaitingSettlement) return;
+    awaitingSettlement = true;
+    speakAtSettlement = mode !== "off";
+    runEntryBoundary = context.sessionManager.getBranch().length;
+    if (mode === "once") {
+      mode = "off";
+      persistMode();
     }
-    if (!speakAtSettlement) return;
   });
 
   pi.on("agent_settled", (_event, context) => {
     const shouldSpeak = speakAtSettlement;
+    const boundary = runEntryBoundary;
     awaitingSettlement = false;
     speakAtSettlement = false;
+    runEntryBoundary = 0;
     if (!shouldSpeak || !tuiActive || context.mode !== "tui") return;
 
     const response = lastSafeAssistantParagraph(
-      context.sessionManager.getBranch(),
+      context.sessionManager.getBranch().slice(boundary),
     );
     if (!response) {
       context.ui.notify("No safe response to speak.", "warning");
@@ -427,6 +430,7 @@ export default function speech(
     tuiActive = false;
     awaitingSettlement = false;
     speakAtSettlement = false;
+    runEntryBoundary = 0;
     await cancelPlayback();
   });
 }

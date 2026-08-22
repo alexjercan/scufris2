@@ -14,7 +14,7 @@ Voice-enabled Scufris owns:
 - A dedicated resumable popup conversation command.
 - The direct Kitty launcher and `scufris-popup.service` definition.
 
-The ordinary voice-capable launcher remains silent until speech is enabled. The popup launcher defaults speech and Calm on, then resumes its dedicated session.
+The ordinary voice-capable launcher remains silent until speech is enabled. The popup launcher defaults speech and Calm on, then resumes its dedicated session. Enabled speech plays each safe settled response once for ordinary prompts and automatic wake turns, including delegated-job and review feedback notifications.
 
 ## Integration
 

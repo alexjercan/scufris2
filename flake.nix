@@ -138,6 +138,10 @@
 
       flake = {
         extensions = {
+          response = builtins.path {
+            path = ./extensions/scufris/response.ts;
+            name = "scufris-response-extension";
+          };
           calm = builtins.path {
             path = ./extensions/scufris/calm.ts;
             name = "scufris-calm-extension";

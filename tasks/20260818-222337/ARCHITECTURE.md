@@ -56,9 +56,17 @@ Does not own:
 
 The Scufris identity extension owns:
 
-- Loading the repository canonical Pair prompt.
+- Loading the canonical foreground orchestration prompt.
 - Appending its complete canonical text in `before_agent_start` on every foreground agent run, including runs after compaction.
 - Activation only from the `SCUFRIS_ROLE=orchestrator` process role.
+
+The response extension owns:
+
+- The terminating `scufris_final_response` tool and direct-text fallback.
+- Private session-adjacent Markdown artifacts and opaque lookup.
+- `/detail` Plannotator annotation requests and compact durable review rows.
+- `/scufris-prompt` prompt inspection without a provider request.
+- Transcript streaming suppression and the final-response prompt policy.
 
 The delegation extension owns:
 
@@ -229,9 +237,9 @@ The matching job directory and exact tmux window are both required for orphan el
 
 ## Pair and delegation readiness
 
-Scufris pairs automatically. There is no `/pair` command or deterministic router. Before proposing work, it inspects the smallest relevant project instructions, conventions, docs, task artifacts, code, tests, Git state, history, and user style. It stops only for real decisions and records durable decisions in project artifacts.
+Scufris pairs automatically. There is no `/pair` command or deterministic router. It answers ordinary conversation, clarification, and product decisions directly. It delegates all project inspection, research, implementation, checks, task maintenance, diagnostics, releases, and deployment before foreground inspection.
 
-Full-send is a prose judgment. Delegate only one bounded outcome with no unresolved product or durable architecture decision, known constraints and checks, and a self-contained handoff. Consequential or compaction-sensitive work uses a Tatr task folder. Accepted design artifacts are committed before implementation delegation. Bounded research, prototypes, diagrams, and demos can run while Pair continues.
+Full-send is a prose judgment. Delegate one bounded outcome with no unresolved product or durable architecture decision and a self-contained handoff. The worker must inspect applicable instructions, context, code, history, and checks. Consequential or compaction-sensitive work uses delegated Tatr maintenance. Bounded research, prototypes, diagrams, and demos can run while Pair continues.
 
 ## Foreground request flow
 
@@ -244,8 +252,8 @@ sequenceDiagram
 
   User->>Pi: request
   Pi->>Skill: load only if matched
-  alt answer or inspect files
-    Pi-->>User: foreground response
+  alt conversation or decision
+    Pi-->>User: short spoken response
   else delegate
     Pi->>Extension: scufris_agent_spawn
     Extension-->>Pi: job_id and running state
@@ -257,7 +265,7 @@ sequenceDiagram
   end
 ```
 
-No deterministic router runs before the model. Version 1 reacts only to direct user messages.
+No deterministic router runs before the model. Every final foreground response uses a terminating structured tool. Only its safe spoken paragraph and optional opaque detail command render. Direct model text is held until a safe fallback split is complete.
 
 ## Job lifecycle
 

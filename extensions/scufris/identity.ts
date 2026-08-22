@@ -9,12 +9,12 @@ const pairPromptPath = fileURLToPath(
 export const pairPrompt = readFileSync(pairPromptPath, "utf8");
 
 if (
-  Buffer.byteLength(pairPrompt, "ascii") > 500 ||
+  Buffer.byteLength(pairPrompt, "ascii") > 800 ||
   !pairPrompt.endsWith("\n") ||
   !/^[\x00-\x7f]+$/.test(pairPrompt)
 ) {
   throw new Error(
-    "prompts/pair.md must be LF-terminated ASCII at most 500 bytes",
+    "prompts/pair.md must be LF-terminated ASCII at most 800 bytes",
   );
 }
 

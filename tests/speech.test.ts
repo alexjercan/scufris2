@@ -5,7 +5,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import speech, {
   extractSpokenParagraph,
   lastSafeAssistantParagraph,
-  spokenResponseInstruction,
   SpeechPlaybackError,
   type SpeechPlayback,
 } from "../extensions/scufris/speech.ts";
@@ -187,6 +186,21 @@ test("last response extraction never falls back from an unsafe final response", 
   );
   addAssistant(entries, "See /unsafe/path now.");
   assert.equal(lastSafeAssistantParagraph(entries), undefined);
+
+  entries.push({
+    type: "custom",
+    id: "response",
+    customType: "scufris-response-v1",
+    data: {
+      version: 1,
+      spoken: "Only this paragraph reaches Piper.",
+      artifact_id: "0123456789abcdef01234567",
+    },
+  });
+  assert.deepEqual(lastSafeAssistantParagraph(entries), {
+    entryId: "response",
+    paragraph: "Only this paragraph reaches Piper.",
+  });
 });
 
 test("speech on, off, once, and replay have deterministic turn behavior", async () => {
@@ -207,11 +221,9 @@ test("speech on, off, once, and replay have deterministic turn behavior", async 
     assert.deepEqual(playback.played, []);
 
     await app.command("once");
-    assert.deepEqual(
+    assert.equal(
       await app.emit("before_agent_start", { systemPrompt: "base" }),
-      {
-        systemPrompt: `base\n\n${spokenResponseInstruction}`,
-      },
+      undefined,
     );
     addAssistant(
       app.entries,
@@ -237,13 +249,9 @@ test("speech on, off, once, and replay have deterministic turn behavior", async 
     assert.equal(playback.played.length, 1);
 
     await app.command("on");
-    assert.match(
-      (
-        (await app.emit("before_agent_start", { systemPrompt: "base" })) as {
-          systemPrompt: string;
-        }
-      ).systemPrompt,
-      /first paragraph as short natural prose/,
+    assert.equal(
+      await app.emit("before_agent_start", { systemPrompt: "base" }),
+      undefined,
     );
     addAssistant(app.entries, "Speech mode remains enabled.");
     await app.emit("agent_settled");

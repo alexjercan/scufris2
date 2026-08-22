@@ -1,6 +1,6 @@
 # Delegated work and review
 
-Scufris can delegate one bounded outcome to an independent Pi or Claude worker in a Sprout worktree. The foreground session owns the job, mediates decisions and blockers, and keeps landing local.
+Scufris delegates project work to an independent Pi or Claude worker in a Sprout worktree before foreground project inspection. The worker receives the request and must inspect applicable repository instructions, context, code, history, and checks. The foreground session owns the job, mediates decisions and blockers, and keeps landing local.
 
 Every job declares one review policy at spawn:
 

@@ -9,18 +9,18 @@ Use Scufris native agent tools. Do not invoke tmux, sprout, Pi, Claude, or Plann
 
 ## Readiness
 
-1. Inspect the smallest relevant project context first: instructions, conventions, docs, task artifacts, relevant code and tests, Git state, recent history, and user style.
+1. Do not inspect the project in the foreground. Decide readiness from the user request and accepted conversation decisions.
 2. Full-send only one bounded outcome with no unresolved product decision, no durable architectural decision, known constraints and checks, and a self-contained handoff.
-3. Keep consequential, multi-stage, multi-agent, or compaction-sensitive work in a Tatr task folder. Retain distilled decisions, not transcripts. Add design, notes, demos, diagrams, or other artifacts only when useful.
-4. Commit accepted design artifacts before delegation.
+3. Require the worker to inspect applicable project instructions, conventions, docs, task artifacts, code, tests, Git state, history, and user style before changing files.
+4. Keep consequential or compaction-sensitive accepted design in a Tatr task folder through delegated task maintenance. Do not perform that maintenance in the foreground.
 5. Continue Pair for unresolved decisions. Workers can produce bounded research, prototypes, demos, or diagrams while Pair continues. Workers never spawn workers.
 
 ## Spawn
 
-1. Confirm the request is project work in a Git repository.
+1. Treat filesystem inspection, research, implementation, checks, task maintenance, diagnostics, releases, deployment, and other project operations as delegated work.
 2. Use the current repository when the request targets it. For another named repository, or outside Git, call `scufris_agent_projects` and select its exact opaque project ID.
 3. Choose `pi` unless the user requests Claude or a specific Claude model.
-4. Make `instructions` self-contained. Include the exact problem, outcome, scope, accepted design, artifacts, constraints, non-goals, applicable checks, completion conditions, and required task evidence. Never put filesystem paths or commands in tool arguments.
+4. Make `instructions` self-contained. Include the exact problem, outcome, scope, accepted design, artifacts, constraints, non-goals, applicable checks, completion conditions, and required task evidence. Require the worker to discover and follow project instructions and context. Never put filesystem paths or commands in tool arguments.
 5. For a clear task name, derive a lowercase alphanumeric single-hyphen `feature`, maximum 48 characters. Omit it when no clear name exists. Never request a job-ID feature.
 6. Select exactly one required `review` policy:
    - Use `code` for implementation correctness and maintainability.

@@ -12,9 +12,21 @@
 
 ## Scufris identity
 
-`prompts/pair.md` is the one canonical Pair prompt. It is LF-terminated ASCII and at most 500 bytes. The Scufris launcher sets `SCUFRIS_ROLE=orchestrator`; `extensions/scufris/identity.ts` appends the complete canonical text in `before_agent_start` for every orchestrator agent run. This rebuilds it after compaction. The worker launcher removes the role. Normal Pi sessions, direct package loading, and ambient delegated Pi workers do not receive the Scufris prompt.
+`prompts/pair.md` is the one canonical Pair prompt. It is LF-terminated ASCII and at most 800 bytes. The Scufris launcher sets `SCUFRIS_ROLE=orchestrator`; `extensions/scufris/identity.ts` appends the complete canonical text in `before_agent_start` for every orchestrator agent run. This rebuilds it after compaction. The worker launcher removes the role. Normal Pi sessions, direct package loading, and ambient delegated Pi workers do not receive the Scufris prompt.
 
-Pair is automatic. No Pair command exists. Readiness remains a Scufris prose judgment, not a deterministic routing tool.
+Pair is automatic. No Pair command exists. Foreground Scufris delegates project work before project inspection. Readiness remains a prose judgment, not a deterministic routing tool. Workers and preflight reviewers do not receive the foreground policy or response extension.
+
+## Foreground responses
+
+`scufris_final_response` accepts one required `spoken` string and one optional `detail` Markdown string. It validates `spoken` as complete plain prose within the 1,000-byte Piper limit. A successful result sets `terminate: true`. The assistant tool-call record is scrubbed of `detail` before durable session storage.
+
+The response extension renders one private custom entry containing the spoken paragraph and optional `/detail <artifact_id>` line. Direct assistant streaming is hidden. Final direct text is split at its first blank line. A valid first paragraph becomes `spoken`; the remainder becomes an artifact. Invalid text is stored in full and replaced with one safe sentence.
+
+Artifacts are adjacent to the session file under `<session>.scufris/`. The directory is mode 0700. Markdown and metadata are mode 0600. IDs match `[a-f0-9]{24}`. A session can own at most 128 artifacts, each at most 256 KiB UTF-8. Lookup verifies regular files, modes, local ownership, metadata session identity, and size. Persistence failure keeps the spoken response and emits a concise UI error.
+
+`/detail <artifact_id>` resolves only against the active session and emits Plannotator's public `plannotator:request` action `annotate` with `gate: true`. Full feedback is saved in artifact metadata. The transcript stores only approval, closure, or annotation count. Actionable feedback enters model context through a hidden custom message and triggers mediation.
+
+`/scufris-prompt` creates a private detail artifact containing the exact assembled prompt and ordered provenance from Pi's current system-prompt options. It makes no provider request.
 
 ## Harness defaults
 

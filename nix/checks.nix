@@ -143,6 +143,8 @@ in
         --extension
         ${resources}/share/scufris/extensions/scufris/identity.ts
         --extension
+        ${resources}/share/scufris/extensions/scufris/response.ts
+        --extension
         ${resources}/share/scufris/extensions/scufris/calm.ts
         --extension
         ${resources}/share/scufris/extensions/scufris/agents.ts
@@ -169,6 +171,7 @@ in
 
     resources = pkgs.runCommand "scufris-resources-check" {} ''
       test -f ${resources}/share/scufris/extensions/scufris/identity.ts
+      test -f ${resources}/share/scufris/extensions/scufris/response.ts
       test -f ${resources}/share/scufris/extensions/scufris/calm.ts
       test ! -e ${resources}/share/scufris/extensions/scufris/speech.ts
       test ! -e ${resources}/share/scufris/scripts/scufris-speak
@@ -182,6 +185,7 @@ in
       test -x ${resources}/share/scufris/scripts/scufris-job
       test -x ${resources}/share/scufris/scripts/scufris-jobs
       test -x ${resources}/share/scufris/scripts/scufris-jobs-prune
+      test -x ${resources}/share/scufris/scripts/scufris-artifacts-prune
       test -x ${resources}/share/scufris/scripts/scufris-dashboard
       test ! -e ${resources}/bin/scufris-jobs-prune
       test ! -e ${launcher}/bin/scufris-jobs-prune
@@ -210,6 +214,8 @@ in
         system-pi
         --extension
         ${voiceResources}/share/scufris/extensions/scufris/identity.ts
+        --extension
+        ${voiceResources}/share/scufris/extensions/scufris/response.ts
         --extension
         ${voiceResources}/share/scufris/extensions/scufris/calm.ts
         --extension

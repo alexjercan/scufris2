@@ -1,6 +1,6 @@
 # Make Scufris a prose-only delegated orchestrator
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: orchestration, speech, artifacts, plannotator
 
@@ -89,6 +89,34 @@ Make foreground Scufris a minimal spoken conversational router. Display and spea
 - Test foreground prompt policy, worker exclusion, and retention of loaded tools and skills.
 - Run repository TypeScript and Python integration checks, formatting, ShellCheck, Nix formatting, diff checks, documentation build, and full Nix checks.
 - Complete live Piper, session resume, detail review, annotation, and transcript-minimality playtesting.
+
+## Implementation record
+
+- Added the foreground-only terminating response tool, safe direct-text splitter, private session sidecars, opaque detail review, compact durable review rows, and private prompt inspection.
+- Kept built-in tools, skills, delegation tools, and widget tools loaded. The canonical foreground policy delegates project work before inspection and is excluded from workers and reviewers by role.
+- Used Plannotator 0.27.4 public `plannotator:request` `annotate` action with `gate: true`. Its published interface accepts `filePath`, optional `markdown`, and returns feedback, approval, or exit state.
+- Added TypeScript and Python integration coverage for termination, fallback, artifact privacy and bounds, ownership, symlink refusal, restored rendering, pruning, detail feedback, prompt composition, Piper isolation, and role separation.
+- Live Piper, browser annotation, session resume, and full transcript-minimality playtests remain for interactive review.
+
+## Verification record
+
+- `sprout sync prose-only-orchestrator`: passed and merged the current landing branch without conflicts.
+- `npm run check`: passed, including 47 TypeScript integration tests.
+- `python3 -m unittest discover -s tests -p 'test_*.py'`: passed, 29 tests.
+- `ruff check scripts tests` and `ruff format --check scripts tests`: passed.
+- `shellcheck scripts/scufris-dev`: passed. Python helpers were checked with Ruff, not ShellCheck.
+- `alejandra --check flake.nix nix/*.nix`: passed.
+- `nix build .#docs --no-link`: passed.
+- `git diff --check`: passed.
+- `nix flake check`: passed on x86_64-linux. Nix reported the repository's existing unknown custom-output and cross-system omission warnings.
+- Non-interactive artifact, prompt, rendering, fallback, resume, review-result, speech isolation, and role-separation acceptance checks passed.
+- Remaining live checks require the TUI, browser, and audio device: Piper playback, browser annotation and approval, real session resume, and visual transcript-minimality review.
+
+## One-time manual review preparation
+
+- Synchronized with landing revision `dc5c61e4859245eb3a94d944260ac7e893cef3c4`.
+- Preserved the accepted prose-only response and delegation behavior while incorporating the landed visible preflight reviewer window and exact 1800-second reviewer deadline.
+- Synchronization completed without conflicts. The complete check suite above passed after synchronization.
 
 ## Completion criteria
 

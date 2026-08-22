@@ -5,6 +5,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { plainProseParagraph } from "./response.ts";
 
 const speechHelperPath = fileURLToPath(
   new URL("../../scripts/scufris-speak", import.meta.url),
@@ -14,9 +15,6 @@ const maxSpeechBytes = 1_000;
 const maxHelperErrorBytes = 2_048;
 const defaultPlaybackTimeoutMs = 65_000;
 const stopGraceMs = 750;
-
-export const spokenResponseInstruction =
-  "For this final answer only, write the first paragraph as short natural prose in complete sentences. Do not use Markdown, bullets, paths, hashes, URLs, or code in that paragraph. Keep all normal visual detail after one blank line.";
 
 export type SpeechMode = "off" | "on" | "once";
 
@@ -61,40 +59,6 @@ function boundedUtf8(value: string, maximum: number): boolean {
   return Buffer.byteLength(value, "utf8") <= maximum;
 }
 
-function plainProseParagraph(value: string): string | undefined {
-  const normalized = value.replace(/\r\n?/g, "\n").trimStart();
-  if (!normalized) return undefined;
-
-  const paragraph = normalized.split(/\n[ \t]*\n/, 1)[0] ?? "";
-  if (!paragraph || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(paragraph)) {
-    return undefined;
-  }
-  if (
-    paragraph
-      .split("\n")
-      .some((line) =>
-        /^\s*(?:[-+*#>]|\d+[.)]|[\u2022\u2023\u25e6\u2043\u2219])\s/.test(line),
-      )
-  ) {
-    return undefined;
-  }
-
-  const prose = paragraph.replace(/[ \t]*\n[ \t]*/g, " ").trim();
-  if (
-    !prose ||
-    !boundedUtf8(prose, maxSpeechBytes) ||
-    !/[\p{L}\p{N}]/u.test(prose) ||
-    !/[.!?]["')\]]?$/.test(prose) ||
-    /[\\/#`*_~|{}<>\[\]]/.test(prose) ||
-    /(?:^|\s)(?:https?:|ftp:|www\.)/iu.test(prose) ||
-    /\b[A-Za-z0-9-]+\.[A-Za-z][A-Za-z0-9-]{0,15}\b/u.test(prose) ||
-    /(?:=>|:=|==|&&|\|\||::)/.test(prose)
-  ) {
-    return undefined;
-  }
-  return prose;
-}
-
 export function extractSpokenParagraph(
   message: AssistantMessage,
 ): string | undefined {
@@ -126,13 +90,24 @@ export function lastSafeAssistantParagraph(
 ): SafeAssistantParagraph | undefined {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const candidate = entries[index];
+    if (typeof candidate !== "object" || candidate === null) continue;
+    const custom = candidate as {
+      type?: unknown;
+      id?: unknown;
+      customType?: unknown;
+      data?: { version?: unknown; spoken?: unknown };
+    };
     if (
-      typeof candidate !== "object" ||
-      candidate === null ||
-      (candidate as { type?: unknown }).type !== "message"
+      custom.type === "custom" &&
+      custom.customType === "scufris-response-v1" &&
+      custom.data?.version === 1 &&
+      typeof custom.data.spoken === "string" &&
+      typeof custom.id === "string"
     ) {
-      continue;
+      const paragraph = plainProseParagraph(custom.data.spoken);
+      return paragraph ? { entryId: custom.id, paragraph } : undefined;
     }
+    if (custom.type !== "message") continue;
     const entry = candidate as BranchMessageEntry;
     if ((entry.message as { role?: unknown }).role !== "assistant") continue;
     if (!isAssistantMessage(entry.message)) return undefined;
@@ -418,7 +393,7 @@ export default function speech(
     return { action: "continue" };
   });
 
-  pi.on("before_agent_start", (event, context) => {
+  pi.on("before_agent_start", (_event, context) => {
     if (!tuiActive || context.mode !== "tui") return;
     if (!awaitingSettlement) {
       awaitingSettlement = true;
@@ -429,9 +404,6 @@ export default function speech(
       }
     }
     if (!speakAtSettlement) return;
-    return {
-      systemPrompt: `${event.systemPrompt}\n\n${spokenResponseInstruction}`,
-    };
   });
 
   pi.on("agent_settled", (_event, context) => {

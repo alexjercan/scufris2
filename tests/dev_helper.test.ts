@@ -82,6 +82,7 @@ async function run(
 function expectedArgs(sessionDirectory: string, voice: boolean): string[] {
   const extensions = [
     "identity.ts",
+    "response.ts",
     "calm.ts",
     ...(voice ? ["speech.ts"] : []),
     "agents.ts",

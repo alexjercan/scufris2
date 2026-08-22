@@ -30,6 +30,7 @@ fi
 
 extensions=(
   "$root/extensions/scufris/identity.ts"
+  "$root/extensions/scufris/response.ts"
   "$root/extensions/scufris/calm.ts"
 )
 skills=()

@@ -17,6 +17,8 @@ assert !voice || (piperPackage != null && piperModel != null && piperConfig != n
       "--extension"
       "${resources}/share/scufris/extensions/scufris/identity.ts"
       "--extension"
+      "${resources}/share/scufris/extensions/scufris/response.ts"
+      "--extension"
       "${resources}/share/scufris/extensions/scufris/calm.ts"
     ]
     ++ pkgs.lib.optionals voice [

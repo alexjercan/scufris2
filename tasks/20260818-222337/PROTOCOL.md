@@ -428,6 +428,53 @@ Review snapshot:
 }
 ```
 
+### Preflight review
+
+Every spawn declares one review policy:
+
+```json
+{
+  "review": {
+    "profile": "consumer",
+    "brief": "Audience: Home Manager users. Outcome: configure and operate Scufris from the manual."
+  }
+}
+```
+
+Landable profiles are `code`, `consumer`, `operations`, and `interface`. The brief is bounded plain text that states the accepted outcome and audience. Requested non-landable results use `{ "profile": "none" }`.
+
+After the normal review snapshot passes, Scufris starts a fresh headless Pi reviewer with model `openai-codex/gpt-5.6-sol`, medium thinking, a dedicated session, and read-only built-in tools. The reviewer receives:
+
+- Repository instructions from the feature worktree.
+- The review profile and brief.
+- A bounded exact base-to-feature patch.
+- Access to surrounding feature-worktree files through read-only tools.
+
+The reviewer does not receive the implementation transcript, worker report, reasoning, or claims. It returns one bounded JSON result:
+
+```json
+{
+  "verdict": "request_changes",
+  "findings": [
+    {
+      "severity": "MINOR",
+      "path": "docs/src/quickstart.md",
+      "line": 12,
+      "reason": "The first use of an internal term has no user action or explanation.",
+      "change": "Describe the user action with product language."
+    }
+  ]
+}
+```
+
+Valid severities are `BLOCKER`, `MAJOR`, and `MINOR`. The reviewer reports only fix-worthy findings. `approve` requires an empty finding list. Malformed, oversized, inconsistent, failed, timed-out, or mutating review runs block the lifecycle.
+
+Findings return to the same implementation worker as one bounded literal message. The reviewer session remains isolated from that worker and verifies the next committed revision. Two feedback cycles are allowed. A third `request_changes` result blocks for Pair mediation. Approval binds to the exact snapshot.
+
+A Plannotator request starts only after exact preflight approval. Plannotator feedback invalidates that approval and the prior reviewer session. The worker's next `review-ready` event starts a fresh preflight sequence before another user review.
+
+### User review
+
 Request review through Plannotator's public Pi event API:
 
 ```ts

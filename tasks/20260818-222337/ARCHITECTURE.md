@@ -271,8 +271,11 @@ stateDiagram-v2
   blocked --> running
   blocked --> review_ready: explicit retry after mediated review precondition
   running --> review_ready
-  review_ready --> running: feedback
-  review_ready --> awaiting_done: exact approval and final instruction
+  review_ready --> preflight_reviewing: exact snapshot
+  preflight_reviewing --> running: fix-worthy findings
+  preflight_reviewing --> human_review: exact preflight approval
+  human_review --> running: user feedback
+  human_review --> awaiting_done: exact user approval and final instruction
   awaiting_done --> landing: exact worker done acknowledgment
   landing --> landed
   landing --> landed_with_retained_resources: cleanup failure after successful land
@@ -346,6 +349,7 @@ sequenceDiagram
   participant Worker
   participant Scufris
   participant Sprout
+  participant Reviewer
   participant Plannotator
 
   Worker->>Sprout: sync feature
@@ -357,8 +361,17 @@ sequenceDiagram
     Scufris->>Scufris: block for mediation
     Scufris->>Scufris: explicit retry takes a fresh snapshot and reverifies all preconditions
   end
+  Scufris->>Reviewer: fresh preflight review, exact since-base diff
+  alt fix-worthy findings
+    Reviewer-->>Scufris: bounded structured findings
+    Scufris->>Worker: submit findings once
+    Worker->>Worker: fix, check, commit, and report review-ready
+    Scufris->>Reviewer: same review session verifies the new exact revision
+  else exact preflight approval
+    Reviewer-->>Scufris: approved
+  end
   Scufris->>Plannotator: code-review event, since-base
-  alt feedback
+  alt user feedback
     Plannotator-->>Scufris: structured feedback
     Scufris->>Worker: submit feedback once
   else approved
@@ -376,7 +389,13 @@ sequenceDiagram
   end
 ```
 
-One committed revision is required per review round. An explicit retry after a transient review-precondition failure is the same round and does not require a new commit. It is accepted only for the owned blocked job marked retryable. It clears request and approval state, takes a fresh snapshot, and reruns every current tmux and Git precondition. Review outcomes and other lifecycle blockers are not retryable through this operation. Scufris requests `last-commit` only for a separate, non-approving fix review. Final approval requires a new `since-base` request and its structured `approved: true` result.
+One committed revision is required per review round. An explicit retry after a transient review-precondition failure is the same round and does not require a new commit. It is accepted only for the owned blocked job marked retryable. It clears request and approval state, takes a fresh snapshot, and reruns every current tmux and Git precondition. Review outcomes and other lifecycle blockers are not retryable through this operation.
+
+Every landable delegated job selects one preflight profile at spawn: code, consumer, operations, or interface. A non-landable result selects none. After `review-ready`, Scufris starts a fresh headless Pi reviewer with Sol at medium thinking. The reviewer receives repository instructions, a concise accepted-outcome and audience brief, and the exact base-to-feature diff. It can inspect the feature worktree with read-only tools. It does not receive the implementation transcript, worker report, reasoning, or claims.
+
+Preflight findings contain only fix-worthy BLOCKER, MAJOR, or MINOR items with a relative path, line, reason, and concrete correction. Feedback returns to the implementation worker. The same reviewer session verifies corrections. A third request for changes blocks for Pair mediation. Preflight approval binds to the exact landing and feature revisions. Plannotator opens only after that approval. User feedback invalidates the preflight approval and starts a fresh preflight sequence before Plannotator reopens.
+
+Plannotator remains the user approval gate. Final approval requires a new `since-base` request and its structured `approved: true` result.
 
 Review and landing validate only the recorded session, window, pane, and worker liveness. Unrelated windows in the same session are outside Scufris ownership during review, landing, retain cleanup, and exact worker stop. The user accepts that `sprout rm` can evict them for remove cleanup after successful landing.
 

@@ -51,6 +51,17 @@ class ReplacementJobsTest(unittest.TestCase):
             check=True,
             capture_output=True,
         )
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.invalid"],
+            cwd=self.project,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Scufris Test"],
+            cwd=self.project,
+            check=True,
+        )
+        (self.project / "README.md").write_text("# Fixture\n")
         (self.project / ".scufris.toml").write_text(
             """version = 1
 
@@ -62,6 +73,17 @@ guidance = "Use project tasks."
 name = "pi"
 options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
 """
+        )
+        subprocess.run(
+            ["git", "add", "README.md", ".scufris.toml"],
+            cwd=self.project,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "fixture"],
+            cwd=self.project,
+            check=True,
+            capture_output=True,
         )
         self.env = os.environ.copy()
         self.env.pop("TMUX", None)
@@ -211,6 +233,56 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         review_record = json.loads((review_directory / "job.json").read_text())
         self.assertEqual(review_record["review_of"], job_id)
         self.assertEqual(review_record["working_directory"], str(self.project))
+
+    def test_sprout_job_has_explicit_review_target_and_guarded_landing(self) -> None:
+        context = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        job_id = "999aaa888bbb"
+        result = self.call(
+            "spawn",
+            {
+                "job_id": job_id,
+                "instructions": "Implement the fixture change.",
+                "owner_session": "foreground-session",
+                "project": context["project"],
+                "project_root": context["project_root"],
+                "context_markdown": context["markdown"],
+                "context_fingerprint": context["fingerprint"],
+                "workspace": "sprout",
+                "feature": "fixture-change",
+            },
+        )["result"]
+        self.jobs.append(job_id)
+        self.assertEqual(result["workspace"], "sprout")
+        directory = self.root / "state" / "scufris" / "jobs-v2" / job_id
+        self.wait_for(directory / "status", "ready: report-complete")
+        record = json.loads((directory / "job.json").read_text())
+        worktree = Path(record["working_directory"])
+        target = self.call("review-target", {"job_id": job_id})["result"]
+        self.assertEqual(target["cwd"], str(worktree))
+        self.assertEqual(target["default_branch"], "master")
+
+        (worktree / "RESULT.md").write_text("replacement works\n")
+        subprocess.run(["git", "add", "RESULT.md"], cwd=worktree, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "Add result"],
+            cwd=worktree,
+            check=True,
+            capture_output=True,
+        )
+        landed = self.call(
+            "land",
+            {
+                "job_id": job_id,
+                "subject": "Land fixture result",
+                "remove_workspace": True,
+            },
+        )["result"]
+        self.assertTrue(landed["landed"])
+        self.assertTrue(landed["workspace_removed"])
+        self.assertEqual(
+            (self.project / "RESULT.md").read_text(), "replacement works\n"
+        )
+        self.assertFalse(worktree.exists())
 
 
 if __name__ == "__main__":

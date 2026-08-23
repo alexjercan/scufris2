@@ -203,7 +203,7 @@ preferences.
 - Exercise generic `ready` handoffs, unknown handoffs, quiet progress, and
   terminal result events.
 - `npm run check` passes.
-- `python3 -m unittest discover -s tests -p 'test_*.py'` passes 12 tests.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` passes 13 tests.
 - `ruff check .` and `ruff format --check .` pass.
 - `nix fmt -- --check .` passes.
 - `nix flake check` passes all supported-system checks.

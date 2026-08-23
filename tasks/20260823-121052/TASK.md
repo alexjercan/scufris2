@@ -59,7 +59,7 @@ an explicit awaited tool result and never starts silently in the background.
 - Python integration tests exercise ordered append-only worker events, project
   and general jobs, steering, inspection, and independent review jobs.
 - `npm run check` passes.
-- `python3 -m unittest discover -s tests -p 'test_*.py'` passes 12 tests.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` passes 13 tests.
 - `nix flake check` passes all supported-system checks.
 - `git diff --check` passes.
 

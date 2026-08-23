@@ -17,17 +17,18 @@ workspace commands directly from the foreground session.
    explicit request overrides it or it is impossible.
 4. Compose one self-contained worker prompt. Select the preferred harness,
    model, thinking, and workspace from the request and project guidance.
-5. Call `scufris_job_spawn` with the single-use context ID, then end the
-   foreground turn immediately.
+5. Call `scufris_job_spawn` with the single-use context ID as the only tool in
+   that batch. Then call `scufris_final_response` as the only follow-up with one
+   short natural acknowledgment, and end the foreground turn.
 
 ## General jobs
 
 Use `scufris_job_spawn` without a context ID. Omit execution choices when the
 user did not specify them. Scufris then uses Pi with
 `openai-codex/gpt-5.6-sol` and medium thinking in a private temporary
-workspace. End the foreground turn immediately after spawning. Project
-tracking, worktrees, review, and landing do not apply unless the request
-explicitly introduces them.
+workspace. After spawning, call `scufris_final_response` with one short natural
+acknowledgment, then end. Project tracking, worktrees, review, and landing do
+not apply unless the request explicitly introduces them.
 
 ## Events
 
@@ -48,11 +49,23 @@ status line as a heading and contains evidence for that event. Inspect the full
 report after a wake instead of treating it as only the latest worker snapshot.
 
 Use `scufris_job_inspect` to recover bounded evidence after a wake or context
-compaction. Use `scufris_job_send` only for literal steering, then end the
-foreground turn immediately. Never call shell `sleep`, wait for a worker, poll
-status, or repeatedly inspect a job for progress. Filesystem notifications
-start later turns. Use `scufris_job_stop` only for an owned job. Remove a Sprout
-workspace only when its result is no longer needed.
+compaction. After reacting to a wake, synthesize one useful short response with
+`scufris_final_response`; never end a wake turn with tools only.
+
+Use each meaningful workflow action as the only tool in its batch. After a
+successful spawn, steering, stop, landing, or review-opening action, the only
+permitted follow-up is `scufris_final_response` as its own tool batch. Give one
+short contextual acknowledgment in Scufris's natural voice, then end. Do not
+use deterministic canned speech. After spawn or steering, never call shell
+`sleep`, wait for a worker, poll status, inspect, or do any other work before
+the final response. Filesystem notifications start later turns.
+
+If an action tool fails, do not claim success. Call `scufris_final_response`
+with one concise explanation and the next safe step. A failed action does not
+authorize waiting or polling. Do not batch multiple meaningful actions; finish
+one acknowledgment boundary before another user-directed action. Use
+`scufris_job_stop` only for an owned job. Remove a Sprout workspace only when
+its result is no longer needed.
 
 ## Optional workflow tools
 

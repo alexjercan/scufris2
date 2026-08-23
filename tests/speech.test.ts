@@ -352,8 +352,16 @@ test("wake settlement without a new response never replays prior speech", async 
     await app.emit("agent_start");
     await app.emit("agent_settled");
 
+    await app.emit("agent_start");
+    await app.emit("agent_settled");
+
     assert.deepEqual(playback.played, ["The prior response is spoken once."]);
-    assert.equal(app.notices.at(-1)?.message, "No safe response to speak.");
+    assert.equal(
+      app.notices.filter(
+        (notice) => notice.message === "No safe response to speak.",
+      ).length,
+      1,
+    );
   } finally {
     if (originalRole === undefined) delete process.env.SCUFRIS_ROLE;
     else process.env.SCUFRIS_ROLE = originalRole;
@@ -413,6 +421,16 @@ test("settlement, input, reload state, unsafe output, and errors fail safely", a
       message: "Speech synthesis failed.",
       type: "error",
     });
+
+    await reloaded.emit("agent_start");
+    addAssistant(reloaded.entries, "See /tmp/still-private for the result.");
+    await reloaded.emit("agent_settled");
+    assert.equal(
+      reloaded.notices.filter(
+        (notice) => notice.message === "No safe response to speak.",
+      ).length,
+      1,
+    );
 
     await reloaded.emit("session_shutdown");
     assert.equal(reloadedPlayback.cancellations >= 2, true);

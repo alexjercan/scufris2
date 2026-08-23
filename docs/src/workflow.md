@@ -82,9 +82,12 @@ lock, status, and authorization files remain private.
 
 The workflow extension watches each owned status file through filesystem
 notifications. It reads events only after a change notification; it does not
-periodically poll jobs. After Scufris spawns or steers a worker, it ends its
-foreground turn immediately. It never sleeps or waits for delegated progress.
-The next applicable filesystem event starts a later turn.
+periodically poll jobs. Scufris calls each meaningful workflow action alone.
+After a successful spawn, steering, stop, landing, or review-opening action, it
+uses the final-response tool alone to give one short contextual acknowledgment,
+then ends the foreground turn. After spawn or steering, that response is the
+only permitted follow-up: Scufris never sleeps, waits, polls, inspects, or does
+other work before it. The next applicable filesystem event starts a later turn.
 
 Use `/wake` to inspect the session's worker wake mode. `/wake minimal` keeps
 `working` updates quiet while `blocked`, `done`, and runtime-generated `failed`
@@ -102,7 +105,8 @@ A `done` event is nonterminal for the worker channel. The worker remains
 available for more instructions. The extension wakes foreground Scufris, which
 inspects the pinned context, worker prompt, report, and current state before it
 decides whether to review, steer more work, open a human review, land, or stop.
-A later instruction returns the same worker to `working`.
+Every wake-triggered turn ends with one useful synthesized final response, not a
+tool-only turn. A later instruction returns the same worker to `working`.
 
 Workers cannot report `failed`. Trusted orchestration appends a linked
 `failed: <summary>` report entry and event only when the harness exits

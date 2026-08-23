@@ -286,6 +286,7 @@ export default function speech(
   let runEntryBoundary = 0;
   let playbackGeneration = 0;
   let sessionGeneration = 0;
+  let missingResponseWarned = false;
 
   const persistMode = () => {
     pi.appendEntry(speechStateType, {
@@ -319,11 +320,17 @@ export default function speech(
   const play = (paragraph: string, context: ExtensionContext) => {
     const generation = ++playbackGeneration;
     const session = sessionGeneration;
-    void playback
-      .play(paragraph)
-      .catch((error) =>
-        notifyPlaybackError(error, context, generation, session),
-      );
+    void playback.play(paragraph).then(
+      () => {
+        if (
+          generation === playbackGeneration &&
+          session === sessionGeneration
+        ) {
+          missingResponseWarned = false;
+        }
+      },
+      (error) => notifyPlaybackError(error, context, generation, session),
+    );
   };
 
   pi.registerCommand("speech", {
@@ -363,7 +370,10 @@ export default function speech(
           context.sessionManager.getBranch(),
         );
         if (!response) {
-          context.ui.notify("No safe response to speak.", "warning");
+          if (!missingResponseWarned) {
+            context.ui.notify("No safe response to speak.", "warning");
+            missingResponseWarned = true;
+          }
           return;
         }
         play(response.paragraph, context);
@@ -378,6 +388,7 @@ export default function speech(
     awaitingSettlement = false;
     speakAtSettlement = false;
     runEntryBoundary = 0;
+    missingResponseWarned = false;
     await cancelPlayback();
     tuiActive = context.mode === "tui";
     mode = tuiActive ? restoredMode(context, environmentMode) : "off";
@@ -419,7 +430,10 @@ export default function speech(
       context.sessionManager.getBranch().slice(boundary),
     );
     if (!response) {
-      context.ui.notify("No safe response to speak.", "warning");
+      if (!missingResponseWarned) {
+        context.ui.notify("No safe response to speak.", "warning");
+        missingResponseWarned = true;
+      }
       return;
     }
     play(response.paragraph, context);
@@ -431,6 +445,7 @@ export default function speech(
     awaitingSettlement = false;
     speakAtSettlement = false;
     runEntryBoundary = 0;
+    missingResponseWarned = false;
     await cancelPlayback();
   });
 }

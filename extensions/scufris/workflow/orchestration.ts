@@ -8,6 +8,10 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import {
+  ACKNOWLEDGMENT_STATE_EVENT,
+  type AcknowledgmentState,
+} from "../shared/acknowledgment.ts";
 import { runPrivateHelper, toolResult } from "../shared/runtime.ts";
 import {
   initialWalkthroughState,
@@ -31,6 +35,16 @@ export const TERMINAL_OWNERSHIP_STATES: ReadonlySet<string> = new Set([
 ]);
 export const QUICK_REVIEW_TOOL = "scufris_job_quick_review";
 export const PLANNOTATOR_REVIEW_TOOL = "scufris_job_plannotator_review";
+export const FINAL_RESPONSE_TOOL = "scufris_final_response";
+export const ACKNOWLEDGED_ACTION_TOOLS: ReadonlySet<string> = new Set([
+  "scufris_job_spawn",
+  "scufris_job_send",
+  "scufris_job_stop",
+  "scufris_job_land",
+  QUICK_REVIEW_TOOL,
+  PLANNOTATOR_REVIEW_TOOL,
+]);
+export const foregroundActionPolicy = `Call each meaningful workflow action as the only tool in its tool batch. After a successful spawn, steering, stop, landing, or review-opening action, call scufris_final_response next as the only permitted follow-up. Give one short natural acknowledgment of what happened, then end. After spawn or steering, do not sleep, wait, poll, inspect, or do any other work before that final response. If an action tool fails, do not claim success; use scufris_final_response for one concise explanation and the next safe step. Do not use a canned acknowledgment.`;
 
 export type WorkerEventType = "working" | "blocked" | "done" | "failed";
 export type WakeMode = "minimal" | "all";
@@ -142,7 +156,7 @@ export function deliverWorkerEvent(
   pi.sendMessage(
     {
       customType: "scufris-job-event",
-      content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ${line}. Inspect the pinned job context, prompt, report, and state before deciding what follows.`,
+      content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ${line}. Inspect the pinned job context, prompt, report, and state before deciding what follows. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
       display: true,
       details: {
         job_id: job.job_id,
@@ -164,6 +178,108 @@ export function deliverRuntimeFailure(
 ): void {
   if (context.hasUI) context.ui.notify(`Job ${job.job_id}: ${error}`, "error");
   deliverWorkerEvent(pi, context, job, { type: "failed", value: error }, mode);
+}
+
+export function toolBatchAllowsAction(
+  toolName: string,
+  batch: readonly string[],
+): boolean {
+  return (
+    (!ACKNOWLEDGED_ACTION_TOOLS.has(toolName) &&
+      toolName !== FINAL_RESPONSE_TOOL) ||
+    (batch.length === 1 && batch[0] === toolName)
+  );
+}
+
+export class ForegroundAcknowledgmentGate {
+  private pendingAction: string | undefined;
+  private readonly onChange: (action?: string) => void;
+
+  constructor(onChange: (action?: string) => void = () => {}) {
+    this.onChange = onChange;
+  }
+
+  markSuccessfulAction(toolName: string): void {
+    if (!ACKNOWLEDGED_ACTION_TOOLS.has(toolName)) return;
+    this.pendingAction = toolName;
+    this.onChange(toolName);
+  }
+
+  blockReason(toolName: string): string | undefined {
+    if (!this.pendingAction || toolName === FINAL_RESPONSE_TOOL) return;
+    return `After ${this.pendingAction}, the only permitted follow-up is scufris_final_response. Do not wait, poll, inspect, or do more work.`;
+  }
+
+  completeFinalResponse(isError: boolean): void {
+    if (!isError) this.reset();
+  }
+
+  isPending(): boolean {
+    return this.pendingAction !== undefined;
+  }
+
+  reset(): void {
+    this.pendingAction = undefined;
+    this.onChange();
+  }
+}
+
+function currentToolBatch(context: ExtensionContext): string[] {
+  const branch = context.sessionManager.getBranch();
+  for (let index = branch.length - 1; index >= 0; index -= 1) {
+    const entry = branch[index] as {
+      type?: string;
+      message?: {
+        role?: string;
+        content?: Array<{ type?: string; name?: string }>;
+      };
+    };
+    if (entry.type !== "message" || entry.message?.role !== "assistant")
+      continue;
+    return (entry.message.content ?? [])
+      .filter(
+        (item): item is { type: "toolCall"; name: string } =>
+          item.type === "toolCall" && typeof item.name === "string",
+      )
+      .map((item) => item.name);
+  }
+  return [];
+}
+
+export function registerForegroundAcknowledgmentLifecycle(
+  pi: ExtensionAPI,
+): ForegroundAcknowledgmentGate {
+  const gate = new ForegroundAcknowledgmentGate((action) => {
+    pi.events.emit(ACKNOWLEDGMENT_STATE_EVENT, {
+      pending: action !== undefined,
+      action,
+    } satisfies AcknowledgmentState);
+  });
+
+  pi.on("tool_call", (event, context) => {
+    const batch = currentToolBatch(context);
+    if (!toolBatchAllowsAction(event.toolName, batch)) {
+      return {
+        block: true,
+        reason:
+          "Meaningful workflow actions and scufris_final_response must each be the only tool in their tool batch.",
+      };
+    }
+    const reason = gate.blockReason(event.toolName);
+    if (reason) return { block: true, reason };
+  });
+
+  pi.on("tool_result", (event) => {
+    if (event.toolName === FINAL_RESPONSE_TOOL) {
+      gate.completeFinalResponse(event.isError);
+    }
+  });
+
+  pi.on("agent_settled", () => {
+    if (gate.isPending()) gate.reset();
+  });
+
+  return gate;
 }
 
 export function foregroundCommandWaits(command: string): boolean {
@@ -303,9 +419,8 @@ Treat done events as completed assignments: inspect the job, project context,
 and report, then decide what follows. A done event never selects review,
 steering, landing, or shutdown by itself.
 
-After scufris_job_spawn or scufris_job_send returns, end the foreground turn
-immediately. Never call shell sleep, wait for a worker, poll status, or repeatedly
-inspect a job for progress. Filesystem notifications will deliver later events.
+${foregroundActionPolicy}
+Filesystem notifications will deliver later worker events.
 
 Active Scufris jobs:
 ${index}`;
@@ -323,6 +438,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   let extensionContext: ExtensionContext | undefined;
   let eventError: string | undefined;
   let wakeMode: WakeMode = "minimal";
+  const acknowledgmentGate = registerForegroundAcknowledgmentLifecycle(pi);
 
   const persistWakeMode = () => {
     pi.appendEntry(wakeStateType, {
@@ -529,7 +645,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       promptSnippet: "Start an independent project or general worker",
       promptGuidelines: [
         "Use scufris_job_spawn for work expected to take minutes. Select workspace sprout only when project guidance or the user asks for isolated repository work.",
-        "After scufris_job_spawn returns, end the foreground turn immediately. Never sleep, wait, poll, or repeatedly inspect for worker progress; filesystem notifications deliver later events.",
+        foregroundActionPolicy,
       ],
       executionMode: "sequential",
       parameters: Type.Object(
@@ -663,13 +779,11 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         };
         jobs.set(job.job_id, job);
         watchJob(job);
-        return {
-          ...toolResult({
-            ...publicResult,
-            ...(resolved ? { context_id: resolved.context_id } : {}),
-          }),
-          terminate: true,
-        };
+        acknowledgmentGate.markSuccessfulAction("scufris_job_spawn");
+        return toolResult({
+          ...publicResult,
+          ...(resolved ? { context_id: resolved.context_id } : {}),
+        });
       },
     }),
   );
@@ -715,7 +829,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             pi.sendMessage(
               {
                 customType: "scufris-job-event",
-                content: `Plannotator review completed for Scufris job ${job.job_id}. Inspect this structured result and decide what follows from the project preferences: ${encoded}`,
+                content: `Plannotator review completed for Scufris job ${job.job_id}. Inspect this structured result and decide what follows from the project preferences: ${encoded}. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
                 display: true,
                 details: {
                   job_id: job.job_id,
@@ -727,6 +841,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             );
           },
         });
+        acknowledgmentGate.markSuccessfulAction(PLANNOTATOR_REVIEW_TOOL);
         return toolResult({
           job_id: job.job_id,
           request_id: requestId,
@@ -834,7 +949,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           pi.sendMessage(
             {
               customType: "scufris-job-event",
-              content: `Scufris job ${job.job_id} (${job.project ?? "general"}): done: ${milestone}. Inspect the Quick Review result and decide what follows from the project preferences.`,
+              content: `Scufris job ${job.job_id} (${job.project ?? "general"}): done: ${milestone}. Inspect the Quick Review result and decide what follows from the project preferences. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
               display: true,
               details: {
                 job_id: job.job_id,
@@ -906,6 +1021,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             `Quick Review for job ${job.job_id}: ${server.url}`,
             "info",
           );
+        acknowledgmentGate.markSuccessfulAction(QUICK_REVIEW_TOOL);
         return toolResult({
           job_id: job.job_id,
           state: "quick-review-opened",
@@ -949,6 +1065,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         job.state = "landed";
         job.summary = "explicitly landed by foreground Scufris";
         job.window_alive = false;
+        acknowledgmentGate.markSuccessfulAction("scufris_job_land");
         return toolResult(result);
       },
     }),
@@ -1018,9 +1135,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       name: "scufris_job_send",
       label: "Steer Scufris job",
       description: "Send one literal line to an owned waiting worker.",
-      promptGuidelines: [
-        "After scufris_job_send returns, end the foreground turn immediately. Never sleep, wait, poll, or repeatedly inspect for worker progress; filesystem notifications deliver later events.",
-      ],
+      promptGuidelines: [foregroundActionPolicy],
       executionMode: "sequential",
       parameters: Type.Object(
         {
@@ -1038,7 +1153,8 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         const result = await runHelper("send", params, signal, 20_000);
         job.state = "working";
         job.summary = "foreground guidance submitted";
-        return { ...toolResult(result), terminate: true };
+        acknowledgmentGate.markSuccessfulAction("scufris_job_send");
+        return toolResult(result);
       },
     }),
   );
@@ -1077,6 +1193,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         job.state = "stopped";
         job.summary = "stopped by foreground Scufris";
         job.window_alive = false;
+        acknowledgmentGate.markSuccessfulAction("scufris_job_stop");
         return toolResult(result);
       },
     }),
@@ -1089,9 +1206,8 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     ) {
       return {
         block: true,
-        terminate: true,
         reason:
-          "Foreground Scufris never sleeps or waits. End this turn; filesystem notifications will deliver worker events.",
+          "Foreground Scufris never sleeps or waits. Use scufris_final_response now; filesystem notifications will deliver worker events.",
       };
     }
   });
@@ -1104,6 +1220,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     extensionContext = ctx;
     shuttingDown = false;
     wakeMode = restoredWakeMode(ctx);
+    acknowledgmentGate.reset();
     try {
       const result = await runHelper<{ job_ids: string[] }>("orphans", {
         owner_session: ctx.sessionManager.getSessionId(),
@@ -1147,6 +1264,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       extensionContext.ui.setStatus("scufris", undefined);
     contexts.clear();
     jobs.clear();
+    acknowledgmentGate.reset();
     extensionContext = undefined;
   });
 }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  existsSync,
   lstatSync,
   mkdtempSync,
   symlinkSync,
@@ -22,6 +23,10 @@ import response, {
   responseText,
   splitDirectResponse,
 } from "../extensions/scufris/voice/response.ts";
+import {
+  FINAL_RESPONSE_TOOL,
+  registerForegroundAcknowledgmentLifecycle,
+} from "../extensions/scufris/workflow/orchestration.ts";
 import { lastSafeAssistantParagraph } from "../extensions/scufris/voice/speech.ts";
 
 const usage = {
@@ -61,6 +66,7 @@ function harness() {
   const commands = new Map<string, any>();
   const renderers = new Map<string, any>();
   const emitted: Array<{ channel: string; request: any }> = [];
+  const eventHandlers = new Map<string, Array<(value: unknown) => void>>();
   const messages: any[] = [];
   const notices: string[] = [];
   const api = {
@@ -95,7 +101,15 @@ function harness() {
       return [...tools.keys()];
     },
     events: {
+      on(channel: string, handler: (value: unknown) => void) {
+        eventHandlers.set(channel, [
+          ...(eventHandlers.get(channel) ?? []),
+          handler,
+        ]);
+      },
       emit(channel: string, request: any) {
+        for (const handler of eventHandlers.get(channel) ?? [])
+          handler(request);
         emitted.push({ channel, request });
       },
     },
@@ -126,6 +140,7 @@ function harness() {
   };
   response(api);
   return {
+    api,
     entries,
     tools,
     commands,
@@ -280,6 +295,199 @@ test("final tool keeps scrubbed arguments executable and terminates", async (t) 
     hidden.message.content.some((item: any) => item.type === "text"),
     false,
   );
+});
+
+test("text-only pending acknowledgment is hidden and lifecycle gate resets", async (t) => {
+  const previous = process.env.SCUFRIS_ROLE;
+  process.env.SCUFRIS_ROLE = "orchestrator";
+  t.after(() =>
+    previous === undefined
+      ? delete process.env.SCUFRIS_ROLE
+      : (process.env.SCUFRIS_ROLE = previous),
+  );
+  const app = harness();
+  const gate = registerForegroundAcknowledgmentLifecycle(app.api);
+  gate.markSuccessfulAction("scufris_job_spawn");
+
+  const replaced = await app.emit("message_end", {
+    message: assistant("I started the worker."),
+  });
+  app.entries.push({
+    type: "message",
+    id: "text-only-acknowledgment",
+    message: replaced.message,
+  });
+  assert.deepEqual(replaced.message.content, []);
+  assert.equal(lastSafeAssistantParagraph(app.entries), undefined);
+  assert.equal(
+    app.entries.some((entry) => entry.customType === RESPONSE_ENTRY),
+    false,
+  );
+  assert.match(gate.blockReason("read") ?? "", /only permitted/);
+
+  await app.emit("agent_settled", {});
+  assert.equal(gate.blockReason("read"), undefined);
+});
+
+test("rejected and preflight-blocked final batches create no response artifacts", async (t) => {
+  const previous = process.env.SCUFRIS_ROLE;
+  process.env.SCUFRIS_ROLE = "orchestrator";
+  t.after(() =>
+    previous === undefined
+      ? delete process.env.SCUFRIS_ROLE
+      : (process.env.SCUFRIS_ROLE = previous),
+  );
+  const app = harness();
+  registerForegroundAcknowledgmentLifecycle(app.api);
+  const call = {
+    type: "toolCall" as const,
+    id: "blocked-final",
+    name: FINAL_TOOL,
+    arguments: {
+      spoken: "This batch must not become visible.",
+      detail: "# Private rejected detail",
+    },
+  };
+  const replaced = await app.emit("message_end", {
+    message: {
+      ...assistant(""),
+      content: [
+        call,
+        {
+          type: "toolCall" as const,
+          id: "sibling-read",
+          name: "read",
+          arguments: { path: "private" },
+        },
+      ],
+      stopReason: "toolUse" as const,
+    },
+  });
+  app.entries.push({
+    type: "message",
+    id: "rejected-final-batch",
+    message: replaced.message,
+  });
+
+  const block = await app.emit("tool_call", {
+    toolName: FINAL_TOOL,
+    toolCallId: call.id,
+    input: replaced.message.content[0].arguments,
+  });
+  assert.equal(block.block, true);
+  await app.emit("tool_result", {
+    toolName: FINAL_TOOL,
+    toolCallId: call.id,
+    input: replaced.message.content[0].arguments,
+    content: [{ type: "text", text: block.reason }],
+    details: undefined,
+    isError: true,
+  });
+
+  assert.equal(
+    app.entries.some((entry) => entry.customType === RESPONSE_ENTRY),
+    false,
+  );
+  assert.equal(
+    existsSync(`${app.context.sessionManager.getSessionFile()}.scufris`),
+    false,
+  );
+  assert.equal(lastSafeAssistantParagraph(app.entries), undefined);
+});
+
+test("spawn and send can each finish with one safe final response and no polling", async (t) => {
+  const previous = process.env.SCUFRIS_ROLE;
+  process.env.SCUFRIS_ROLE = "orchestrator";
+  t.after(() =>
+    previous === undefined
+      ? delete process.env.SCUFRIS_ROLE
+      : (process.env.SCUFRIS_ROLE = previous),
+  );
+  const app = harness();
+  const gate = registerForegroundAcknowledgmentLifecycle(app.api);
+  const finalTool = app.tools.get(FINAL_TOOL);
+
+  for (const [index, action] of [
+    "scufris_job_spawn",
+    "scufris_job_send",
+  ].entries()) {
+    gate.markSuccessfulAction(action);
+    assert.match(
+      gate.blockReason("scufris_job_inspect") ?? "",
+      /only permitted/,
+    );
+    assert.match(gate.blockReason("bash") ?? "", /only permitted/);
+    assert.equal(gate.blockReason(FINAL_RESPONSE_TOOL), undefined);
+
+    const call = {
+      type: "toolCall" as const,
+      id: `ack-${index}`,
+      name: FINAL_TOOL,
+      arguments: {
+        spoken:
+          action === "scufris_job_spawn"
+            ? "I started the implementation and will let you know when it needs attention."
+            : "I sent that guidance and will let you know when the worker responds.",
+      },
+    };
+    const replaced = await app.emit("message_end", {
+      message: {
+        ...assistant(""),
+        content: [call],
+        stopReason: "toolUse" as const,
+      },
+    });
+    app.entries.push({
+      type: "message",
+      id: `assistant-${index}`,
+      message: replaced.message,
+    });
+    const result = await finalTool.execute(
+      call.id,
+      replaced.message.content[0].arguments,
+      undefined,
+      undefined,
+      app.context,
+    );
+    app.entries.push({
+      type: "message",
+      id: `result-${index}`,
+      message: {
+        role: "toolResult",
+        toolName: FINAL_TOOL,
+        toolCallId: call.id,
+        content: result.content,
+        details: result.details,
+        isError: false,
+        timestamp: 0,
+      },
+    });
+    assert.equal(result.terminate, true);
+    await assert.rejects(
+      finalTool.execute(
+        call.id,
+        replaced.message.content[0].arguments,
+        undefined,
+        undefined,
+        app.context,
+      ),
+      /already completed/,
+    );
+    await app.emit("tool_result", {
+      toolName: FINAL_TOOL,
+      toolCallId: call.id,
+      input: replaced.message.content[0].arguments,
+      content: result.content,
+      details: result.details,
+      isError: false,
+    });
+    assert.equal(gate.blockReason("read"), undefined);
+    assert.equal(
+      lastSafeAssistantParagraph(app.entries)?.paragraph,
+      call.arguments.spoken,
+    );
+  }
+  assert.deepEqual(app.notices, []);
 });
 
 test("structured spoken-only response remains available to settled speech", async (t) => {

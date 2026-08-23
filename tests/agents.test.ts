@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  ACKNOWLEDGED_ACTION_TOOLS,
   deliverRuntimeFailure,
   deliverWorkerEvent,
+  FINAL_RESPONSE_TOOL,
+  foregroundActionPolicy,
+  ForegroundAcknowledgmentGate,
   foregroundCommandWaits,
   parseWorkerEvent,
   PLANNOTATOR_REVIEW_TOOL,
   QUICK_REVIEW_TOOL,
   resolveWakeCommand,
   TERMINAL_OWNERSHIP_STATES,
+  toolBatchAllowsAction,
   wakeModeFromEntries,
   workerEventWakes,
 } from "../extensions/scufris/workflow/orchestration.ts";
@@ -33,6 +38,42 @@ test("worker events use only the replacement protocol", () => {
     type: "failed",
     value: "harness exited",
   });
+});
+
+test("foreground action policy requires one natural final acknowledgment", () => {
+  assert.match(foregroundActionPolicy, /only permitted follow-up/);
+  assert.match(foregroundActionPolicy, /Do not use a canned acknowledgment/);
+  assert.deepEqual([...ACKNOWLEDGED_ACTION_TOOLS].sort(), [
+    "scufris_job_land",
+    "scufris_job_plannotator_review",
+    "scufris_job_quick_review",
+    "scufris_job_send",
+    "scufris_job_spawn",
+    "scufris_job_stop",
+  ]);
+  for (const action of ACKNOWLEDGED_ACTION_TOOLS) {
+    assert.equal(toolBatchAllowsAction(action, [action]), true);
+    assert.equal(toolBatchAllowsAction(action, [action, "read"]), false);
+  }
+  assert.equal(
+    toolBatchAllowsAction(FINAL_RESPONSE_TOOL, [FINAL_RESPONSE_TOOL]),
+    true,
+  );
+  assert.equal(
+    toolBatchAllowsAction(FINAL_RESPONSE_TOOL, ["read", FINAL_RESPONSE_TOOL]),
+    false,
+  );
+
+  const gate = new ForegroundAcknowledgmentGate();
+  for (const action of ["scufris_job_spawn", "scufris_job_send"]) {
+    gate.markSuccessfulAction(action);
+    assert.match(gate.blockReason("read") ?? "", /only permitted follow-up/);
+    assert.equal(gate.blockReason(FINAL_RESPONSE_TOOL), undefined);
+    gate.completeFinalResponse(true);
+    assert.match(gate.blockReason("bash") ?? "", /only permitted follow-up/);
+    gate.completeFinalResponse(false);
+    assert.equal(gate.blockReason("read"), undefined);
+  }
 });
 
 test("foreground Scufris rejects shell waits", () => {
@@ -177,6 +218,7 @@ test("orchestration delivers exact worker wakes and quiet progress by mode", () 
       assert.equal(message.details.project, job.project);
       assert.equal(message.details.context_id, job.context_id);
       assert.match(message.content, new RegExp(message.details.event));
+      assert.match(message.content, /call scufris_final_response/);
     }
     assert.deepEqual(
       notices,

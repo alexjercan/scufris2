@@ -21,6 +21,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import {
+  ACKNOWLEDGMENT_STATE_EVENT,
+  type AcknowledgmentState,
+} from "../shared/acknowledgment.ts";
+import {
   appendScufrisIdentityPrompt,
   scufrisIdentityPrompt,
 } from "../workflow/identity.ts";
@@ -33,7 +37,7 @@ export const REVIEW_ENTRY = "scufris-detail-review-v1";
 export const maxDetailBytes = 256 * 1024;
 export const maxReviewBytes = 256 * 1024;
 export const maxArtifacts = 128;
-export const finalResponsePolicy = `${spokenResponseInstruction} Use scufris_final_response for every final answer. Put optional Markdown detail in detail. Call it as the only tool in the final tool batch. Do not write assistant text before or after the call.`;
+export const finalResponsePolicy = `${spokenResponseInstruction} Use scufris_final_response for every final answer, including after a workflow action and on a wake-triggered turn. Put optional Markdown detail in detail. Call it as the only tool in the final tool batch. Do not write assistant text before or after the call. After taking a meaningful action, acknowledge it once with short contextual prose instead of a canned status phrase. If a tool fails, do not claim success; briefly explain the failure and the next safe step.`;
 const fallbackSentence =
   "I could not safely present that response, so I saved it for review.";
 const idPattern = /^[a-f0-9]{24}$/;
@@ -329,9 +333,15 @@ export function promptInspectionMarkdown(
 
 export default function response(pi: ExtensionAPI): void {
   if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
-  const prepared = new Map<string, ResponseEntry>();
-  const appendedResponses = new WeakSet<ResponseEntry>();
+  const prepared = new Map<string, { spoken: string; detail?: string }>();
+  const completedFinalCalls = new Set<string>();
+  let workflowAcknowledgmentPending = false;
   let lastEffectivePrompt: string | undefined;
+
+  pi.events.on(ACKNOWLEDGMENT_STATE_EVENT, (value: unknown) => {
+    const state = value as Partial<AcknowledgmentState> | undefined;
+    workflowAcknowledgmentPending = state?.pending === true;
+  });
 
   pi.registerMarkdownTransformer((markdown, context) => {
     if (
@@ -405,8 +415,7 @@ export default function response(pi: ExtensionAPI): void {
           ? input.detail
           : undefined
         : `# Rejected final response\n\n${typeof input.spoken === "string" ? input.spoken : "Missing spoken response."}\n\n${typeof input.detail === "string" ? input.detail : ""}`;
-      const entry = prepareResponse(context, spoken, detail);
-      prepared.set(call.id, entry);
+      prepared.set(call.id, { spoken, ...(detail ? { detail } : {}) });
       return {
         message: {
           ...message,
@@ -422,13 +431,7 @@ export default function response(pi: ExtensionAPI): void {
       };
     }
     if (finalCalls.length > 0) {
-      const detail = `# Rejected final tool batch\n\n\`\`\`json\n${JSON.stringify(
-        finalCalls.map((call) => call.arguments),
-        null,
-        2,
-      )}\n\`\`\``;
-      const entry = prepareResponse(context, fallbackSentence, detail);
-      for (const call of finalCalls) prepared.set(call.id, entry);
+      for (const call of finalCalls) prepared.delete(call.id);
       return {
         message: {
           ...message,
@@ -454,6 +457,9 @@ export default function response(pi: ExtensionAPI): void {
       };
     }
     if (message.stopReason !== "stop") return;
+    if (workflowAcknowledgmentPending) {
+      return { message: { ...message, content: [] } };
+    }
     const split = splitDirectResponse(assistantText(message));
     const entry = prepareResponse(context, split.spoken, split.detail);
     return {
@@ -485,17 +491,20 @@ export default function response(pi: ExtensionAPI): void {
         { additionalProperties: false },
       ),
       async execute(toolCallId, params, _signal, _update, context) {
-        let entry = prepared.get(toolCallId);
+        if (completedFinalCalls.has(toolCallId))
+          throw new Error("final response call already completed");
+        const pending = prepared.get(toolCallId);
         prepared.delete(toolCallId);
-        if (!entry) {
-          const spoken = plainProseParagraph(params.spoken);
-          if (!spoken || spoken !== params.spoken.trim())
-            throw new Error("spoken must be complete safe plain prose");
-          entry = appendResponse(pi, context, spoken, params.detail);
-        } else if (!appendedResponses.has(entry)) {
-          pi.appendEntry(RESPONSE_ENTRY, entry);
-          appendedResponses.add(entry);
-        }
+        const spoken = pending?.spoken ?? plainProseParagraph(params.spoken);
+        if (!spoken || spoken !== params.spoken.trim())
+          throw new Error("spoken must be complete safe plain prose");
+        const entry = appendResponse(
+          pi,
+          context,
+          spoken,
+          pending?.detail ?? params.detail,
+        );
+        completedFinalCalls.add(toolCallId);
         return {
           content: [{ type: "text", text: "Final response recorded." }],
           details: entry,
@@ -510,6 +519,12 @@ export default function response(pi: ExtensionAPI): void {
       },
     }),
   );
+
+  pi.on("tool_result", (event) => {
+    if (event.toolName === FINAL_TOOL && event.isError) {
+      prepared.delete(event.toolCallId);
+    }
+  });
 
   pi.registerCommand("detail", {
     description: "Open a private Scufris detail artifact in Plannotator.",
@@ -576,7 +591,7 @@ export default function response(pi: ExtensionAPI): void {
             annotations,
           } satisfies ReviewEntry);
           if (feedback) {
-            const content = `The user reviewed detail artifact ${id}. Address this private structured feedback: ${JSON.stringify(value.result)}`;
+            const content = `The user reviewed detail artifact ${id}. Address this private structured feedback: ${JSON.stringify(value.result)}. Then call scufris_final_response with one short useful response before ending this wake turn.`;
             if (Buffer.byteLength(content, "utf8") > 16 * 1024) {
               context.ui.notify(
                 "Detail feedback was saved but exceeds the mediation limit.",

@@ -1,0 +1,861 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reference Viewer - dashboardd widget concept</title>
+<style>
+  /* ---------------------------------------------------------------------
+     Reference Viewer - design concept for a dashboardd widget
+     Scope: visual design only. Not production dashboardd code.
+
+     Type system (three roles, matched to the three kinds of content the
+     widget actually shows):
+       --font-ui     interface chrome: title, tabs, buttons, labels
+       --font-serif  long-form reading: extracted article text, transcript
+       --font-mono   provenance data: hash, timestamps, URL, dates
+
+     Color: fixed dark theme. This page simulates one specific real
+     surface (a dashboardd desktop widget window), which keeps its own
+     dark chrome regardless of OS theme, the same way a media player or
+     terminal emulator does - so the palette is not re-derived for a
+     light variant.
+  --------------------------------------------------------------------- */
+
+  :root {
+    --bg: #0e1015;
+    --widget-bg: #171b21;
+    --surface: #1c212a;
+    --surface-raised: #242a34;
+    --border: #2b313c;
+    --border-soft: #232833;
+    --border-strong: #3a4150;
+
+    --text: #e8e3d8;
+    --text-dim: #a7abb7;
+    --text-faint: #6f7580;
+
+    --accent: #d3a35a;
+    --accent-strong: #e8c082;
+    --accent-soft: rgba(211, 163, 90, 0.16);
+    --accent-border: rgba(211, 163, 90, 0.42);
+
+    --good: #86ab7c;
+    --good-soft: rgba(134, 171, 124, 0.14);
+    --good-border: rgba(134, 171, 124, 0.5);
+
+    --bad: #c2786a;
+    --bad-soft: rgba(194, 120, 106, 0.13);
+    --bad-border: rgba(194, 120, 106, 0.48);
+
+    --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --font-serif: ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+
+    --radius: 10px;
+    --radius-sm: 6px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  body {
+    font-family: var(--font-ui);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 3rem 1.25rem;
+    background:
+      radial-gradient(ellipse 900px 500px at 50% -10%, #191d24 0%, var(--bg) 60%);
+  }
+
+  a { color: var(--accent-strong); }
+
+  button {
+    font-family: inherit;
+    color: inherit;
+  }
+
+  button:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  }
+
+  /* ---------------------------- widget shell --------------------------- */
+
+  .widget {
+    width: min(800px, 100%);
+    background: var(--widget-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.03) inset,
+      0 24px 60px -20px rgba(0, 0, 0, 0.65);
+    overflow: hidden;
+  }
+
+  .titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.55rem 0.9rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .titlebar-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+  }
+
+  .titlebar-label b {
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  .titlebar-dots {
+    display: flex;
+    gap: 0.32rem;
+  }
+
+  .titlebar-dots span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--border-strong);
+  }
+
+  /* ------------------------------ header -------------------------------- */
+
+  .provenance {
+    padding: 1.15rem 1.4rem 1rem;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .title {
+    margin: 0 0 0.5rem;
+    font-size: 1.28rem;
+    line-height: 1.3;
+    font-weight: 650;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+    color: var(--text);
+  }
+
+  .source-row[hidden],
+  .topics[hidden] {
+    display: none;
+  }
+
+  .source-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.55rem;
+    margin-bottom: 0.65rem;
+    min-width: 0;
+  }
+
+  .domain {
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--accent-strong);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-border);
+    border-radius: var(--radius-sm);
+    padding: 0.14rem 0.5rem;
+  }
+
+  .url {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-faint);
+  }
+
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.6rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .meta-item {
+    font-family: var(--font-mono);
+    font-size: 0.73rem;
+    color: var(--text-dim);
+  }
+
+  .meta-item.hash {
+    color: var(--text-faint);
+  }
+
+  .meta-dot {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: var(--border-strong);
+    flex: 0 0 auto;
+  }
+
+  .trust-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--font-ui);
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    padding: 0.2rem 0.6rem 0.2rem 0.5rem;
+    margin-left: auto;
+  }
+
+  .trust-pill .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--good);
+    box-shadow: 0 0 0 3px var(--good-soft);
+    flex: 0 0 auto;
+  }
+
+  .topics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .chip {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.01em;
+    color: var(--text-dim);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.22rem 0.62rem;
+  }
+
+  /* ------------------------------- tabs ---------------------------------- */
+
+  .tabs {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0 1.4rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .tab {
+    appearance: none;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 0.65rem 0.15rem;
+    margin: 0 0.65rem -1px 0;
+    font-size: 0.82rem;
+    font-weight: 550;
+    color: var(--text-faint);
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .tab:hover {
+    color: var(--text-dim);
+  }
+
+  .tab.active {
+    color: var(--accent-strong);
+    border-bottom-color: var(--accent);
+  }
+
+  /* ------------------------------ panels --------------------------------- */
+
+  .panels {
+    padding: 1.3rem 1.4rem 1.1rem;
+    min-height: 360px;
+  }
+
+  .panel[hidden] { display: none; }
+
+  /* -- article -- */
+
+  .article {
+    font-family: var(--font-serif);
+    font-size: 1.02rem;
+    line-height: 1.68;
+    color: #ded9cd;
+    max-width: 64ch;
+  }
+
+  .article p {
+    margin: 0 0 0.95em;
+  }
+
+  .article .byline {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-faint);
+    margin: 0 0 1.1em;
+    letter-spacing: 0.01em;
+  }
+
+  .cited {
+    position: relative;
+    margin: 1.2em 0 1.3em;
+    padding: 0.75em 1em 0.8em 1.05em;
+    border-left: 2px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  }
+
+  .cited-tag {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    text-transform: lowercase;
+    color: var(--accent-strong);
+    margin-bottom: 0.4em;
+  }
+
+  /* -- video: keyframe strip -- */
+
+  .video-block {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin: 0 0 0.55rem;
+  }
+
+  .keyframes {
+    display: flex;
+    gap: 0.6rem;
+    overflow-x: auto;
+    padding-bottom: 0.35rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  .keyframes::-webkit-scrollbar {
+    height: 7px;
+  }
+
+  .keyframes::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .keyframes::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+  }
+
+  .frame {
+    appearance: none;
+    flex: 0 0 auto;
+    width: 128px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.4rem;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  }
+
+  .frame:hover {
+    border-color: var(--border-strong);
+  }
+
+  .frame.active {
+    border-color: var(--accent-border);
+    box-shadow: 0 0 0 1px var(--accent-border);
+    transform: translateY(-1px);
+  }
+
+  .frame-art {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 4px;
+    background: var(--surface-raised);
+  }
+
+  .frame-time {
+    display: block;
+    margin-top: 0.35rem;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-dim);
+  }
+
+  .frame.active .frame-time {
+    color: var(--accent-strong);
+  }
+
+  .frame-caption {
+    display: block;
+    font-size: 0.68rem;
+    color: var(--text-faint);
+    margin-top: 0.1rem;
+  }
+
+  /* -- video: transcript -- */
+
+  .transcript {
+    max-height: 232px;
+    overflow-y: auto;
+    padding-right: 0.4rem;
+    border-top: 1px solid var(--border-soft);
+    padding-top: 0.85rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  .transcript::-webkit-scrollbar {
+    width: 7px;
+  }
+
+  .transcript::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .transcript::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+  }
+
+  .line {
+    display: flex;
+    gap: 0.7rem;
+    align-items: baseline;
+    padding: 0.42rem 0.5rem;
+    margin: 0 -0.5rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-family: var(--font-serif);
+    font-size: 0.94rem;
+    line-height: 1.55;
+    color: #d6d1c6;
+    transition: background 0.15s ease;
+  }
+
+  .line:hover {
+    background: var(--surface-raised);
+  }
+
+  .line.active {
+    background: var(--accent-soft);
+    color: var(--text);
+  }
+
+  .line .ts {
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-faint);
+    padding-top: 0.2em;
+  }
+
+  .line.active .ts {
+    color: var(--accent-strong);
+  }
+
+  /* ------------------------------- footer --------------------------------- */
+
+  .actions {
+    padding: 1rem 1.4rem 1.15rem;
+    border-top: 1px solid var(--border-soft);
+    background: var(--surface);
+  }
+
+  .actions-row {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+  }
+
+  .actions-right {
+    display: flex;
+    gap: 0.55rem;
+    margin-left: auto;
+  }
+
+  .btn {
+    appearance: none;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 550;
+    border-radius: var(--radius-sm);
+    padding: 0.48rem 0.85rem;
+    border: 1px solid var(--border-strong);
+    background: transparent;
+    color: var(--text-dim);
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  }
+
+  .btn:hover {
+    color: var(--text);
+    border-color: var(--text-faint);
+  }
+
+  .btn.accent {
+    color: var(--accent-strong);
+    border-color: var(--accent-border);
+    background: var(--accent-soft);
+  }
+
+  .btn.accent:hover {
+    background: rgba(211, 163, 90, 0.24);
+  }
+
+  .btn.keep {
+    color: var(--good);
+    border-color: var(--good-border);
+    background: var(--good-soft);
+  }
+
+  .btn.keep:hover {
+    background: rgba(134, 171, 124, 0.22);
+  }
+
+  .btn.discard {
+    color: var(--text-faint);
+    border-color: var(--border);
+    background: transparent;
+  }
+
+  .btn.discard:hover {
+    color: var(--bad);
+    border-color: var(--bad-border);
+    background: var(--bad-soft);
+  }
+
+  .provenance-line {
+    margin: 0.75rem 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-faint);
+  }
+
+  .provenance-line b {
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+
+  /* narrow-viewport safety: keep the widget from ever forcing page scroll */
+  @media (max-width: 460px) {
+    .actions-right { margin-left: 0; }
+    .trust-pill { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="widget">
+    <div class="titlebar">
+      <span class="titlebar-label"><b>reference-viewer</b> -- dashboardd widget, design concept</span>
+      <span class="titlebar-dots"><span></span><span></span><span></span></span>
+    </div>
+
+    <header class="provenance">
+      <h1 class="title" data-tab-target="article">The Dead Draw Problem: Curve Design in Roguelike Deckbuilders</h1>
+      <h1 class="title" data-tab-target="video" hidden>Balancing the Unbalanceable: Card Synergy in Procedural Decks</h1>
+
+      <div class="source-row" data-tab-target="article">
+        <span class="domain">runstate.dev</span>
+        <span class="url">https://runstate.dev/notes/dead-draw-problem-curve-design</span>
+      </div>
+      <div class="source-row" data-tab-target="video" hidden>
+        <span class="domain">youtube.com</span>
+        <span class="url">https://www.youtube.com/watch?v=7qN3vXvR2mL</span>
+      </div>
+
+      <div class="meta-row">
+        <span class="meta-item" data-tab-target="article">captured 2026-08-19</span>
+        <span class="meta-item" data-tab-target="video" hidden>captured 2026-08-21</span>
+        <span class="meta-dot" aria-hidden="true"></span>
+        <span class="meta-item hash" data-tab-target="article">sha256:b7e2a9f4d1c8...9a06</span>
+        <span class="meta-item hash" data-tab-target="video" hidden>sha256:4c1f7d02ae93...e277</span>
+        <span class="trust-pill"><span class="dot"></span>captured content - sanitized view</span>
+      </div>
+
+      <div class="topics" data-tab-target="article">
+        <span class="chip">nova-protocol</span>
+        <span class="chip">game-design</span>
+        <span class="chip">card-curves</span>
+      </div>
+      <div class="topics" data-tab-target="video" hidden>
+        <span class="chip">nova-protocol</span>
+        <span class="chip">game-design</span>
+        <span class="chip">procedural-generation</span>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="Reference content type">
+      <button class="tab active" role="tab" id="tab-article" data-tab="article" aria-selected="true" aria-controls="panel-article">Article</button>
+      <button class="tab" role="tab" id="tab-video" data-tab="video" aria-selected="false" aria-controls="panel-video">Video</button>
+    </nav>
+
+    <div class="panels">
+
+      <!-- ============================== ARTICLE ============================== -->
+      <section class="panel" id="panel-article" role="tabpanel" aria-labelledby="tab-article" data-tab-target="article">
+        <article class="article">
+          <p class="byline">extracted text -- runstate.dev, M. Okafor -- 6 min read</p>
+
+          <p>Every roguelike deckbuilder inherits the same design tax: a shuffled
+          deck means some hands will be bad, and bad hands are supposed to be part
+          of the tension. The trouble starts when a bad hand quietly turns into a
+          dead hand, a draw with nothing in it that changes the fight you are
+          currently losing.</p>
+
+          <p>Curve design is the usual lever. A deck's curve is the distribution
+          of what a card costs against what it does, plotted across a typical run
+          length rather than a single match. Get the curve wrong early and the
+          deck spends its first ten turns doing arithmetic instead of playing a
+          game.</p>
+
+          <div class="cited">
+            <span class="cited-tag">cited by scufris</span>
+            <p style="margin:0;">A deck under fifteen cards should almost never
+            carry more than two non-answers at any point in its curve. Past that
+            threshold the dead draw rate compounds faster than card quality can
+            offset it, no matter how good the top end is.</p>
+          </div>
+
+          <p>Slay the Spire's answer was aggressive thinning: cards that remove
+          themselves or their neighbors from the deck, so the curve tightens as
+          the run goes on instead of staying fixed at its starting shape. Other
+          entries in the genre lean on tutors instead, cards that fetch a specific
+          answer on demand, which fixes the dead draw problem locally but adds its
+          own variance if the tutor itself gets drawn dead.</p>
+
+          <p>Neither fix is free, and that is the actual design question: which
+          kind of variance are you willing to keep, the shape of the deck or the
+          shape of the search for an answer inside it. Whatever the choice, it has
+          to be made on purpose, early, before the card pool grows large enough
+          that curve problems hide inside it.</p>
+        </article>
+      </section>
+
+      <!-- =============================== VIDEO ================================ -->
+      <section class="panel" id="panel-video" role="tabpanel" aria-labelledby="tab-video" data-tab-target="video" hidden>
+        <div class="video-block">
+          <div>
+            <p class="section-label">Keyframes</p>
+            <div class="keyframes" id="keyframes">
+
+              <button class="frame active" type="button" id="frame-1" data-frame="1">
+                <svg class="frame-art" viewBox="0 0 160 90" aria-hidden="true">
+                  <rect width="160" height="90" fill="var(--surface-raised)"/>
+                  <rect x="18" y="30" width="92" height="7" rx="3.5" fill="var(--text-dim)"/>
+                  <rect x="18" y="44" width="60" height="5" rx="2.5" fill="var(--text-faint)"/>
+                  <rect x="18" y="60" width="36" height="5" rx="2.5" fill="var(--accent)"/>
+                </svg>
+                <span class="frame-time">00:00</span>
+                <span class="frame-caption">Title card</span>
+              </button>
+
+              <button class="frame" type="button" id="frame-2" data-frame="2">
+                <svg class="frame-art" viewBox="0 0 160 90" aria-hidden="true">
+                  <rect width="160" height="90" fill="var(--surface-raised)"/>
+                  <circle cx="80" cy="33" r="11" fill="var(--text-faint)"/>
+                  <polygon points="60,68 100,68 92,49 68,49" fill="var(--text-faint)"/>
+                  <rect x="30" y="76" width="4" height="8" fill="var(--accent)"/>
+                  <rect x="38" y="72" width="4" height="12" fill="var(--accent)"/>
+                  <rect x="46" y="78" width="4" height="6" fill="var(--accent)"/>
+                  <rect x="110" y="74" width="4" height="10" fill="var(--accent)"/>
+                  <rect x="118" y="70" width="4" height="14" fill="var(--accent)"/>
+                  <rect x="126" y="77" width="4" height="7" fill="var(--accent)"/>
+                </svg>
+                <span class="frame-time">02:14</span>
+                <span class="frame-caption">Speaker</span>
+              </button>
+
+              <button class="frame" type="button" id="frame-3" data-frame="3">
+                <svg class="frame-art" viewBox="0 0 160 90" aria-hidden="true">
+                  <rect width="160" height="90" fill="var(--surface-raised)"/>
+                  <line x1="40" y1="60" x2="70" y2="30" stroke="var(--text-faint)" stroke-width="1.5"/>
+                  <line x1="70" y1="30" x2="102" y2="55" stroke="var(--text-faint)" stroke-width="1.5"/>
+                  <line x1="102" y1="55" x2="130" y2="26" stroke="var(--text-faint)" stroke-width="1.5"/>
+                  <line x1="70" y1="30" x2="58" y2="20" stroke="var(--text-faint)" stroke-width="1.5"/>
+                  <circle cx="40" cy="60" r="4.5" fill="var(--accent)"/>
+                  <circle cx="70" cy="30" r="4.5" fill="var(--accent)"/>
+                  <circle cx="102" cy="55" r="4.5" fill="var(--accent)"/>
+                  <circle cx="130" cy="26" r="4.5" fill="var(--accent)"/>
+                  <circle cx="58" cy="20" r="4.5" fill="var(--accent)"/>
+                </svg>
+                <span class="frame-time">05:47</span>
+                <span class="frame-caption">Synergy graph</span>
+              </button>
+
+              <button class="frame" type="button" id="frame-4" data-frame="4">
+                <svg class="frame-art" viewBox="0 0 160 90" aria-hidden="true">
+                  <rect width="160" height="90" fill="var(--surface-raised)"/>
+                  <line x1="16" y1="24" x2="146" y2="24" stroke="var(--border-strong)" stroke-width="1"/>
+                  <line x1="16" y1="40" x2="146" y2="40" stroke="var(--border-strong)" stroke-width="1"/>
+                  <line x1="16" y1="56" x2="146" y2="56" stroke="var(--border-strong)" stroke-width="1"/>
+                  <line x1="16" y1="72" x2="146" y2="72" stroke="var(--border-strong)" stroke-width="1"/>
+                  <rect x="98" y="16" width="30" height="6" fill="var(--accent)"/>
+                  <rect x="98" y="32" width="44" height="6" fill="var(--accent)"/>
+                  <rect x="98" y="48" width="18" height="6" fill="var(--accent)"/>
+                  <rect x="98" y="64" width="26" height="6" fill="var(--accent)"/>
+                </svg>
+                <span class="frame-time">09:30</span>
+                <span class="frame-caption">Probability table</span>
+              </button>
+
+              <button class="frame" type="button" id="frame-5" data-frame="5">
+                <svg class="frame-art" viewBox="0 0 160 90" aria-hidden="true">
+                  <rect width="160" height="90" fill="var(--surface-raised)"/>
+                  <rect x="16" y="18" width="26" height="34" rx="3" fill="var(--text-faint)"/>
+                  <rect x="50" y="18" width="26" height="34" rx="3" fill="var(--accent)"/>
+                  <rect x="84" y="18" width="26" height="34" rx="3" fill="var(--text-faint)"/>
+                  <rect x="118" y="18" width="26" height="34" rx="3" fill="var(--accent)"/>
+                  <rect x="16" y="56" width="26" height="34" rx="3" fill="var(--text-faint)"/>
+                  <rect x="50" y="56" width="26" height="34" rx="3" fill="var(--text-faint)"/>
+                  <rect x="84" y="56" width="26" height="34" rx="3" fill="var(--accent)"/>
+                  <rect x="118" y="56" width="26" height="34" rx="3" fill="var(--text-faint)"/>
+                </svg>
+                <span class="frame-time">13:02</span>
+                <span class="frame-caption">Deck grid demo</span>
+              </button>
+
+              <button class="frame" type="button" id="frame-6" data-frame="6">
+                <svg class="frame-art" viewBox="0 0 160 90" aria-hidden="true">
+                  <rect width="160" height="90" fill="var(--surface-raised)"/>
+                  <rect x="45" y="36" width="70" height="7" rx="3.5" fill="var(--text-dim)"/>
+                  <circle cx="66" cy="58" r="4.5" fill="var(--accent)"/>
+                  <circle cx="80" cy="58" r="4.5" fill="var(--accent)"/>
+                  <circle cx="94" cy="58" r="4.5" fill="var(--accent)"/>
+                </svg>
+                <span class="frame-time">16:50</span>
+                <span class="frame-caption">Closing slide</span>
+              </button>
+
+            </div>
+          </div>
+
+          <div>
+            <p class="section-label">Transcript</p>
+            <div class="transcript" id="transcript">
+
+              <p class="line active" data-frame="1"><span class="ts">00:00</span><span>Hi, I'm Priya Natarajan, I work on systems design at a small roguelike studio, and today I want to talk about a problem that shows up the moment you let the computer build your decks for you: card synergy that either does nothing, or does too much.</span></p>
+
+              <p class="line" data-frame="2"><span class="ts">02:14</span><span>The failure mode on one end is a deck that feels flat. Cards sit next to each other and never interact, so every run plays the same regardless of what you drew. The failure mode on the other end is a deck that snowballs the instant two specific cards land in the same hand, and every other run feels like a coin flip for whether that pair showed up.</span></p>
+
+              <p class="line" data-frame="3"><span class="ts">05:47</span><span>We model synergy as a weighted graph. Every card is a node. Every pair of cards that interact gets a scored edge, positive for combos, negative for cards that actively work against each other. The generator samples clusters from that graph, which is the part that actually changes how a run feels.</span></p>
+
+              <p class="line" data-frame="4"><span class="ts">09:30</span><span>The number that mattered most in playtesting wasn't the average synergy score, it was the tail. We cap how many high-weight edges can appear in the same deck, so a run can still find a strong combo, but it can't stack three of them and break the curve entirely. That cap is the whole balance knob.</span></p>
+
+              <p class="line" data-frame="5"><span class="ts">13:02</span><span>Here's a deck the generator produced under that cap. Watch the highlighted cards: three of them share a resource-conversion theme, which is enough to feel intentional, but the rest of the deck stays generically useful so a bad draw early doesn't end the run before it starts.</span></p>
+
+              <p class="line" data-frame="6"><span class="ts">16:50</span><span>That's the core of it: model the interactions explicitly, then budget them like any other scarce resource. Thanks for watching, the slides and the sampling code are both linked below.</span></p>
+
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <footer class="actions">
+      <div class="actions-row">
+        <button class="btn">Open in browser</button>
+        <button class="btn accent">Cite in chat</button>
+        <div class="actions-right">
+          <button class="btn discard">Discard</button>
+          <button class="btn keep">Keep</button>
+        </div>
+      </div>
+      <p class="provenance-line">captured by Scufris during: <b>&quot;collect resources about card curves and pacing for nova-protocol&quot;</b></p>
+    </footer>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  var reduceMotion = window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---- tabs: switch which item's header, panel, and topics are shown ----
+  var tabs = document.querySelectorAll(".tab");
+  tabs.forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      var target = tab.getAttribute("data-tab");
+      document.querySelectorAll("[data-tab-target]").forEach(function (el) {
+        el.hidden = el.getAttribute("data-tab-target") !== target;
+      });
+      tabs.forEach(function (t) {
+        var on = t === tab;
+        t.classList.toggle("active", on);
+        t.setAttribute("aria-selected", on ? "true" : "false");
+      });
+    });
+  });
+
+  // ---- video: clicking a transcript line highlights its keyframe, and
+  //      clicking a keyframe highlights its transcript line ----
+  function selectFrame(id) {
+    document.querySelectorAll(".frame").forEach(function (f) {
+      f.classList.toggle("active", f.getAttribute("data-frame") === id);
+    });
+    document.querySelectorAll(".line").forEach(function (l) {
+      l.classList.toggle("active", l.getAttribute("data-frame") === id);
+    });
+    var frameEl = document.getElementById("frame-" + id);
+    if (frameEl) {
+      frameEl.scrollIntoView({
+        behavior: reduceMotion ? "auto" : "smooth",
+        inline: "center",
+        block: "nearest"
+      });
+    }
+  }
+
+  document.querySelectorAll(".frame").forEach(function (f) {
+    f.addEventListener("click", function () {
+      selectFrame(f.getAttribute("data-frame"));
+    });
+  });
+
+  document.querySelectorAll(".line").forEach(function (l) {
+    l.addEventListener("click", function () {
+      selectFrame(l.getAttribute("data-frame"));
+    });
+  });
+})();
+</script>
+
+</body>
+</html>

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  foregroundCommandWaits,
   parseWorkerEvent,
   PLANNOTATOR_REVIEW_TOOL,
   QUICK_REVIEW_TOOL,
@@ -23,6 +24,18 @@ test("worker events use only the replacement protocol", () => {
     type: "done",
     value: "report saved",
   });
+});
+
+test("foreground Scufris rejects shell waits", () => {
+  assert.equal(foregroundCommandWaits("sleep 30"), true);
+  assert.equal(
+    foregroundCommandWaits("echo started && /usr/bin/sleep 30"),
+    true,
+  );
+  assert.equal(foregroundCommandWaits("DELAY=30 command sleep $DELAY"), true);
+  assert.equal(foregroundCommandWaits("job & wait"), true);
+  assert.equal(foregroundCommandWaits("rg -n sleep extensions"), false);
+  assert.equal(foregroundCommandWaits("npm test"), false);
 });
 
 test("delegated workers use one dedicated reporting tool", () => {

@@ -1,6 +1,6 @@
 # Remove foreground sleep and waiting
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: workflow
 
@@ -39,3 +39,36 @@ wait loops.
 ## Dependencies
 
 None. This is the first task.
+
+## Decisions
+
+- Return terminating tool results from worker spawn and steering. These are
+  asynchronous handoff boundaries, so another automatic model turn would only
+  encourage foreground waiting.
+- Enforce the no-wait rule at the Bash tool boundary as well as in prompts.
+  Foreground model calls that directly invoke shell `sleep` or `wait` are
+  blocked and terminated. User shell commands are unaffected.
+- Cancel an in-flight status read with `AbortController` during shutdown. Do not
+  delay shutdown until the read promise settles.
+- Keep helper operation deadlines. They bound immediate operations and are not
+  delegated-progress polling or sleep loops.
+
+## Implemented
+
+- Added terminating spawn and steering results.
+- Added system, tool, and workflow-skill guidance to end the foreground turn
+  immediately after handoff.
+- Added a foreground Bash gate for direct `sleep` and `wait` commands.
+- Replaced the shutdown delay loop with immediate watcher closure and status
+  read cancellation.
+- Documented notification-driven continuation and added focused guard tests.
+
+## Verification evidence
+
+- `npm run check` passes typechecking, formatting, and 50 TypeScript tests.
+- Python unittest discovery passes 20 tests.
+- Ruff, ShellCheck, Prettier, Alejandra, and `git diff --check` pass.
+- `nix flake check` passes all supported-system checks.
+- Focused tests verify direct shell waits are rejected, ordinary searches are
+  unaffected, status uses `fs.watch`, shutdown aborts event reads, and no timer
+  or delayed event-read loop remains in orchestration.

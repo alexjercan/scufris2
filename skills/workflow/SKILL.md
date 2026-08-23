@@ -17,15 +17,17 @@ workspace commands directly from the foreground session.
    explicit request overrides it or it is impossible.
 4. Compose one self-contained worker prompt. Select the preferred harness,
    model, thinking, and workspace from the request and project guidance.
-5. Call `scufris_job_spawn` with the single-use context ID.
+5. Call `scufris_job_spawn` with the single-use context ID, then end the
+   foreground turn immediately.
 
 ## General jobs
 
 Use `scufris_job_spawn` without a context ID. Omit execution choices when the
 user did not specify them. Scufris then uses Pi with
 `openai-codex/gpt-5.6-sol` and medium thinking in a private temporary
-workspace. Project tracking, worktrees, review, and landing do not apply unless
-the request explicitly introduces them.
+workspace. End the foreground turn immediately after spawning. Project
+tracking, worktrees, review, and landing do not apply unless the request
+explicitly introduces them.
 
 ## Events
 
@@ -40,9 +42,11 @@ the request explicitly introduces them.
 - `failed` is terminal failure.
 
 Use `scufris_job_inspect` to recover bounded evidence after a wake or context
-compaction. Use `scufris_job_send` only for literal steering. Use
-`scufris_job_stop` only for an owned job. Remove a Sprout workspace only when
-its result is no longer needed.
+compaction. Use `scufris_job_send` only for literal steering, then end the
+foreground turn immediately. Never call shell `sleep`, wait for a worker, poll
+status, or repeatedly inspect a job for progress. Filesystem notifications
+start later turns. Use `scufris_job_stop` only for an owned job. Remove a Sprout
+workspace only when its result is no longer needed.
 
 ## Optional workflow tools
 

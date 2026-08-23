@@ -1,8 +1,8 @@
 # Project workflows and delegated jobs
 
 The workflow extension is Scufris's core engine. It owns foreground identity,
-project methodology, delegated-agent state, polling, review, and landing in one
-lifecycle. Agent spawn, inspect, send, and stop operations remain narrow parts
+project methodology, delegated-agent state, event delivery, review, and landing
+in one lifecycle. Agent spawn, inspect, send, and stop operations remain narrow parts
 of that engine rather than a separate loaded extension.
 
 Scufris handles work expected to take seconds in the foreground and delegates
@@ -63,7 +63,9 @@ read-only code tools plus this reporting tool. Claude workers use the matching
 
 The workflow extension watches each owned status file through filesystem
 notifications. It reads events only after a change notification; it does not
-periodically poll jobs.
+periodically poll jobs. After Scufris spawns or steers a worker, it ends its
+foreground turn immediately. It never sleeps or waits for delegated progress.
+The next applicable filesystem event starts a later turn.
 
 Worker events are:
 

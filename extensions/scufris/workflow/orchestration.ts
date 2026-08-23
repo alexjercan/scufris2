@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import {
   defineTool,
+  isToolCallEventType,
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
@@ -66,6 +67,23 @@ export function parseWorkerEvent(line: string): WorkerEvent | undefined {
 
 export function workerEventWakes(type: WorkerEventType): boolean {
   return type !== "working";
+}
+
+export function foregroundCommandWaits(command: string): boolean {
+  return command.split(/[\n;&|]+/).some((part) => {
+    const words = part
+      .trim()
+      .replace(/^[({]+\s*/, "")
+      .split(/\s+/);
+    while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? "")) words.shift();
+    while (["command", "builtin", "env"].includes(words[0] ?? "")) {
+      words.shift();
+      while (/^(?:-[^\s]+|[A-Za-z_][A-Za-z0-9_]*=)/.test(words[0] ?? ""))
+        words.shift();
+    }
+    const executable = (words[0] ?? "").replace(/^['"]|['"]$/g, "");
+    return /(?:^|\/)sleep$/.test(executable) || executable === "wait";
+  });
 }
 
 interface ContextResult {
@@ -184,6 +202,10 @@ project context for general work. A project context creates exactly one job.
 Treat ready events as completed milestone hints: inspect the job and decide
 what follows; never route from the milestone slug alone.
 
+After scufris_job_spawn or scufris_job_send returns, end the foreground turn
+immediately. Never call shell sleep, wait for a worker, poll status, or repeatedly
+inspect a job for progress. Filesystem notifications will deliver later events.
+
 Active Scufris jobs:
 ${index}`;
 }
@@ -195,6 +217,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   const jobs = new Map<string, OwnedJob>();
   let readingEvents = false;
   let readAgain = false;
+  let eventReadController: AbortController | undefined;
   let shuttingDown = false;
   let extensionContext: ExtensionContext | undefined;
   let eventError: string | undefined;
@@ -223,6 +246,8 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       return;
     }
     readingEvents = true;
+    const controller = new AbortController();
+    eventReadController = controller;
     try {
       do {
         readAgain = false;
@@ -234,14 +259,18 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             extensionContext.ui.setStatus("scufris", undefined);
           return;
         }
-        const result = await runHelper<EventResult>("events", {
-          jobs: active.map((job) => ({
-            job_id: job.job_id,
-            offset: job.offset,
-            tail: job.tail,
-            inode: job.inode,
-          })),
-        });
+        const result = await runHelper<EventResult>(
+          "events",
+          {
+            jobs: active.map((job) => ({
+              job_id: job.job_id,
+              offset: job.offset,
+              tail: job.tail,
+              inode: job.inode,
+            })),
+          },
+          controller.signal,
+        );
         if (shuttingDown) return;
         const progress: string[] = [];
         for (const update of result.jobs) {
@@ -294,6 +323,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         extensionContext.ui.notify(message, "error");
       eventError = message;
     } finally {
+      if (eventReadController === controller) eventReadController = undefined;
       readingEvents = false;
     }
   };
@@ -386,6 +416,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       promptSnippet: "Start an independent project or general worker",
       promptGuidelines: [
         "Use scufris_job_spawn for work expected to take minutes. Select workspace sprout only when project guidance or the user asks for isolated repository work.",
+        "After scufris_job_spawn returns, end the foreground turn immediately. Never sleep, wait, poll, or repeatedly inspect for worker progress; filesystem notifications deliver later events.",
       ],
       executionMode: "sequential",
       parameters: Type.Object(
@@ -516,10 +547,13 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         };
         jobs.set(job.job_id, job);
         watchJob(job);
-        return toolResult({
-          ...publicResult,
-          ...(resolved ? { context_id: resolved.context_id } : {}),
-        });
+        return {
+          ...toolResult({
+            ...publicResult,
+            ...(resolved ? { context_id: resolved.context_id } : {}),
+          }),
+          terminate: true,
+        };
       },
     }),
   );
@@ -868,6 +902,9 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       name: "scufris_job_send",
       label: "Steer Scufris job",
       description: "Send one literal line to an owned waiting worker.",
+      promptGuidelines: [
+        "After scufris_job_send returns, end the foreground turn immediately. Never sleep, wait, poll, or repeatedly inspect for worker progress; filesystem notifications deliver later events.",
+      ],
       executionMode: "sequential",
       parameters: Type.Object(
         {
@@ -885,7 +922,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         const result = await runHelper("send", params, signal, 20_000);
         job.state = "working";
         job.summary = "foreground guidance submitted";
-        return toolResult(result);
+        return { ...toolResult(result), terminate: true };
       },
     }),
   );
@@ -929,6 +966,20 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     }),
   );
 
+  pi.on("tool_call", (event) => {
+    if (
+      isToolCallEventType("bash", event) &&
+      foregroundCommandWaits(event.input.command)
+    ) {
+      return {
+        block: true,
+        terminate: true,
+        reason:
+          "Foreground Scufris never sleeps or waits. End this turn; filesystem notifications will deliver worker events.",
+      };
+    }
+  });
+
   pi.on("before_agent_start", (event) => ({
     systemPrompt: `${event.systemPrompt}\n\n${activeJobPrompt(jobs.values())}`,
   }));
@@ -960,8 +1011,8 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       job.status_watcher?.close();
       job.status_watcher = undefined;
     }
-    while (readingEvents)
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    eventReadController?.abort();
+    eventReadController = undefined;
     await Promise.allSettled(
       [...jobs.values()].map(async (job) => {
         const quickReview = job.quick_review;

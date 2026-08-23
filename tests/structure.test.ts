@@ -35,8 +35,10 @@ test("package loads only capability-owned Scufris extensions", async () => {
     join(root, "extensions", "scufris", "workflow", "orchestration.ts"),
     "utf8",
   );
-  assert.doesNotMatch(orchestration, /setInterval|setTimeout\(.*readEvents/);
+  assert.doesNotMatch(orchestration, /setInterval|setTimeout/);
+  assert.doesNotMatch(orchestration, /while \(readingEvents\)/);
   assert.match(orchestration, /watch\(job\.status_file/);
+  assert.match(orchestration, /eventReadController\?\.abort\(\)/);
   await access(
     join(root, "extensions", "scufris", "workflow", "worker-report.ts"),
   );

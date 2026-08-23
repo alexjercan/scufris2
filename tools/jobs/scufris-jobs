@@ -1,0 +1,829 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import secrets
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any, NoReturn
+
+import tomllib
+
+JOB_ID = re.compile(r"^[a-f0-9]{12}$")
+PROJECT_ID = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
+FEATURE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+HANDOFF = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+EVENTS = {"working", "needs-decision", "blocked", "ready", "done", "failed"}
+THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+WORKSPACES = {"temporary", "project", "sprout"}
+TERMINAL = {"done", "failed", "stopped"}
+MAX_REQUEST = 2 * 1024 * 1024
+MAX_REPORT = 512 * 1024
+MAX_EVENT_LINE = 4096
+
+
+class JobError(Exception):
+    pass
+
+
+def state_home() -> Path:
+    base = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+    return base / "scufris"
+
+
+def jobs_root() -> Path:
+    return state_home() / "jobs-v2"
+
+
+def job_dir(job_id: str) -> Path:
+    return jobs_root() / validate_job_id(job_id)
+
+
+def validate_job_id(value: Any) -> str:
+    if not isinstance(value, str) or not JOB_ID.fullmatch(value):
+        raise JobError("invalid job ID")
+    return value
+
+
+def validate_request(
+    value: Any, required: set[str], optional: set[str] | None = None
+) -> dict[str, Any]:
+    allowed_optional = set() if optional is None else optional
+    if (
+        not isinstance(value, dict)
+        or set(value) - required - allowed_optional
+        or not required <= set(value)
+    ):
+        raise JobError("invalid request fields")
+    return value
+
+
+def write_new(path: Path, data: bytes, mode: int) -> None:
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+
+
+def run(
+    argv: list[str],
+    *,
+    cwd: Path | None = None,
+    input_bytes: bytes | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[bytes]:
+    result = subprocess.run(
+        argv,
+        cwd=cwd,
+        input=input_bytes,
+        capture_output=True,
+        check=False,
+        timeout=120,
+    )
+    if check and result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        raise JobError(detail or f"command failed: {argv[0]}")
+    return result
+
+
+def tmux(
+    argv: list[str], *, input_bytes: bytes | None = None, check: bool = True
+) -> subprocess.CompletedProcess[bytes]:
+    return run(["tmux", *argv], input_bytes=input_bytes, check=check)
+
+
+def expanded(path: str) -> Path:
+    return Path(os.path.expandvars(os.path.expanduser(path))).resolve()
+
+
+def configured_roots() -> list[Path]:
+    raw = os.environ.get("SCUFRIS_PROJECT_ROOTS", "[]")
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise JobError("SCUFRIS_PROJECT_ROOTS is invalid JSON") from error
+    if not isinstance(values, list) or not all(
+        isinstance(item, str) for item in values
+    ):
+        raise JobError("SCUFRIS_PROJECT_ROOTS must be a string array")
+    return [expanded(item) for item in values]
+
+
+def is_git_root(path: Path) -> bool:
+    return (path / ".git").exists()
+
+
+def discover_projects() -> dict[str, Path]:
+    projects: dict[str, Path] = {}
+    for configured in configured_roots():
+        if not configured.is_dir():
+            continue
+        candidates = [configured] if is_git_root(configured) else []
+        candidates.extend(
+            path.parent for path in configured.rglob(".git") if path.parent.is_dir()
+        )
+        for root in sorted(set(candidates)):
+            try:
+                relative = root.relative_to(configured.parent)
+            except ValueError:
+                continue
+            project_id = relative.as_posix()
+            if PROJECT_ID.fullmatch(project_id):
+                projects.setdefault(project_id, root.resolve())
+    return projects
+
+
+def resolve_project(project: Any) -> tuple[str, Path]:
+    if not isinstance(project, str) or not PROJECT_ID.fullmatch(project):
+        raise JobError("invalid project ID")
+    root = discover_projects().get(project)
+    if root is None:
+        raise JobError(f"unknown project ID: {project}")
+    return project, root
+
+
+def option_value(value: Any) -> bool:
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return True
+    if isinstance(value, list):
+        return all(option_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(key, str) and option_value(item) for key, item in value.items()
+        )
+    return False
+
+
+def render_context(project: str, source: Path) -> dict[str, Any]:
+    if not source.exists():
+        return {
+            "project": project,
+            "configured": False,
+            "fingerprint": hashlib.sha256(b"").hexdigest(),
+            "markdown": f"# Project context: {project}\n\nNo .scufris.toml was found. Infer the workflow from the request and project instructions.\n",
+            "diagnostic": None,
+        }
+    try:
+        raw = source.read_bytes()
+        document = tomllib.loads(raw.decode("utf-8"))
+        if document.get("version") != 1 or set(document) - {"version", "preferences"}:
+            raise ValueError("expected version 1 and a preferences table")
+        preferences = document.get("preferences", {})
+        if not isinstance(preferences, dict):
+            raise TypeError("preferences must be a table")
+        sections: list[str] = [
+            f"# Project context: {project}",
+            "",
+            f"Configuration fingerprint: {hashlib.sha256(raw).hexdigest()}",
+        ]
+        for key, entry in preferences.items():
+            if not isinstance(key, str) or not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9_-]*", key
+            ):
+                raise ValueError("preference names must be simple identifiers")
+            if not isinstance(entry, dict) or set(entry) - {
+                "name",
+                "options",
+                "guidance",
+            }:
+                raise ValueError(f"preference {key} has invalid fields")
+            name = entry.get("name")
+            options = entry.get("options")
+            guidance = entry.get("guidance")
+            if name is not None and (not isinstance(name, str) or not name.strip()):
+                raise ValueError(f"preference {key} name must be nonempty text")
+            if options is not None and (
+                not isinstance(options, dict) or not option_value(options)
+            ):
+                raise ValueError(f"preference {key} options are invalid")
+            if guidance is not None and (
+                not isinstance(guidance, str) or not guidance.strip()
+            ):
+                raise ValueError(f"preference {key} guidance must be nonempty text")
+            sections.extend(["", f"## {key}"])
+            if name is not None:
+                sections.extend(["", f"Preferred selection: {name.strip()}"])
+            if options:
+                sections.extend(
+                    [
+                        "",
+                        "Options:",
+                        "",
+                        "```json",
+                        json.dumps(options, sort_keys=True, indent=2),
+                        "```",
+                    ]
+                )
+            if guidance is not None:
+                sections.extend(["", guidance.strip()])
+        sections.extend(
+            [
+                "",
+                "Follow these project preferences unless the user's explicit request overrides them or they are impossible to follow.",
+                "",
+            ]
+        )
+        return {
+            "project": project,
+            "configured": True,
+            "fingerprint": hashlib.sha256(raw).hexdigest(),
+            "markdown": "\n".join(sections),
+            "diagnostic": None,
+        }
+    except (
+        OSError,
+        TypeError,
+        UnicodeError,
+        tomllib.TOMLDecodeError,
+        ValueError,
+    ) as error:
+        return {
+            "project": project,
+            "configured": False,
+            "fingerprint": hashlib.sha256(b"").hexdigest(),
+            "markdown": f"# Project context: {project}\n\nThe project configuration was unusable. Infer the workflow from the request and project instructions.\n",
+            "diagnostic": f"ignored .scufris.toml: {error}",
+        }
+
+
+def projects(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, set())
+    return {"projects": sorted(discover_projects())}
+
+
+def context(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"project"})
+    project, root = resolve_project(request["project"])
+    return {
+        **render_context(project, root / ".scufris.toml"),
+        "project_root": str(root),
+    }
+
+
+def selected_adapter(harness: Any, model: Any, thinking: Any) -> tuple[str, str, str]:
+    selected_harness = "pi" if harness is None else harness
+    defaults = {
+        "pi": ("openai-codex/gpt-5.6-sol", "medium"),
+        "claude": ("opus", "xhigh"),
+    }
+    if selected_harness not in defaults:
+        raise JobError("harness must be pi or claude")
+    default_model, default_thinking = defaults[selected_harness]
+    selected_model = default_model if model is None else model
+    selected_thinking = default_thinking if thinking is None else thinking
+    if (
+        not isinstance(selected_model, str)
+        or not selected_model
+        or len(selected_model) > 200
+    ):
+        raise JobError("invalid model")
+    if selected_thinking not in THINKING:
+        raise JobError("invalid thinking level")
+    if selected_harness == "pi" and selected_thinking == "max":
+        raise JobError("Pi does not support max thinking")
+    if selected_harness == "claude" and selected_thinking in {"off", "minimal"}:
+        raise JobError("Claude does not support off or minimal thinking")
+    return selected_harness, selected_model, selected_thinking
+
+
+def worker_prompt(instructions: str, context_markdown: str | None) -> str:
+    project_section = (
+        f"\n## Project workflow preferences\n\n{context_markdown.strip()}\n"
+        if context_markdown
+        else ""
+    )
+    return f"""# Scufris delegated job
+
+You are a bounded worker for one foreground Scufris job. Complete only the request below. Do not spawn other workers. Read instructions and project-local skills from your working directory when relevant.
+{project_section}
+## Request
+
+{instructions.strip()}
+
+## Communication
+
+The job directory that contains this prompt also contains `status` and `report.md`.
+Write detailed evidence to `report.md` before each actionable or terminal event. Append one event line to `status`; never rewrite existing lines.
+
+Allowed events:
+
+- `working: <summary>` for quiet progress.
+- `needs-decision: <summary>` when user input can change the outcome, then wait.
+- `blocked: <summary>` when you cannot continue, then wait.
+- `ready: <milestone-slug>` after a nonterminal milestone, then wait. The lowercase slug describes what completed; it does not prescribe the next action.
+- `done: <summary>` for terminal success, then wait.
+- `failed: <summary>` for terminal failure, then wait.
+
+Do not invent another event keyword. Foreground Scufris decides what follows a ready milestone from the request, project preferences, prompt, and report.
+"""
+
+
+def safe_feature(value: Any, job_id: str) -> str:
+    feature = f"scufris-{job_id}" if value is None else value
+    if (
+        not isinstance(feature, str)
+        or len(feature) > 48
+        or not FEATURE.fullmatch(feature)
+    ):
+        raise JobError("invalid feature")
+    return feature
+
+
+def sprout(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[bytes]:
+    return run(["sprout", *argv], cwd=cwd)
+
+
+def session_name(job_id: str) -> str:
+    return f"scufris-{job_id}"
+
+
+def create_tmux(job_id: str, cwd: Path) -> tuple[str, str, str]:
+    name = session_name(job_id)
+    tmux(["new-session", "-d", "-s", name, "-n", f"job-{job_id}", "-c", str(cwd)])
+    result = tmux(
+        [
+            "display-message",
+            "-p",
+            "-t",
+            f"={name}:0.0",
+            "#{session_id}\t#{window_id}\t#{pane_id}",
+        ]
+    )
+    values = result.stdout.decode().strip().split("\t")
+    if len(values) != 3:
+        tmux(["kill-session", "-t", f"={name}"], check=False)
+        raise JobError("could not record tmux identity")
+    tmux(["set-option", "-t", values[1], "remain-on-exit", "on"])
+    return values[0], values[1], values[2]
+
+
+def spawn(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(
+        request,
+        {"job_id", "instructions", "owner_session"},
+        {
+            "project",
+            "project_root",
+            "context_markdown",
+            "context_fingerprint",
+            "harness",
+            "model",
+            "thinking",
+            "workspace",
+            "feature",
+        },
+    )
+    job_id = validate_job_id(request["job_id"])
+    instructions = request["instructions"]
+    owner_session = request["owner_session"]
+    if (
+        not isinstance(instructions, str)
+        or not instructions.strip()
+        or "\x00" in instructions
+    ):
+        raise JobError("instructions must be nonempty text")
+    if not isinstance(owner_session, str) or not owner_session:
+        raise JobError("owner session is required")
+    harness, model, thinking = selected_adapter(
+        request.get("harness"), request.get("model"), request.get("thinking")
+    )
+    if shutil.which(harness) is None:
+        raise JobError(f"harness executable not found: {harness}")
+    project = request.get("project")
+    project_root_value = request.get("project_root")
+    context_markdown = request.get("context_markdown")
+    context_fingerprint = request.get("context_fingerprint")
+    if project is None:
+        if any(
+            value is not None
+            for value in (project_root_value, context_markdown, context_fingerprint)
+        ):
+            raise JobError("general jobs cannot include project context")
+        root = None
+    else:
+        if (
+            not isinstance(project_root_value, str)
+            or not isinstance(context_markdown, str)
+            or not isinstance(context_fingerprint, str)
+        ):
+            raise JobError("project jobs require a resolved context")
+        resolved_project, root = resolve_project(project)
+        if resolved_project != project or root != Path(project_root_value).resolve():
+            raise JobError("project context no longer resolves to the selected project")
+    workspace = request.get("workspace", "temporary" if root is None else "project")
+    if workspace not in WORKSPACES:
+        raise JobError("invalid workspace")
+    if root is None and workspace != "temporary":
+        raise JobError("general jobs require a temporary workspace")
+    if root is not None and workspace == "temporary":
+        raise JobError("project jobs require project or sprout workspace")
+    feature = (
+        safe_feature(request.get("feature"), job_id) if workspace == "sprout" else None
+    )
+    directory = job_dir(job_id)
+    if directory.exists():
+        raise JobError("job already exists")
+    directory.mkdir(parents=True, mode=0o700)
+    working: Path | None = None
+    sprout_created = False
+    tmux_identity: tuple[str, str, str] | None = None
+    try:
+        if workspace == "temporary":
+            working = directory / "workspace"
+            working.mkdir(mode=0o700)
+        elif workspace == "project":
+            assert root is not None
+            working = root
+        else:
+            assert root is not None and feature is not None
+            sprout(["new", feature], root)
+            sprout_created = True
+            working = Path(
+                sprout(["show", feature], root).stdout.decode().strip()
+            ).resolve()
+        prompt = worker_prompt(instructions, context_markdown)
+        write_new(directory / "prompt.md", prompt.encode(), 0o400)
+        if context_markdown is not None:
+            write_new(
+                directory / "project-context.md", context_markdown.encode(), 0o400
+            )
+        write_new(directory / "status", b"", 0o600)
+        write_new(directory / "report.md", b"", 0o600)
+        record = {
+            "version": 1,
+            "job_id": job_id,
+            "owner_session": owner_session,
+            "project": project,
+            "context_fingerprint": context_fingerprint,
+            "workspace": workspace,
+            "feature": feature,
+            "working_directory": str(working),
+            "harness": harness,
+            "model": model,
+            "thinking": thinking,
+            "state": "working",
+            "summary": "worker starting",
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        write_new(
+            directory / "job.json",
+            json.dumps(record, sort_keys=True, indent=2).encode() + b"\n",
+            0o400,
+        )
+        tmux_identity = create_tmux(job_id, working)
+        mutable = {
+            **record,
+            "tmux_session_id": tmux_identity[0],
+            "tmux_window_id": tmux_identity[1],
+            "tmux_pane_id": tmux_identity[2],
+        }
+        os.chmod(directory / "job.json", 0o600)
+        (directory / "job.json").write_text(
+            json.dumps(mutable, sort_keys=True, indent=2) + "\n"
+        )
+        os.chmod(directory / "job.json", 0o400)
+        tmux(
+            [
+                "respawn-pane",
+                "-k",
+                "-t",
+                tmux_identity[2],
+                "-c",
+                str(working),
+                shlex.join(
+                    [sys.executable, str(Path(__file__).resolve()), "launch", job_id]
+                ),
+            ]
+        )
+        return {
+            "job_id": job_id,
+            "state": "working",
+            "project": project,
+            "workspace": workspace,
+            "feature": feature,
+            "harness": harness,
+            "model": model,
+            "thinking": thinking,
+            "tmux_session": session_name(job_id),
+            "message": "Worker started.",
+        }
+    except Exception:
+        if tmux_identity is not None:
+            tmux(["kill-session", "-t", tmux_identity[0]], check=False)
+        if sprout_created and root is not None and feature is not None:
+            sprout(["rm", feature], root)
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+
+
+def load_job(job_id: str) -> dict[str, Any]:
+    path = job_dir(job_id) / "job.json"
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise JobError("job record is unavailable") from error
+    if (
+        not isinstance(value, dict)
+        or value.get("version") != 1
+        or value.get("job_id") != job_id
+    ):
+        raise JobError("job record is invalid")
+    return value
+
+
+def worker_environment() -> dict[str, str]:
+    env = os.environ.copy()
+    for variable in (
+        "SCUFRIS_ROLE",
+        "SCUFRIS_SPEECH",
+        "SCUFRIS_CALM",
+        "SCUFRIS_PIPER_MODEL",
+        "SCUFRIS_PIPER_CONFIG",
+        "PI_SESSION_ID",
+        "PI_SESSION_FILE",
+        "PI_PROVIDER",
+        "PI_MODEL",
+        "PI_REASONING_LEVEL",
+    ):
+        env.pop(variable, None)
+    return env
+
+
+def launch(job_id: str) -> NoReturn:
+    job = load_job(job_id)
+    prompt = f"Read and follow {job_dir(job_id) / 'prompt.md'}"
+    if job["harness"] == "pi":
+        argv = [
+            "pi",
+            "--approve",
+            "--tui-mode",
+            "regular",
+            "--model",
+            job["model"],
+            "--thinking",
+            job["thinking"],
+            prompt,
+        ]
+    elif job["harness"] == "claude":
+        argv = [
+            "claude",
+            "--dangerously-skip-permissions",
+            "--model",
+            job["model"],
+            "--effort",
+            job["thinking"],
+            prompt,
+        ]
+    else:
+        raise JobError("invalid harness")
+    env = worker_environment()
+    if job["harness"] == "claude":
+        env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] = "false"
+    executable = shutil.which(argv[0], path=env.get("PATH"))
+    if executable is None:
+        raise JobError(f"harness executable not found: {argv[0]}")
+    os.execvpe(executable, argv, env)
+
+
+def pane_alive(job: dict[str, Any]) -> bool:
+    pane = job.get("tmux_pane_id")
+    if not isinstance(pane, str):
+        return False
+    result = tmux(["display-message", "-p", "-t", pane, "#{pane_dead}"], check=False)
+    return result.returncode == 0 and result.stdout.strip() == b"0"
+
+
+def parse_event(line: str) -> tuple[str, str] | None:
+    if len(line.encode()) > MAX_EVENT_LINE or ": " not in line:
+        return None
+    state, summary = line.split(": ", 1)
+    if (
+        state not in EVENTS
+        or not summary.strip()
+        or any(ord(char) < 32 for char in summary)
+    ):
+        return None
+    if state == "ready" and not HANDOFF.fullmatch(summary):
+        return None
+    return state, summary
+
+
+def poll(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"jobs"})
+    requested = request["jobs"]
+    if not isinstance(requested, list):
+        raise JobError("jobs must be an array")
+    results: list[dict[str, Any]] = []
+    for cursor in requested:
+        if not isinstance(cursor, dict) or set(cursor) != {
+            "job_id",
+            "offset",
+            "tail",
+            "inode",
+        }:
+            raise JobError("invalid poll cursor")
+        job_id = validate_job_id(cursor["job_id"])
+        offset, tail, inode = cursor["offset"], cursor["tail"], cursor["inode"]
+        if (
+            not isinstance(offset, int)
+            or offset < 0
+            or not isinstance(tail, str)
+            or (inode is not None and not isinstance(inode, int))
+        ):
+            raise JobError("invalid poll cursor values")
+        path = job_dir(job_id) / "status"
+        info = path.stat()
+        if inode != info.st_ino or offset > info.st_size:
+            offset, tail = 0, ""
+        with path.open("rb") as stream:
+            stream.seek(offset)
+            chunk = stream.read()
+            next_offset = stream.tell()
+        text = tail + chunk.decode("utf-8", "replace")
+        lines = text.split("\n")
+        next_tail = lines.pop()
+        events: list[str] = []
+        errors: list[str] = []
+        for line in lines:
+            if not line:
+                continue
+            parsed = parse_event(line)
+            if parsed is None:
+                errors.append(f"invalid worker event: {line[:200]}")
+            else:
+                events.append(line)
+        job = load_job(job_id)
+        results.append(
+            {
+                "job_id": job_id,
+                "events": events,
+                "errors": errors,
+                "offset": next_offset,
+                "tail": next_tail,
+                "inode": info.st_ino,
+                "window_alive": pane_alive(job),
+            }
+        )
+    return {"jobs": results}
+
+
+def send(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id", "message"})
+    job_id = validate_job_id(request["job_id"])
+    message = request["message"]
+    if (
+        not isinstance(message, str)
+        or not message
+        or "\n" in message
+        or "\r" in message
+    ):
+        raise JobError("message must be one nonempty line")
+    job = load_job(job_id)
+    if not pane_alive(job):
+        raise JobError("worker is not running")
+    pane = job["tmux_pane_id"]
+    buffer = f"scufris-{job_id}-{secrets.token_hex(4)}"
+    try:
+        tmux(["load-buffer", "-b", buffer, "-"], input_bytes=message.encode())
+        tmux(["paste-buffer", "-b", buffer, "-t", pane, "-d"])
+        tmux(["send-keys", "-t", pane, "Enter"])
+    finally:
+        tmux(["delete-buffer", "-b", buffer], check=False)
+    return {"job_id": job_id, "sent": True}
+
+
+def inspect(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(
+        request, {"job_id"}, {"include_report", "include_context", "include_prompt"}
+    )
+    job_id = validate_job_id(request["job_id"])
+    job = load_job(job_id)
+    directory = job_dir(job_id)
+    result = {
+        key: job.get(key)
+        for key in (
+            "job_id",
+            "project",
+            "workspace",
+            "feature",
+            "harness",
+            "model",
+            "thinking",
+            "state",
+            "summary",
+            "context_fingerprint",
+        )
+    }
+    result["window_alive"] = pane_alive(job)
+    status = (directory / "status").read_text("utf-8", errors="replace")
+    result["events"] = status.splitlines()[-100:]
+    for enabled, name, key in (
+        (request.get("include_report", False), "report.md", "report"),
+        (
+            request.get("include_context", False),
+            "project-context.md",
+            "project_context",
+        ),
+        (request.get("include_prompt", False), "prompt.md", "prompt"),
+    ):
+        path = directory / name
+        if enabled and path.exists():
+            data = path.read_bytes()
+            if len(data) > MAX_REPORT:
+                data = data[:MAX_REPORT]
+            result[key] = data.decode("utf-8", "replace")
+    return result
+
+
+def stop(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id"}, {"remove_workspace"})
+    job_id = validate_job_id(request["job_id"])
+    job = load_job(job_id)
+    session = job.get("tmux_session_id")
+    if isinstance(session, str):
+        tmux(["kill-session", "-t", session], check=False)
+    if request.get("remove_workspace", False) and job.get("workspace") == "sprout":
+        project = job.get("project")
+        feature = job.get("feature")
+        if isinstance(project, str) and isinstance(feature, str):
+            _, root = resolve_project(project)
+            sprout(["rm", feature], root)
+    return {"job_id": job_id, "state": "stopped"}
+
+
+def orphans(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"owner_session"})
+    owner = request["owner_session"]
+    if not isinstance(owner, str):
+        raise JobError("owner session must be text")
+    found: list[str] = []
+    root = jobs_root()
+    if root.exists():
+        for directory in root.iterdir():
+            if not directory.is_dir() or not JOB_ID.fullmatch(directory.name):
+                continue
+            try:
+                job = load_job(directory.name)
+            except JobError:
+                continue
+            if job.get("owner_session") != owner and pane_alive(job):
+                found.append(directory.name)
+    return {"job_ids": sorted(found)}
+
+
+def remove_old_state() -> None:
+    old = state_home() / "jobs"
+    if old.exists():
+        shutil.rmtree(old)
+
+
+def main() -> int:
+    remove_old_state()
+    if len(sys.argv) == 3 and sys.argv[1] == "launch":
+        launch(validate_job_id(sys.argv[2]))
+    if len(sys.argv) != 2:
+        raise JobError("use one helper command")
+    command = sys.argv[1]
+    handlers = {
+        "projects": projects,
+        "context": context,
+        "spawn": spawn,
+        "poll": poll,
+        "send": send,
+        "inspect": inspect,
+        "stop": stop,
+        "orphans": orphans,
+    }
+    handler = handlers.get(command)
+    if handler is None:
+        raise JobError("unknown helper command")
+    raw = sys.stdin.buffer.read(MAX_REQUEST + 1)
+    if len(raw) > MAX_REQUEST:
+        raise JobError("request is too large")
+    try:
+        request = json.loads(raw or b"{}")
+    except json.JSONDecodeError as error:
+        raise JobError("request is not valid JSON") from error
+    result = handler(request)
+    print(json.dumps({"ok": True, "result": result}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except JobError as error:
+        print(json.dumps({"ok": False, "error": str(error)}, sort_keys=True))
+        raise SystemExit(1)

@@ -17,7 +17,7 @@ import {
   type WalkthroughState,
   validateWalkthroughState,
 } from "../extensions/scufris/walkthrough.ts";
-import { approvalInstruction } from "../extensions/scufris/agents.ts";
+import { approvalInstruction } from "../extensions/scufris/walkthrough.ts";
 import { submitWalkthroughTool } from "../extensions/scufris/walkthrough-reviewer.ts";
 
 const base = "1".repeat(40);

@@ -1,0 +1,47 @@
+[preferences.tracking]
+name = "tatr"
+guidance = """
+Use Tatr for substantial tracked work. Keep one task for one request and its
+follow-up work. Record decisions and verification evidence under the task.
+Skip task creation when the user explicitly requests untracked work.
+"""
+
+[preferences.workspace]
+name = "project"
+guidance = """
+Work directly on master. Use Sprout only when the user explicitly requests an
+isolated worktree. Do not create another worktree by default.
+"""
+
+[preferences.implementation]
+name = "pi"
+options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
+guidance = """
+Use Pi with Sol and medium thinking by default. Keep orchestration narrow.
+Prefer product skills and small deterministic helpers over extension
+complexity. Follow repository AGENTS.md instructions and existing conventions.
+"""
+
+[preferences.review]
+name = "foreground"
+guidance = """
+Review changes in foreground Scufris. Use an independent reviewer, custom Quick
+Review, or Plannotator only when the user requests it or the change has enough
+risk to justify that explicit step. Keep Quick Review and Plannotator separate.
+"""
+
+[preferences.verification]
+name = "focused"
+guidance = """
+Run the cheapest relevant focused checks first. Run npm run check for
+TypeScript behavior and nix flake check for broad package integration. Use
+focused integration tests and small end-to-end examples where practical.
+"""
+
+[preferences.landing]
+name = "explicit"
+guidance = """
+Commit directly on master when the request asks for a full send. Never infer
+landing from worker completion or review approval. Use guarded Sprout landing
+only for an explicitly selected Sprout workspace.
+"""

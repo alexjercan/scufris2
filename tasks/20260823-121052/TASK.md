@@ -1,6 +1,6 @@
 # Fix delegated lifecycle wake ordering and completion notifications
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: bug, orchestration, notifications, response
 
@@ -44,16 +44,24 @@ when their lifecycle continues.
   or actionable state instead of appearing stuck.
 - Preserve concise spoken responses for automatic wake turns.
 
-## Investigation and verification
+## Replacement result
 
-- Build a transition table covering spawn, working, decision, generic ready
-  handoffs, preflight, feedback, Quick Review, approval acknowledgment,
-  landing, cleanup, blocked, failed, and terminal success.
-- Add focused tests for event ordering, wake selection, duplicate suppression,
-  and successful landing notification.
-- Exercise review approval, review feedback, preflight failure, landing success,
-  and cleanup failure paths.
-- Run `npm run check` after extension behavior changes.
+The fixed lifecycle was deleted. Workers now append only generic progress,
+decision, blocked, milestone, success, and failure events. Poll offsets suppress
+duplicate delivery. Quiet progress uses UI notification; every actionable or
+terminal event sends one ordered follow-up that wakes foreground Scufris after
+the event exists. Quick Review returns through the same wake path. Landing is
+an explicit awaited tool result and never starts silently in the background.
+
+## Verification evidence
+
+- Focused TypeScript tests verify event parsing and wake selection.
+- Python integration tests exercise ordered append-only worker events, project
+  and general jobs, steering, inspection, and independent review jobs.
+- `npm run check` passes.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` passes 12 tests.
+- `nix flake check` passes all supported-system checks.
+- `git diff --check` passes.
 
 ## Relationship
 

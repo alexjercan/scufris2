@@ -1,6 +1,6 @@
 # Add project workflow preferences and generic delegation planning
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: orchestration, configuration, preferences, delegation
 
@@ -145,7 +145,7 @@ configuration; existing jobs never change implicitly.
 ## Optional workflow tools
 
 Put deterministic reusable capabilities under `tools/<tool>/`. Initial useful
-capabilities include Sprout workspace management, independent preflight review,
+capabilities include Sprout workspace management, independent read-only review,
 Quick Review, and guarded local landing. Keep Pi lifecycle ownership and narrow
 native tool registration in `extensions/scufris/`; keep each tool's process and
 filesystem mechanics in its owning `tools/` directory.
@@ -178,22 +178,21 @@ slug alone. Scufris inspects the pinned project context, worker prompt, report,
 and current state, then decides the next action from the request and project
 preferences.
 
-## Open design work
+## Implemented replacement
 
-- Define the narrow input and output schema for `scufris_project_context` and
-  successful context consumption at spawn.
-- Define non-Git workspace behavior without adding another workflow-plan
-  schema. General workers use a job-owned temporary workspace unless the
-  explicit request supplies an external result destination.
-- Define narrow independent contracts for the initial optional tools without
-  rebuilding a fixed lifecycle between them.
-- Define supported TOML value types and duplicate handling. Add no arbitrary
-  product-level size policy; use only technical bounds required for safe local
-  parsing and provider requests.
-- Keep workflow resolution separate from lifecycle notifications and wake-turn
-  ordering, which are tracked in `tasks/20260823-121052/TASK.md`.
+- `scufris_project_context` returns canonical guidance and a single-use
+  session-owned context ID without exposing the project path.
+- General jobs use a private job-owned workspace. Project jobs select direct,
+  Sprout, or exact-source read-only review workspaces explicitly.
+- `tools/jobs/scufris-jobs` owns project discovery, TOML parsing, workspace and
+  tmux mechanics, polling, inspection, steering, Quick Review targets, and
+  guarded landing.
+- Foreground tools expose project resolution, generic spawn, independent review
+  jobs, Quick Review, landing, inspection, steering, and exact owned cleanup.
+- The fixed review and landing lifecycle, its helpers, tests, and documentation
+  were deleted. No compatibility or migration path remains.
 
-## Verification plan
+## Verification evidence
 
 - Focused parser, validation, discovery, registry, pinning, and prompt-rendering
   tests.
@@ -203,4 +202,9 @@ preferences.
 - Exercise a general delegated job outside Git without Sprout or review.
 - Exercise generic `ready` handoffs, unknown handoffs, quiet progress, and
   terminal result events.
-- Run `npm run check` after the extension integration is complete.
+- `npm run check` passes.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` passes 12 tests.
+- `ruff check .` and `ruff format --check .` pass.
+- `nix fmt -- --check .` passes.
+- `nix flake check` passes all supported-system checks.
+- `git diff --check` passes.

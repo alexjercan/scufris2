@@ -37,10 +37,11 @@ not apply unless the request explicitly introduces them.
 - `blocked` means the worker cannot continue without mediation. Inspect the
   report, then resolve it directly or ask the user when a user decision is
   necessary.
-- `done` means the current assignment is complete. It does not stop the worker
-  or authorize a next action. Inspect the project context, prompt, report, and
-  current state, then decide whether to review, steer more work, open a human
-  review, land, or stop.
+- `done` means the current assignment and execution generation are complete.
+  Scufris stops that exact execution but keeps the logical job steerable. Inspect
+  the project context, prompt, report, conversation, and current state, then
+  decide whether to review, restart with guidance, open a human review, land, or
+  stop.
 - `failed` is generated only when trusted orchestration detects that the worker
   can no longer work. Workers cannot report it themselves.
 
@@ -64,8 +65,9 @@ If an action tool fails, do not claim success. Call `scufris_final_response`
 with one concise explanation and the next safe step. A failed action does not
 authorize waiting or polling. Do not batch multiple meaningful actions; finish
 one acknowledgment boundary before another user-directed action. Use
-`scufris_job_stop` only for an owned job. Remove a Sprout workspace only when
-its result is no longer needed.
+`scufris_job_stop` only for an owned job. It removes that complete workflow
+graph, including reviewer descendants, temporary and Sprout workspaces, review
+state, and durable records. Call it only when no graph result is still needed.
 
 ## Optional workflow tools
 

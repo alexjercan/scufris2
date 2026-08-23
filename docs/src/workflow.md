@@ -101,20 +101,39 @@ Workers can report only:
 - `blocked: <summary>` when work cannot continue without mediation.
 - `done: <summary>` when the current assignment is complete.
 
-A `done` event is nonterminal for the worker channel. The worker remains
-available for more instructions. The extension wakes foreground Scufris, which
-inspects the pinned context, worker prompt, report, and current state before it
-decides whether to review, steer more work, open a human review, land, or stop.
-Every wake-triggered turn ends with one useful synthesized final response, not a
-tool-only turn. A later instruction returns the same worker to `working`.
+A `done` or `failed` event ends only that execution generation. Scufris closes
+the exact owned tmux session immediately and keeps the logical job, pinned
+prompt, project context, report, foreground guidance, and workspace. Foreground
+Scufris inspects that durable state before it decides whether to review, steer,
+open a human review, land, or stop. A later instruction rotates launch and
+report authority, increments the generation, validates the recorded workspace,
+and starts a new execution from `prompt.md`, `report.md`, and `conversation.md`.
+Quick Review change requests use this same restart path and restore the status
+watcher before publishing their foreground result.
 
 Workers cannot report `failed`. Trusted orchestration appends a linked
 `failed: <summary>` report entry and event only when the harness exits
-unexpectedly or the reporting protocol breaks. Runtime failure, explicit stop,
-and landing are the only terminal ownership states.
+unexpectedly or the reporting protocol breaks. `blocked` keeps its exact
+execution alive and steerable. Every wake-triggered turn ends with one useful
+synthesized final response, not a tool-only turn.
 
-Every worker runs in an owned tmux session. Shutdown targets only resources
-recorded for jobs owned by the foreground session.
+Each status record includes its execution generation. The durable job record
+owns the byte offset of the next event. Event reads do not advance it. The
+extension persists each wake message with its event ID and then acknowledges
+that exact next event. On foreground recovery, persisted message IDs are
+acknowledged without another wake, while unacknowledged `blocked`, `done`, and
+`failed` records wake once. This ordered read and acknowledge protocol prevents
+EOF advancement, generation replay, and restart gaps.
+
+Every execution runs in an owned tmux session on the mandatory absolute
+`SCUFRIS_TMUX_SOCKET`. The durable record pins the canonical socket, random
+execution token, generation, exact session name, and session, window, and pane
+IDs. Matching options are stored in the tmux server. Termination is one
+server-side conditional command that validates every value and kills only that
+session. Scufris never uses an ambient tmux server, `kill-server`, broad process
+matching, or a separate check-then-kill sequence. Creation first stores an
+unguessable execution intent; recovery can complete a server-created session or
+a not-yet-created generation after a crash.
 
 Run `scripts/scufris-jobs all` to list all stored jobs across foreground
 sessions. `--all` is the flag alias, and the original no-argument form remains
@@ -133,8 +152,24 @@ fail without selecting a job. Add `--json` to either form for structured
 output. An empty list is `{"jobs": []}` in JSON and `No Scufris jobs.` in
 plain text.
 
+Each implementation job is a workflow root. Reviewers record their exact parent,
+root, owner session, project, and random workflow identity; reviewer descendants
+inherit the same graph. Explicit stop and landing operate on the complete graph.
+They stop every exact execution, remove each Sprout and temporary workspace, and
+remove descendant job directories before the root. A partial failure keeps the
+root and remaining records for a retry. Already absent sessions, workspaces, and
+records are successful cleanup states. A successful action leaves no record for
+the workflow in the jobs store.
+
+Project jobs pin canonical project-root and workspace paths plus filesystem
+identities. Review and restart reuse the source's exact workspace. Landing and
+Sprout removal refuse configuration drift, path replacement, or symlinks before
+mutation. Cleanup records its stop or land intent before external mutation, so
+an interrupted action can continue safely.
+
 Inspection validates the exact durable record fields, types, identifier
-domains, timestamps, workspace relationships, and tmux identities. Invalid
+domains, timestamps, graph relationships, canonical workspace identity, event
+generation, cleanup intent, and tmux identities. Invalid
 records appear as `invalid` rows in a complete list and fail direct lookup.
 Job records and inspected status, report, context, and prompt artifacts are
 opened by descriptor with no symlink following and must be regular files. Reads

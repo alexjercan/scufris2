@@ -34,6 +34,7 @@ in
     name = "scufris";
     runtimeInputs =
       [
+        pkgs.coreutils
         pkgs.python3
         pkgs.tmux
       ]
@@ -45,6 +46,21 @@ in
     text = ''
       if [[ -z "''${SCUFRIS_PROJECT_ROOTS+x}" ]]; then
         export SCUFRIS_PROJECT_ROOTS=${pkgs.lib.escapeShellArg (builtins.toJSON projectRoots)}
+      fi
+      if [[ -z "''${SCUFRIS_TMUX_SOCKET+x}" ]]; then
+        if [[ -n "''${XDG_RUNTIME_DIR:-}" ]]; then
+          scufris_runtime_root="$XDG_RUNTIME_DIR/scufris"
+        elif [[ -n "''${XDG_STATE_HOME:-}" ]]; then
+          scufris_runtime_root="$XDG_STATE_HOME/scufris/run"
+        elif [[ "''${HOME:-}" != /homeless-shelter && -n "''${HOME:-}" ]]; then
+          scufris_runtime_root="$HOME/.local/state/scufris/run"
+        else
+          scufris_runtime_root="''${TMPDIR:-/tmp}/scufris-runtime-$UID"
+        fi
+        mkdir -p -- "$scufris_runtime_root"
+        chmod 0700 "$scufris_runtime_root"
+        scufris_runtime_root="$(unset CDPATH; cd -- "$scufris_runtime_root" && pwd -P)"
+        export SCUFRIS_TMUX_SOCKET="$scufris_runtime_root/workflows.tmux"
       fi
       export SCUFRIS_ROLE=orchestrator
       ${pkgs.lib.optionalString voice ''

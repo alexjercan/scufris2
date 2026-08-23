@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import fcntl
 import hashlib
@@ -27,18 +28,22 @@ FEATURE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 HANDOFF = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 WORKER_EVENTS = {"working", "blocked", "done"}
 EVENTS = {*WORKER_EVENTS, "failed"}
+LOGICAL_STATES = {*EVENTS, "suspended"}
+TERMINAL_EVENTS = {"done", "failed"}
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 WORKSPACES = {"temporary", "project", "sprout", "review"}
+RECORD_VERSION = 2
 MAX_REQUEST = 2 * 1024 * 1024
 MAX_JOB_RECORD = 64 * 1024
 MAX_STATUS_DETAIL = 256 * 1024
 MAX_REPORT_DETAIL = 512 * 1024
 MAX_EVENT_LINE = 4096
+MAX_EVENT_BATCH = 1024 * 1024
 MAX_REPORT_ENTRY = MAX_REPORT_DETAIL + MAX_EVENT_LINE + 5
 MAX_REPORT_FILE = 2 * 1024 * 1024
 MAX_QUICK_REVIEW_PATCH = 512 * 1024
 MAX_QUICK_REVIEW_ARTIFACT = 300 * 1024
-JOB_FIELDS = {
+LEGACY_JOB_FIELDS = {
     "job_id",
     "owner_session",
     "project",
@@ -58,6 +63,44 @@ JOB_FIELDS = {
     "tmux_window_id",
     "tmux_pane_id",
 }
+JOB_FIELDS = {
+    "version",
+    "job_id",
+    "owner_session",
+    "workflow_id",
+    "root_job",
+    "parent_job",
+    "project",
+    "project_root",
+    "project_root_device",
+    "project_root_inode",
+    "context_fingerprint",
+    "workspace",
+    "feature",
+    "review_of",
+    "working_directory",
+    "workspace_device",
+    "workspace_inode",
+    "landing_branch",
+    "harness",
+    "model",
+    "thinking",
+    "state",
+    "summary",
+    "created_at",
+    "generation",
+    "event_offset",
+    "status_device",
+    "status_inode",
+    "execution_state",
+    "tmux_socket",
+    "tmux_session_name",
+    "tmux_session_id",
+    "tmux_window_id",
+    "tmux_pane_id",
+    "execution_token",
+    "cleanup",
+}
 
 
 class JobError(Exception):
@@ -75,6 +118,26 @@ def jobs_root() -> Path:
 
 def job_dir(job_id: str) -> Path:
     return jobs_root() / validate_job_id(job_id)
+
+
+@contextlib.contextmanager
+def workflow_lock() -> Any:
+    root = state_home()
+    root.mkdir(parents=True, mode=0o700, exist_ok=True)
+    canonical_path(root)
+    path = root / "jobs.lock"
+    descriptor = os.open(
+        path,
+        os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+        0o600,
+    )
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise JobError("workflow lock is not a regular file")
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
 
 
 def validate_job_id(value: Any) -> str:
@@ -106,14 +169,23 @@ def load_report_auth(job_id: str) -> dict[str, Any]:
         value = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
         raise JobError("report authorization record is invalid") from error
+    if isinstance(value, dict) and set(value) == {
+        "launch_capability_hash",
+        "report_capability_hash",
+        "trusted_capability_hash",
+    }:
+        value = {"generation": 0, **value}
     if (
         not isinstance(value, dict)
         or set(value)
         != {
+            "generation",
             "launch_capability_hash",
             "report_capability_hash",
             "trusted_capability_hash",
         }
+        or not isinstance(value["generation"], int)
+        or value["generation"] < 0
         or not isinstance(value["trusted_capability_hash"], str)
         or not re.fullmatch(r"[a-f0-9]{64}", value["trusted_capability_hash"])
         or any(
@@ -164,6 +236,40 @@ def write_new(path: Path, data: bytes, mode: int) -> None:
         raise
 
 
+def fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def atomic_write(path: Path, data: bytes, mode: int = 0o600) -> None:
+    temporary = path.parent / f".{path.name}-{secrets.token_hex(16)}.tmp"
+    try:
+        write_new(temporary, data, mode)
+        os.replace(temporary, path)
+        fsync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def store_job(record: dict[str, Any]) -> None:
+    validate_job_record(record, validate_job_id(record.get("job_id")))
+    atomic_write(
+        job_dir(record["job_id"]) / "job.json",
+        json.dumps(record, sort_keys=True, indent=2).encode() + b"\n",
+        0o600,
+    )
+    os.chmod(job_dir(record["job_id"]) / "job.json", 0o400)
+
+
+def path_identity(path: Path) -> tuple[str, int, int]:
+    canonical = canonical_path(path)
+    info = canonical.stat()
+    return str(canonical), info.st_dev, info.st_ino
+
+
 def run(
     argv: list[str],
     *,
@@ -186,10 +292,65 @@ def run(
     return result
 
 
+def canonical_path(path: Path, *, directory: bool = True) -> Path:
+    if not path.is_absolute():
+        raise JobError("path must be absolute")
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current /= part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            if current == path and not directory:
+                break
+            raise JobError(f"path is unavailable: {path}") from None
+        if stat.S_ISLNK(info.st_mode):
+            raise JobError(f"symlink paths are not allowed: {path}")
+    resolved = path.resolve(strict=directory)
+    if resolved != path:
+        raise JobError(f"path is not canonical: {path}")
+    if directory and not resolved.is_dir():
+        raise JobError(f"path is not a directory: {path}")
+    return resolved
+
+
+def explicit_tmux_socket(value: str | None = None) -> Path:
+    raw = os.environ.get("SCUFRIS_TMUX_SOCKET") if value is None else value
+    if not raw:
+        raise JobError("SCUFRIS_TMUX_SOCKET must select an explicit socket")
+    socket = Path(raw)
+    if not socket.is_absolute():
+        raise JobError("SCUFRIS_TMUX_SOCKET must be absolute")
+    canonical_path(socket.parent)
+    try:
+        info = socket.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        if stat.S_ISLNK(info.st_mode):
+            raise JobError("tmux socket must not be a symlink")
+        if not stat.S_ISSOCK(info.st_mode):
+            raise JobError("tmux socket path is not a socket")
+    return socket
+
+
 def tmux(
-    argv: list[str], *, input_bytes: bytes | None = None, check: bool = True
+    argv: list[str],
+    *,
+    socket: Path | None = None,
+    input_bytes: bytes | None = None,
+    check: bool = True,
 ) -> subprocess.CompletedProcess[bytes]:
-    return run(["tmux", *argv], input_bytes=input_bytes, check=check)
+    if "kill-server" in argv:
+        raise JobError("kill-server is forbidden")
+    selected = (
+        explicit_tmux_socket() if socket is None else explicit_tmux_socket(str(socket))
+    )
+    return run(
+        ["tmux", "-S", str(selected), *argv],
+        input_bytes=input_bytes,
+        check=check,
+    )
 
 
 def expanded(path: str) -> Path:
@@ -429,7 +590,8 @@ def worker_prompt(
 {role}
 
 Do not spawn other workers. Read instructions and project-local skills from
-your working directory when relevant.
+your working directory when relevant. On a restarted execution, also read the
+adjacent durable `report.md` and `conversation.md` before continuing.
 {project_section}
 ## Request
 
@@ -470,28 +632,135 @@ def sprout(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[bytes]:
     return run(["sprout", *argv], cwd=cwd)
 
 
-def session_name(job_id: str) -> str:
-    return f"scufris-{job_id}"
+def execution_session_name(job_id: str, generation: int, token: str) -> str:
+    return f"scufris-{job_id}-g{generation}-{token[:16]}"
 
 
-def create_tmux(job_id: str, cwd: Path) -> tuple[str, str, str]:
-    name = session_name(job_id)
-    tmux(["new-session", "-d", "-s", name, "-n", f"job-{job_id}", "-c", str(cwd)])
+def prepare_execution(record: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    launch_capability = secrets.token_hex(32)
+    execution_token = secrets.token_hex(32)
+    generation = record["generation"]
+    socket = explicit_tmux_socket()
+    updated = {
+        **record,
+        "execution_state": "creating",
+        "tmux_socket": str(socket),
+        "tmux_session_name": execution_session_name(
+            record["job_id"], generation, execution_token
+        ),
+        "tmux_session_id": None,
+        "tmux_window_id": None,
+        "tmux_pane_id": None,
+        "execution_token": execution_token,
+    }
+    directory = job_dir(record["job_id"])
+    auth = load_report_auth(record["job_id"])
+    auth.update(
+        {
+            "generation": generation,
+            "launch_capability_hash": capability_hash(launch_capability),
+            "report_capability_hash": None,
+        }
+    )
+    atomic_write(
+        directory / ".report-auth.json",
+        json.dumps(auth, sort_keys=True).encode(),
+        0o400,
+    )
+    atomic_write(directory / ".launch-capability", launch_capability.encode(), 0o400)
+    store_job(updated)
+    return updated, launch_capability
+
+
+def start_execution(record: dict[str, Any], launch_capability: str) -> dict[str, Any]:
+    socket = explicit_tmux_socket(record["tmux_socket"])
+    name = record["tmux_session_name"]
     result = tmux(
         [
-            "display-message",
-            "-p",
-            "-t",
-            f"={name}:0.0",
+            "new-session",
+            "-d",
+            "-P",
+            "-F",
             "#{session_id}\t#{window_id}\t#{pane_id}",
-        ]
+            "-s",
+            name,
+            "-n",
+            f"job-{record['job_id']}",
+            "-c",
+            record["working_directory"],
+            "exec sleep 2147483647",
+            ";",
+            "set-option",
+            "-t",
+            name,
+            "@scufris_job_id",
+            record["job_id"],
+            ";",
+            "set-option",
+            "-t",
+            name,
+            "@scufris_execution_token",
+            record["execution_token"],
+            ";",
+            "set-option",
+            "-t",
+            name,
+            "@scufris_generation",
+            str(record["generation"]),
+            ";",
+            "set-option",
+            "-t",
+            name,
+            "@scufris_phase",
+            "creating",
+            ";",
+            "set-window-option",
+            "-t",
+            name,
+            "remain-on-exit",
+            "on",
+        ],
+        socket=socket,
     )
     values = result.stdout.decode().strip().split("\t")
     if len(values) != 3:
-        tmux(["kill-session", "-t", f"={name}"], check=False)
         raise JobError("could not record tmux identity")
-    tmux(["set-option", "-t", values[1], "remain-on-exit", "on"])
-    return values[0], values[1], values[2]
+    updated = {
+        **record,
+        "tmux_session_id": values[0],
+        "tmux_window_id": values[1],
+        "tmux_pane_id": values[2],
+    }
+    store_job(updated)
+    tmux(
+        [
+            "respawn-pane",
+            "-k",
+            "-t",
+            values[2],
+            "-c",
+            record["working_directory"],
+            shlex.join(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "launch",
+                    record["job_id"],
+                    launch_capability,
+                ]
+            ),
+            ";",
+            "set-option",
+            "-t",
+            name,
+            "@scufris_phase",
+            "running",
+        ],
+        socket=socket,
+    )
+    updated = {**updated, "execution_state": "running"}
+    store_job(updated)
+    return updated
 
 
 def spawn(request: dict[str, Any]) -> dict[str, Any]:
@@ -515,24 +784,27 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
     instructions = request["instructions"]
     owner_session = request["owner_session"]
     trusted_capability = validate_capability(request["trusted_capability"])
-    launch_capability = secrets.token_hex(32)
     if (
         not isinstance(instructions, str)
         or not instructions.strip()
         or "\x00" in instructions
     ):
         raise JobError("instructions must be nonempty text")
-    if not isinstance(owner_session, str) or not owner_session:
+    if not valid_record_text(owner_session, 512):
         raise JobError("owner session is required")
+    explicit_tmux_socket()
     harness, model, thinking = selected_adapter(
         request.get("harness"), request.get("model"), request.get("thinking")
     )
     if shutil.which(harness) is None:
         raise JobError(f"harness executable not found: {harness}")
+
     project = request.get("project")
     project_root_value = request.get("project_root")
     context_markdown = request.get("context_markdown")
     context_fingerprint = request.get("context_fingerprint")
+    root: Path | None
+    root_identity: tuple[str | None, int | None, int | None]
     if project is None:
         if any(
             value is not None
@@ -540,26 +812,43 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
         ):
             raise JobError("general jobs cannot include project context")
         root = None
+        root_identity = (None, None, None)
     else:
         if (
             not isinstance(project_root_value, str)
             or not isinstance(context_markdown, str)
             or not isinstance(context_fingerprint, str)
+            or re.fullmatch(r"[a-f0-9]{64}", context_fingerprint) is None
         ):
             raise JobError("project jobs require a resolved context")
-        resolved_project, root = resolve_project(project)
-        if resolved_project != project or root != Path(project_root_value).resolve():
+        resolved_project, discovered = resolve_project(project)
+        supplied = canonical_path(Path(project_root_value))
+        discovered = canonical_path(discovered)
+        if resolved_project != project or discovered != supplied:
             raise JobError("project context no longer resolves to the selected project")
+        root = supplied
+        root_identity = path_identity(root)
+
     review_of = request.get("review_of")
+    source: dict[str, Any] | None = None
     if review_of is not None:
         if harness != "pi":
             raise JobError("independent review jobs require the read-only Pi harness")
         source = load_job(validate_job_id(review_of))
-        if root is None or source.get("project") != project:
-            raise JobError("review job context must match the source project")
+        source_root = load_job(source["root_job"])
+        if source_root["cleanup"] is not None:
+            raise JobError("cannot add a reviewer while workflow cleanup is active")
+        if (
+            source["owner_session"] != owner_session
+            or root is None
+            or source["project"] != project
+            or source["project_root"] != str(root)
+        ):
+            raise JobError(
+                "review job must share the source workflow owner and project"
+            )
         workspace = "review"
     else:
-        source = None
         workspace = request.get("workspace", "temporary" if root is None else "project")
     if workspace not in WORKSPACES:
         raise JobError("invalid workspace")
@@ -572,13 +861,17 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
     feature = (
         safe_feature(request.get("feature"), job_id) if workspace == "sprout" else None
     )
+
     directory = job_dir(job_id)
-    if directory.exists():
+    if directory.exists() or directory.is_symlink():
         raise JobError("job already exists")
-    directory.mkdir(parents=True, mode=0o700)
+    root_jobs = jobs_root()
+    root_jobs.mkdir(parents=True, mode=0o700, exist_ok=True)
+    canonical_path(root_jobs)
+    directory.mkdir(mode=0o700)
+    fsync_directory(root_jobs)
     working: Path | None = None
     sprout_created = False
-    tmux_identity: tuple[str, str, str] | None = None
     try:
         if workspace == "temporary":
             working = directory / "workspace"
@@ -590,31 +883,38 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
             assert root is not None and feature is not None
             sprout(["new", feature], root)
             sprout_created = True
-            working = Path(
-                sprout(["show", feature], root).stdout.decode().strip()
-            ).resolve()
+            working = canonical_path(
+                Path(sprout(["show", feature], root).stdout.decode().strip())
+            )
         else:
             assert source is not None
-            working = Path(source["working_directory"]).resolve()
+            working = canonical_path(Path(source["working_directory"]))
+            identity = path_identity(working)
+            if identity != (
+                source["working_directory"],
+                source["workspace_device"],
+                source["workspace_inode"],
+            ):
+                raise JobError("review source workspace identity changed")
+        assert working is not None
+        working_identity = path_identity(working)
         prompt = worker_prompt(
-            instructions,
-            context_markdown,
-            source is not None,
-            harness,
+            instructions, context_markdown, source is not None, harness
         )
         write_new(directory / "prompt.md", prompt.encode(), 0o400)
+        write_new(directory / "conversation.md", b"", 0o600)
         if context_markdown is not None:
             write_new(
                 directory / "project-context.md", context_markdown.encode(), 0o400
             )
-        write_new(directory / "status", b"", 0o600)
-        write_new(directory / "report.md", b"", 0o600)
-        write_new(directory / "report.lock", b"", 0o600)
+        for name in ("status", "report.md", "report.lock"):
+            write_new(directory / name, b"", 0o600)
         write_new(
             directory / ".report-auth.json",
             json.dumps(
                 {
-                    "launch_capability_hash": capability_hash(launch_capability),
+                    "generation": 1,
+                    "launch_capability_hash": None,
                     "report_capability_hash": None,
                     "trusted_capability_hash": capability_hash(trusted_capability),
                 },
@@ -623,14 +923,23 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
             0o400,
         )
         record = {
+            "version": RECORD_VERSION,
             "job_id": job_id,
             "owner_session": owner_session,
+            "workflow_id": source["workflow_id"] if source else secrets.token_hex(32),
+            "root_job": source["root_job"] if source else job_id,
+            "parent_job": source["job_id"] if source else None,
             "project": project,
+            "project_root": root_identity[0],
+            "project_root_device": root_identity[1],
+            "project_root_inode": root_identity[2],
             "context_fingerprint": context_fingerprint,
             "workspace": workspace,
             "feature": feature,
             "review_of": review_of,
-            "working_directory": str(working),
+            "working_directory": working_identity[0],
+            "workspace_device": working_identity[1],
+            "workspace_inode": working_identity[2],
             "landing_branch": (
                 run(["git", "branch", "--show-current"], cwd=root)
                 .stdout.decode()
@@ -644,62 +953,46 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
             "state": "working",
             "summary": "worker starting",
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "generation": 1,
+            "event_offset": 0,
+            "status_device": (directory / "status").stat().st_dev,
+            "status_inode": (directory / "status").stat().st_ino,
+            "execution_state": None,
+            "tmux_socket": None,
+            "tmux_session_name": None,
+            "tmux_session_id": None,
+            "tmux_window_id": None,
+            "tmux_pane_id": None,
+            "execution_token": None,
+            "cleanup": None,
         }
-        write_new(
-            directory / "job.json",
-            json.dumps(record, sort_keys=True, indent=2).encode() + b"\n",
-            0o400,
-        )
-        tmux_identity = create_tmux(job_id, working)
-        mutable = {
-            **record,
-            "tmux_session_id": tmux_identity[0],
-            "tmux_window_id": tmux_identity[1],
-            "tmux_pane_id": tmux_identity[2],
-        }
-        os.chmod(directory / "job.json", 0o600)
-        (directory / "job.json").write_text(
-            json.dumps(mutable, sort_keys=True, indent=2) + "\n"
-        )
-        os.chmod(directory / "job.json", 0o400)
-        tmux(
-            [
-                "respawn-pane",
-                "-k",
-                "-t",
-                tmux_identity[2],
-                "-c",
-                str(working),
-                shlex.join(
-                    [
-                        sys.executable,
-                        str(Path(__file__).resolve()),
-                        "launch",
-                        job_id,
-                        launch_capability,
-                    ]
-                ),
-            ]
-        )
+        store_job(record)
+        prepared, launch_capability = prepare_execution(record)
+        running = start_execution(prepared, launch_capability)
         return {
             "job_id": job_id,
-            "state": "working",
+            "state": running["state"],
             "project": project,
+            "root_job": running["root_job"],
+            "parent_job": running["parent_job"],
+            "workflow_id": running["workflow_id"],
             "workspace": workspace,
             "feature": feature,
             "harness": harness,
             "model": model,
             "thinking": thinking,
-            "tmux_session": session_name(job_id),
+            "generation": running["generation"],
+            "tmux_session": running["tmux_session_name"],
             "status_file": str(directory / "status"),
             "message": "Worker started.",
         }
     except Exception:
-        if tmux_identity is not None:
-            tmux(["kill-session", "-t", tmux_identity[0]], check=False)
-        if sprout_created and root is not None and feature is not None:
-            sprout(["rm", feature], root)
-        shutil.rmtree(directory, ignore_errors=True)
+        # A durable record is intentionally retained if execution creation began.
+        # Recovery can finish or safely stop it from the pinned ownership intent.
+        if not (directory / "job.json").exists():
+            if sprout_created and root is not None and feature is not None:
+                sprout(["rm", feature], root)
+            secure_rmtree(directory)
         raise
 
 
@@ -791,13 +1084,29 @@ def valid_record_text(value: Any, maximum: int) -> bool:
 def validate_job_record(value: Any, job_id: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != JOB_FIELDS:
         raise JobError("job record is invalid")
-    if value.get("job_id") != job_id:
+    if value.get("version") != RECORD_VERSION or value.get("job_id") != job_id:
         raise JobError("job record is invalid")
-    if not valid_record_text(value.get("owner_session"), 512):
+    for field, maximum in (
+        ("owner_session", 512),
+        ("workflow_id", 64),
+        ("working_directory", 4096),
+        ("model", 200),
+        ("summary", 500),
+    ):
+        if not valid_record_text(value.get(field), maximum):
+            raise JobError("job record is invalid")
+    if re.fullmatch(r"[a-f0-9]{64}", value["workflow_id"]) is None:
+        raise JobError("job record is invalid")
+    if value.get("root_job") is None or JOB_ID.fullmatch(value["root_job"]) is None:
+        raise JobError("job record is invalid")
+    parent = value.get("parent_job")
+    if parent is not None and (
+        not isinstance(parent, str) or JOB_ID.fullmatch(parent) is None
+    ):
         raise JobError("job record is invalid")
     project = value.get("project")
     if project is not None and (
-        not isinstance(project, str) or not PROJECT_ID.fullmatch(project)
+        not isinstance(project, str) or PROJECT_ID.fullmatch(project) is None
     ):
         raise JobError("job record is invalid")
     fingerprint = value.get("context_fingerprint")
@@ -807,84 +1116,151 @@ def validate_job_record(value: Any, job_id: str) -> dict[str, Any]:
     ):
         raise JobError("job record is invalid")
     workspace = value.get("workspace")
+    feature = value.get("feature")
+    review_of = value.get("review_of")
     if workspace not in WORKSPACES:
         raise JobError("job record is invalid")
-    feature = value.get("feature")
     if feature is not None and (
         not isinstance(feature, str)
         or len(feature) > 48
         or FEATURE.fullmatch(feature) is None
     ):
         raise JobError("job record is invalid")
-    review_of = value.get("review_of")
     if review_of is not None and (
         not isinstance(review_of, str) or JOB_ID.fullmatch(review_of) is None
     ):
         raise JobError("job record is invalid")
-    working_directory = value.get("working_directory")
-    if (
-        not valid_record_text(working_directory, 4096)
-        or not Path(working_directory).is_absolute()
-        or ".." in Path(working_directory).parts
-    ):
-        raise JobError("job record is invalid")
+    for field in ("working_directory", "project_root"):
+        path = value.get(field)
+        if path is not None and (
+            not valid_record_text(path, 4096)
+            or not Path(path).is_absolute()
+            or ".." in Path(path).parts
+        ):
+            raise JobError("job record is invalid")
     landing_branch = value.get("landing_branch")
     if landing_branch is not None and not valid_record_text(landing_branch, 1024):
         raise JobError("job record is invalid")
     harness = value.get("harness")
     thinking = value.get("thinking")
-    if harness not in {"pi", "claude"}:
-        raise JobError("job record is invalid")
-    if not valid_record_text(value.get("model"), 200):
-        raise JobError("job record is invalid")
     if (
-        thinking not in THINKING
+        harness not in {"pi", "claude"}
+        or thinking not in THINKING
         or (harness == "pi" and thinking == "max")
         or (harness == "claude" and thinking in {"off", "minimal"})
-        or value.get("state") not in EVENTS
+        or value.get("state") not in LOGICAL_STATES
     ):
         raise JobError("job record is invalid")
-    if not valid_record_text(value.get("summary"), 500):
-        raise JobError("job record is invalid")
     created_at = value.get("created_at")
-    if not isinstance(created_at, str):
-        raise JobError("job record is invalid")
     try:
         parsed = dt.datetime.strptime(created_at, "%Y-%m-%dT%H:%M:%SZ").replace(
             tzinfo=dt.timezone.utc
         )
-    except ValueError as error:
+    except (TypeError, ValueError) as error:
         raise JobError("job record is invalid") from error
     if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != created_at:
         raise JobError("job record is invalid")
-    for key, prefix in (
-        ("tmux_session_id", "$"),
-        ("tmux_window_id", "@"),
-        ("tmux_pane_id", "%"),
+    for field in (
+        "project_root_device",
+        "project_root_inode",
+        "workspace_device",
+        "workspace_inode",
     ):
-        identity = value.get(key)
-        if (
-            not isinstance(identity, str)
-            or re.fullmatch(re.escape(prefix) + r"[0-9]+", identity) is None
+        item = value.get(field)
+        if item is not None and (not isinstance(item, int) or item < 0):
+            raise JobError("job record is invalid")
+    generation = value.get("generation")
+    event_offset = value.get("event_offset")
+    status_device = value.get("status_device")
+    status_inode = value.get("status_inode")
+    if not isinstance(generation, int) or generation < 1:
+        raise JobError("job record is invalid")
+    if not isinstance(event_offset, int) or event_offset < 0:
+        raise JobError("job record is invalid")
+    if (
+        not isinstance(status_device, int)
+        or status_device < 0
+        or not isinstance(status_inode, int)
+        or status_inode < 0
+    ):
+        raise JobError("job record is invalid")
+    execution_state = value.get("execution_state")
+    if execution_state not in {None, "creating", "running"}:
+        raise JobError("job record is invalid")
+    execution_values = [
+        value.get("tmux_socket"),
+        value.get("tmux_session_name"),
+        value.get("execution_token"),
+    ]
+    if execution_state is None:
+        if any(item is not None for item in execution_values) or any(
+            value.get(field) is not None
+            for field in ("tmux_session_id", "tmux_window_id", "tmux_pane_id")
         ):
             raise JobError("job record is invalid")
-    if project is None:
-        consistent = (
-            fingerprint is None
-            and workspace == "temporary"
-            and feature is None
-            and review_of is None
-            and landing_branch is None
-        )
     else:
-        consistent = (
-            fingerprint is not None
-            and workspace != "temporary"
-            and landing_branch is not None
-            and (workspace == "sprout") == (feature is not None)
-            and (workspace == "review") == (review_of is not None)
+        if not all(isinstance(item, str) and item for item in execution_values):
+            raise JobError("job record is invalid")
+        if not Path(value["tmux_socket"]).is_absolute():
+            raise JobError("job record is invalid")
+        if re.fullmatch(r"[a-f0-9]{64}", value["execution_token"]) is None:
+            raise JobError("job record is invalid")
+        identities = (
+            ("tmux_session_id", r"\$[0-9]+"),
+            ("tmux_window_id", r"@[0-9]+"),
+            ("tmux_pane_id", r"%[0-9]+"),
         )
-    if not consistent:
+        present = [value.get(field) is not None for field, _ in identities]
+        if any(present) and not all(present):
+            raise JobError("job record is invalid")
+        for field, pattern in identities:
+            item = value.get(field)
+            if item is not None and (
+                not isinstance(item, str) or re.fullmatch(pattern, item) is None
+            ):
+                raise JobError("job record is invalid")
+    cleanup = value.get("cleanup")
+    if cleanup is not None and (
+        not isinstance(cleanup, dict)
+        or set(cleanup) != {"action", "subject", "remove_workspace", "revision"}
+        or cleanup.get("action") not in {"stop", "land"}
+        or not isinstance(cleanup.get("remove_workspace"), bool)
+        or (
+            cleanup.get("subject") is not None
+            and not valid_record_text(cleanup.get("subject"), 500)
+        )
+        or (
+            cleanup.get("revision") is not None
+            and (
+                not isinstance(cleanup.get("revision"), str)
+                or re.fullmatch(r"[a-f0-9]{40,64}", cleanup["revision"]) is None
+            )
+        )
+    ):
+        raise JobError("job record is invalid")
+    project_consistent = (
+        project is None
+        and value.get("project_root") is None
+        and value.get("project_root_device") is None
+        and value.get("project_root_inode") is None
+        and fingerprint is None
+        and landing_branch is None
+        and workspace == "temporary"
+        or project is not None
+        and value.get("project_root") is not None
+        and value.get("project_root_device") is not None
+        and value.get("project_root_inode") is not None
+        and fingerprint is not None
+        and landing_branch is not None
+        and workspace != "temporary"
+    )
+    relation_consistent = (
+        (workspace == "sprout") == (feature is not None)
+        and (workspace == "review") == (review_of is not None)
+        and (review_of is None or review_of == parent)
+        and ((value["root_job"] == job_id) == (parent is None))
+    )
+    if not project_consistent or not relation_consistent:
         raise JobError("job record is invalid")
     return value
 
@@ -898,6 +1274,24 @@ def load_job(job_id: str) -> dict[str, Any]:
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
         raise JobError("job record is invalid") from error
     return validate_job_record(value, job_id)
+
+
+def load_legacy_job_for_reporting(job_id: str) -> dict[str, Any]:
+    path = job_dir(job_id) / "job.json"
+    try:
+        raw = read_regular(path, MAX_JOB_RECORD)
+        assert raw is not None
+        value = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise JobError("job record is invalid") from error
+    if (
+        not isinstance(value, dict)
+        or set(value) != LEGACY_JOB_FIELDS
+        or value.get("job_id") != job_id
+        or not valid_record_text(value.get("owner_session"), 512)
+    ):
+        raise JobError("job record is invalid")
+    return value
 
 
 def worker_environment() -> dict[str, str]:
@@ -924,10 +1318,12 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
     capability = validate_capability(launch_capability)
     auth = load_report_auth(job_id)
     expected_launch = auth["launch_capability_hash"]
-    if not isinstance(expected_launch, str) or not secrets.compare_digest(
-        capability_hash(capability), expected_launch
+    if (
+        auth["generation"] != job["generation"]
+        or not isinstance(expected_launch, str)
+        or not secrets.compare_digest(capability_hash(capability), expected_launch)
     ):
-        raise JobError("launch capability does not authorize this job")
+        raise JobError("launch capability does not authorize this generation")
     prompt = f"Read and follow {job_dir(job_id) / 'prompt.md'}"
     if job["harness"] == "pi":
         report_extension = (
@@ -952,10 +1348,10 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
             str(report_extension),
             "--no-extensions",
         ]
-        if job.get("workspace") == "review":
+        if job["workspace"] == "review":
             argv.extend(["--tools", "read,grep,find,ls,scufris_report"])
         argv.append(prompt)
-    elif job["harness"] == "claude":
+    else:
         argv = [
             "claude",
             "--dangerously-skip-permissions",
@@ -965,26 +1361,20 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
             job["thinking"],
             prompt,
         ]
-    else:
-        raise JobError("invalid harness")
     report_capability = secrets.token_hex(32)
     auth["launch_capability_hash"] = None
     auth["report_capability_hash"] = capability_hash(report_capability)
-    auth_path = job_dir(job_id) / ".report-auth.json"
-    auth_temporary = job_dir(job_id) / f".report-auth-{secrets.token_hex(16)}.tmp"
-    try:
-        write_new(auth_temporary, json.dumps(auth, sort_keys=True).encode(), 0o400)
-        os.replace(auth_temporary, auth_path)
-        directory_fd = os.open(job_dir(job_id), os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    finally:
-        auth_temporary.unlink(missing_ok=True)
+    atomic_write(
+        job_dir(job_id) / ".report-auth.json",
+        json.dumps(auth, sort_keys=True).encode(),
+        0o400,
+    )
+    (job_dir(job_id) / ".launch-capability").unlink(missing_ok=True)
+    fsync_directory(job_dir(job_id))
     env = worker_environment()
     env["SCUFRIS_ROLE"] = "worker"
     env["SCUFRIS_JOB_ID"] = job_id
+    env["SCUFRIS_JOB_GENERATION"] = str(job["generation"])
     env["SCUFRIS_REPORT_CAPABILITY"] = report_capability
     if job["harness"] == "claude":
         env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] = "false"
@@ -992,46 +1382,282 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
     if executable is None:
         raise JobError(f"harness executable not found: {argv[0]}")
     completed = subprocess.run([executable, *argv[1:]], env=env, check=False)
-    event_lines = (
-        read_regular_tail(job_dir(job_id) / "status", MAX_STATUS_DETAIL)
-        .decode("utf-8", errors="replace")
-        .splitlines()
-    )
-    last_event = next(
-        (parsed for line in reversed(event_lines) if (parsed := parse_event(line))),
-        None,
-    )
-    if not (job_dir(job_id) / ".stopping").exists() and (
-        last_event is None or last_event[0] != "failed"
-    ):
-        write_report(
-            job_id,
-            "failed",
-            "worker harness exited unexpectedly",
-            f"Worker harness exited with status {completed.returncode}.",
-        )
+    current = load_job(job_id)
+    if current["generation"] == job["generation"] and current["execution_state"]:
+        latest = latest_event(job_id)
+        if latest is None or latest["event"] not in TERMINAL_EVENTS:
+            write_report(
+                job_id,
+                "failed",
+                "worker harness exited unexpectedly",
+                f"Worker harness exited with status {completed.returncode}.",
+            )
     raise SystemExit(completed.returncode)
 
 
-def pane_alive(job: dict[str, Any]) -> bool:
-    pane = job.get("tmux_pane_id")
-    if not isinstance(pane, str):
-        return False
-    result = tmux(["display-message", "-p", "-t", pane, "#{pane_dead}"], check=False)
-    return result.returncode == 0 and result.stdout.strip() == b"0"
-
-
-def parse_event(line: str) -> tuple[str, str] | None:
-    if len(line.encode()) > MAX_EVENT_LINE or ": " not in line:
+def execution_snapshot(job: dict[str, Any]) -> dict[str, Any] | None:
+    if job["execution_state"] is None:
         return None
-    state, summary = line.split(": ", 1)
+    socket = explicit_tmux_socket(job["tmux_socket"])
+    if not socket.exists():
+        return None
+    name = job["tmux_session_name"]
+    result = tmux(
+        [
+            "display-message",
+            "-p",
+            "-t",
+            f"={name}:",
+            (
+                "#{session_name}\t#{session_id}\t#{window_id}\t#{pane_id}\t"
+                "#{@scufris_job_id}\t#{@scufris_execution_token}\t"
+                "#{@scufris_generation}\t#{@scufris_phase}\t#{pane_dead}"
+            ),
+        ],
+        socket=socket,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace").lower()
+        if any(
+            phrase in detail
+            for phrase in ("no server running", "can't find session", "no sessions")
+        ):
+            return None
+        raise JobError(detail.strip() or "tmux ownership query failed")
+    fields = result.stdout.decode().strip().split("\t")
+    if len(fields) != 9:
+        raise JobError("tmux ownership response is invalid")
+    snapshot = dict(
+        zip(
+            (
+                "name",
+                "session_id",
+                "window_id",
+                "pane_id",
+                "job_id",
+                "token",
+                "generation",
+                "phase",
+                "pane_dead",
+            ),
+            fields,
+            strict=True,
+        )
+    )
+    expected = {
+        "name": name,
+        "job_id": job["job_id"],
+        "token": job["execution_token"],
+        "generation": str(job["generation"]),
+    }
+    for key, value in expected.items():
+        if snapshot[key] != value:
+            raise JobError(f"tmux ownership mismatch: {key}")
+    for key, field in (
+        ("session_id", "tmux_session_id"),
+        ("window_id", "tmux_window_id"),
+        ("pane_id", "tmux_pane_id"),
+    ):
+        if job[field] is not None and snapshot[key] != job[field]:
+            raise JobError(f"tmux ownership mismatch: {key}")
+    return snapshot
+
+
+def record_snapshot(job: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
+    updated = {
+        **job,
+        "tmux_session_id": snapshot["session_id"],
+        "tmux_window_id": snapshot["window_id"],
+        "tmux_pane_id": snapshot["pane_id"],
+        "execution_state": "running" if snapshot["phase"] == "running" else "creating",
+    }
+    store_job(updated)
+    return updated
+
+
+def finish_precreated_execution(
+    job: dict[str, Any], snapshot: dict[str, Any]
+) -> dict[str, Any]:
+    job = record_snapshot(job, snapshot)
+    launch_path = job_dir(job["job_id"]) / ".launch-capability"
+    launch_capability = read_bounded_artifact(launch_path, 128).decode("ascii")
+    socket = explicit_tmux_socket(job["tmux_socket"])
+    tmux(
+        [
+            "respawn-pane",
+            "-k",
+            "-t",
+            job["tmux_pane_id"],
+            "-c",
+            job["working_directory"],
+            shlex.join(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "launch",
+                    job["job_id"],
+                    launch_capability,
+                ]
+            ),
+            ";",
+            "set-option",
+            "-t",
+            job["tmux_session_name"],
+            "@scufris_phase",
+            "running",
+        ],
+        socket=socket,
+    )
+    updated = {**job, "execution_state": "running"}
+    store_job(updated)
+    return updated
+
+
+def execution_ownership_condition(job: dict[str, Any]) -> str:
+    comparisons = [
+        f"#{{==:#{{session_name}},{job['tmux_session_name']}}}",
+        f"#{{==:#{{session_id}},{job['tmux_session_id']}}}",
+        f"#{{==:#{{window_id}},{job['tmux_window_id']}}}",
+        f"#{{==:#{{pane_id}},{job['tmux_pane_id']}}}",
+        f"#{{==:#{{@scufris_job_id}},{job['job_id']}}}",
+        f"#{{==:#{{@scufris_execution_token}},{job['execution_token']}}}",
+        f"#{{==:#{{@scufris_generation}},{job['generation']}}}",
+    ]
+    condition = comparisons[0]
+    for comparison in comparisons[1:]:
+        condition = "#{&&:" + condition + "," + comparison + "}"
+    return condition
+
+
+SNAPSHOT_UNSET = object()
+
+
+def stop_execution(
+    job: dict[str, Any], snapshot: dict[str, Any] | None | object = SNAPSHOT_UNSET
+) -> dict[str, Any]:
+    if job["execution_state"] is None:
+        return job
+    if snapshot is SNAPSHOT_UNSET:
+        snapshot = execution_snapshot(job)
+    if snapshot is None:
+        updated = clear_execution(job)
+        store_job(updated)
+        return updated
+    assert isinstance(snapshot, dict)
+    job = record_snapshot(job, snapshot)
+    condition = execution_ownership_condition(job)
+    result = tmux(
+        [
+            "if-shell",
+            "-F",
+            "-t",
+            f"={job['tmux_session_name']}:",
+            condition,
+            f"kill-session -t ={job['tmux_session_name']}",
+            "display-message -p scufris-ownership-mismatch",
+        ],
+        socket=Path(job["tmux_socket"]),
+        check=False,
+    )
+    output = result.stdout.decode("utf-8", "replace")
+    detail = result.stderr.decode("utf-8", "replace").lower()
+    absent = not Path(job["tmux_socket"]).exists() or any(
+        phrase in detail
+        for phrase in ("no server running", "can't find session", "no sessions")
+    )
+    if "scufris-ownership-mismatch" in output or (
+        result.returncode != 0 and not absent
+    ):
+        raise JobError("tmux atomic ownership validation refused termination")
+    updated = clear_execution(job)
+    store_job(updated)
+    return updated
+
+
+def clear_execution(job: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **job,
+        "execution_state": None,
+        "tmux_socket": None,
+        "tmux_session_name": None,
+        "tmux_session_id": None,
+        "tmux_window_id": None,
+        "tmux_pane_id": None,
+        "execution_token": None,
+    }
+
+
+def pane_alive(job: dict[str, Any]) -> bool:
+    try:
+        snapshot = execution_snapshot(job)
+    except JobError:
+        return False
+    return snapshot is not None and snapshot["pane_dead"] == "0"
+
+
+def parse_event(line: str) -> dict[str, Any] | None:
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError:
+        return None
     if (
-        state not in EVENTS
-        or not summary.strip()
-        or any(ord(char) < 32 for char in summary)
+        not isinstance(value, dict)
+        or set(value) != {"generation", "event", "summary"}
+        or not isinstance(value.get("generation"), int)
+        or value["generation"] < 1
+        or value.get("event") not in EVENTS
+        or not isinstance(value.get("summary"), str)
+        or not value["summary"].strip()
+        or len(value["summary"].encode("utf-8")) > MAX_EVENT_LINE
+        or any(ord(character) < 32 for character in value["summary"])
     ):
         return None
-    return state, summary
+    return value
+
+
+def event_line(generation: int, event: str, summary: str) -> bytes:
+    return (
+        json.dumps(
+            {"generation": generation, "event": event, "summary": summary},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
+
+
+def event_identity(job_id: str, start: int, end: int, raw: bytes) -> str:
+    digest = hashlib.sha256(raw).hexdigest()[:24]
+    return f"{job_id}:{start}:{end}:{digest}"
+
+
+def latest_event(
+    job_id: str, job: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    current = load_job(job_id) if job is None else job
+    descriptor = open_regular(job_dir(job_id) / "status")
+    try:
+        info = os.fstat(descriptor)
+        if (info.st_dev, info.st_ino) != (
+            current["status_device"],
+            current["status_inode"],
+        ):
+            raise JobError("status identity changed")
+        offset = max(0, info.st_size - MAX_STATUS_DETAIL)
+        os.lseek(descriptor, offset, os.SEEK_SET)
+        data = read_descriptor(descriptor, MAX_STATUS_DETAIL)
+        if offset and b"\n" in data:
+            data = data.split(b"\n", 1)[1]
+        elif offset:
+            data = b""
+    finally:
+        os.close(descriptor)
+    for line in reversed(data.decode("utf-8", "replace").splitlines()):
+        parsed = parse_event(line)
+        if parsed is not None:
+            return parsed
+    return None
 
 
 def write_all(descriptor: int, data: bytes) -> None:
@@ -1070,37 +1696,46 @@ def read_bounded_artifact(path: Path, maximum: int) -> bytes:
         os.close(descriptor)
 
 
-def write_report(job_id: str, event: str, summary: str, detail: str) -> None:
-    line = f"{event}: {summary}"
+def write_report(
+    job_id: str,
+    event: str,
+    summary: str,
+    detail: str,
+    *,
+    legacy: bool = False,
+) -> None:
+    display = f"{event}: {summary}"
     try:
-        encoded_line = line.encode("utf-8")
+        encoded_display = display.encode("utf-8")
         encoded_detail = detail.encode("utf-8")
     except UnicodeEncodeError as error:
         raise JobError("report must be valid UTF-8 text") from error
-    if parse_event(line) is None:
+    if (
+        event not in EVENTS
+        or not summary.strip()
+        or len(encoded_display) > MAX_EVENT_LINE
+        or any(ord(character) < 32 for character in summary)
+    ):
         raise JobError("invalid worker event")
     if len(encoded_detail) > MAX_REPORT_DETAIL:
         raise JobError("report detail is too large")
     body = detail.strip()
     if not body:
         raise JobError("report must be nonempty text")
-    encoded_body = body.encode("utf-8")
-    entry = b"# " + encoded_line + b"\n\n" + encoded_body + b"\n"
+    entry = b"# " + encoded_display + b"\n\n" + body.encode("utf-8") + b"\n"
     if len(entry) > MAX_REPORT_ENTRY:
         raise JobError("report entry is too large")
 
     directory = job_dir(job_id)
-    load_job(job_id)
     lock_fd = open_job_artifact(directory / "report.lock", os.O_RDWR)
     temporary = directory / f".report-{secrets.token_hex(16)}.tmp"
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        generation = 0 if legacy else load_job(job_id)["generation"]
         current = read_bounded_artifact(directory / "report.md", MAX_REPORT_FILE)
-        separator = b"\n" if current else b""
-        updated = current + separator + entry
+        updated = current + (b"\n" if current else b"") + entry
         if len(updated) > MAX_REPORT_FILE:
             updated = entry
-
         temporary_fd = os.open(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -1112,15 +1747,15 @@ def write_report(job_id: str, event: str, summary: str, detail: str) -> None:
         finally:
             os.close(temporary_fd)
         os.replace(temporary, directory / "report.md")
-        directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-
+        fsync_directory(directory)
         status_fd = open_job_artifact(directory / "status", os.O_WRONLY | os.O_APPEND)
         try:
-            write_all(status_fd, f"{line}\n".encode())
+            status_payload = (
+                f"{event}: {summary}\n".encode()
+                if legacy
+                else event_line(generation, event, summary)
+            )
+            write_all(status_fd, status_payload)
             os.fsync(status_fd)
         finally:
             os.close(status_fd)
@@ -1132,32 +1767,41 @@ def write_report(job_id: str, event: str, summary: str, detail: str) -> None:
 def report(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(request, {"job_id", "capability", "event", "summary", "report"})
     job_id = validate_job_id(request["job_id"])
-    load_job(job_id)
+    legacy = False
+    try:
+        job = load_job(job_id)
+    except JobError:
+        job = load_legacy_job_for_reporting(job_id)
+        legacy = True
     authorize_capability(job_id, request["capability"], False)
-    event, summary, detail = (
-        request["event"],
-        request["summary"],
-        request["report"],
-    )
+    auth = load_report_auth(job_id)
+    if not legacy and auth["generation"] != job["generation"]:
+        raise JobError("report capability belongs to an old generation")
+    event, summary, detail = request["event"], request["summary"], request["report"]
     if not isinstance(event, str) or not isinstance(summary, str):
         raise JobError("event and summary must be text")
     if event not in WORKER_EVENTS:
         raise JobError("workers may report only working, blocked, or done")
     if not isinstance(detail, str):
         raise JobError("report must be text")
-    write_report(job_id, event, summary, detail)
+    write_report(job_id, event, summary, detail, legacy=legacy)
     return {"job_id": job_id, "event": event, "summary": summary}
 
 
 def failure(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(request, {"job_id", "capability", "summary", "report"})
     job_id = validate_job_id(request["job_id"])
-    load_job(job_id)
+    legacy = False
+    try:
+        load_job(job_id)
+    except JobError:
+        load_legacy_job_for_reporting(job_id)
+        legacy = True
     authorize_capability(job_id, request["capability"], True)
     summary, detail = request["summary"], request["report"]
     if not isinstance(summary, str) or not isinstance(detail, str):
         raise JobError("summary and report must be text")
-    write_report(job_id, "failed", summary, detail)
+    write_report(job_id, "failed", summary, detail, legacy=legacy)
     return {"job_id": job_id, "event": "failed", "summary": summary}
 
 
@@ -1168,61 +1812,183 @@ def read_events(request: dict[str, Any]) -> dict[str, Any]:
         raise JobError("jobs must be an array")
     results: list[dict[str, Any]] = []
     for cursor in requested:
-        if not isinstance(cursor, dict) or set(cursor) != {
-            "job_id",
-            "offset",
-            "tail",
-            "inode",
-        }:
+        if not isinstance(cursor, dict) or set(cursor) != {"job_id"}:
             raise JobError("invalid event cursor")
         job_id = validate_job_id(cursor["job_id"])
-        offset, tail, inode = cursor["offset"], cursor["tail"], cursor["inode"]
-        if (
-            not isinstance(offset, int)
-            or offset < 0
-            or not isinstance(tail, str)
-            or (inode is not None and not isinstance(inode, int))
-        ):
-            raise JobError("invalid event cursor values")
+        job = load_job(job_id)
         path = job_dir(job_id) / "status"
         descriptor = open_regular(path)
         try:
             info = os.fstat(descriptor)
-            if inode != info.st_ino or offset > info.st_size:
-                offset, tail = 0, ""
-            os.lseek(descriptor, offset, os.SEEK_SET)
-            chunk = read_descriptor(descriptor, MAX_REQUEST + 1)
-            if len(chunk) > MAX_REQUEST:
-                raise JobError("status update is too large")
-            next_offset = os.lseek(descriptor, 0, os.SEEK_CUR)
+            if (info.st_dev, info.st_ino) != (
+                job["status_device"],
+                job["status_inode"],
+            ):
+                raise JobError("status identity changed")
+            if job["event_offset"] > info.st_size:
+                raise JobError("durable event cursor exceeds status size")
+            os.lseek(descriptor, job["event_offset"], os.SEEK_SET)
+            chunk = read_descriptor(descriptor, MAX_EVENT_BATCH)
         finally:
             os.close(descriptor)
-        text = tail + chunk.decode("utf-8", "replace")
-        lines = text.split("\n")
-        next_tail = lines.pop()
-        events: list[str] = []
-        errors: list[str] = []
-        for line in lines:
-            if not line:
-                continue
+        events: list[dict[str, Any]] = []
+        position = job["event_offset"]
+        terminal_seen = False
+        for raw in chunk.splitlines(keepends=True):
+            if not raw.endswith(b"\n"):
+                break
+            start = position
+            position += len(raw)
+            identity = event_identity(job_id, start, position, raw)
+            try:
+                line = raw[:-1].decode("utf-8", "strict")
+            except UnicodeDecodeError:
+                line = ""
             parsed = parse_event(line)
             if parsed is None:
-                errors.append(f"invalid worker event: {line[:200]}")
-            else:
-                events.append(line)
-        job = load_job(job_id)
+                events.append(
+                    {
+                        "id": identity,
+                        "start": start,
+                        "end": position,
+                        "generation": 0,
+                        "type": "invalid",
+                        "value": "invalid worker event",
+                        "line": line[:200],
+                    }
+                )
+                continue
+            if parsed["generation"] == job["generation"] and terminal_seen:
+                events.append(
+                    {
+                        "id": identity,
+                        "start": start,
+                        "end": position,
+                        "generation": parsed["generation"],
+                        "type": "invalid",
+                        "value": "event followed a terminal generation event",
+                        "line": f"{parsed['event']}: {parsed['summary']}",
+                    }
+                )
+                continue
+            if parsed["generation"] == job["generation"]:
+                job = {**job, "state": parsed["event"], "summary": parsed["summary"]}
+                if parsed["event"] in TERMINAL_EVENTS:
+                    job = stop_execution(job)
+                    terminal_seen = True
+                store_job(job)
+            events.append(
+                {
+                    "id": identity,
+                    "start": start,
+                    "end": position,
+                    "generation": parsed["generation"],
+                    "type": parsed["event"],
+                    "value": parsed["summary"],
+                    "line": f"{parsed['event']}: {parsed['summary']}",
+                }
+            )
         results.append(
             {
                 "job_id": job_id,
                 "events": events,
-                "errors": errors,
-                "offset": next_offset,
-                "tail": next_tail,
-                "inode": info.st_ino,
+                "generation": job["generation"],
+                "more": position < info.st_size,
                 "window_alive": pane_alive(job),
             }
         )
     return {"jobs": results}
+
+
+def acknowledge_event(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id", "event_id"})
+    job_id = validate_job_id(request["job_id"])
+    event_id = request["event_id"]
+    if not isinstance(event_id, str):
+        raise JobError("invalid event identity")
+    job = load_job(job_id)
+    descriptor = open_regular(job_dir(job_id) / "status")
+    try:
+        info = os.fstat(descriptor)
+        if (info.st_dev, info.st_ino) != (
+            job["status_device"],
+            job["status_inode"],
+        ):
+            raise JobError("status identity changed")
+        os.lseek(descriptor, job["event_offset"], os.SEEK_SET)
+        raw = bytearray()
+        while len(raw) <= MAX_EVENT_LINE:
+            character = os.read(descriptor, 1)
+            if not character:
+                break
+            raw.extend(character)
+            if character == b"\n":
+                break
+    finally:
+        os.close(descriptor)
+    if not raw.endswith(b"\n"):
+        raise JobError("event is not durably complete")
+    end = job["event_offset"] + len(raw)
+    expected = event_identity(job_id, job["event_offset"], end, bytes(raw))
+    if not secrets.compare_digest(event_id, expected):
+        raise JobError("event acknowledgement is out of order")
+    updated = {**job, "event_offset": end}
+    store_job(updated)
+    return {"job_id": job_id, "event_id": event_id, "offset": end}
+
+
+def validate_workspace_identity(job: dict[str, Any]) -> Path:
+    workspace = canonical_path(Path(job["working_directory"]))
+    if path_identity(workspace) != (
+        job["working_directory"],
+        job["workspace_device"],
+        job["workspace_inode"],
+    ):
+        raise JobError("workspace identity changed")
+    if job["project"] is not None:
+        root = canonical_path(Path(job["project_root"]))
+        if path_identity(root) != (
+            job["project_root"],
+            job["project_root_device"],
+            job["project_root_inode"],
+        ):
+            raise JobError("project root identity changed")
+        resolved_project, configured = resolve_project(job["project"])
+        if resolved_project != job["project"] or canonical_path(configured) != root:
+            raise JobError("project configuration drifted from the recorded root")
+        if job["workspace"] == "sprout":
+            shown = canonical_path(
+                Path(sprout(["show", job["feature"]], root).stdout.decode().strip())
+            )
+            if shown != workspace:
+                raise JobError("Sprout workspace no longer matches its record")
+    return workspace
+
+
+def append_conversation(job_id: str, message: str) -> None:
+    path = job_dir(job_id) / "conversation.md"
+    descriptor = open_job_artifact(path, os.O_WRONLY | os.O_APPEND)
+    try:
+        payload = f"\n## Foreground guidance\n\n{message}\n".encode()
+        write_all(descriptor, payload)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def restart_execution(job: dict[str, Any]) -> dict[str, Any]:
+    validate_workspace_identity(job)
+    if job["execution_state"] is not None:
+        job = stop_execution(job)
+    restarted = {
+        **job,
+        "generation": job["generation"] + 1,
+        "state": "working",
+        "summary": "foreground guidance submitted",
+    }
+    store_job(restarted)
+    prepared, capability = prepare_execution(restarted)
+    return start_execution(prepared, capability)
 
 
 def send(request: dict[str, Any]) -> dict[str, Any]:
@@ -1237,22 +2003,78 @@ def send(request: dict[str, Any]) -> dict[str, Any]:
     ):
         raise JobError("message must be one nonempty line")
     job = load_job(job_id)
-    if not pane_alive(job):
-        raise JobError("worker is not running")
-    pane = job["tmux_pane_id"]
-    buffer = f"scufris-{job_id}-{secrets.token_hex(4)}"
+    root = load_job(job["root_job"])
+    if root["cleanup"] is not None:
+        raise JobError("workflow cleanup is active; retry cleanup instead of steering")
+    append_conversation(job_id, message)
+    if job["state"] in TERMINAL_EVENTS or job["state"] == "suspended":
+        job = restart_execution(job)
+        return {
+            "job_id": job_id,
+            "sent": True,
+            "restarted": True,
+            "generation": job["generation"],
+            "status_file": str(job_dir(job_id) / "status"),
+        }
+    snapshot = execution_snapshot(job)
+    if snapshot is None or snapshot["pane_dead"] != "0":
+        job = {**job, "state": "failed", "summary": "worker execution was lost"}
+        if job["execution_state"] is not None:
+            job = clear_execution(job)
+            store_job(job)
+        job = restart_execution(job)
+        return {
+            "job_id": job_id,
+            "sent": True,
+            "restarted": True,
+            "generation": job["generation"],
+            "status_file": str(job_dir(job_id) / "status"),
+        }
+    buffer = f"scufris-{job_id}-{secrets.token_hex(8)}"
+    socket = Path(job["tmux_socket"])
     try:
-        tmux(["load-buffer", "-b", buffer, "-"], input_bytes=message.encode())
-        tmux(["paste-buffer", "-b", buffer, "-t", pane, "-d"])
-        tmux(["send-keys", "-t", pane, "Enter"])
+        tmux(
+            ["load-buffer", "-b", buffer, "-"],
+            socket=socket,
+            input_bytes=message.encode(),
+        )
+        condition = execution_ownership_condition(job)
+        routed = tmux(
+            [
+                "if-shell",
+                "-F",
+                "-t",
+                job["tmux_pane_id"],
+                condition,
+                (
+                    f"paste-buffer -b {buffer} -t {job['tmux_pane_id']} -d ; "
+                    f"send-keys -t {job['tmux_pane_id']} Enter"
+                ),
+                "display-message -p scufris-ownership-mismatch",
+            ],
+            socket=socket,
+            check=False,
+        )
+        if routed.returncode != 0 or b"scufris-ownership-mismatch" in routed.stdout:
+            raise JobError("tmux atomic ownership validation refused steering")
     finally:
-        tmux(["delete-buffer", "-b", buffer], check=False)
-    return {"job_id": job_id, "sent": True}
+        tmux(["delete-buffer", "-b", buffer], socket=socket, check=False)
+    updated = {**job, "state": "working", "summary": "foreground guidance submitted"}
+    store_job(updated)
+    return {
+        "job_id": job_id,
+        "sent": True,
+        "restarted": False,
+        "generation": updated["generation"],
+        "status_file": str(job_dir(job_id) / "status"),
+    }
 
 
 def inspect(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(
-        request, {"job_id"}, {"include_report", "include_context", "include_prompt"}
+        request,
+        {"job_id"},
+        {"include_report", "include_context", "include_prompt", "include_conversation"},
     )
     job_id = validate_job_id(request["job_id"])
     job = load_job(job_id)
@@ -1262,7 +2084,11 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
         for key in (
             "job_id",
             "owner_session",
+            "workflow_id",
+            "root_job",
+            "parent_job",
             "project",
+            "project_root",
             "workspace",
             "feature",
             "review_of",
@@ -1275,6 +2101,13 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
             "summary",
             "created_at",
             "context_fingerprint",
+            "generation",
+            "event_offset",
+            "status_device",
+            "status_inode",
+            "execution_state",
+            "tmux_socket",
+            "tmux_session_name",
             "tmux_session_id",
             "tmux_window_id",
             "tmux_pane_id",
@@ -1285,12 +2118,14 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
         "utf-8", errors="replace"
     )
     event_lines = status.splitlines()
-    result["events"] = event_lines[-100:]
-    for line in reversed(event_lines):
-        event = parse_event(line)
-        if event is not None:
-            result["state"], result["summary"] = event
-            break
+    parsed_events = [event for line in event_lines if (event := parse_event(line))]
+    result["events"] = [
+        f"g{event['generation']} {event['event']}: {event['summary']}"
+        for event in parsed_events[-100:]
+    ]
+    if parsed_events:
+        result["state"] = parsed_events[-1]["event"]
+        result["summary"] = parsed_events[-1]["summary"]
     for enabled, name, key in (
         (request.get("include_report", False), "report.md", "report"),
         (
@@ -1299,6 +2134,11 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
             "project_context",
         ),
         (request.get("include_prompt", False), "prompt.md", "prompt"),
+        (
+            request.get("include_conversation", False),
+            "conversation.md",
+            "conversation",
+        ),
     ):
         if enabled:
             maximum = MAX_REPORT_FILE if name == "report.md" else MAX_REPORT_DETAIL
@@ -1648,12 +2488,172 @@ def review_target(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def mark_stopping(job_id: str) -> None:
-    path = job_dir(job_id) / ".stopping"
+def secure_rmtree(path: Path) -> None:
     try:
-        write_new(path, b"", 0o600)
-    except FileExistsError:
-        pass
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        raise JobError(f"refusing unsafe directory removal: {path}")
+
+    def empty(descriptor: int) -> None:
+        with os.scandir(descriptor) as entries:
+            names = [entry.name for entry in entries]
+        for name in names:
+            child_info = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            if stat.S_ISDIR(child_info.st_mode) and not stat.S_ISLNK(
+                child_info.st_mode
+            ):
+                child = os.open(
+                    name,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=descriptor,
+                )
+                try:
+                    empty(child)
+                finally:
+                    os.close(child)
+                os.rmdir(name, dir_fd=descriptor)
+            else:
+                os.unlink(name, dir_fd=descriptor)
+
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        if os.fstat(descriptor).st_ino != info.st_ino:
+            raise JobError(f"directory identity changed during cleanup: {path}")
+        empty(descriptor)
+    finally:
+        os.close(descriptor)
+    path.rmdir()
+    fsync_directory(path.parent)
+
+
+def all_job_records() -> list[dict[str, Any]]:
+    root = jobs_root()
+    try:
+        canonical_path(root)
+    except JobError:
+        if not root.exists():
+            return []
+        raise
+    records: list[dict[str, Any]] = []
+    with os.scandir(root) as entries:
+        for entry in entries:
+            if not JOB_ID.fullmatch(entry.name):
+                continue
+            if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                raise JobError(f"unsafe job directory: {entry.name}")
+            records.append(load_job(entry.name))
+    return records
+
+
+def workflow_records(selected: dict[str, Any]) -> list[dict[str, Any]]:
+    records = [
+        record
+        for record in all_job_records()
+        if record["root_job"] == selected["root_job"]
+        and record["workflow_id"] == selected["workflow_id"]
+        and record["owner_session"] == selected["owner_session"]
+    ]
+    by_id = {record["job_id"]: record for record in records}
+    root = by_id.get(selected["root_job"])
+    if root is None or root["parent_job"] is not None:
+        raise JobError("workflow root record is unavailable")
+    for record in records:
+        parent = record["parent_job"]
+        if parent is not None and parent not in by_id and root["cleanup"] is None:
+            raise JobError("workflow descendant has an invalid parent")
+        if record["project"] != root["project"]:
+            raise JobError("workflow descendant project mismatch")
+    return records
+
+
+def graph_depth(record: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> int:
+    depth = 0
+    parent = record["parent_job"]
+    seen = {record["job_id"]}
+    while parent is not None:
+        if parent in seen:
+            raise JobError("workflow graph contains a cycle")
+        seen.add(parent)
+        depth += 1
+        if parent not in by_id:
+            break
+        parent = by_id[parent]["parent_job"]
+    return depth
+
+
+def remove_sprout_workspace(job: dict[str, Any]) -> None:
+    if job["workspace"] != "sprout":
+        return
+    workspace = Path(job["working_directory"])
+    root = canonical_path(Path(job["project_root"]))
+    if path_identity(root) != (
+        job["project_root"],
+        job["project_root_device"],
+        job["project_root_inode"],
+    ):
+        raise JobError("project root identity changed before Sprout removal")
+    resolved_project, configured = resolve_project(job["project"])
+    if resolved_project != job["project"] or canonical_path(configured) != root:
+        raise JobError("project configuration drifted before Sprout removal")
+    shown_result = run(["sprout", "show", job["feature"]], cwd=root, check=False)
+    if shown_result.returncode != 0:
+        if workspace.exists() or workspace.is_symlink():
+            raise JobError(
+                "Sprout feature is absent but its recorded workspace remains"
+            )
+        return
+    shown = shown_result.stdout.decode().strip()
+    if canonical_path(Path(shown)) != canonical_path(workspace):
+        raise JobError("Sprout feature points at a different workspace")
+    sprout(["rm", job["feature"]], root)
+
+
+def stop_workflow_executions(records: list[dict[str, Any]]) -> None:
+    errors: list[str] = []
+    for record in records:
+        try:
+            stop_execution(record)
+        except JobError as error:
+            errors.append(f"{record['job_id']}: {error}")
+    if errors:
+        raise JobError("workflow execution cleanup incomplete: " + "; ".join(errors))
+
+
+def cleanup_workflow(selected: dict[str, Any]) -> dict[str, Any]:
+    records = workflow_records(selected)
+    by_id = {record["job_id"]: record for record in records}
+    ordered = sorted(
+        records, key=lambda record: graph_depth(record, by_id), reverse=True
+    )
+    errors: list[str] = []
+    stop_workflow_executions(ordered)
+    for record in ordered:
+        if record["workspace"] == "sprout":
+            try:
+                remove_sprout_workspace(record)
+            except (JobError, subprocess.SubprocessError) as error:
+                errors.append(f"{record['job_id']}: {error}")
+    if errors:
+        raise JobError("workflow workspace cleanup incomplete: " + "; ".join(errors))
+    root_id = selected["root_job"]
+    removed: list[str] = []
+    for record in ordered:
+        if record["job_id"] == root_id:
+            continue
+        try:
+            secure_rmtree(job_dir(record["job_id"]))
+            removed.append(record["job_id"])
+        except (JobError, OSError) as error:
+            errors.append(f"{record['job_id']}: {error}")
+    if errors:
+        raise JobError(
+            "workflow record cleanup incomplete; root retained: " + "; ".join(errors)
+        )
+    secure_rmtree(job_dir(root_id))
+    removed.append(root_id)
+    return {"root_job": root_id, "removed_jobs": removed, "clean": True}
 
 
 def land(request: dict[str, Any]) -> dict[str, Any]:
@@ -1662,41 +2662,233 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
     subject = request["subject"]
     if not isinstance(subject, str) or not subject.strip() or "\n" in subject:
         raise JobError("landing subject must be one nonempty line")
-    job = load_job(job_id)
-    if job.get("workspace") != "sprout":
-        raise JobError("landing requires a Sprout project job")
-    project = job.get("project")
-    feature = job.get("feature")
-    if not isinstance(project, str) or not isinstance(feature, str):
-        raise JobError("landing job metadata is invalid")
-    _, root = resolve_project(project)
-    sprout(["land", feature, "--dry-run", "-m", subject], root)
-    sprout(["land", feature, "-m", subject], root)
-    mark_stopping(job_id)
-    session = job.get("tmux_session_id")
-    if isinstance(session, str):
-        tmux(["kill-session", "-t", session], check=False)
-    removed = bool(request.get("remove_workspace", False))
-    if removed:
-        sprout(["rm", feature], root)
-    return {"job_id": job_id, "landed": True, "workspace_removed": removed}
+    selected = load_job(job_id)
+    root = load_job(selected["root_job"])
+    if root["workspace"] != "sprout":
+        raise JobError("landing requires a Sprout workflow root")
+    if root["cleanup"] is None:
+        cwd = validate_workspace_identity(root)
+        revision = run(["git", "rev-parse", "HEAD"], cwd=cwd).stdout.decode().strip()
+        intent = {
+            "action": "land",
+            "subject": subject,
+            "remove_workspace": True,
+            "revision": revision,
+        }
+        root = {**root, "cleanup": intent}
+        store_job(root)
+    else:
+        intent = root["cleanup"]
+        if (
+            intent["action"] != "land"
+            or intent["subject"] != subject
+            or not intent["remove_workspace"]
+            or not isinstance(intent["revision"], str)
+        ):
+            raise JobError("a different cleanup operation is already durable")
+        revision = intent["revision"]
+    stop_workflow_executions(workflow_records(root))
+    project_root = canonical_path(Path(root["project_root"]))
+    branch = root["landing_branch"]
+    already_landed = (
+        run(
+            ["git", "merge-base", "--is-ancestor", revision, f"refs/heads/{branch}"],
+            cwd=project_root,
+            check=False,
+        ).returncode
+        == 0
+    )
+    if not already_landed and Path(root["working_directory"]).exists():
+        feature_tree = run(
+            ["git", "rev-parse", f"{revision}^{{tree}}"], cwd=project_root
+        ).stdout.strip()
+        branch_tree = run(
+            ["git", "rev-parse", f"refs/heads/{branch}^{{tree}}"], cwd=project_root
+        ).stdout.strip()
+        already_landed = feature_tree == branch_tree
+    if not already_landed:
+        validate_workspace_identity(root)
+        sprout(["land", root["feature"], "--dry-run", "-m", subject], project_root)
+        sprout(["land", root["feature"], "-m", subject], project_root)
+        landed_revision = (
+            run(["git", "rev-parse", f"refs/heads/{branch}"], cwd=project_root)
+            .stdout.decode()
+            .strip()
+        )
+        root = load_job(root["job_id"])
+        root = {**root, "cleanup": {**intent, "revision": landed_revision}}
+        store_job(root)
+    result = cleanup_workflow(root)
+    return {"job_id": job_id, "landed": True, "workspace_removed": True, **result}
 
 
 def stop(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(request, {"job_id"}, {"remove_workspace"})
     job_id = validate_job_id(request["job_id"])
-    job = load_job(job_id)
-    mark_stopping(job_id)
-    session = job.get("tmux_session_id")
-    if isinstance(session, str):
-        tmux(["kill-session", "-t", session], check=False)
-    if request.get("remove_workspace", False) and job.get("workspace") == "sprout":
-        project = job.get("project")
-        feature = job.get("feature")
-        if isinstance(project, str) and isinstance(feature, str):
-            _, root = resolve_project(project)
-            sprout(["rm", feature], root)
-    return {"job_id": job_id, "state": "stopped"}
+    directory = job_dir(job_id)
+    if not directory.exists() and not directory.is_symlink():
+        return {"job_id": job_id, "state": "stopped", "clean": True, "removed_jobs": []}
+    selected = load_job(job_id)
+    root = load_job(selected["root_job"])
+    intent = {
+        "action": "stop",
+        "subject": None,
+        "remove_workspace": True,
+        "revision": None,
+    }
+    if root["cleanup"] is not None and root["cleanup"] != intent:
+        raise JobError("a different cleanup operation is already durable")
+    root = {**root, "cleanup": intent}
+    store_job(root)
+    result = cleanup_workflow(root)
+    return {"job_id": job_id, "state": "stopped", **result}
+
+
+def rotate_trusted_capability(job: dict[str, Any]) -> str:
+    capability = secrets.token_hex(32)
+    auth = load_report_auth(job["job_id"])
+    auth["trusted_capability_hash"] = capability_hash(capability)
+    atomic_write(
+        job_dir(job["job_id"]) / ".report-auth.json",
+        json.dumps(auth, sort_keys=True).encode(),
+        0o400,
+    )
+    return capability
+
+
+def recover_job(job: dict[str, Any]) -> dict[str, Any]:
+    root = load_job(job["root_job"])
+    if root["cleanup"] is not None:
+        if job["execution_state"] is not None:
+            job = stop_execution(job)
+        job = {
+            **job,
+            "state": "suspended",
+            "summary": "workflow cleanup is incomplete",
+        }
+        store_job(job)
+        return job
+    latest = latest_event(job["job_id"], job)
+    if (
+        latest is not None
+        and latest["generation"] == job["generation"]
+        and latest["event"] in TERMINAL_EVENTS
+    ):
+        job = {**job, "state": latest["event"], "summary": latest["summary"]}
+    snapshot = execution_snapshot(job) if job["execution_state"] is not None else None
+    if job["state"] in TERMINAL_EVENTS:
+        if snapshot is not None:
+            job = stop_execution(job, snapshot)
+        elif job["execution_state"] is not None:
+            job = clear_execution(job)
+            store_job(job)
+        else:
+            store_job(job)
+    elif job["execution_state"] == "creating":
+        if snapshot is None:
+            capability = read_bounded_artifact(
+                job_dir(job["job_id"]) / ".launch-capability", 128
+            ).decode("ascii")
+            job = start_execution(job, capability)
+        elif snapshot["phase"] == "creating":
+            job = finish_precreated_execution(job, snapshot)
+        else:
+            job = record_snapshot(job, snapshot)
+    elif job["execution_state"] == "running":
+        if snapshot is None or snapshot["pane_dead"] != "0":
+            if snapshot is not None:
+                job = stop_execution(job, snapshot)
+            else:
+                job = clear_execution(job)
+                store_job(job)
+            write_report(
+                job["job_id"],
+                "failed",
+                "worker execution was lost",
+                "Startup reconciliation found no live execution for this logical job.",
+            )
+            job = {**job, "state": "failed", "summary": "worker execution was lost"}
+            store_job(job)
+        else:
+            job = record_snapshot(job, snapshot)
+    elif job["execution_state"] is None and job["state"] in {"working", "blocked"}:
+        write_report(
+            job["job_id"],
+            "failed",
+            "execution creation was interrupted",
+            "Startup reconciliation found a nonterminal logical job with no owned execution.",
+        )
+        job = {
+            **job,
+            "state": "failed",
+            "summary": "execution creation was interrupted",
+        }
+        store_job(job)
+    return job
+
+
+def recover(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"owner_session"})
+    owner = request["owner_session"]
+    if not valid_record_text(owner, 512):
+        raise JobError("owner session must be text")
+    recovered: list[dict[str, Any]] = []
+    for job in all_job_records():
+        if job["owner_session"] != owner:
+            continue
+        job = recover_job(job)
+        capability = rotate_trusted_capability(job)
+        recovered.append(
+            {
+                **{
+                    key: job[key]
+                    for key in (
+                        "job_id",
+                        "state",
+                        "project",
+                        "workspace",
+                        "feature",
+                        "harness",
+                        "model",
+                        "thinking",
+                        "generation",
+                        "tmux_session_name",
+                        "root_job",
+                        "parent_job",
+                        "workflow_id",
+                    )
+                },
+                "tmux_session": job["tmux_session_name"],
+                "status_file": str(job_dir(job["job_id"]) / "status"),
+                "trusted_capability": capability,
+                "summary": job["summary"],
+                "window_alive": pane_alive(job),
+            }
+        )
+    return {"jobs": recovered}
+
+
+def suspend_owner(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"owner_session"})
+    owner = request["owner_session"]
+    errors: list[str] = []
+    suspended: list[str] = []
+    for job in all_job_records():
+        if job["owner_session"] != owner or job["execution_state"] is None:
+            continue
+        try:
+            job = stop_execution(job)
+            if job["state"] not in TERMINAL_EVENTS:
+                job = {
+                    **job,
+                    "state": "suspended",
+                    "summary": "foreground session stopped",
+                }
+                store_job(job)
+            suspended.append(job["job_id"])
+        except JobError as error:
+            errors.append(f"{job['job_id']}: {error}")
+    return {"job_ids": suspended, "errors": errors}
 
 
 def orphans(request: dict[str, Any]) -> dict[str, Any]:
@@ -1704,19 +2896,13 @@ def orphans(request: dict[str, Any]) -> dict[str, Any]:
     owner = request["owner_session"]
     if not isinstance(owner, str):
         raise JobError("owner session must be text")
-    found: list[str] = []
-    root = jobs_root()
-    if root.exists():
-        for directory in root.iterdir():
-            if not directory.is_dir() or not JOB_ID.fullmatch(directory.name):
-                continue
-            try:
-                job = load_job(directory.name)
-            except JobError:
-                continue
-            if job.get("owner_session") != owner and pane_alive(job):
-                found.append(directory.name)
-    return {"job_ids": sorted(found)}
+    return {
+        "job_ids": sorted(
+            job["job_id"]
+            for job in all_job_records()
+            if job["owner_session"] != owner and pane_alive(job)
+        )
+    }
 
 
 def main() -> int:
@@ -1730,6 +2916,7 @@ def main() -> int:
         "context": context,
         "spawn": spawn,
         "events": read_events,
+        "ack-event": acknowledge_event,
         "report": report,
         "failure": failure,
         "send": send,
@@ -1742,6 +2929,8 @@ def main() -> int:
         "review-target": review_target,
         "land": land,
         "stop": stop,
+        "recover": recover,
+        "suspend-owner": suspend_owner,
         "orphans": orphans,
     }
     handler = handlers.get(command)
@@ -1754,7 +2943,24 @@ def main() -> int:
         request = json.loads(raw or b"{}")
     except json.JSONDecodeError as error:
         raise JobError("request is not valid JSON") from error
-    result = handler(request)
+    mutating = {
+        "spawn",
+        "events",
+        "ack-event",
+        "report",
+        "failure",
+        "send",
+        "invalidate-quick-review",
+        "land",
+        "stop",
+        "recover",
+        "suspend-owner",
+    }
+    if command in mutating:
+        with workflow_lock():
+            result = handler(request)
+    else:
+        result = handler(request)
     print(json.dumps({"ok": True, "result": result}, sort_keys=True))
     return 0
 

@@ -5,6 +5,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -27,9 +28,10 @@ directory = prompt.parent
 (directory / 'worker-prompt.txt').write_text(prompt.read_text())
 (directory / 'worker-argv.json').write_text(__import__('json').dumps(sys.argv[1:]))
 (directory / 'worker-capability').write_text(__import__('os').environ['SCUFRIS_REPORT_CAPABILITY'])
+generation = int(__import__('os').environ['SCUFRIS_JOB_GENERATION'])
 with (directory / 'status').open('a') as stream:
-    stream.write('working: fake worker started\\n')
-    stream.write('done: report complete\\n')
+    for event, summary in [('working', 'fake worker started'), ('done', 'report complete')]:
+        stream.write(__import__('json').dumps({'generation': generation, 'event': event, 'summary': summary}, separators=(',', ':')) + '\\n')
 for line in sys.stdin:
     with (directory / 'received').open('a') as stream:
         stream.write(line)
@@ -54,8 +56,9 @@ import pathlib
 import sys
 prompt = pathlib.Path(sys.argv[-1].removeprefix('Read and follow '))
 directory = prompt.parent
+generation = int(__import__('os').environ['SCUFRIS_JOB_GENERATION'])
 with (directory / 'status').open('a') as stream:
-    stream.write('done: assignment complete\\n')
+    stream.write(__import__('json').dumps({'generation': generation, 'event': 'done', 'summary': 'assignment complete'}, separators=(',', ':')) + '\\n')
 """
 
 
@@ -111,12 +114,13 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
             capture_output=True,
         )
         self.env = os.environ.copy()
-        self.env.pop("TMUX", None)
+        for selector in ("TMUX", "TMUX_PANE", "TMUX_TMPDIR"):
+            self.env.pop(selector, None)
         self.env.update(
             {
                 "PATH": f"{self.bin}:{self.env['PATH']}",
                 "XDG_STATE_HOME": str(self.root / "state"),
-                "TMUX_TMPDIR": str(self.root / "tmux"),
+                "SCUFRIS_TMUX_SOCKET": str(self.root / "tmux" / "jobs.sock"),
                 "SCUFRIS_PROJECT_ROOTS": json.dumps([str(self.projects)]),
             }
         )
@@ -154,6 +158,21 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
             self.fail(f"helper failed: {value} stderr={result.stderr}")
         return value
 
+    def tmux(
+        self, *arguments: str, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        result = subprocess.run(
+            ["tmux", "-S", self.env["SCUFRIS_TMUX_SOCKET"], *arguments],
+            text=True,
+            capture_output=True,
+            env=self.env,
+            timeout=10,
+            check=False,
+        )
+        if check and result.returncode != 0:
+            self.fail(f"tmux failed: {result.stderr}")
+        return result
+
     def cli(
         self, *arguments: str, check: bool = True
     ) -> subprocess.CompletedProcess[str]:
@@ -175,15 +194,32 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
     def fixture_job(self, job_id: str, overrides: dict[str, Any] | None = None) -> Path:
         directory = self.root / "state" / "scufris" / "jobs" / job_id
         directory.mkdir(parents=True)
+        status = directory / "status"
+        status.write_text(
+            json.dumps(
+                {"generation": 1, "event": "working", "summary": "fixture started"},
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
         record: dict[str, Any] = {
+            "version": 2,
             "job_id": job_id,
             "owner_session": "fixture-owner",
+            "workflow_id": hashlib.sha256(f"workflow:{job_id}".encode()).hexdigest(),
+            "root_job": job_id,
+            "parent_job": None,
             "project": None,
+            "project_root": None,
+            "project_root_device": None,
+            "project_root_inode": None,
             "context_fingerprint": None,
             "workspace": "temporary",
             "feature": None,
             "review_of": None,
             "working_directory": str(directory / "workspace"),
+            "workspace_device": self.root.stat().st_dev,
+            "workspace_inode": self.root.stat().st_ino,
             "landing_branch": None,
             "harness": "pi",
             "model": "fixture-model",
@@ -191,15 +227,24 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
             "state": "working",
             "summary": "fixture starting",
             "created_at": "2026-08-23T12:00:00Z",
-            "tmux_session_id": "$99991",
-            "tmux_window_id": "@99992",
-            "tmux_pane_id": "%99993",
+            "generation": 1,
+            "event_offset": 0,
+            "status_device": status.stat().st_dev,
+            "status_inode": status.stat().st_ino,
+            "execution_state": None,
+            "tmux_socket": None,
+            "tmux_session_name": None,
+            "tmux_session_id": None,
+            "tmux_window_id": None,
+            "tmux_pane_id": None,
+            "execution_token": None,
+            "cleanup": None,
         }
         record.update(overrides or {})
         (directory / "job.json").write_text(json.dumps(record))
-        (directory / "status").write_text("working: fixture started\n")
         (directory / "report.md").write_text("")
         (directory / "prompt.md").write_text("Fixture prompt.\n")
+        (directory / "conversation.md").write_text("")
         return directory
 
     def worker_capability(self, job_id: str) -> str:
@@ -210,8 +255,22 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
     def wait_for(self, path: Path, text: str) -> None:
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
-            if path.exists() and text in path.read_text():
-                return
+            if path.exists():
+                content = path.read_text()
+                if text in content:
+                    return
+                if ": " in text:
+                    event, summary = text.split(": ", 1)
+                    for line in content.splitlines():
+                        try:
+                            value = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if (
+                            value.get("event") == event
+                            and value.get("summary") == summary
+                        ):
+                            return
             time.sleep(0.05)
         self.fail(f"timed out waiting for {text!r} in {path}")
 
@@ -308,9 +367,16 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         (directory / "project-context.md").write_text(escape_text)
         (directory / "prompt.md").write_text(escape_text)
         status_summary = "status\u009b31m text"
-        status_lines = (
-            "".join(f"working: update {index}\n" for index in range(20000))
-            + f"working: {status_summary}\n"
+        status_lines = "".join(
+            json.dumps(
+                {"generation": 1, "event": "working", "summary": summary},
+                separators=(",", ":"),
+            )
+            + "\n"
+            for summary in [
+                *(f"update {index}" for index in range(20000)),
+                status_summary,
+            ]
         )
         (directory / "status").write_text(status_lines)
 
@@ -341,7 +407,13 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         model = "界" * 20
         summary = ("界e\u0301" * 40) + " end"
         directory = self.fixture_job("500000000001", {"model": model})
-        (directory / "status").write_text(f"working: {summary}\n")
+        (directory / "status").write_text(
+            json.dumps(
+                {"generation": 1, "event": "working", "summary": summary},
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
         parsed = json.loads(self.cli("all", "--json").stdout)["jobs"][0]
         self.assertEqual(parsed["model"], model)
         self.assertEqual(parsed["summary"], summary)
@@ -362,7 +434,7 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.assertEqual(cells(row), cells(separator))
         self.assertIn("...", row)
 
-    def test_done_remains_nonterminal_and_harness_exit_generates_failure(self) -> None:
+    def test_done_is_terminal_without_spurious_harness_failure(self) -> None:
         executable = self.bin / "pi"
         executable.write_text(FAKE_PI_EXIT_AFTER_DONE)
         executable.chmod(0o755)
@@ -377,20 +449,18 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         )
         self.jobs.append(job_id)
         status = self.root / "state" / "scufris" / "jobs" / job_id / "status"
-        self.wait_for(status, "failed: worker harness exited unexpectedly")
+        self.wait_for(status, '"event":"done","summary":"assignment complete"')
+        events = self.call("events", {"jobs": [{"job_id": job_id}]})["result"]["jobs"][
+            0
+        ]
         self.assertEqual(
-            status.read_text().splitlines(),
-            [
-                "done: assignment complete",
-                "failed: worker harness exited unexpectedly",
-            ],
+            [event["line"] for event in events["events"]],
+            ["done: assignment complete"],
         )
-        report = status.with_name("report.md").read_text()
-        self.assertEqual(
-            report,
-            "# failed: worker harness exited unexpectedly\n\n"
-            "Worker harness exited with status 0.\n",
-        )
+        inspected = self.call("inspect", {"job_id": job_id})["result"]
+        self.assertEqual(inspected["state"], "done")
+        self.assertFalse(inspected["window_alive"])
+        self.assertNotIn("worker harness exited unexpectedly", status.read_text())
 
     def test_project_context_is_canonical_and_malformed_config_is_ignored(self) -> None:
         projects = self.call("projects", {})["result"]["projects"]
@@ -423,7 +493,9 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.assertEqual(result["model"], "openai-codex/gpt-5.6-sol")
         self.assertEqual(result["thinking"], "medium")
         directory = self.root / "state" / "scufris" / "jobs" / job_id
-        self.wait_for(directory / "status", "done: report complete")
+        self.wait_for(
+            directory / "status", '"event":"done","summary":"report complete"'
+        )
         self.assertTrue((directory / "workspace").is_dir())
         self.assertFalse((directory / "project-context.md").exists())
         prompt = (directory / "prompt.md").read_text()
@@ -433,14 +505,15 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.assertIn("You cannot report `failed`", prompt)
         self.assertIn("Call the `scufris_report` tool.", prompt)
 
-        events = self.call(
-            "events",
-            {"jobs": [{"job_id": job_id, "offset": 0, "tail": "", "inode": None}]},
-        )["result"]["jobs"][0]
+        events = self.call("events", {"jobs": [{"job_id": job_id}]})["result"]["jobs"][
+            0
+        ]
         self.assertEqual(
-            events["events"],
+            [event["line"] for event in events["events"]],
             ["working: fake worker started", "done: report complete"],
         )
+        for event in events["events"]:
+            self.call("ack-event", {"job_id": job_id, "event_id": event["id"]})
         worker_capability = self.worker_capability(job_id)
         reporter_env = {
             **self.env,
@@ -507,26 +580,18 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
             "result"
         ]
         self.assertEqual(inspected["report"], (directory / "report.md").read_text())
-        next_events = self.call(
-            "events",
-            {
-                "jobs": [
-                    {
-                        "job_id": job_id,
-                        "offset": events["offset"],
-                        "tail": events["tail"],
-                        "inode": events["inode"],
-                    }
-                ]
-            },
-        )["result"]["jobs"][0]
+        next_events = self.call("events", {"jobs": [{"job_id": job_id}]})["result"][
+            "jobs"
+        ][0]
         self.assertEqual(
-            next_events["events"],
+            [event["line"] for event in next_events["events"]],
             [
                 "working: report adapter verified",
                 "done: research report complete",
             ],
         )
+        for event in next_events["events"]:
+            self.call("ack-event", {"job_id": job_id, "event_id": event["id"]})
         large_detail = "x" * (500 * 1024)
         for index in range(5):
             self.call(
@@ -544,8 +609,14 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.assertTrue(bounded_report.startswith("# working: bounded update 4\n"))
         self.assertNotIn("# working: bounded update 3\n", bounded_report)
 
-        self.call("send", {"job_id": job_id, "message": "Continue carefully."})
-        self.wait_for(directory / "received", "Continue carefully.")
+        restarted = self.call(
+            "send", {"job_id": job_id, "message": "Continue carefully."}
+        )["result"]
+        self.assertTrue(restarted["restarted"])
+        self.assertEqual(restarted["generation"], 2)
+        self.assertIn(
+            "Continue carefully.", (directory / "conversation.md").read_text()
+        )
 
         listed_jobs = json.loads(self.cli("all", "--json").stdout)["jobs"]
         self.assertEqual([item["job_id"] for item in listed_jobs], [job_id])
@@ -563,19 +634,17 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.assertIn("Created: ", detail)
         self.assertIn(f"Working directory: {directory / 'workspace'}", detail)
         self.assertIn("Tmux pane ID: %", detail)
-        self.assertIn("  working: report adapter verified\n", detail)
+        self.assertIn("  g1 working: report adapter verified\n", detail)
         self.assertIn("Report:\n# working: bounded update 4", detail)
         self.assertIn("Prompt:\n# Scufris delegated job", detail)
         json_detail = json.loads(self.cli(job_id, "--json").stdout)
         self.assertEqual(json_detail["job_id"], job_id)
         self.assertEqual(json_detail["report"], bounded_report)
 
-        self.call("stop", {"job_id": job_id})
-        time.sleep(0.05)
-        self.assertNotIn(
-            "worker harness exited unexpectedly",
-            (directory / "status").read_text(),
-        )
+        stopped = self.call("stop", {"job_id": job_id})["result"]
+        self.assertTrue(stopped["clean"])
+        self.assertFalse(directory.exists())
+        self.assertEqual(json.loads(self.cli("all", "--json").stdout), {"jobs": []})
 
     def test_trusted_failure_is_linked_and_report_symlinks_are_refused(self) -> None:
         job_id = "123abc456def"
@@ -863,6 +932,539 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.assertEqual(review_record["review_of"], job_id)
         self.assertEqual(review_record["working_directory"], str(self.project))
 
+    def test_generation_cursor_is_lossless_and_restart_does_not_replay(self) -> None:
+        job_id = "aabbccddeeff"
+        self.call(
+            "spawn",
+            {
+                "job_id": job_id,
+                "instructions": "Publish a terminal fixture.",
+                "owner_session": "cursor-owner",
+            },
+        )
+        self.jobs.append(job_id)
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
+        self.wait_for(directory / "status", "done: report complete")
+
+        first = self.call("events", {"jobs": [{"job_id": job_id}]})["result"]["jobs"][0]
+        replay = self.call("events", {"jobs": [{"job_id": job_id}]})["result"]["jobs"][
+            0
+        ]
+        self.assertEqual(
+            [event["id"] for event in first["events"]],
+            [event["id"] for event in replay["events"]],
+        )
+        self.assertEqual([event["generation"] for event in first["events"]], [1, 1])
+        self.call("ack-event", {"job_id": job_id, "event_id": first["events"][0]["id"]})
+        remaining = self.call("events", {"jobs": [{"job_id": job_id}]})["result"][
+            "jobs"
+        ][0]
+        self.assertEqual(
+            [event["line"] for event in remaining["events"]],
+            ["done: report complete"],
+        )
+        self.call(
+            "ack-event",
+            {"job_id": job_id, "event_id": remaining["events"][0]["id"]},
+        )
+        self.assertEqual(
+            self.call("events", {"jobs": [{"job_id": job_id}]})["result"]["jobs"][0][
+                "events"
+            ],
+            [],
+        )
+
+        restarted = self.call(
+            "send", {"job_id": job_id, "message": "Run a correction generation."}
+        )["result"]
+        self.assertTrue(restarted["restarted"])
+        self.assertEqual(restarted["generation"], 2)
+        self.wait_for(directory / "status", '"generation":2')
+        generation_two = self.call("events", {"jobs": [{"job_id": job_id}]})["result"][
+            "jobs"
+        ][0]["events"]
+        self.assertEqual([event["generation"] for event in generation_two], [2, 2])
+        self.assertNotEqual(generation_two[0]["id"], first["events"][0]["id"])
+
+    def test_status_replacement_refuses_cursor_drift(self) -> None:
+        job_id = "ffeeddccbbaa"
+        self.call(
+            "spawn",
+            {
+                "job_id": job_id,
+                "instructions": "Publish status for replacement test.",
+                "owner_session": "status-owner",
+            },
+        )
+        self.jobs.append(job_id)
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
+        self.wait_for(directory / "status", "done: report complete")
+        status = directory / "status"
+        content = status.read_bytes()
+        replacement = directory / "replacement-status"
+        replacement.write_bytes(content)
+        os.replace(replacement, status)
+        rejected = self.call("events", {"jobs": [{"job_id": job_id}]}, check=False)
+        self.assertFalse(rejected["ok"])
+        self.assertIn("status identity changed", rejected["error"])
+
+    def test_terminal_and_recursive_cleanup_preserve_unrelated_resources(self) -> None:
+        before_default = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_id}:#{session_name}"],
+            text=True,
+            capture_output=True,
+            env=self.env,
+            check=False,
+            timeout=10,
+        )
+        self.tmux("new-session", "-d", "-s", "unrelated-explicit-session")
+        first = "010203040506"
+        second = "102030405060"
+        for job_id, owner in ((first, "workflow-a"), (second, "workflow-b")):
+            self.call(
+                "spawn",
+                {
+                    "job_id": job_id,
+                    "instructions": "Wait for isolated cleanup.",
+                    "owner_session": owner,
+                },
+            )
+            self.jobs.append(job_id)
+        first_directory = self.root / "state" / "scufris" / "jobs" / first
+        self.wait_for(first_directory / "status", "done: report complete")
+        events = self.call("events", {"jobs": [{"job_id": first}]})["result"]["jobs"][0]
+        self.assertTrue(events["events"])
+        self.assertEqual(
+            self.tmux("has-session", "-t", "unrelated-explicit-session").returncode,
+            0,
+        )
+        self.assertTrue((self.root / "state" / "scufris" / "jobs" / second).is_dir())
+        self.call("stop", {"job_id": first})
+        self.assertFalse(first_directory.exists())
+        self.assertTrue((self.root / "state" / "scufris" / "jobs" / second).is_dir())
+        self.assertEqual(
+            self.tmux("has-session", "-t", "unrelated-explicit-session").returncode,
+            0,
+        )
+        self.tmux("kill-session", "-t", "unrelated-explicit-session")
+        after_default = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_id}:#{session_name}"],
+            text=True,
+            capture_output=True,
+            env=self.env,
+            check=False,
+            timeout=10,
+        )
+        self.assertEqual(
+            (after_default.returncode, after_default.stdout),
+            (before_default.returncode, before_default.stdout),
+        )
+
+    def test_atomic_tmux_ownership_mismatch_refuses_termination(self) -> None:
+        job_id = "abcdefabcdef"
+        self.call(
+            "spawn",
+            {
+                "job_id": job_id,
+                "instructions": "Wait for ownership validation.",
+                "owner_session": "ownership-owner",
+            },
+        )
+        self.jobs.append(job_id)
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
+        self.wait_for(directory / "status", "done: report complete")
+        record = json.loads((directory / "job.json").read_text())
+        self.tmux(
+            "set-option",
+            "-t",
+            record["tmux_session_name"],
+            "@scufris_execution_token",
+            "0" * 64,
+        )
+        rejected = self.call("events", {"jobs": [{"job_id": job_id}]}, check=False)
+        self.assertFalse(rejected["ok"])
+        self.assertIn("ownership mismatch", rejected["error"])
+        self.assertEqual(
+            self.tmux("has-session", "-t", record["tmux_session_name"]).returncode,
+            0,
+        )
+        self.tmux(
+            "set-option",
+            "-t",
+            record["tmux_session_name"],
+            "@scufris_execution_token",
+            record["execution_token"],
+        )
+        accepted = self.call("events", {"jobs": [{"job_id": job_id}]})["result"]
+        self.assertTrue(accepted["jobs"][0]["events"])
+        self.assertNotEqual(
+            self.tmux(
+                "has-session", "-t", record["tmux_session_name"], check=False
+            ).returncode,
+            0,
+        )
+
+    def test_atomic_server_revalidation_closes_the_check_kill_race(self) -> None:
+        job_id = "0011aabbccdd"
+        token = "a" * 64
+        socket = self.env["SCUFRIS_TMUX_SOCKET"]
+        directory = self.fixture_job(
+            job_id,
+            {
+                "execution_state": "running",
+                "tmux_socket": socket,
+                "tmux_session_name": "scufris-race-owned",
+                "tmux_session_id": "$91",
+                "tmux_window_id": "@92",
+                "tmux_pane_id": "%93",
+                "execution_token": token,
+            },
+        )
+        jobs_module = load_jobs_module()
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            job = jobs_module.load_job(job_id)
+            snapshot = {
+                "name": job["tmux_session_name"],
+                "session_id": job["tmux_session_id"],
+                "window_id": job["tmux_window_id"],
+                "pane_id": job["tmux_pane_id"],
+                "job_id": job_id,
+                "token": token,
+                "generation": "1",
+                "phase": "running",
+                "pane_dead": "0",
+            }
+            replacement = subprocess.CompletedProcess(
+                ["tmux"], 0, b"scufris-ownership-mismatch\n", b""
+            )
+            with (
+                mock.patch.object(
+                    jobs_module, "tmux", return_value=replacement
+                ) as call,
+                self.assertRaises(jobs_module.JobError),
+            ):
+                jobs_module.stop_execution(job, snapshot)
+        arguments = call.call_args.args[0]
+        self.assertEqual(arguments[0], "if-shell")
+        self.assertIn("kill-session", arguments[-2])
+        self.assertIn(token, arguments[-3])
+        self.assertTrue(directory.is_dir())
+        unchanged = json.loads((directory / "job.json").read_text())
+        self.assertEqual(unchanged["execution_token"], token)
+
+    def test_creation_crash_is_recovered_from_durable_intent(self) -> None:
+        jobs_module = load_jobs_module()
+        job_id = "112233445566"
+        request = {
+            "job_id": job_id,
+            "instructions": "Recover creation.",
+            "owner_session": "crash-owner",
+            "trusted_capability": hashlib.sha256(b"trusted:crash").hexdigest(),
+        }
+        original_store = jobs_module.store_job
+        injected = False
+
+        def crash_after_server_creation(record: dict[str, Any]) -> None:
+            nonlocal injected
+            if (
+                not injected
+                and record.get("execution_state") == "creating"
+                and record.get("tmux_session_id") is not None
+            ):
+                injected = True
+                raise OSError("injected crash after tmux creation")
+            original_store(record)
+
+        with (
+            mock.patch.dict(os.environ, self.env, clear=True),
+            mock.patch.object(
+                jobs_module, "store_job", side_effect=crash_after_server_creation
+            ),
+            self.assertRaises(OSError),
+        ):
+            jobs_module.spawn(request)
+        self.jobs.append(job_id)
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            durable = jobs_module.load_job(job_id)
+            self.assertEqual(durable["execution_state"], "creating")
+            self.assertIsNone(durable["tmux_session_id"])
+            recovered = jobs_module.recover({"owner_session": "crash-owner"})
+            self.assertEqual(recovered["jobs"][0]["job_id"], job_id)
+            self.assertTrue(recovered["jobs"][0]["window_alive"])
+            self.assertEqual(jobs_module.load_job(job_id)["execution_state"], "running")
+
+    def test_partial_descendant_failure_retains_root_for_retry(self) -> None:
+        context = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        root_id = "223344556677"
+        review_id = "334455667788"
+        self.call(
+            "spawn",
+            {
+                "job_id": root_id,
+                "instructions": "Own the workflow root.",
+                "owner_session": "partial-owner",
+                "project": context["project"],
+                "project_root": context["project_root"],
+                "context_markdown": context["markdown"],
+                "context_fingerprint": context["fingerprint"],
+                "workspace": "project",
+            },
+        )
+        self.jobs.append(root_id)
+        review_context = self.call("context", {"project": "projects/nova-protocol"})[
+            "result"
+        ]
+        self.call(
+            "spawn",
+            {
+                "job_id": review_id,
+                "instructions": "Review the workflow root.",
+                "owner_session": "partial-owner",
+                "project": review_context["project"],
+                "project_root": review_context["project_root"],
+                "context_markdown": review_context["markdown"],
+                "context_fingerprint": review_context["fingerprint"],
+                "review_of": root_id,
+            },
+        )
+        jobs_module = load_jobs_module()
+        original_remove = jobs_module.secure_rmtree
+
+        def fail_descendant(path: Path) -> None:
+            if path.name == review_id:
+                raise OSError("injected descendant deletion failure")
+            original_remove(path)
+
+        with (
+            mock.patch.dict(os.environ, self.env, clear=True),
+            mock.patch.object(
+                jobs_module, "secure_rmtree", side_effect=fail_descendant
+            ),
+            self.assertRaises(jobs_module.JobError),
+        ):
+            jobs_module.stop({"job_id": root_id})
+        jobs = self.root / "state" / "scufris" / "jobs"
+        self.assertTrue((jobs / root_id).is_dir())
+        self.assertTrue((jobs / review_id).is_dir())
+        retried = self.call("stop", {"job_id": root_id})["result"]
+        self.assertTrue(retried["clean"])
+        self.assertFalse((jobs / root_id).exists())
+        self.assertFalse((jobs / review_id).exists())
+        self.assertTrue(self.call("stop", {"job_id": root_id})["result"]["clean"])
+
+    def test_reviewer_descendants_share_one_recursive_graph(self) -> None:
+        context = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        ids = ["445566778899", "556677889900", "667788990011"]
+        self.call(
+            "spawn",
+            {
+                "job_id": ids[0],
+                "instructions": "Implement the graph root.",
+                "owner_session": "graph-owner",
+                "project": context["project"],
+                "project_root": context["project_root"],
+                "context_markdown": context["markdown"],
+                "context_fingerprint": context["fingerprint"],
+                "workspace": "project",
+            },
+        )
+        self.jobs.append(ids[0])
+        for job_id, parent in zip(ids[1:], ids, strict=False):
+            child_context = self.call("context", {"project": "projects/nova-protocol"})[
+                "result"
+            ]
+            self.call(
+                "spawn",
+                {
+                    "job_id": job_id,
+                    "instructions": "Review the parent job read-only.",
+                    "owner_session": "graph-owner",
+                    "project": child_context["project"],
+                    "project_root": child_context["project_root"],
+                    "context_markdown": child_context["markdown"],
+                    "context_fingerprint": child_context["fingerprint"],
+                    "review_of": parent,
+                },
+            )
+        records = [
+            json.loads(
+                (
+                    self.root / "state" / "scufris" / "jobs" / job_id / "job.json"
+                ).read_text()
+            )
+            for job_id in ids
+        ]
+        self.assertTrue(all(record["root_job"] == ids[0] for record in records))
+        self.assertEqual(
+            [record["parent_job"] for record in records], [None, ids[0], ids[1]]
+        )
+        self.assertEqual(len({record["workflow_id"] for record in records}), 1)
+        cleaned = self.call("stop", {"job_id": ids[2]})["result"]
+        self.assertEqual(set(cleaned["removed_jobs"]), set(ids))
+        self.assertEqual(json.loads(self.cli("all", "--json").stdout), {"jobs": []})
+
+    def test_restart_crash_before_tmux_creation_rotates_generation_safely(self) -> None:
+        job_id = "789900112233"
+        self.call(
+            "spawn",
+            {
+                "job_id": job_id,
+                "instructions": "Complete before restart.",
+                "owner_session": "restart-owner",
+            },
+        )
+        self.jobs.append(job_id)
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
+        self.wait_for(directory / "status", "done: report complete")
+        events = self.call("events", {"jobs": [{"job_id": job_id}]})["result"]["jobs"][
+            0
+        ]["events"]
+        for event in events:
+            self.call("ack-event", {"job_id": job_id, "event_id": event["id"]})
+
+        jobs_module = load_jobs_module()
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            previous = jobs_module.load_job(job_id)
+            restarted = {
+                **previous,
+                "generation": previous["generation"] + 1,
+                "state": "working",
+                "summary": "restart intent persisted",
+            }
+            jobs_module.store_job(restarted)
+            prepared, _capability = jobs_module.prepare_execution(restarted)
+            self.assertEqual(prepared["execution_state"], "creating")
+            self.assertIsNone(jobs_module.execution_snapshot(prepared))
+            recovered = jobs_module.recover({"owner_session": "restart-owner"})
+            self.assertEqual(recovered["jobs"][0]["generation"], 2)
+            self.assertTrue(recovered["jobs"][0]["window_alive"])
+        self.wait_for(directory / "status", '"generation":2')
+        new_events = self.call("events", {"jobs": [{"job_id": job_id}]})["result"][
+            "jobs"
+        ][0]["events"]
+        self.assertTrue(new_events)
+        self.assertTrue(all(event["generation"] == 2 for event in new_events))
+
+    def test_blocked_event_survives_recovery_once_and_remains_steerable(self) -> None:
+        blocked_pi = """#!/usr/bin/env python3
+import json
+import os
+import pathlib
+import sys
+prompt = pathlib.Path(sys.argv[-1].removeprefix('Read and follow '))
+directory = prompt.parent
+generation = int(os.environ['SCUFRIS_JOB_GENERATION'])
+with (directory / 'status').open('a') as stream:
+    for event, summary in [('working', 'starting blocked fixture'), ('blocked', 'needs one decision')]:
+        stream.write(json.dumps({'generation': generation, 'event': event, 'summary': summary}, separators=(',', ':')) + '\\n')
+for line in sys.stdin:
+    with (directory / 'received').open('a') as stream:
+        stream.write(line)
+"""
+        (self.bin / "pi").write_text(blocked_pi)
+        (self.bin / "pi").chmod(0o755)
+        job_id = "890011223344"
+        self.call(
+            "spawn",
+            {
+                "job_id": job_id,
+                "instructions": "Block for mediation.",
+                "owner_session": "blocked-owner",
+            },
+        )
+        self.jobs.append(job_id)
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
+        self.wait_for(directory / "status", "blocked: needs one decision")
+        recovered = self.call("recover", {"owner_session": "blocked-owner"})["result"][
+            "jobs"
+        ][0]
+        self.trusted_capabilities[job_id] = recovered["trusted_capability"]
+        self.assertTrue(recovered["window_alive"])
+        events = self.call("events", {"jobs": [{"job_id": job_id}]})["result"]["jobs"][
+            0
+        ]["events"]
+        self.assertEqual(events[-1]["line"], "blocked: needs one decision")
+        for event in events:
+            self.call("ack-event", {"job_id": job_id, "event_id": event["id"]})
+        recovered_again = self.call("recover", {"owner_session": "blocked-owner"})[
+            "result"
+        ]["jobs"][0]
+        self.trusted_capabilities[job_id] = recovered_again["trusted_capability"]
+        self.assertEqual(
+            self.call("events", {"jobs": [{"job_id": job_id}]})["result"]["jobs"][0][
+                "events"
+            ],
+            [],
+        )
+        sent = self.call(
+            "send", {"job_id": job_id, "message": "Use the safe default."}
+        )["result"]
+        self.assertFalse(sent["restarted"])
+        self.wait_for(directory / "received", "Use the safe default.")
+
+    def test_project_configuration_drift_refuses_sprout_cleanup(self) -> None:
+        context = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        job_id = "901122334455"
+        self.call(
+            "spawn",
+            {
+                "job_id": job_id,
+                "instructions": "Create a drift-sensitive Sprout.",
+                "owner_session": "drift-owner",
+                "project": context["project"],
+                "project_root": context["project_root"],
+                "context_markdown": context["markdown"],
+                "context_fingerprint": context["fingerprint"],
+                "workspace": "sprout",
+                "feature": "drift-sensitive-workspace",
+            },
+        )
+        self.jobs.append(job_id)
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
+        alternate_projects = self.root / "alternate" / "projects"
+        alternate_projects.mkdir(parents=True)
+        shutil.copytree(self.project, alternate_projects / "nova-protocol")
+        original_roots = self.env["SCUFRIS_PROJECT_ROOTS"]
+        self.env["SCUFRIS_PROJECT_ROOTS"] = json.dumps([str(alternate_projects)])
+        rejected = self.call("stop", {"job_id": job_id}, check=False)
+        self.assertFalse(rejected["ok"])
+        self.assertIn("drifted", rejected["error"])
+        self.assertTrue(directory.is_dir())
+        self.env["SCUFRIS_PROJECT_ROOTS"] = original_roots
+        cleaned = self.call("stop", {"job_id": job_id})["result"]
+        self.assertTrue(cleaned["clean"])
+        self.assertFalse(directory.exists())
+
+    def test_socket_and_workspace_symlink_drift_fail_closed(self) -> None:
+        linked_parent = self.root / "linked-tmux"
+        linked_parent.symlink_to(self.root / "tmux", target_is_directory=True)
+        unsafe_env = {
+            **self.env,
+            "SCUFRIS_TMUX_SOCKET": str(linked_parent / "unsafe.sock"),
+        }
+        result = subprocess.run(
+            [str(HELPER), "spawn"],
+            input=json.dumps(
+                {
+                    "job_id": "778899001122",
+                    "instructions": "Must not start.",
+                    "owner_session": "unsafe-owner",
+                    "trusted_capability": hashlib.sha256(b"unsafe").hexdigest(),
+                }
+            ),
+            text=True,
+            capture_output=True,
+            env=unsafe_env,
+            check=False,
+            timeout=30,
+        )
+        rejected = json.loads(result.stdout)
+        self.assertFalse(rejected["ok"])
+        self.assertIn("symlink", rejected["error"])
+        self.assertFalse(
+            (self.root / "state" / "scufris" / "jobs" / "778899001122").exists()
+        )
+
     def test_sprout_job_has_explicit_review_target_and_guarded_landing(self) -> None:
         context = self.call("context", {"project": "projects/nova-protocol"})["result"]
         job_id = "999aaa888bbb"
@@ -972,6 +1574,26 @@ Confirm that the result content is correct.
             walkthrough,
         )
 
+        review_context = self.call("context", {"project": "projects/nova-protocol"})[
+            "result"
+        ]
+        reviewer_id = "aaabbbcccddd"
+        self.call(
+            "spawn",
+            {
+                "job_id": reviewer_id,
+                "instructions": "Review the exact committed Sprout.",
+                "owner_session": "foreground-session",
+                "project": review_context["project"],
+                "project_root": review_context["project_root"],
+                "context_markdown": review_context["markdown"],
+                "context_fingerprint": review_context["fingerprint"],
+                "review_of": job_id,
+            },
+        )
+        reviewer_directory = self.root / "state" / "scufris" / "jobs" / reviewer_id
+        self.assertTrue(reviewer_directory.is_dir())
+
         landed = self.call(
             "land",
             {
@@ -982,6 +1604,8 @@ Confirm that the result content is correct.
         )["result"]
         self.assertTrue(landed["landed"])
         self.assertTrue(landed["workspace_removed"])
+        self.assertEqual(set(landed["removed_jobs"]), {job_id, reviewer_id})
+        self.assertFalse(reviewer_directory.exists())
         self.assertEqual(
             (self.project / "RESULT.md").read_text(), "replacement works\n"
         )

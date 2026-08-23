@@ -29,7 +29,9 @@ const jobsHelperPath = fileURLToPath(
 const CONTEXT_ID = /^[a-f0-9]{24}$/;
 const JOB_ID = /^[a-f0-9]{12}$/;
 export const TERMINAL_OWNERSHIP_STATES: ReadonlySet<string> = new Set([
+  "done",
   "failed",
+  "suspended",
   "stopped",
   "landed",
 ]);
@@ -59,6 +61,8 @@ interface WakeStateEntry {
 export interface WorkerEvent {
   type: WorkerEventType;
   value: string;
+  id?: string;
+  generation?: number;
 }
 
 export interface WorkerEventTarget {
@@ -140,6 +144,36 @@ function restoredWakeMode(context: ExtensionContext): WakeMode {
   return wakeModeFromEntries(context.sessionManager.getBranch());
 }
 
+export function deliveredWorkerEventIds(
+  entries: Iterable<{
+    type?: string;
+    customType?: string;
+    details?: unknown;
+    message?: unknown;
+  }>,
+): Set<string> {
+  const result = new Set<string>();
+  for (const entry of entries) {
+    const message = entry.message as
+      | { customType?: string; details?: { event_id?: unknown } }
+      | undefined;
+    const topLevelDetails = entry.details as { event_id?: unknown } | undefined;
+    if (
+      entry.type === "custom_message" &&
+      entry.customType === "scufris-job-event" &&
+      typeof topLevelDetails?.event_id === "string"
+    )
+      result.add(topLevelDetails.event_id);
+    else if (
+      entry.type === "message" &&
+      message?.customType === "scufris-job-event" &&
+      typeof message.details?.event_id === "string"
+    )
+      result.add(message.details.event_id);
+  }
+  return result;
+}
+
 export function deliverWorkerEvent(
   pi: Pick<ExtensionAPI, "sendMessage">,
   context: Pick<ExtensionContext, "hasUI" | "ui">,
@@ -163,6 +197,8 @@ export function deliverWorkerEvent(
         project: job.project,
         context_id: job.context_id,
         event: line,
+        event_id: event.id,
+        generation: event.generation,
       },
     },
     { deliverAs: "followUp", triggerTurn: true },
@@ -317,12 +353,16 @@ interface SpawnResult {
   job_id: string;
   state: string;
   project: string | null;
+  root_job: string;
+  parent_job: string | null;
+  workflow_id: string;
+  generation: number;
   workspace: "temporary" | "project" | "sprout" | "review";
   feature: string | null;
   harness: "pi" | "claude";
   model: string;
   thinking: string;
-  tmux_session: string;
+  tmux_session: string | null;
   status_file: string;
   message: string;
 }
@@ -332,9 +372,6 @@ interface OwnedJob extends SpawnResult {
   context_id?: string;
   context_fingerprint?: string;
   summary: string;
-  offset: number;
-  tail: string;
-  inode: number | null;
   window_alive: boolean;
   quick_review?: { close(): Promise<void>; revision: string };
   status_watcher?: FSWatcher;
@@ -360,13 +397,42 @@ interface QuickReviewSnapshot {
 interface EventResult {
   jobs: Array<{
     job_id: string;
-    events: string[];
-    errors: string[];
-    offset: number;
-    tail: string;
-    inode: number | null;
+    generation: number;
+    more: boolean;
     window_alive: boolean;
+    events: Array<{
+      id: string;
+      start: number;
+      end: number;
+      generation: number;
+      type: WorkerEventType | "invalid";
+      value: string;
+      line: string;
+    }>;
   }>;
+}
+
+interface CleanupResult {
+  removed_jobs: string[];
+}
+
+export function applySteerResult(
+  job: {
+    state: string;
+    summary: string;
+    generation: number;
+    status_file: string;
+    window_alive: boolean;
+  },
+  result: { generation: number; status_file: string; restarted: boolean },
+  watchJob: () => void,
+): void {
+  job.state = "working";
+  job.summary = "foreground guidance submitted";
+  job.generation = result.generation;
+  job.status_file = result.status_file;
+  job.window_alive = true;
+  if (result.restarted) watchJob();
 }
 
 async function runHelper<T>(
@@ -397,11 +463,9 @@ function jobId(): string {
 }
 
 function activeJobPrompt(jobs: Iterable<OwnedJob>): string {
-  const active = [...jobs].filter(
-    (job) => !TERMINAL_OWNERSHIP_STATES.has(job.state),
-  );
-  const index = active.length
-    ? active
+  const owned = [...jobs];
+  const index = owned.length
+    ? owned
         .slice(-32)
         .map(
           (job) =>
@@ -422,7 +486,7 @@ steering, landing, or shutdown by itself.
 ${foregroundActionPolicy}
 Filesystem notifications will deliver later worker events.
 
-Active Scufris jobs:
+Owned Scufris logical jobs:
 ${index}`;
 }
 
@@ -431,6 +495,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
 
   const contexts = new Map<string, ResolvedContext>();
   const jobs = new Map<string, OwnedJob>();
+  const deliveredEventIds = new Set<string>();
   let readingEvents = false;
   let readAgain = false;
   let eventReadController: AbortController | undefined;
@@ -480,10 +545,8 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     try {
       do {
         readAgain = false;
-        const active = [...jobs.values()].filter(
-          (job) => !TERMINAL_OWNERSHIP_STATES.has(job.state),
-        );
-        if (active.length === 0) {
+        const owned = [...jobs.values()];
+        if (owned.length === 0) {
           if (extensionContext.hasUI)
             extensionContext.ui.setStatus("scufris", undefined);
           return;
@@ -491,12 +554,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         const result = await runHelper<EventResult>(
           "events",
           {
-            jobs: active.map((job) => ({
-              job_id: job.job_id,
-              offset: job.offset,
-              tail: job.tail,
-              inode: job.inode,
-            })),
+            jobs: owned.map((job) => ({ job_id: job.job_id })),
           },
           controller.signal,
         );
@@ -504,30 +562,45 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         for (const update of result.jobs) {
           const job = jobs.get(update.job_id);
           if (!job) continue;
-          job.offset = update.offset;
-          job.tail = update.tail;
-          job.inode = update.inode;
           job.window_alive = update.window_alive;
-          for (const error of update.errors) {
-            if (extensionContext.hasUI)
-              extensionContext.ui.notify(
-                `Job ${job.job_id}: ${error}`,
-                "error",
-              );
-            await runHelper("failure", {
-              job_id: job.job_id,
-              capability: job.trusted_capability,
-              summary: error,
-              report: `Trusted orchestration rejected a worker status record: ${error}`,
-            });
-            readAgain = true;
-          }
-          for (const line of update.events) {
-            const event = parseWorkerEvent(line);
-            if (!event) continue;
+          job.generation = update.generation;
+          if (update.more) readAgain = true;
+          for (const updateEvent of update.events) {
+            if (deliveredEventIds.has(updateEvent.id)) {
+              await runHelper("ack-event", {
+                job_id: job.job_id,
+                event_id: updateEvent.id,
+              });
+              continue;
+            }
+            if (updateEvent.type === "invalid") {
+              await runHelper("ack-event", {
+                job_id: job.job_id,
+                event_id: updateEvent.id,
+              });
+              await runHelper("failure", {
+                job_id: job.job_id,
+                capability: job.trusted_capability,
+                summary: updateEvent.value,
+                report: `Trusted orchestration rejected a worker status record: ${updateEvent.line}`,
+              });
+              readAgain = true;
+              continue;
+            }
+            const event: WorkerEvent = {
+              type: updateEvent.type,
+              value: updateEvent.value,
+              id: updateEvent.id,
+              generation: updateEvent.generation,
+            };
             job.state = event.type;
             job.summary = event.value;
             deliverWorkerEvent(pi, extensionContext, job, event, wakeMode);
+            deliveredEventIds.add(updateEvent.id);
+            await runHelper("ack-event", {
+              job_id: job.job_id,
+              event_id: updateEvent.id,
+            });
           }
           if (TERMINAL_OWNERSHIP_STATES.has(job.state)) {
             job.status_watcher?.close();
@@ -558,6 +631,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   };
 
   const watchJob = (job: OwnedJob) => {
+    if (job.status_watcher) return;
     const watcher = watch(job.status_file, { persistent: false }, () => {
       void readEvents();
     });
@@ -570,6 +644,25 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     });
     job.status_watcher = watcher;
     void readEvents();
+  };
+
+  const closeWorkflowSurfaces = async (rootJob: string) => {
+    const related = [...jobs.values()].filter(
+      (candidate) => candidate.root_job === rootJob,
+    );
+    await Promise.all(
+      related.map(async (candidate) => {
+        candidate.status_watcher?.close();
+        candidate.status_watcher = undefined;
+        const review = candidate.quick_review;
+        candidate.quick_review = undefined;
+        if (review) await review.close();
+      }),
+    );
+  };
+
+  const forgetRemovedJobs = (removed: readonly string[]) => {
+    for (const removedJob of removed) jobs.delete(removedJob);
   };
 
   pi.registerTool(
@@ -772,9 +865,6 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
               }
             : {}),
           summary: "worker starting",
-          offset: 0,
-          tail: "",
-          inode: null,
           window_alive: true,
         };
         jobs.set(job.job_id, job);
@@ -936,6 +1026,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           milestone: string,
           detail: Record<string, unknown>,
           invalidate: boolean,
+          nextState: "working" | "done" = "done",
         ) => {
           const active = job.quick_review;
           job.quick_review = undefined;
@@ -944,12 +1035,12 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             await runHelper("invalidate-quick-review", {
               job_id: job.job_id,
             });
-          job.state = "done";
+          job.state = nextState;
           job.summary = milestone;
           pi.sendMessage(
             {
               customType: "scufris-job-event",
-              content: `Scufris job ${job.job_id} (${job.project ?? "general"}): done: ${milestone}. Inspect the Quick Review result and decide what follows from the project preferences. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
+              content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ${nextState}: ${milestone}. Inspect the Quick Review result and decide what follows from the project preferences. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
               display: true,
               details: {
                 job_id: job.job_id,
@@ -983,11 +1074,22 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           },
           requestChanges: async (feedback) => {
             await verify();
-            await runHelper("send", {
+            const restarted = await runHelper<{
+              generation: number;
+              status_file: string;
+            }>("send", {
               job_id: job.job_id,
               message: feedback,
             });
-            await finish("quick-review-feedback-submitted", { feedback }, true);
+            applySteerResult(job, { ...restarted, restarted: true }, () =>
+              watchJob(job),
+            );
+            await finish(
+              "quick-review-feedback-submitted",
+              { feedback, generation: restarted.generation },
+              true,
+              "working",
+            );
           },
           fullDiff: async () => {
             await verify();
@@ -1050,7 +1152,8 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       async execute(_id, params, signal) {
         const job = jobs.get(params.job_id);
         if (!job) throw new Error("job is not owned by this Scufris session");
-        const result = await runHelper(
+        await closeWorkflowSurfaces(job.root_job);
+        const result = await runHelper<CleanupResult>(
           "land",
           {
             job_id: params.job_id,
@@ -1060,11 +1163,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           signal,
           120_000,
         );
-        job.status_watcher?.close();
-        job.status_watcher = undefined;
-        job.state = "landed";
-        job.summary = "explicitly landed by foreground Scufris";
-        job.window_alive = false;
+        forgetRemovedJobs(result.removed_jobs);
         acknowledgmentGate.markSuccessfulAction("scufris_job_land");
         return toolResult(result);
       },
@@ -1083,6 +1182,9 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             job_id: job.job_id,
             project: job.project,
             context_id: job.context_id,
+            root_job: job.root_job,
+            parent_job: job.parent_job,
+            generation: job.generation,
             state: job.state,
             summary: job.summary,
             workspace: job.workspace,
@@ -1108,6 +1210,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           include_report: Type.Optional(Type.Boolean({ default: false })),
           include_context: Type.Optional(Type.Boolean({ default: false })),
           include_prompt: Type.Optional(Type.Boolean({ default: false })),
+          include_conversation: Type.Optional(Type.Boolean({ default: false })),
         },
         { additionalProperties: false },
       ),
@@ -1122,6 +1225,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
               include_report: params.include_report ?? false,
               include_context: params.include_context ?? false,
               include_prompt: params.include_prompt ?? false,
+              include_conversation: params.include_conversation ?? false,
             },
             signal,
           ),
@@ -1150,9 +1254,12 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       async execute(_id, params, signal) {
         const job = jobs.get(params.job_id);
         if (!job) throw new Error("job is not owned by this Scufris session");
-        const result = await runHelper("send", params, signal, 20_000);
-        job.state = "working";
-        job.summary = "foreground guidance submitted";
+        const result = await runHelper<{
+          generation: number;
+          status_file: string;
+          restarted: boolean;
+        }>("send", params, signal, 20_000);
+        applySteerResult(job, result, () => watchJob(job));
         acknowledgmentGate.markSuccessfulAction("scufris_job_send");
         return toolResult(result);
       },
@@ -1164,7 +1271,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       name: "scufris_job_stop",
       label: "Stop Scufris job",
       description:
-        "Stop one owned worker and optionally remove its Sprout workspace.",
+        "Stop and recursively remove one owned workflow and all descendants.",
       executionMode: "sequential",
       parameters: Type.Object(
         {
@@ -1176,10 +1283,8 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       async execute(_id, params, signal) {
         const job = jobs.get(params.job_id);
         if (!job) throw new Error("job is not owned by this Scufris session");
-        const quickReview = job.quick_review;
-        job.quick_review = undefined;
-        if (quickReview) await quickReview.close();
-        const result = await runHelper(
+        await closeWorkflowSurfaces(job.root_job);
+        const result = await runHelper<CleanupResult>(
           "stop",
           {
             job_id: params.job_id,
@@ -1188,11 +1293,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           signal,
           30_000,
         );
-        job.status_watcher?.close();
-        job.status_watcher = undefined;
-        job.state = "stopped";
-        job.summary = "stopped by foreground Scufris";
-        job.window_alive = false;
+        forgetRemovedJobs(result.removed_jobs);
         acknowledgmentGate.markSuccessfulAction("scufris_job_stop");
         return toolResult(result);
       },
@@ -1221,15 +1322,30 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     shuttingDown = false;
     wakeMode = restoredWakeMode(ctx);
     acknowledgmentGate.reset();
+    deliveredEventIds.clear();
+    for (const eventId of deliveredWorkerEventIds(
+      ctx.sessionManager.getEntries(),
+    ))
+      deliveredEventIds.add(eventId);
     try {
-      const result = await runHelper<{ job_ids: string[] }>("orphans", {
+      const result = await runHelper<{
+        jobs: Array<
+          SpawnResult & {
+            trusted_capability: string;
+            summary: string;
+            window_alive: boolean;
+            status_file: string;
+          }
+        >;
+      }>("recover", {
         owner_session: ctx.sessionManager.getSessionId(),
       });
-      if (result.job_ids.length > 0 && ctx.hasUI)
-        ctx.ui.notify(
-          `Unowned Scufris jobs remain: ${result.job_ids.join(", ")}`,
-          "warning",
-        );
+      for (const recovered of result.jobs) {
+        const job: OwnedJob = { ...recovered };
+        jobs.set(job.job_id, job);
+        if (job.window_alive) watchJob(job);
+      }
+      await readEvents();
     } catch (error) {
       if (ctx.hasUI)
         ctx.ui.notify(
@@ -1243,27 +1359,41 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     wakeMode = restoredWakeMode(ctx);
   });
 
-  pi.on("session_shutdown", async () => {
+  pi.on("session_shutdown", async (_event, context) => {
     shuttingDown = true;
     for (const job of jobs.values()) {
       job.status_watcher?.close();
       job.status_watcher = undefined;
+      const review = job.quick_review;
+      job.quick_review = undefined;
+      if (review) await review.close();
     }
     eventReadController?.abort();
     eventReadController = undefined;
-    await Promise.allSettled(
-      [...jobs.values()].map(async (job) => {
-        const quickReview = job.quick_review;
-        job.quick_review = undefined;
-        if (quickReview) await quickReview.close();
-        if (job.window_alive)
-          await runHelper("stop", { job_id: job.job_id }, undefined, 15_000);
-      }),
-    );
+    try {
+      const suspended = await runHelper<{ errors: string[] }>(
+        "suspend-owner",
+        { owner_session: context.sessionManager.getSessionId() },
+        undefined,
+        30_000,
+      );
+      if (suspended.errors.length > 0 && extensionContext?.hasUI)
+        extensionContext.ui.notify(
+          `Scufris suspension incomplete: ${suspended.errors.join("; ")}`,
+          "error",
+        );
+    } catch (error) {
+      if (extensionContext?.hasUI)
+        extensionContext.ui.notify(
+          error instanceof Error ? error.message : String(error),
+          "error",
+        );
+    }
     if (extensionContext?.hasUI)
       extensionContext.ui.setStatus("scufris", undefined);
     contexts.clear();
     jobs.clear();
+    deliveredEventIds.clear();
     acknowledgmentGate.reset();
     extensionContext = undefined;
   });

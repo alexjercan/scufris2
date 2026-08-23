@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ACKNOWLEDGED_ACTION_TOOLS,
+  applySteerResult,
+  deliveredWorkerEventIds,
   deliverRuntimeFailure,
   deliverWorkerEvent,
   FINAL_RESPONSE_TOOL,
@@ -102,11 +104,66 @@ test("Quick Review and Plannotator remain separate tools", () => {
   assert.notEqual(QUICK_REVIEW_TOOL, PLANNOTATOR_REVIEW_TOOL);
 });
 
-test("done remains steerable and only runtime lifecycle states terminate ownership", () => {
-  assert.equal(TERMINAL_OWNERSHIP_STATES.has("done"), false);
+test("done closes execution while its durable logical job remains steerable", () => {
+  assert.equal(TERMINAL_OWNERSHIP_STATES.has("done"), true);
   assert.equal(TERMINAL_OWNERSHIP_STATES.has("failed"), true);
   assert.equal(TERMINAL_OWNERSHIP_STATES.has("stopped"), true);
   assert.equal(TERMINAL_OWNERSHIP_STATES.has("landed"), true);
+});
+
+test("generation restarts restore status watching including Quick Review corrections", () => {
+  const job = {
+    state: "done",
+    summary: "old generation complete",
+    generation: 1,
+    status_file: "/old/status",
+    window_alive: false,
+  };
+  let watches = 0;
+  applySteerResult(
+    job,
+    { generation: 2, status_file: "/new/status", restarted: true },
+    () => {
+      watches += 1;
+    },
+  );
+  assert.deepEqual(job, {
+    state: "working",
+    summary: "foreground guidance submitted",
+    generation: 2,
+    status_file: "/new/status",
+    window_alive: true,
+  });
+  assert.equal(watches, 1);
+});
+
+test("persisted worker event messages provide restart deduplication", () => {
+  assert.deepEqual(
+    [
+      ...deliveredWorkerEventIds([
+        {
+          type: "message",
+          message: {
+            customType: "scufris-job-event",
+            details: { event_id: "job:0:10:digest" },
+          },
+        },
+        {
+          type: "custom_message",
+          customType: "scufris-job-event",
+          details: { event_id: "job:10:20:second" },
+        },
+        {
+          type: "message",
+          message: {
+            customType: "other",
+            details: { event_id: "ignored" },
+          },
+        },
+      ]),
+    ],
+    ["job:0:10:digest", "job:10:20:second"],
+  );
 });
 
 test("minimal and all wake modes are deterministic", () => {

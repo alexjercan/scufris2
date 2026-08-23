@@ -68,6 +68,10 @@ class QuickReviewTest(unittest.TestCase):
         self.assertIn('class="diff-line diff-add"', page)
         self.assertIn('class="diff-line diff-context"', page)
         self.assertNotIn('style="', page)
+        self.assertIn(
+            ".button{appearance:none;border:1px solid rgba(31,35,40,.15);border-radius:0;",
+            quick_review.CSS,
+        )
         self.assertNotIn("<form", page)
         self.assertIn(
             '<pre class="context-view" aria-label="Exact-revision file context" hidden><code></code></pre>',

@@ -488,6 +488,7 @@ export default function scufrisJobs(pi: ExtensionAPI): void {
             diffType: "since-base",
           },
           respond: (response: unknown) => {
+            if (shuttingDown || jobs.get(job.job_id) !== job) return;
             let encoded: string;
             try {
               encoded = JSON.stringify(response);

@@ -430,6 +430,8 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
             raise JobError("project context no longer resolves to the selected project")
     review_of = request.get("review_of")
     if review_of is not None:
+        if harness != "pi":
+            raise JobError("independent review jobs require the read-only Pi harness")
         source = load_job(validate_job_id(review_of))
         if root is None or source.get("project") != project:
             raise JobError("review job context must match the source project")

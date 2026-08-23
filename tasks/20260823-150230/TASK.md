@@ -1,6 +1,6 @@
 # Make Quick Review work like a GitHub PR review
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: quick-review
 

@@ -1,6 +1,6 @@
 # Add project workflow preferences and generic delegation planning
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: orchestration, configuration, preferences, delegation
 

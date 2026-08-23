@@ -1,6 +1,6 @@
 # Restructure Scufris extensions and tools
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: architecture
 

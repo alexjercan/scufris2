@@ -138,9 +138,10 @@ function activeJobPrompt(jobs: Iterable<OwnedJob>): string {
   const active = [...jobs].filter((job) => !TERMINAL_STATES.has(job.state));
   const index = active.length
     ? active
+        .slice(-32)
         .map(
           (job) =>
-            `- ${job.job_id}: ${job.project ?? "general"}, ${job.state}, ${job.summary}${job.context_id ? `, context ${job.context_id}` : ""}`,
+            `- ${job.job_id}: ${job.project ?? "general"}, ${job.state}, ${job.summary.slice(0, 160)}${job.context_id ? `, context ${job.context_id}` : ""}`,
         )
         .join("\n")
     : "- none";
@@ -421,7 +422,10 @@ export default function scufrisJobs(pi: ExtensionAPI): void {
           signal,
           120_000,
         );
-        if (resolved) resolved.consumed = true;
+        if (resolved) {
+          resolved.consumed = true;
+          contexts.delete(resolved.context_id);
+        }
         if (shuttingDown) {
           await runHelper(
             "stop",

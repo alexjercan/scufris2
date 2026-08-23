@@ -1,6 +1,6 @@
 # Replace job polling and add worker reporting tool
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: workflow
 

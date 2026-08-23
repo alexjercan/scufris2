@@ -1,0 +1,6 @@
+interface:
+  display_name: "Pi extension"
+  short_description: "Develop Scufris Pi integrations"
+  default_prompt: "Use $pi-extension to change and verify a Scufris Pi integration."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Helpers"
+  short_description: "Develop Scufris Bash and Python helpers"
+  default_prompt: "Use $helpers to change and verify a Scufris process or filesystem helper."
+policy:
+  allow_implicit_invocation: true

@@ -58,26 +58,38 @@ new decisions and verification evidence here.
   identity, exact root and parent jobs, owner session, canonical project and
   workspace paths with device/inode identity, generation, next event byte,
   status identity, cleanup intent, and an optional replaceable execution.
-- `done` and `failed` end every implementation and reviewer execution without
-  deleting logical state. Steering increments the generation, rotates launch
-  and report authority, validates the workspace, and starts from the pinned
-  prompt, report, and foreground `conversation.md`. `blocked` keeps its exact
-  execution alive.
+- `working` is the only event that keeps an execution running. `blocked`,
+  `done`, and `failed` all end the execution without deleting logical state.
+- Steering increments the generation, rotates launch and report authority,
+  validates the workspace, and restores the job's own pinned harness session in
+  a new window. Each job owns one UUID harness session for its whole life: Pi
+  gets `--session-id` on every launch, Claude gets `--session-id` first and
+  `--resume` after, and the transcript lives in the job directory. A
+  continuation is a true restore, not a prompt replay.
 - Status is append-only generation-tagged JSONL. Event reads start at the
   durable unacknowledged byte and never advance it. The extension persists a
   wake message with the event ID before exact ordered acknowledgement. Recovery
   recognizes event IDs in Pi session entries. Large backlogs continue in 1 MiB
   batches. Status replacement fails its durable device/inode check.
-- Tmux requires an absolute canonical `SCUFRIS_TMUX_SOCKET`; launchers supply a
-  private physical default. Every command uses `tmux -S`. Creation stores a
-  random execution intent before server mutation and writes matching job,
-  token, generation, and phase options in one tmux command queue. Recovery can
-  complete either side of the creation and restart crash windows.
-- Exact termination is one tmux `if-shell -F` server command. Its condition
-  validates the socket-selected session name, session/window/pane IDs, job,
-  random execution token, and generation. Only its true branch runs exact
-  `kill-session`. Steering uses the same atomic condition. The wrapper rejects
-  `kill-server`; there is no ambient selection or broad process match.
+- Workers share the default tmux server with the foreground session. The
+  wrapper rejects `kill-server` and every socket selector, so there is no
+  private server and no ambient selection. Creation stores a random execution
+  intent before server mutation and writes matching job, token, generation, and
+  phase options in one tmux command queue. Recovery can complete either side of
+  the creation and restart crash windows.
+- Exact termination is one tmux `if-shell -F` server command. The session name
+  must first match the generated worker namespace, then the condition validates
+  the session name, session/window/pane IDs, job, random execution token, and
+  generation. Only its true branch runs exact `kill-session`, so unrelated
+  sessions on the shared server always survive. Steering uses the same atomic
+  condition.
+- Cleanup is workflow scoped and archival. It refuses a descendant ID, stops
+  every execution in the graph, removes Sprout worktrees only when the request
+  asks, then stamps `archived_at` and moves each job directory into
+  `jobs/_archive/`. Status, report, prompt, conversation, and the harness
+  session transcript all survive. Archived jobs are invisible to active
+  listing, recovery, and orphan scans, refuse every reviving operation, and
+  stay readable through `inspect` and `scufris-jobs --archived`.
 - Stop or land records an intent at the root, stops every descendant, validates
   current project configuration and Sprout identity, removes workspaces, then
   removes descendant records before the root. Missing resources are success.

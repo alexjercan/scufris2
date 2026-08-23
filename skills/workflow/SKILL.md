@@ -32,16 +32,19 @@ not apply unless the request explicitly introduces them.
 
 ## Events
 
-- `working` means the worker is actively doing assigned work. Job status
-  arrives through filesystem notifications; do not poll merely to repeat it.
-- `blocked` means the worker cannot continue without mediation. Inspect the
-  report, then resolve it directly or ask the user when a user decision is
-  necessary.
-- `done` means the current assignment and execution generation are complete.
-  Scufris stops that exact execution but keeps the logical job steerable. Inspect
-  the project context, prompt, report, conversation, and current state, then
-  decide whether to review, restart with guidance, open a human review, land, or
-  stop.
+- `working` means the worker is actively doing assigned work. It is the only
+  event that keeps an execution running. Job status arrives through filesystem
+  notifications; do not poll merely to repeat it.
+- `blocked` and `done` both end that execution generation and release its tmux
+  window. The logical job stays steerable. `blocked` means the worker needs
+  mediation; `done` means the assignment is complete.
+- After either one, inspect the project context, prompt, report, conversation,
+  and current state, then decide whether to review, continue with guidance,
+  open a human review, land, or stop.
+- `scufris_job_send` continues a job. It restores the worker's own harness
+  session in a new window and appends your guidance, so the worker keeps its
+  full conversation. Spawn a new job only when you want a genuinely fresh
+  agent.
 - `failed` is generated only when trusted orchestration detects that the worker
   can no longer work. Workers cannot report it themselves.
 
@@ -65,9 +68,12 @@ If an action tool fails, do not claim success. Call `scufris_final_response`
 with one concise explanation and the next safe step. A failed action does not
 authorize waiting or polling. Do not batch multiple meaningful actions; finish
 one acknowledgment boundary before another user-directed action. Use
-`scufris_job_stop` only for an owned job. It removes that complete workflow
-graph, including reviewer descendants, temporary and Sprout workspaces, review
-state, and durable records. Call it only when no graph result is still needed.
+`scufris_job_stop` only for an owned job, and pass the workflow root; a
+descendant ID is refused. It ends that complete workflow graph, including
+reviewer descendants, and archives their durable records instead of deleting
+them, so each report and conversation stays readable. It removes Sprout
+worktrees only when you pass `remove_workspace`. Call it only when no graph
+result is still needed.
 
 ## Optional workflow tools
 

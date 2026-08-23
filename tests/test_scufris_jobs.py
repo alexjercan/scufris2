@@ -5,6 +5,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -20,12 +21,13 @@ HELPER = REPOSITORY / "tools" / "jobs" / "scufris-jobs"
 REPORTER = REPOSITORY / "tools" / "jobs" / "scufris-report"
 
 FAKE_PI = """#!/usr/bin/env python3
+import os
 import pathlib
 import sys
 import time
-prompt = pathlib.Path(sys.argv[-1].removeprefix('Read and follow '))
-directory = prompt.parent
-(directory / 'worker-prompt.txt').write_text(prompt.read_text())
+state = pathlib.Path(os.environ['XDG_STATE_HOME'])
+directory = state / 'scufris' / 'jobs' / os.environ['SCUFRIS_JOB_ID']
+(directory / 'worker-prompt.txt').write_text(sys.argv[-1])
 (directory / 'worker-argv.json').write_text(__import__('json').dumps(sys.argv[1:]))
 (directory / 'worker-capability').write_text(__import__('os').environ['SCUFRIS_REPORT_CAPABILITY'])
 generation = int(__import__('os').environ['SCUFRIS_JOB_GENERATION'])
@@ -52,10 +54,10 @@ def load_jobs_module() -> Any:
 
 
 FAKE_PI_EXIT_AFTER_DONE = """#!/usr/bin/env python3
+import os
 import pathlib
-import sys
-prompt = pathlib.Path(sys.argv[-1].removeprefix('Read and follow '))
-directory = prompt.parent
+state = pathlib.Path(os.environ['XDG_STATE_HOME'])
+directory = state / 'scufris' / 'jobs' / os.environ['SCUFRIS_JOB_ID']
 generation = int(__import__('os').environ['SCUFRIS_JOB_GENERATION'])
 with (directory / 'status').open('a') as stream:
     stream.write(__import__('json').dumps({'generation': generation, 'event': 'done', 'summary': 'assignment complete'}, separators=(',', ':')) + '\\n')
@@ -114,23 +116,30 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
             capture_output=True,
         )
         self.env = os.environ.copy()
-        for selector in ("TMUX", "TMUX_PANE", "TMUX_TMPDIR"):
+        for selector in ("TMUX", "TMUX_PANE"):
             self.env.pop(selector, None)
+        # The helper always uses the default tmux server. TMUX_TMPDIR moves that
+        # default under the fixture so tests never touch the developer server.
         self.env.update(
             {
                 "PATH": f"{self.bin}:{self.env['PATH']}",
                 "XDG_STATE_HOME": str(self.root / "state"),
-                "SCUFRIS_TMUX_SOCKET": str(self.root / "tmux" / "jobs.sock"),
+                "TMUX_TMPDIR": str(self.root / "tmux"),
                 "SCUFRIS_PROJECT_ROOTS": json.dumps([str(self.projects)]),
             }
         )
         (self.root / "tmux").mkdir()
         self.jobs: list[str] = []
         self.trusted_capabilities: dict[str, str] = {}
+        # Sprout features are keyed by project name in a shared user cache, so a
+        # stale worktree from an interrupted run must never block a later one.
+        self.run_token = secrets.token_hex(4)
 
     def tearDown(self) -> None:
+        # Sprout worktrees live outside the fixture, so cleanup must ask for
+        # their removal explicitly or every run leaks one.
         for job_id in self.jobs:
-            self.call("stop", {"job_id": job_id}, check=False)
+            self.call("stop", {"job_id": job_id, "remove_workspace": True}, check=False)
         self.temporary.cleanup()
 
     def call(
@@ -162,7 +171,7 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self, *arguments: str, check: bool = True
     ) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
-            ["tmux", "-S", self.env["SCUFRIS_TMUX_SOCKET"], *arguments],
+            ["tmux", *arguments],
             text=True,
             capture_output=True,
             env=self.env,
@@ -222,17 +231,18 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
             "workspace_inode": self.root.stat().st_ino,
             "landing_branch": None,
             "harness": "pi",
+            "harness_session": "00000000-0000-4000-8000-000000000000",
             "model": "fixture-model",
             "thinking": "medium",
             "state": "working",
             "summary": "fixture starting",
             "created_at": "2026-08-23T12:00:00Z",
+            "archived_at": None,
             "generation": 1,
             "event_offset": 0,
             "status_device": status.stat().st_dev,
             "status_inode": status.stat().st_ino,
             "execution_state": None,
-            "tmux_socket": None,
             "tmux_session_name": None,
             "tmux_session_id": None,
             "tmux_window_id": None,
@@ -246,6 +256,18 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         (directory / "prompt.md").write_text("Fixture prompt.\n")
         (directory / "conversation.md").write_text("")
         return directory
+
+    def assert_archived(self, job_id: str) -> dict[str, Any]:
+        jobs = self.root / "state" / "scufris" / "jobs"
+        self.assertFalse((jobs / job_id).exists())
+        directory = jobs / "_archive" / job_id
+        self.assertTrue(directory.is_dir())
+        record = json.loads((directory / "job.json").read_text())
+        self.assertIsNotNone(record["archived_at"])
+        self.assertIsNone(record["execution_state"])
+        self.assertTrue((directory / "report.md").is_file())
+        self.assertTrue((directory / "status").is_file())
+        return record
 
     def worker_capability(self, job_id: str) -> str:
         path = self.root / "state" / "scufris" / "jobs" / job_id / "worker-capability"
@@ -643,8 +665,14 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
 
         stopped = self.call("stop", {"job_id": job_id})["result"]
         self.assertTrue(stopped["clean"])
-        self.assertFalse(directory.exists())
+        self.assert_archived(job_id)
         self.assertEqual(json.loads(self.cli("all", "--json").stdout), {"jobs": []})
+        archived_detail = json.loads(self.cli(job_id, "--json").stdout)
+        self.assertEqual(archived_detail["report"], bounded_report)
+        self.assertIsNotNone(archived_detail["archived_at"])
+        refused = self.call("send", {"job_id": job_id, "message": "again"}, check=False)
+        self.assertFalse(refused["ok"])
+        self.assertIn("archived", refused["error"])
 
     def test_trusted_failure_is_linked_and_report_symlinks_are_refused(self) -> None:
         job_id = "123abc456def"
@@ -1009,14 +1037,6 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.assertIn("status identity changed", rejected["error"])
 
     def test_terminal_and_recursive_cleanup_preserve_unrelated_resources(self) -> None:
-        before_default = subprocess.run(
-            ["tmux", "list-sessions", "-F", "#{session_id}:#{session_name}"],
-            text=True,
-            capture_output=True,
-            env=self.env,
-            check=False,
-            timeout=10,
-        )
         self.tmux("new-session", "-d", "-s", "unrelated-explicit-session")
         first = "010203040506"
         second = "102030405060"
@@ -1034,31 +1054,30 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.wait_for(first_directory / "status", "done: report complete")
         events = self.call("events", {"jobs": [{"job_id": first}]})["result"]["jobs"][0]
         self.assertTrue(events["events"])
+        first_session = json.loads((first_directory / "job.json").read_text())[
+            "tmux_session_name"
+        ]
+        second_directory = self.root / "state" / "scufris" / "jobs" / second
+        second_session = json.loads((second_directory / "job.json").read_text())[
+            "tmux_session_name"
+        ]
         self.assertEqual(
             self.tmux("has-session", "-t", "unrelated-explicit-session").returncode,
             0,
         )
-        self.assertTrue((self.root / "state" / "scufris" / "jobs" / second).is_dir())
+        self.assertTrue(second_directory.is_dir())
         self.call("stop", {"job_id": first})
-        self.assertFalse(first_directory.exists())
-        self.assertTrue((self.root / "state" / "scufris" / "jobs" / second).is_dir())
-        self.assertEqual(
-            self.tmux("has-session", "-t", "unrelated-explicit-session").returncode,
+        self.assert_archived(first)
+        self.assertTrue(second_directory.is_dir())
+        # Cleanup shares the default server, so it must kill only its own
+        # session and leave every unrelated session running.
+        self.assertNotEqual(
+            self.tmux("has-session", "-t", f"={first_session}", check=False).returncode,
             0,
         )
+        for survivor in ("unrelated-explicit-session", f"={second_session}"):
+            self.assertEqual(self.tmux("has-session", "-t", survivor).returncode, 0)
         self.tmux("kill-session", "-t", "unrelated-explicit-session")
-        after_default = subprocess.run(
-            ["tmux", "list-sessions", "-F", "#{session_id}:#{session_name}"],
-            text=True,
-            capture_output=True,
-            env=self.env,
-            check=False,
-            timeout=10,
-        )
-        self.assertEqual(
-            (after_default.returncode, after_default.stdout),
-            (before_default.returncode, before_default.stdout),
-        )
 
     def test_atomic_tmux_ownership_mismatch_refuses_termination(self) -> None:
         job_id = "abcdefabcdef"
@@ -1107,13 +1126,11 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
     def test_atomic_server_revalidation_closes_the_check_kill_race(self) -> None:
         job_id = "0011aabbccdd"
         token = "a" * 64
-        socket = self.env["SCUFRIS_TMUX_SOCKET"]
         directory = self.fixture_job(
             job_id,
             {
                 "execution_state": "running",
-                "tmux_socket": socket,
-                "tmux_session_name": "scufris-race-owned",
+                "tmux_session_name": f"scufris-{job_id}-g1-{token[:16]}",
                 "tmux_session_id": "$91",
                 "tmux_window_id": "@92",
                 "tmux_pane_id": "%93",
@@ -1228,28 +1245,29 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
             },
         )
         jobs_module = load_jobs_module()
-        original_remove = jobs_module.secure_rmtree
+        original_archive = jobs_module.archive_job
 
-        def fail_descendant(path: Path) -> None:
-            if path.name == review_id:
-                raise OSError("injected descendant deletion failure")
-            original_remove(path)
+        def fail_descendant(record: dict[str, Any], archived_at: str) -> None:
+            if record["job_id"] == review_id:
+                raise OSError("injected descendant archive failure")
+            original_archive(record, archived_at)
 
         with (
             mock.patch.dict(os.environ, self.env, clear=True),
-            mock.patch.object(
-                jobs_module, "secure_rmtree", side_effect=fail_descendant
-            ),
+            mock.patch.object(jobs_module, "archive_job", side_effect=fail_descendant),
             self.assertRaises(jobs_module.JobError),
         ):
             jobs_module.stop({"job_id": root_id})
         jobs = self.root / "state" / "scufris" / "jobs"
         self.assertTrue((jobs / root_id).is_dir())
         self.assertTrue((jobs / review_id).is_dir())
+        self.assertIsNone(
+            json.loads((jobs / root_id / "job.json").read_text())["archived_at"]
+        )
         retried = self.call("stop", {"job_id": root_id})["result"]
         self.assertTrue(retried["clean"])
-        self.assertFalse((jobs / root_id).exists())
-        self.assertFalse((jobs / review_id).exists())
+        self.assert_archived(root_id)
+        self.assert_archived(review_id)
         self.assertTrue(self.call("stop", {"job_id": root_id})["result"]["clean"])
 
     def test_reviewer_descendants_share_one_recursive_graph(self) -> None:
@@ -1299,9 +1317,16 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
             [record["parent_job"] for record in records], [None, ids[0], ids[1]]
         )
         self.assertEqual(len({record["workflow_id"] for record in records}), 1)
-        cleaned = self.call("stop", {"job_id": ids[2]})["result"]
+        # A descendant ID must not escalate into stopping its parents.
+        refused = self.call("stop", {"job_id": ids[2]}, check=False)
+        self.assertFalse(refused["ok"])
+        self.assertIn(ids[0], refused["error"])
+        self.assertTrue((self.root / "state" / "scufris" / "jobs" / ids[0]).is_dir())
+        cleaned = self.call("stop", {"job_id": ids[0]})["result"]
         self.assertEqual(set(cleaned["removed_jobs"]), set(ids))
         self.assertEqual(json.loads(self.cli("all", "--json").stdout), {"jobs": []})
+        archived = json.loads(self.cli("all", "--archived", "--json").stdout)["jobs"]
+        self.assertEqual({job["job_id"] for job in archived}, set(ids))
 
     def test_restart_crash_before_tmux_creation_rotates_generation_safely(self) -> None:
         job_id = "789900112233"
@@ -1345,21 +1370,20 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.assertTrue(new_events)
         self.assertTrue(all(event["generation"] == 2 for event in new_events))
 
-    def test_blocked_event_survives_recovery_once_and_remains_steerable(self) -> None:
+    def test_blocked_ends_the_execution_and_steering_restores_the_session(self) -> None:
         blocked_pi = """#!/usr/bin/env python3
 import json
 import os
 import pathlib
 import sys
-prompt = pathlib.Path(sys.argv[-1].removeprefix('Read and follow '))
-directory = prompt.parent
+state = pathlib.Path(os.environ['XDG_STATE_HOME'])
+directory = state / 'scufris' / 'jobs' / os.environ['SCUFRIS_JOB_ID']
 generation = int(os.environ['SCUFRIS_JOB_GENERATION'])
+(directory / f'argv-g{generation}.json').write_text(json.dumps(sys.argv[1:]))
+event = 'blocked' if generation == 1 else 'done'
 with (directory / 'status').open('a') as stream:
-    for event, summary in [('working', 'starting blocked fixture'), ('blocked', 'needs one decision')]:
-        stream.write(json.dumps({'generation': generation, 'event': event, 'summary': summary}, separators=(',', ':')) + '\\n')
-for line in sys.stdin:
-    with (directory / 'received').open('a') as stream:
-        stream.write(line)
+    for name, summary in [('working', 'starting blocked fixture'), (event, 'needs one decision')]:
+        stream.write(json.dumps({'generation': generation, 'event': name, 'summary': summary}, separators=(',', ':')) + '\\n')
 """
         (self.bin / "pi").write_text(blocked_pi)
         (self.bin / "pi").chmod(0o755)
@@ -1375,32 +1399,37 @@ for line in sys.stdin:
         self.jobs.append(job_id)
         directory = self.root / "state" / "scufris" / "jobs" / job_id
         self.wait_for(directory / "status", "blocked: needs one decision")
-        recovered = self.call("recover", {"owner_session": "blocked-owner"})["result"][
-            "jobs"
-        ][0]
-        self.trusted_capabilities[job_id] = recovered["trusted_capability"]
-        self.assertTrue(recovered["window_alive"])
+        session = json.loads((directory / "job.json").read_text())["harness_session"]
+        first_argv = json.loads((directory / "argv-g1.json").read_text())
+        self.assertIn("--session-id", first_argv)
+        self.assertIn(session, first_argv)
         events = self.call("events", {"jobs": [{"job_id": job_id}]})["result"]["jobs"][
             0
         ]["events"]
         self.assertEqual(events[-1]["line"], "blocked: needs one decision")
         for event in events:
             self.call("ack-event", {"job_id": job_id, "event_id": event["id"]})
-        recovered_again = self.call("recover", {"owner_session": "blocked-owner"})[
-            "result"
-        ]["jobs"][0]
-        self.trusted_capabilities[job_id] = recovered_again["trusted_capability"]
-        self.assertEqual(
-            self.call("events", {"jobs": [{"job_id": job_id}]})["result"]["jobs"][0][
-                "events"
-            ],
-            [],
-        )
+        # blocked is terminal: the execution is released and the pane is gone.
+        record = json.loads((directory / "job.json").read_text())
+        self.assertIsNone(record["execution_state"])
+        self.assertIsNone(record["tmux_session_name"])
+        recovered = self.call("recover", {"owner_session": "blocked-owner"})["result"][
+            "jobs"
+        ][0]
+        self.trusted_capabilities[job_id] = recovered["trusted_capability"]
+        self.assertFalse(recovered["window_alive"])
         sent = self.call(
             "send", {"job_id": job_id, "message": "Use the safe default."}
         )["result"]
-        self.assertFalse(sent["restarted"])
-        self.wait_for(directory / "received", "Use the safe default.")
+        self.assertTrue(sent["restarted"])
+        self.assertEqual(sent["generation"], 2)
+        self.wait_for(directory / "status", '"generation":2')
+        # The restored generation reuses the same pinned harness session.
+        second_argv = json.loads((directory / "argv-g2.json").read_text())
+        self.assertIn(session, second_argv)
+        self.assertIn(
+            "Use the safe default.", (directory / "conversation.md").read_text()
+        )
 
     def test_project_configuration_drift_refuses_sprout_cleanup(self) -> None:
         context = self.call("context", {"project": "projects/nova-protocol"})["result"]
@@ -1416,7 +1445,7 @@ for line in sys.stdin:
                 "context_markdown": context["markdown"],
                 "context_fingerprint": context["fingerprint"],
                 "workspace": "sprout",
-                "feature": "drift-sensitive-workspace",
+                "feature": f"drift-sensitive-{self.run_token}",
             },
         )
         self.jobs.append(job_id)
@@ -1426,44 +1455,70 @@ for line in sys.stdin:
         shutil.copytree(self.project, alternate_projects / "nova-protocol")
         original_roots = self.env["SCUFRIS_PROJECT_ROOTS"]
         self.env["SCUFRIS_PROJECT_ROOTS"] = json.dumps([str(alternate_projects)])
-        rejected = self.call("stop", {"job_id": job_id}, check=False)
+        rejected = self.call(
+            "stop", {"job_id": job_id, "remove_workspace": True}, check=False
+        )
         self.assertFalse(rejected["ok"])
         self.assertIn("drifted", rejected["error"])
         self.assertTrue(directory.is_dir())
         self.env["SCUFRIS_PROJECT_ROOTS"] = original_roots
-        cleaned = self.call("stop", {"job_id": job_id})["result"]
+        cleaned = self.call("stop", {"job_id": job_id, "remove_workspace": True})[
+            "result"
+        ]
         self.assertTrue(cleaned["clean"])
-        self.assertFalse(directory.exists())
+        self.assert_archived(job_id)
 
-    def test_socket_and_workspace_symlink_drift_fail_closed(self) -> None:
-        linked_parent = self.root / "linked-tmux"
-        linked_parent.symlink_to(self.root / "tmux", target_is_directory=True)
-        unsafe_env = {
-            **self.env,
-            "SCUFRIS_TMUX_SOCKET": str(linked_parent / "unsafe.sock"),
-        }
-        result = subprocess.run(
-            [str(HELPER), "spawn"],
-            input=json.dumps(
-                {
-                    "job_id": "778899001122",
-                    "instructions": "Must not start.",
-                    "owner_session": "unsafe-owner",
-                    "trusted_capability": hashlib.sha256(b"unsafe").hexdigest(),
-                }
-            ),
-            text=True,
-            capture_output=True,
-            env=unsafe_env,
-            check=False,
-            timeout=30,
+    def test_workers_share_the_default_server_and_never_kill_it(self) -> None:
+        jobs_module = load_jobs_module()
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            with mock.patch.object(jobs_module, "run") as call:
+                call.return_value = subprocess.CompletedProcess(["tmux"], 0, b"", b"")
+                jobs_module.tmux(["list-sessions"])
+            self.assertEqual(call.call_args.args[0], ["tmux", "list-sessions"])
+            for argv in (
+                ["kill-server"],
+                ["if-shell", "-F", "-t", "=other:", "1", "kill-server"],
+                ["-S", "/tmp/other.sock", "list-sessions"],
+                ["-L", "other", "list-sessions"],
+            ):
+                with self.assertRaises(jobs_module.JobError):
+                    jobs_module.tmux(argv)
+
+    def test_stop_refuses_a_session_outside_the_worker_namespace(self) -> None:
+        job_id = "aa11bb22cc33"
+        token = "b" * 64
+        self.fixture_job(
+            job_id,
+            {
+                "execution_state": "running",
+                "tmux_session_name": f"scufris-{job_id}-g1-{token[:16]}",
+                "tmux_session_id": "$81",
+                "tmux_window_id": "@82",
+                "tmux_pane_id": "%83",
+                "execution_token": token,
+            },
         )
-        rejected = json.loads(result.stdout)
-        self.assertFalse(rejected["ok"])
-        self.assertIn("symlink", rejected["error"])
-        self.assertFalse(
-            (self.root / "state" / "scufris" / "jobs" / "778899001122").exists()
-        )
+        jobs_module = load_jobs_module()
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            job = jobs_module.load_job(job_id)
+            hijacked = {**job, "tmux_session_name": "scufris2"}
+            snapshot = {
+                "name": hijacked["tmux_session_name"],
+                "session_id": job["tmux_session_id"],
+                "window_id": job["tmux_window_id"],
+                "pane_id": job["tmux_pane_id"],
+                "job_id": job_id,
+                "token": token,
+                "generation": "1",
+                "phase": "running",
+                "pane_dead": "0",
+            }
+            with (
+                mock.patch.object(jobs_module, "tmux") as call,
+                self.assertRaises(jobs_module.JobError),
+            ):
+                jobs_module.stop_execution(hijacked, snapshot)
+            call.assert_not_called()
 
     def test_sprout_job_has_explicit_review_target_and_guarded_landing(self) -> None:
         context = self.call("context", {"project": "projects/nova-protocol"})["result"]
@@ -1479,7 +1534,7 @@ for line in sys.stdin:
                 "context_markdown": context["markdown"],
                 "context_fingerprint": context["fingerprint"],
                 "workspace": "sprout",
-                "feature": f"fixture-{job_id}",
+                "feature": f"fixture-{job_id}-{self.run_token}",
             },
         )["result"]
         self.jobs.append(job_id)
@@ -1605,7 +1660,8 @@ Confirm that the result content is correct.
         self.assertTrue(landed["landed"])
         self.assertTrue(landed["workspace_removed"])
         self.assertEqual(set(landed["removed_jobs"]), {job_id, reviewer_id})
-        self.assertFalse(reviewer_directory.exists())
+        self.assert_archived(reviewer_id)
+        self.assert_archived(job_id)
         self.assertEqual(
             (self.project / "RESULT.md").read_text(), "replacement works\n"
         )

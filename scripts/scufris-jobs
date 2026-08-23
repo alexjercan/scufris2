@@ -15,6 +15,7 @@ from typing import Any
 
 JOB_ID = re.compile(r"^[a-f0-9]{12}$")
 JOB_ID_PREFIX = re.compile(r"^[a-f0-9]{1,12}$")
+ARCHIVE_DIR = "_archive"
 TABLE_FIELDS = (
     ("ID", 12),
     ("STATE", 10),
@@ -77,8 +78,7 @@ def inspect(job_id: str, *, full: bool = False) -> dict[str, Any]:
     return result
 
 
-def job_ids() -> list[str]:
-    root = jobs_root()
+def scan_job_ids(root: Path) -> list[str]:
     try:
         with os.scandir(root) as entries:
             return sorted(
@@ -92,6 +92,13 @@ def job_ids() -> list[str]:
         raise CliError(f"cannot list jobs: {error}") from error
 
 
+def job_ids(*, archived: bool = False) -> list[str]:
+    active = scan_job_ids(jobs_root())
+    if not archived:
+        return active
+    return sorted({*active, *scan_job_ids(jobs_root() / ARCHIVE_DIR)})
+
+
 def invalid_job(job_id: str, error: CliError) -> dict[str, Any]:
     return {
         "job_id": job_id,
@@ -101,9 +108,9 @@ def invalid_job(job_id: str, error: CliError) -> dict[str, Any]:
     }
 
 
-def all_jobs() -> list[dict[str, Any]]:
+def all_jobs(*, archived: bool = False) -> list[dict[str, Any]]:
     jobs: list[dict[str, Any]] = []
-    for job_id in job_ids():
+    for job_id in job_ids(archived=archived):
         try:
             jobs.append(inspect(job_id))
         except CliError as error:
@@ -114,7 +121,7 @@ def all_jobs() -> list[dict[str, Any]]:
 def resolve_job_id(value: str) -> str:
     if not JOB_ID_PREFIX.fullmatch(value):
         raise CliError("job ID must be 1 to 12 lowercase hexadecimal characters")
-    matches = [job_id for job_id in job_ids() if job_id.startswith(value)]
+    matches = [job_id for job_id in job_ids(archived=True) if job_id.startswith(value)]
     if not matches:
         raise CliError(f"job ID not found: {value}")
     if len(matches) > 1:
@@ -230,6 +237,7 @@ def print_detail(job: dict[str, Any]) -> None:
     print_field("Summary", job.get("summary"))
     print_field("Worker pane", "running" if job.get("window_alive") else "stopped")
     print_field("Created", job.get("created_at"))
+    print_field("Archived", job.get("archived_at"))
     print_field("Owner session", job.get("owner_session"))
     print_field("Workflow ID", job.get("workflow_id"))
     print_field("Root job", job.get("root_job"))
@@ -248,7 +256,6 @@ def print_detail(job: dict[str, Any]) -> None:
     print_field("Execution generation", job.get("generation"))
     print_field("Event offset", job.get("event_offset"))
     print_field("Execution state", job.get("execution_state"))
-    print_field("Tmux socket", job.get("tmux_socket"))
     print_field("Tmux session", job.get("tmux_session_name"))
     print_field("Tmux session ID", job.get("tmux_session_id"))
     print_field("Tmux window ID", job.get("tmux_window_id"))
@@ -269,14 +276,20 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         description="List all stored Scufris jobs or inspect one job by ID.",
         epilog=(
-            "Use 'all' or --all to list every job; no argument remains an alias for "
-            "backward compatibility. ID prefixes are accepted when unique. Human "
-            "table output is stable and identical in terminals and pipes."
+            "Use 'all' or --all to list every active job; no argument remains an "
+            "alias for backward compatibility. Cleanup archives a job instead of "
+            "deleting it; use --archived to include archived jobs in the list. ID "
+            "prefixes are accepted when unique and always resolve archived jobs "
+            "too. Human table output is stable and identical in terminals and "
+            "pipes."
         ),
     )
     result.add_argument("command", nargs="?", metavar="all|ID")
     result.add_argument(
         "--all", action="store_true", dest="all_flag", help="list every stored job"
+    )
+    result.add_argument(
+        "--archived", action="store_true", help="include archived jobs in the list"
     )
     result.add_argument("--json", action="store_true", help="print structured JSON")
     return result
@@ -296,9 +309,11 @@ def main() -> int:
     if arguments.all_flag and arguments.command not in (None, "all"):
         argument_parser.error("--all cannot be used with a job ID")
     list_all = arguments.all_flag or arguments.command in (None, "all")
+    if arguments.archived and not list_all:
+        argument_parser.error("--archived cannot be used with a job ID")
     try:
         if list_all:
-            jobs = all_jobs()
+            jobs = all_jobs(archived=arguments.archived)
             if arguments.json:
                 print(json.dumps({"jobs": jobs}, indent=2, sort_keys=True))
             else:

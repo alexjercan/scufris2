@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path, PurePosixPath
 from textwrap import dedent
 from typing import Any, NoReturn
@@ -26,10 +27,17 @@ JOB_ID = re.compile(r"^[a-f0-9]{12}$")
 PROJECT_ID = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
 FEATURE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 HANDOFF = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+EXECUTION_SESSION = re.compile(r"^scufris-[a-f0-9]{12}-g[1-9][0-9]*-[a-f0-9]{16}$")
+ARCHIVE_DIR = "_archive"
+UUID4 = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
 WORKER_EVENTS = {"working", "blocked", "done"}
 EVENTS = {*WORKER_EVENTS, "failed"}
 LOGICAL_STATES = {*EVENTS, "suspended"}
-TERMINAL_EVENTS = {"done", "failed"}
+# `working` is a progress note. Every other event ends the execution; the job
+# stays steerable and its next generation restores the same harness session.
+TERMINAL_EVENTS = {"blocked", "done", "failed"}
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 WORKSPACES = {"temporary", "project", "sprout", "review"}
 RECORD_VERSION = 2
@@ -83,17 +91,18 @@ JOB_FIELDS = {
     "workspace_inode",
     "landing_branch",
     "harness",
+    "harness_session",
     "model",
     "thinking",
     "state",
     "summary",
     "created_at",
+    "archived_at",
     "generation",
     "event_offset",
     "status_device",
     "status_inode",
     "execution_state",
-    "tmux_socket",
     "tmux_session_name",
     "tmux_session_id",
     "tmux_window_id",
@@ -116,8 +125,24 @@ def jobs_root() -> Path:
     return state_home() / "jobs"
 
 
+def archive_root() -> Path:
+    return jobs_root() / ARCHIVE_DIR
+
+
+def archived_job_dir(job_id: str) -> Path:
+    return archive_root() / validate_job_id(job_id)
+
+
 def job_dir(job_id: str) -> Path:
-    return jobs_root() / validate_job_id(job_id)
+    # Cleanup moves a finished job into the archive. Active lookups keep using
+    # the live directory; only explicit archival readers fall back.
+    active = jobs_root() / validate_job_id(job_id)
+    if active.exists() or active.is_symlink():
+        return active
+    archived = archived_job_dir(job_id)
+    if archived.is_dir():
+        return archived
+    return active
 
 
 @contextlib.contextmanager
@@ -314,43 +339,22 @@ def canonical_path(path: Path, *, directory: bool = True) -> Path:
     return resolved
 
 
-def explicit_tmux_socket(value: str | None = None) -> Path:
-    raw = os.environ.get("SCUFRIS_TMUX_SOCKET") if value is None else value
-    if not raw:
-        raise JobError("SCUFRIS_TMUX_SOCKET must select an explicit socket")
-    socket = Path(raw)
-    if not socket.is_absolute():
-        raise JobError("SCUFRIS_TMUX_SOCKET must be absolute")
-    canonical_path(socket.parent)
-    try:
-        info = socket.lstat()
-    except FileNotFoundError:
-        pass
-    else:
-        if stat.S_ISLNK(info.st_mode):
-            raise JobError("tmux socket must not be a symlink")
-        if not stat.S_ISSOCK(info.st_mode):
-            raise JobError("tmux socket path is not a socket")
-    return socket
+SERVER_ABSENT = ("no server running", "can't find session", "no sessions")
 
 
 def tmux(
     argv: list[str],
     *,
-    socket: Path | None = None,
     input_bytes: bytes | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[bytes]:
-    if "kill-server" in argv:
+    # Workers share the default tmux server with the foreground session. Only
+    # named job sessions are ever killed, so the shared server always survives.
+    if any(argument.startswith("kill-server") for argument in argv):
         raise JobError("kill-server is forbidden")
-    selected = (
-        explicit_tmux_socket() if socket is None else explicit_tmux_socket(str(socket))
-    )
-    return run(
-        ["tmux", "-S", str(selected), *argv],
-        input_bytes=input_bytes,
-        check=check,
-    )
+    if any(argument in ("-S", "-L") for argument in argv):
+        raise JobError("tmux socket selection is forbidden")
+    return run(["tmux", *argv], input_bytes=input_bytes, check=check)
 
 
 def expanded(path: str) -> Path:
@@ -605,15 +609,21 @@ Scufris.
 
 Allowed events:
 
-- `working: <summary>` while you are actively doing assigned work.
-- `blocked: <summary>` when you cannot continue without mediation, then wait.
-- `done: <summary>` when the current assignment is complete, then wait.
+- `working: <summary>` while you are actively doing assigned work. This is the
+  only event that keeps you running; report it as often as it is useful.
+- `blocked: <summary>` when you cannot continue without mediation.
+- `done: <summary>` when the current assignment is complete.
 
 Do not invent another event keyword. You cannot report `failed`; trusted
-orchestration generates failure when the harness can no longer work. A `done`
-event does not stop this worker or select the next phase. Foreground Scufris
-inspects the request, project preferences, prompt, and report, then decides
-whether to review, steer more work, land, or stop.
+orchestration generates failure when the harness can no longer work.
+
+`blocked` and `done` both end this execution. Report either one only when you
+have nothing further to do, and put everything the next execution needs into
+`report.md` first. Do not wait afterwards. Your conversation is preserved:
+foreground Scufris inspects the request, project preferences, prompt, report,
+and conversation, then decides whether to review, land, stop, or continue. If
+it continues, you resume in this same session with its guidance appended to
+`conversation.md`, so do not repeat work you already finished.
 """
 
 
@@ -640,11 +650,9 @@ def prepare_execution(record: dict[str, Any]) -> tuple[dict[str, Any], str]:
     launch_capability = secrets.token_hex(32)
     execution_token = secrets.token_hex(32)
     generation = record["generation"]
-    socket = explicit_tmux_socket()
     updated = {
         **record,
         "execution_state": "creating",
-        "tmux_socket": str(socket),
         "tmux_session_name": execution_session_name(
             record["job_id"], generation, execution_token
         ),
@@ -673,7 +681,6 @@ def prepare_execution(record: dict[str, Any]) -> tuple[dict[str, Any], str]:
 
 
 def start_execution(record: dict[str, Any], launch_capability: str) -> dict[str, Any]:
-    socket = explicit_tmux_socket(record["tmux_socket"])
     name = record["tmux_session_name"]
     result = tmux(
         [
@@ -719,8 +726,7 @@ def start_execution(record: dict[str, Any], launch_capability: str) -> dict[str,
             name,
             "remain-on-exit",
             "on",
-        ],
-        socket=socket,
+        ]
     )
     values = result.stdout.decode().strip().split("\t")
     if len(values) != 3:
@@ -755,8 +761,7 @@ def start_execution(record: dict[str, Any], launch_capability: str) -> dict[str,
             name,
             "@scufris_phase",
             "running",
-        ],
-        socket=socket,
+        ]
     )
     updated = {**updated, "execution_state": "running"}
     store_job(updated)
@@ -792,7 +797,8 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
         raise JobError("instructions must be nonempty text")
     if not valid_record_text(owner_session, 512):
         raise JobError("owner session is required")
-    explicit_tmux_socket()
+    if shutil.which("tmux") is None:
+        raise JobError("tmux executable not found")
     harness, model, thinking = selected_adapter(
         request.get("harness"), request.get("model"), request.get("thinking")
     )
@@ -948,17 +954,18 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
                 else None
             ),
             "harness": harness,
+            "harness_session": str(uuid.uuid4()),
             "model": model,
             "thinking": thinking,
             "state": "working",
             "summary": "worker starting",
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "archived_at": None,
             "generation": 1,
             "event_offset": 0,
             "status_device": (directory / "status").stat().st_dev,
             "status_inode": (directory / "status").stat().st_ino,
             "execution_state": None,
-            "tmux_socket": None,
             "tmux_session_name": None,
             "tmux_session_id": None,
             "tmux_window_id": None,
@@ -1151,6 +1158,9 @@ def validate_job_record(value: Any, job_id: str) -> dict[str, Any]:
         or value.get("state") not in LOGICAL_STATES
     ):
         raise JobError("job record is invalid")
+    harness_session = value.get("harness_session")
+    if not isinstance(harness_session, str) or UUID4.fullmatch(harness_session) is None:
+        raise JobError("job record is invalid")
     created_at = value.get("created_at")
     try:
         parsed = dt.datetime.strptime(created_at, "%Y-%m-%dT%H:%M:%SZ").replace(
@@ -1160,6 +1170,18 @@ def validate_job_record(value: Any, job_id: str) -> dict[str, Any]:
         raise JobError("job record is invalid") from error
     if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != created_at:
         raise JobError("job record is invalid")
+    archived_at = value.get("archived_at")
+    if archived_at is not None:
+        try:
+            archived = dt.datetime.strptime(archived_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=dt.timezone.utc
+            )
+        except (TypeError, ValueError) as error:
+            raise JobError("job record is invalid") from error
+        if archived.strftime("%Y-%m-%dT%H:%M:%SZ") != archived_at:
+            raise JobError("job record is invalid")
+        if value.get("execution_state") is not None:
+            raise JobError("job record is invalid")
     for field in (
         "project_root_device",
         "project_root_inode",
@@ -1188,7 +1210,6 @@ def validate_job_record(value: Any, job_id: str) -> dict[str, Any]:
     if execution_state not in {None, "creating", "running"}:
         raise JobError("job record is invalid")
     execution_values = [
-        value.get("tmux_socket"),
         value.get("tmux_session_name"),
         value.get("execution_token"),
     ]
@@ -1201,7 +1222,7 @@ def validate_job_record(value: Any, job_id: str) -> dict[str, Any]:
     else:
         if not all(isinstance(item, str) and item for item in execution_values):
             raise JobError("job record is invalid")
-        if not Path(value["tmux_socket"]).is_absolute():
+        if EXECUTION_SESSION.fullmatch(value["tmux_session_name"]) is None:
             raise JobError("job record is invalid")
         if re.fullmatch(r"[a-f0-9]{64}", value["execution_token"]) is None:
             raise JobError("job record is invalid")
@@ -1265,7 +1286,7 @@ def validate_job_record(value: Any, job_id: str) -> dict[str, Any]:
     return value
 
 
-def load_job(job_id: str) -> dict[str, Any]:
+def load_job(job_id: str, *, archived: bool = False) -> dict[str, Any]:
     path = job_dir(job_id) / "job.json"
     try:
         raw = read_regular(path, MAX_JOB_RECORD)
@@ -1273,7 +1294,12 @@ def load_job(job_id: str) -> dict[str, Any]:
         value = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
         raise JobError("job record is invalid") from error
-    return validate_job_record(value, job_id)
+    record = validate_job_record(value, job_id)
+    # Cleanup archives a workflow instead of deleting it. Archived records stay
+    # readable for history and refuse every operation that would revive them.
+    if record["archived_at"] is not None and not archived:
+        raise JobError("job is archived")
+    return record
 
 
 def load_legacy_job_for_reporting(job_id: str) -> dict[str, Any]:
@@ -1324,7 +1350,16 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
         or not secrets.compare_digest(capability_hash(capability), expected_launch)
     ):
         raise JobError("launch capability does not authorize this generation")
-    prompt = f"Read and follow {job_dir(job_id) / 'prompt.md'}"
+    directory = job_dir(job_id)
+    # Generation 1 opens the pinned prompt. Every later generation restores the
+    # same harness session and continues it with the foreground's guidance.
+    resuming = job["generation"] > 1
+    if resuming:
+        prompt = f"Read and follow the new guidance at the end of {directory / 'conversation.md'}"
+    else:
+        prompt = f"Read and follow {directory / 'prompt.md'}"
+    session_dir = directory / "harness-session"
+    session_dir.mkdir(mode=0o700, exist_ok=True)
     if job["harness"] == "pi":
         report_extension = (
             Path(__file__).resolve().parents[2]
@@ -1335,6 +1370,8 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
         )
         if not report_extension.is_file():
             raise JobError("worker report extension is unavailable")
+        # Pi creates the session ID when missing and resumes it when present,
+        # so one flag covers the first launch and every restore.
         argv = [
             "pi",
             "--approve",
@@ -1347,6 +1384,10 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
             "--extension",
             str(report_extension),
             "--no-extensions",
+            "--session-dir",
+            str(session_dir),
+            "--session-id",
+            job["harness_session"],
         ]
         if job["workspace"] == "review":
             argv.extend(["--tools", "read,grep,find,ls,scufris_report"])
@@ -1359,8 +1400,14 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
             job["model"],
             "--effort",
             job["thinking"],
-            prompt,
         ]
+        # Claude pins the ID on the first launch and restores it by ID after.
+        argv.extend(
+            ["--resume", job["harness_session"]]
+            if resuming
+            else ["--session-id", job["harness_session"]]
+        )
+        argv.append(prompt)
     report_capability = secrets.token_hex(32)
     auth["launch_capability_hash"] = None
     auth["report_capability_hash"] = capability_hash(report_capability)
@@ -1398,9 +1445,6 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
 def execution_snapshot(job: dict[str, Any]) -> dict[str, Any] | None:
     if job["execution_state"] is None:
         return None
-    socket = explicit_tmux_socket(job["tmux_socket"])
-    if not socket.exists():
-        return None
     name = job["tmux_session_name"]
     result = tmux(
         [
@@ -1414,15 +1458,11 @@ def execution_snapshot(job: dict[str, Any]) -> dict[str, Any] | None:
                 "#{@scufris_generation}\t#{@scufris_phase}\t#{pane_dead}"
             ),
         ],
-        socket=socket,
         check=False,
     )
     if result.returncode != 0:
         detail = result.stderr.decode("utf-8", "replace").lower()
-        if any(
-            phrase in detail
-            for phrase in ("no server running", "can't find session", "no sessions")
-        ):
+        if any(phrase in detail for phrase in SERVER_ABSENT):
             return None
         raise JobError(detail.strip() or "tmux ownership query failed")
     fields = result.stdout.decode().strip().split("\t")
@@ -1482,7 +1522,6 @@ def finish_precreated_execution(
     job = record_snapshot(job, snapshot)
     launch_path = job_dir(job["job_id"]) / ".launch-capability"
     launch_capability = read_bounded_artifact(launch_path, 128).decode("ascii")
-    socket = explicit_tmux_socket(job["tmux_socket"])
     tmux(
         [
             "respawn-pane",
@@ -1506,8 +1545,7 @@ def finish_precreated_execution(
             job["tmux_session_name"],
             "@scufris_phase",
             "running",
-        ],
-        socket=socket,
+        ]
     )
     updated = {**job, "execution_state": "running"}
     store_job(updated)
@@ -1546,26 +1584,27 @@ def stop_execution(
         return updated
     assert isinstance(snapshot, dict)
     job = record_snapshot(job, snapshot)
+    name = job["tmux_session_name"]
+    # The default server also runs the foreground session. Only an exact match
+    # on a generated worker session name may ever be killed.
+    if EXECUTION_SESSION.fullmatch(name) is None:
+        raise JobError("refusing to kill a session outside the worker namespace")
     condition = execution_ownership_condition(job)
     result = tmux(
         [
             "if-shell",
             "-F",
             "-t",
-            f"={job['tmux_session_name']}:",
+            f"={name}:",
             condition,
-            f"kill-session -t ={job['tmux_session_name']}",
+            f"kill-session -t ={name}",
             "display-message -p scufris-ownership-mismatch",
         ],
-        socket=Path(job["tmux_socket"]),
         check=False,
     )
     output = result.stdout.decode("utf-8", "replace")
     detail = result.stderr.decode("utf-8", "replace").lower()
-    absent = not Path(job["tmux_socket"]).exists() or any(
-        phrase in detail
-        for phrase in ("no server running", "can't find session", "no sessions")
-    )
+    absent = any(phrase in detail for phrase in SERVER_ABSENT)
     if "scufris-ownership-mismatch" in output or (
         result.returncode != 0 and not absent
     ):
@@ -1579,7 +1618,6 @@ def clear_execution(job: dict[str, Any]) -> dict[str, Any]:
     return {
         **job,
         "execution_state": None,
-        "tmux_socket": None,
         "tmux_session_name": None,
         "tmux_session_id": None,
         "tmux_window_id": None,
@@ -2007,65 +2045,14 @@ def send(request: dict[str, Any]) -> dict[str, Any]:
     if root["cleanup"] is not None:
         raise JobError("workflow cleanup is active; retry cleanup instead of steering")
     append_conversation(job_id, message)
-    if job["state"] in TERMINAL_EVENTS or job["state"] == "suspended":
-        job = restart_execution(job)
-        return {
-            "job_id": job_id,
-            "sent": True,
-            "restarted": True,
-            "generation": job["generation"],
-            "status_file": str(job_dir(job_id) / "status"),
-        }
-    snapshot = execution_snapshot(job)
-    if snapshot is None or snapshot["pane_dead"] != "0":
-        job = {**job, "state": "failed", "summary": "worker execution was lost"}
-        if job["execution_state"] is not None:
-            job = clear_execution(job)
-            store_job(job)
-        job = restart_execution(job)
-        return {
-            "job_id": job_id,
-            "sent": True,
-            "restarted": True,
-            "generation": job["generation"],
-            "status_file": str(job_dir(job_id) / "status"),
-        }
-    buffer = f"scufris-{job_id}-{secrets.token_hex(8)}"
-    socket = Path(job["tmux_socket"])
-    try:
-        tmux(
-            ["load-buffer", "-b", buffer, "-"],
-            socket=socket,
-            input_bytes=message.encode(),
-        )
-        condition = execution_ownership_condition(job)
-        routed = tmux(
-            [
-                "if-shell",
-                "-F",
-                "-t",
-                job["tmux_pane_id"],
-                condition,
-                (
-                    f"paste-buffer -b {buffer} -t {job['tmux_pane_id']} -d ; "
-                    f"send-keys -t {job['tmux_pane_id']} Enter"
-                ),
-                "display-message -p scufris-ownership-mismatch",
-            ],
-            socket=socket,
-            check=False,
-        )
-        if routed.returncode != 0 or b"scufris-ownership-mismatch" in routed.stdout:
-            raise JobError("tmux atomic ownership validation refused steering")
-    finally:
-        tmux(["delete-buffer", "-b", buffer], socket=socket, check=False)
-    updated = {**job, "state": "working", "summary": "foreground guidance submitted"}
-    store_job(updated)
+    # Every worker event except `working` ends its execution, so steering always
+    # restores the pinned harness session in a fresh generation and window.
+    job = restart_execution(job)
     return {
         "job_id": job_id,
         "sent": True,
-        "restarted": False,
-        "generation": updated["generation"],
+        "restarted": True,
+        "generation": job["generation"],
         "status_file": str(job_dir(job_id) / "status"),
     }
 
@@ -2077,7 +2064,7 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
         {"include_report", "include_context", "include_prompt", "include_conversation"},
     )
     job_id = validate_job_id(request["job_id"])
-    job = load_job(job_id)
+    job = load_job(job_id, archived=True)
     directory = job_dir(job_id)
     result = {
         key: job.get(key)
@@ -2100,13 +2087,13 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
             "state",
             "summary",
             "created_at",
+            "archived_at",
             "context_fingerprint",
             "generation",
             "event_offset",
             "status_device",
             "status_inode",
             "execution_state",
-            "tmux_socket",
             "tmux_session_name",
             "tmux_session_id",
             "tmux_window_id",
@@ -2543,7 +2530,9 @@ def all_job_records() -> list[dict[str, Any]]:
                 continue
             if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
                 raise JobError(f"unsafe job directory: {entry.name}")
-            records.append(load_job(entry.name))
+            record = load_job(entry.name, archived=True)
+            if record["archived_at"] is None:
+                records.append(record)
     return records
 
 
@@ -2621,6 +2610,26 @@ def stop_workflow_executions(records: list[dict[str, Any]]) -> None:
         raise JobError("workflow execution cleanup incomplete: " + "; ".join(errors))
 
 
+def archive_job(record: dict[str, Any], archived_at: str) -> None:
+    job_id = record["job_id"]
+    current = load_job(job_id, archived=True)
+    if current["archived_at"] is not None:
+        return
+    if current["execution_state"] is not None:
+        raise JobError("job still owns an execution")
+    store_job({**current, "archived_at": archived_at})
+    active = jobs_root() / job_id
+    destination = archived_job_dir(job_id)
+    if destination.exists() or destination.is_symlink():
+        raise JobError("an archived job already occupies that identity")
+    root = archive_root()
+    root.mkdir(parents=True, mode=0o700, exist_ok=True)
+    canonical_path(root)
+    os.rename(active, destination)
+    fsync_directory(jobs_root())
+    fsync_directory(root)
+
+
 def cleanup_workflow(selected: dict[str, Any]) -> dict[str, Any]:
     records = workflow_records(selected)
     by_id = {record["job_id"]: record for record in records}
@@ -2629,8 +2638,9 @@ def cleanup_workflow(selected: dict[str, Any]) -> dict[str, Any]:
     )
     errors: list[str] = []
     stop_workflow_executions(ordered)
+    remove_workspace = selected["cleanup"]["remove_workspace"]
     for record in ordered:
-        if record["workspace"] == "sprout":
+        if record["workspace"] == "sprout" and remove_workspace:
             try:
                 remove_sprout_workspace(record)
             except (JobError, subprocess.SubprocessError) as error:
@@ -2638,12 +2648,15 @@ def cleanup_workflow(selected: dict[str, Any]) -> dict[str, Any]:
     if errors:
         raise JobError("workflow workspace cleanup incomplete: " + "; ".join(errors))
     root_id = selected["root_job"]
+    # Job directories are archival. Cleanup releases the live resources and then
+    # marks each record archived so its report and history stay on disk.
+    archived_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     removed: list[str] = []
     for record in ordered:
         if record["job_id"] == root_id:
             continue
         try:
-            secure_rmtree(job_dir(record["job_id"]))
+            archive_job(record, archived_at)
             removed.append(record["job_id"])
         except (JobError, OSError) as error:
             errors.append(f"{record['job_id']}: {error}")
@@ -2651,7 +2664,7 @@ def cleanup_workflow(selected: dict[str, Any]) -> dict[str, Any]:
         raise JobError(
             "workflow record cleanup incomplete; root retained: " + "; ".join(errors)
         )
-    secure_rmtree(job_dir(root_id))
+    archive_job(by_id[root_id], archived_at)
     removed.append(root_id)
     return {"root_job": root_id, "removed_jobs": removed, "clean": True}
 
@@ -2662,6 +2675,9 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
     subject = request["subject"]
     if not isinstance(subject, str) or not subject.strip() or "\n" in subject:
         raise JobError("landing subject must be one nonempty line")
+    remove_workspace = request.get("remove_workspace", True)
+    if not isinstance(remove_workspace, bool):
+        raise JobError("remove_workspace must be true or false")
     selected = load_job(job_id)
     root = load_job(selected["root_job"])
     if root["workspace"] != "sprout":
@@ -2672,7 +2688,7 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
         intent = {
             "action": "land",
             "subject": subject,
-            "remove_workspace": True,
+            "remove_workspace": remove_workspace,
             "revision": revision,
         }
         root = {**root, "cleanup": intent}
@@ -2682,7 +2698,7 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
         if (
             intent["action"] != "land"
             or intent["subject"] != subject
-            or not intent["remove_workspace"]
+            or intent["remove_workspace"] != remove_workspace
             or not isinstance(intent["revision"], str)
         ):
             raise JobError("a different cleanup operation is already durable")
@@ -2719,21 +2735,37 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
         root = {**root, "cleanup": {**intent, "revision": landed_revision}}
         store_job(root)
     result = cleanup_workflow(root)
-    return {"job_id": job_id, "landed": True, "workspace_removed": True, **result}
+    return {
+        "job_id": job_id,
+        "landed": True,
+        "workspace_removed": remove_workspace,
+        **result,
+    }
 
 
 def stop(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(request, {"job_id"}, {"remove_workspace"})
     job_id = validate_job_id(request["job_id"])
+    remove_workspace = request.get("remove_workspace", False)
+    if not isinstance(remove_workspace, bool):
+        raise JobError("remove_workspace must be true or false")
     directory = job_dir(job_id)
     if not directory.exists() and not directory.is_symlink():
         return {"job_id": job_id, "state": "stopped", "clean": True, "removed_jobs": []}
-    selected = load_job(job_id)
+    selected = load_job(job_id, archived=True)
+    if selected["archived_at"] is not None:
+        return {"job_id": job_id, "state": "stopped", "clean": True, "removed_jobs": []}
+    # Cleanup is workflow scoped. A descendant ID must never silently escalate
+    # into stopping its parent's execution and workspace.
+    if selected["job_id"] != selected["root_job"]:
+        raise JobError(
+            f"stop is workflow scoped; stop the workflow root {selected['root_job']}"
+        )
     root = load_job(selected["root_job"])
     intent = {
         "action": "stop",
         "subject": None,
-        "remove_workspace": True,
+        "remove_workspace": remove_workspace,
         "revision": None,
     }
     if root["cleanup"] is not None and root["cleanup"] != intent:

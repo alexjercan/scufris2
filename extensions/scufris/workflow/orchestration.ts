@@ -28,7 +28,10 @@ const jobsHelperPath = fileURLToPath(
 
 const CONTEXT_ID = /^[a-f0-9]{24}$/;
 const JOB_ID = /^[a-f0-9]{12}$/;
+// Every worker event except `working` ends its execution, so `blocked` releases
+// the pane exactly like `done` and waits for foreground guidance.
 export const TERMINAL_OWNERSHIP_STATES: ReadonlySet<string> = new Set([
+  "blocked",
   "done",
   "failed",
   "suspended",

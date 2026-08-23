@@ -170,6 +170,7 @@ in
       test -f ${resources}/share/scufris/extensions/scufris/workflow/index.ts
       test -f ${resources}/share/scufris/extensions/scufris/workflow/identity.ts
       test -f ${resources}/share/scufris/extensions/scufris/workflow/orchestration.ts
+      test -f ${resources}/share/scufris/extensions/scufris/workflow/worker-report.ts
       test -f ${resources}/share/scufris/extensions/scufris/workflow/walkthrough.ts
       test -f ${resources}/share/scufris/extensions/scufris/workflow/walkthrough-reviewer.ts
       test -f ${resources}/share/scufris/extensions/scufris/voice/index.ts
@@ -184,6 +185,7 @@ in
       test ! -e ${voiceResources}/share/scufris/scripts/scufris-dev
       test ! -e ${resources}/share/scufris/prompts
       test -x ${resources}/share/scufris/tools/jobs/scufris-jobs
+      test -x ${resources}/share/scufris/tools/jobs/scufris-report
       test -x ${resources}/share/scufris/tools/quick-review/quick_review.py
       test -x ${resources}/share/scufris/tools/dashboard/scufris-dashboard
       test -x ${resources}/share/scufris/scripts/scufris-jobs

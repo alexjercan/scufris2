@@ -323,7 +323,12 @@ def selected_adapter(harness: Any, model: Any, thinking: Any) -> tuple[str, str,
     return selected_harness, selected_model, selected_thinking
 
 
-def worker_prompt(instructions: str, context_markdown: str | None, review: bool) -> str:
+def worker_prompt(
+    instructions: str,
+    context_markdown: str | None,
+    review: bool,
+    harness: str,
+) -> str:
     project_section = (
         f"\n## Project workflow preferences\n\n{context_markdown.strip()}\n"
         if context_markdown
@@ -345,6 +350,17 @@ def worker_prompt(instructions: str, context_markdown: str | None, review: bool)
             """
         ).strip()
     )
+    reporting = (
+        "Call the `scufris_report` tool."
+        if harness == "pi"
+        else dedent(
+            f"""\
+            Send reports through `{Path(__file__).with_name("scufris-report")}`.
+            Pass the event and one-line summary as arguments and the detailed
+            Markdown report on standard input.
+            """
+        ).strip()
+    )
     return f"""# Scufris delegated job
 
 {role}
@@ -358,10 +374,9 @@ your working directory when relevant.
 
 ## Communication
 
-The job directory that contains this prompt also contains `status` and
-`report.md`. Write detailed evidence to `report.md` before each actionable or
-terminal event. Append one event line to `status`; never rewrite existing
-lines.
+{reporting} Do not modify `status` or `report.md` directly. Each report replaces
+the current detailed evidence and appends one validated event for foreground
+Scufris.
 
 Allowed events:
 
@@ -518,7 +533,12 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
         else:
             assert source is not None
             working = Path(source["working_directory"]).resolve()
-        prompt = worker_prompt(instructions, context_markdown, source is not None)
+        prompt = worker_prompt(
+            instructions,
+            context_markdown,
+            source is not None,
+            harness,
+        )
         write_new(directory / "prompt.md", prompt.encode(), 0o400)
         if context_markdown is not None:
             write_new(
@@ -589,6 +609,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
             "model": model,
             "thinking": thinking,
             "tmux_session": session_name(job_id),
+            "status_file": str(directory / "status"),
             "message": "Worker started.",
         }
     except Exception:
@@ -637,6 +658,15 @@ def launch(job_id: str) -> NoReturn:
     job = load_job(job_id)
     prompt = f"Read and follow {job_dir(job_id) / 'prompt.md'}"
     if job["harness"] == "pi":
+        report_extension = (
+            Path(__file__).resolve().parents[2]
+            / "extensions"
+            / "scufris"
+            / "workflow"
+            / "worker-report.ts"
+        )
+        if not report_extension.is_file():
+            raise JobError("worker report extension is unavailable")
         argv = [
             "pi",
             "--approve",
@@ -646,9 +676,12 @@ def launch(job_id: str) -> NoReturn:
             job["model"],
             "--thinking",
             job["thinking"],
+            "--extension",
+            str(report_extension),
+            "--no-extensions",
         ]
         if job.get("workspace") == "review":
-            argv.extend(["--tools", "read,grep,find,ls", "--no-extensions"])
+            argv.extend(["--tools", "read,grep,find,ls,scufris_report"])
         argv.append(prompt)
     elif job["harness"] == "claude":
         argv = [
@@ -663,12 +696,41 @@ def launch(job_id: str) -> NoReturn:
     else:
         raise JobError("invalid harness")
     env = worker_environment()
+    env["SCUFRIS_ROLE"] = "worker"
+    env["SCUFRIS_JOB_ID"] = job_id
     if job["harness"] == "claude":
         env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] = "false"
     executable = shutil.which(argv[0], path=env.get("PATH"))
     if executable is None:
         raise JobError(f"harness executable not found: {argv[0]}")
-    os.execvpe(executable, argv, env)
+    completed = subprocess.run([executable, *argv[1:]], env=env, check=False)
+    event_lines = (
+        (job_dir(job_id) / "status").read_text("utf-8", errors="replace").splitlines()
+    )
+    last_event = next(
+        (parsed for line in reversed(event_lines) if (parsed := parse_event(line))),
+        None,
+    )
+    if (
+        not (job_dir(job_id) / ".stopping").exists()
+        and (last_event is None or last_event[0] not in {"done", "failed"})
+    ):
+        existing_report = (job_dir(job_id) / "report.md").read_text(
+            "utf-8", errors="replace"
+        )
+        detail = existing_report.rstrip()
+        if detail:
+            detail += "\n\n"
+        detail += f"Worker harness exited with status {completed.returncode}.\n"
+        report(
+            {
+                "job_id": job_id,
+                "event": "failed",
+                "summary": "worker harness exited without a terminal report",
+                "report": detail,
+            }
+        )
+    raise SystemExit(completed.returncode)
 
 
 def pane_alive(job: dict[str, Any]) -> bool:
@@ -694,7 +756,51 @@ def parse_event(line: str) -> tuple[str, str] | None:
     return state, summary
 
 
-def poll(request: dict[str, Any]) -> dict[str, Any]:
+def report(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id", "event", "summary", "report"})
+    job_id = validate_job_id(request["job_id"])
+    event, summary, detail = (
+        request["event"],
+        request["summary"],
+        request["report"],
+    )
+    if not isinstance(event, str) or not isinstance(summary, str):
+        raise JobError("event and summary must be text")
+    line = f"{event}: {summary}"
+    if parse_event(line) is None:
+        raise JobError("invalid worker event")
+    if not isinstance(detail, str) or not detail.strip():
+        raise JobError("report must be nonempty text")
+    encoded_report = detail.encode()
+    if len(encoded_report) > MAX_REPORT:
+        raise JobError("report is too large")
+
+    directory = job_dir(job_id)
+    load_job(job_id)
+    report_fd = os.open(
+        directory / "report.md",
+        os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW,
+    )
+    try:
+        view = memoryview(encoded_report)
+        while view:
+            view = view[os.write(report_fd, view) :]
+        os.fsync(report_fd)
+    finally:
+        os.close(report_fd)
+    status_fd = os.open(
+        directory / "status",
+        os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW,
+    )
+    try:
+        os.write(status_fd, f"{line}\n".encode())
+        os.fsync(status_fd)
+    finally:
+        os.close(status_fd)
+    return {"job_id": job_id, "event": event, "summary": summary}
+
+
+def read_events(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(request, {"jobs"})
     requested = request["jobs"]
     if not isinstance(requested, list):
@@ -707,7 +813,7 @@ def poll(request: dict[str, Any]) -> dict[str, Any]:
             "tail",
             "inode",
         }:
-            raise JobError("invalid poll cursor")
+            raise JobError("invalid event cursor")
         job_id = validate_job_id(cursor["job_id"])
         offset, tail, inode = cursor["offset"], cursor["tail"], cursor["inode"]
         if (
@@ -716,7 +822,7 @@ def poll(request: dict[str, Any]) -> dict[str, Any]:
             or not isinstance(tail, str)
             or (inode is not None and not isinstance(inode, int))
         ):
-            raise JobError("invalid poll cursor values")
+            raise JobError("invalid event cursor values")
         path = job_dir(job_id) / "status"
         info = path.stat()
         if inode != info.st_ino or offset > info.st_size:
@@ -1169,6 +1275,14 @@ def review_target(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def mark_stopping(job_id: str) -> None:
+    path = job_dir(job_id) / ".stopping"
+    try:
+        write_new(path, b"", 0o600)
+    except FileExistsError:
+        pass
+
+
 def land(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(request, {"job_id", "subject"}, {"remove_workspace"})
     job_id = validate_job_id(request["job_id"])
@@ -1185,6 +1299,7 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
     _, root = resolve_project(project)
     sprout(["land", feature, "--dry-run", "-m", subject], root)
     sprout(["land", feature, "-m", subject], root)
+    mark_stopping(job_id)
     session = job.get("tmux_session_id")
     if isinstance(session, str):
         tmux(["kill-session", "-t", session], check=False)
@@ -1198,6 +1313,7 @@ def stop(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(request, {"job_id"}, {"remove_workspace"})
     job_id = validate_job_id(request["job_id"])
     job = load_job(job_id)
+    mark_stopping(job_id)
     session = job.get("tmux_session_id")
     if isinstance(session, str):
         tmux(["kill-session", "-t", session], check=False)
@@ -1240,7 +1356,8 @@ def main() -> int:
         "projects": projects,
         "context": context,
         "spawn": spawn,
-        "poll": poll,
+        "events": read_events,
+        "report": report,
         "send": send,
         "inspect": inspect,
         "quick-review-snapshot": quick_review_snapshot,

@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        print("usage: scufris-report EVENT SUMMARY", file=sys.stderr)
+        return 2
+    job_id = os.environ.get("SCUFRIS_JOB_ID")
+    if not job_id:
+        print("scufris-report: SCUFRIS_JOB_ID is unavailable", file=sys.stderr)
+        return 2
+    report = sys.stdin.read(512 * 1024 + 1)
+    request = {
+        "job_id": job_id,
+        "event": sys.argv[1],
+        "summary": sys.argv[2],
+        "report": report,
+    }
+    result = subprocess.run(
+        [str(Path(__file__).with_name("scufris-jobs")), "report"],
+        input=json.dumps(request),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        try:
+            error = json.loads(result.stdout).get("error", "report failed")
+        except (json.JSONDecodeError, AttributeError):
+            error = result.stderr.strip() or "report failed"
+        print(f"scufris-report: {error}", file=sys.stderr)
+        return result.returncode
+    value = json.loads(result.stdout)["result"]
+    print(f"reported {value['event']}: {value['summary']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

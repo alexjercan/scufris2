@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, watch, type FSWatcher } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import {
@@ -92,6 +92,7 @@ interface SpawnResult {
   model: string;
   thinking: string;
   tmux_session: string;
+  status_file: string;
   message: string;
 }
 
@@ -103,8 +104,8 @@ interface OwnedJob extends SpawnResult {
   tail: string;
   inode: number | null;
   window_alive: boolean;
-  exit_reported: boolean;
   quick_review?: { close(): Promise<void>; revision: string };
+  status_watcher?: FSWatcher;
 }
 
 interface QuickReviewBuild {
@@ -124,7 +125,7 @@ interface QuickReviewSnapshot {
   revision: string;
 }
 
-interface PollResult {
+interface EventResult {
   jobs: Array<{
     job_id: string;
     events: string[];
@@ -192,11 +193,11 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
 
   const contexts = new Map<string, ResolvedContext>();
   const jobs = new Map<string, OwnedJob>();
-  let timer: ReturnType<typeof setInterval> | undefined;
-  let polling = false;
+  let readingEvents = false;
+  let readAgain = false;
   let shuttingDown = false;
   let extensionContext: ExtensionContext | undefined;
-  let pollError: string | undefined;
+  let eventError: string | undefined;
 
   const sendEvent = (job: OwnedJob, line: string, triggerTurn: boolean) => {
     pi.sendMessage(
@@ -215,78 +216,101 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     );
   };
 
-  const poll = async () => {
-    if (polling || shuttingDown || !extensionContext) return;
-    const active = [...jobs.values()].filter(
-      (job) => !TERMINAL_STATES.has(job.state),
-    );
-    if (active.length === 0) {
-      if (extensionContext.hasUI)
-        extensionContext.ui.setStatus("scufris", undefined);
+  const readEvents = async () => {
+    if (shuttingDown || !extensionContext) return;
+    if (readingEvents) {
+      readAgain = true;
       return;
     }
-    polling = true;
+    readingEvents = true;
     try {
-      const result = await runHelper<PollResult>("poll", {
-        jobs: active.map((job) => ({
-          job_id: job.job_id,
-          offset: job.offset,
-          tail: job.tail,
-          inode: job.inode,
-        })),
-      });
-      if (shuttingDown) return;
-      const progress: string[] = [];
-      for (const update of result.jobs) {
-        const job = jobs.get(update.job_id);
-        if (!job) continue;
-        job.offset = update.offset;
-        job.tail = update.tail;
-        job.inode = update.inode;
-        job.window_alive = update.window_alive;
-        for (const error of update.errors) {
-          if (extensionContext.hasUI)
-            extensionContext.ui.notify(`Job ${job.job_id}: ${error}`, "error");
-          sendEvent(job, `failed: ${error}`, true);
-        }
-        for (const line of update.events) {
-          const event = parseWorkerEvent(line);
-          if (!event) continue;
-          job.state = event.type;
-          job.summary = event.value;
-          if (workerEventWakes(event.type)) sendEvent(job, line, true);
-          else progress.push(`${job.job_id}: ${event.value}`);
-        }
-        if (
-          !job.window_alive &&
-          !job.exit_reported &&
-          !TERMINAL_STATES.has(job.state)
-        ) {
-          job.exit_reported = true;
-          job.state = "failed";
-          job.summary = "worker exited without a terminal event";
-          sendEvent(job, `failed: ${job.summary}`, true);
-        }
-      }
-      if (progress.length > 0 && extensionContext.hasUI)
-        extensionContext.ui.notify(progress.join("\n"), "info");
-      const running = active.filter((job) => job.window_alive).length;
-      if (extensionContext.hasUI)
-        extensionContext.ui.setStatus(
-          "scufris",
-          running > 0
-            ? `${running} delegated job${running === 1 ? "" : "s"}`
-            : undefined,
+      do {
+        readAgain = false;
+        const active = [...jobs.values()].filter(
+          (job) => !TERMINAL_STATES.has(job.state),
         );
-      pollError = undefined;
+        if (active.length === 0) {
+          if (extensionContext.hasUI)
+            extensionContext.ui.setStatus("scufris", undefined);
+          return;
+        }
+        const result = await runHelper<EventResult>("events", {
+          jobs: active.map((job) => ({
+            job_id: job.job_id,
+            offset: job.offset,
+            tail: job.tail,
+            inode: job.inode,
+          })),
+        });
+        if (shuttingDown) return;
+        const progress: string[] = [];
+        for (const update of result.jobs) {
+          const job = jobs.get(update.job_id);
+          if (!job) continue;
+          job.offset = update.offset;
+          job.tail = update.tail;
+          job.inode = update.inode;
+          job.window_alive = update.window_alive;
+          for (const error of update.errors) {
+            if (extensionContext.hasUI)
+              extensionContext.ui.notify(
+                `Job ${job.job_id}: ${error}`,
+                "error",
+              );
+            job.state = "failed";
+            job.summary = error;
+            sendEvent(job, `failed: ${error}`, true);
+          }
+          for (const line of update.events) {
+            const event = parseWorkerEvent(line);
+            if (!event) continue;
+            job.state = event.type;
+            job.summary = event.value;
+            if (workerEventWakes(event.type)) sendEvent(job, line, true);
+            else progress.push(`${job.job_id}: ${event.value}`);
+          }
+          if (TERMINAL_STATES.has(job.state)) {
+            job.status_watcher?.close();
+            job.status_watcher = undefined;
+          }
+        }
+        if (progress.length > 0 && extensionContext.hasUI)
+          extensionContext.ui.notify(progress.join("\n"), "info");
+        const running = [...jobs.values()].filter(
+          (job) => !TERMINAL_STATES.has(job.state),
+        ).length;
+        if (extensionContext.hasUI)
+          extensionContext.ui.setStatus(
+            "scufris",
+            running > 0
+              ? `${running} delegated job${running === 1 ? "" : "s"}`
+              : undefined,
+          );
+        eventError = undefined;
+      } while (readAgain && !shuttingDown);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!shuttingDown && message !== pollError && extensionContext.hasUI)
+      if (!shuttingDown && message !== eventError && extensionContext.hasUI)
         extensionContext.ui.notify(message, "error");
-      pollError = message;
+      eventError = message;
     } finally {
-      polling = false;
+      readingEvents = false;
     }
+  };
+
+  const watchJob = (job: OwnedJob) => {
+    const watcher = watch(job.status_file, { persistent: false }, () => {
+      void readEvents();
+    });
+    watcher.on("error", (error) => {
+      if (!shuttingDown && extensionContext?.hasUI)
+        extensionContext.ui.notify(
+          `Job ${job.job_id} status watch failed: ${error.message}`,
+          "error",
+        );
+    });
+    job.status_watcher = watcher;
+    void readEvents();
   };
 
   pi.registerTool(
@@ -474,8 +498,10 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           );
           throw new Error("Pi session is shutting down");
         }
+        const { status_file, ...publicResult } = result;
         const job: OwnedJob = {
-          ...result,
+          ...publicResult,
+          status_file,
           ...(resolved
             ? {
                 context_id: resolved.context_id,
@@ -487,12 +513,11 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           tail: "",
           inode: null,
           window_alive: true,
-          exit_reported: false,
         };
         jobs.set(job.job_id, job);
-        void poll();
+        watchJob(job);
         return toolResult({
-          ...result,
+          ...publicResult,
           ...(resolved ? { context_id: resolved.context_id } : {}),
         });
       },
@@ -766,6 +791,8 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           signal,
           120_000,
         );
+        job.status_watcher?.close();
+        job.status_watcher = undefined;
         job.state = "landed";
         job.summary = "explicitly landed by foreground Scufris";
         job.window_alive = false;
@@ -889,6 +916,8 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           signal,
           30_000,
         );
+        job.status_watcher?.close();
+        job.status_watcher = undefined;
         job.state = "stopped";
         job.summary = "stopped by foreground Scufris";
         job.window_alive = false;
@@ -920,14 +949,16 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           "error",
         );
     }
-    timer = setInterval(() => void poll(), 1_000);
   });
 
   pi.on("session_shutdown", async () => {
     shuttingDown = true;
-    if (timer) clearInterval(timer);
-    timer = undefined;
-    while (polling) await new Promise((resolve) => setTimeout(resolve, 25));
+    for (const job of jobs.values()) {
+      job.status_watcher?.close();
+      job.status_watcher = undefined;
+    }
+    while (readingEvents)
+      await new Promise((resolve) => setTimeout(resolve, 25));
     await Promise.allSettled(
       [...jobs.values()].map(async (job) => {
         const quickReview = job.quick_review;

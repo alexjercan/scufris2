@@ -6,6 +6,7 @@ import {
   QUICK_REVIEW_TOOL,
   workerEventWakes,
 } from "../extensions/scufris/workflow/orchestration.ts";
+import { WORKER_REPORT_TOOL } from "../extensions/scufris/workflow/worker-report.ts";
 
 test("worker events use only the replacement protocol", () => {
   assert.deepEqual(parseWorkerEvent("working: checking docs"), {
@@ -22,6 +23,10 @@ test("worker events use only the replacement protocol", () => {
     type: "done",
     value: "report saved",
   });
+});
+
+test("delegated workers use one dedicated reporting tool", () => {
+  assert.equal(WORKER_REPORT_TOOL, "scufris_report");
 });
 
 test("Quick Review and Plannotator remain separate tools", () => {

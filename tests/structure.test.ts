@@ -31,6 +31,16 @@ test("package loads only capability-owned Scufris extensions", async () => {
     assert.doesNotMatch(await readFile(file, "utf8"), /scripts\/scufris-/);
   }
 
+  const orchestration = await readFile(
+    join(root, "extensions", "scufris", "workflow", "orchestration.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(orchestration, /setInterval|setTimeout\(.*readEvents/);
+  assert.match(orchestration, /watch\(job\.status_file/);
+  await access(
+    join(root, "extensions", "scufris", "workflow", "worker-report.ts"),
+  );
+  await access(join(root, "tools", "jobs", "scufris-report"));
   await access(join(root, "tools", "dashboard", "scufris-dashboard"));
   await access(join(root, "tools", "voice", "scufris-speak"));
   assert.deepEqual((await readdir(join(root, "scripts"))).sort(), [

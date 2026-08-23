@@ -56,7 +56,16 @@ path, such as `~/Downloads`, remains part of the worker request.
 
 ## Worker events
 
-Workers append events to their private `status` file:
+Workers call the dedicated `scufris_report` tool to replace their detailed
+Markdown report and append one validated event. Pi reviewers retain only
+read-only code tools plus this reporting tool. Claude workers use the matching
+`scufris-report` adapter described in their private prompt.
+
+The workflow extension watches each owned status file through filesystem
+notifications. It reads events only after a change notification; it does not
+periodically poll jobs.
+
+Worker events are:
 
 - `working: <summary>` records quiet progress.
 - `needs-decision: <summary>` requests user mediation.

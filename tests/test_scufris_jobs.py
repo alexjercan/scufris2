@@ -11,6 +11,7 @@ from typing import Any
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 HELPER = REPOSITORY / "tools" / "jobs" / "scufris-jobs"
+REPORTER = REPOSITORY / "tools" / "jobs" / "scufris-report"
 
 FAKE_PI = """#!/usr/bin/env python3
 import pathlib
@@ -162,14 +163,63 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.assertFalse((directory / "project-context.md").exists())
         prompt = (directory / "prompt.md").read_text()
         self.assertIn("ready: <milestone-slug>", prompt)
+        self.assertIn("Call the `scufris_report` tool.", prompt)
 
-        polled = self.call(
-            "poll",
+        events = self.call(
+            "events",
             {"jobs": [{"job_id": job_id, "offset": 0, "tail": "", "inode": None}]},
         )["result"]["jobs"][0]
         self.assertEqual(
-            polled["events"],
+            events["events"],
             ["working: fake worker started", "ready: report-complete"],
+        )
+        reporter_env = {**self.env, "SCUFRIS_JOB_ID": job_id}
+        adapted = subprocess.run(
+            [str(REPORTER), "working", "report adapter verified"],
+            input="# Adapter\n\nThe report adapter works.\n",
+            text=True,
+            capture_output=True,
+            env=reporter_env,
+            check=True,
+            timeout=30,
+        )
+        self.assertEqual(
+            adapted.stdout,
+            "reported working: report adapter verified\n",
+        )
+        reported = self.call(
+            "report",
+            {
+                "job_id": job_id,
+                "event": "done",
+                "summary": "research report complete",
+                "report": "# Result\n\nThe report is complete.\n",
+            },
+        )["result"]
+        self.assertEqual(reported["event"], "done")
+        self.assertEqual(
+            (directory / "report.md").read_text(),
+            "# Result\n\nThe report is complete.\n",
+        )
+        next_events = self.call(
+            "events",
+            {
+                "jobs": [
+                    {
+                        "job_id": job_id,
+                        "offset": events["offset"],
+                        "tail": events["tail"],
+                        "inode": events["inode"],
+                    }
+                ]
+            },
+        )["result"]["jobs"][0]
+        self.assertEqual(
+            next_events["events"],
+            [
+                "working: report adapter verified",
+                "done: research report complete",
+            ],
         )
         self.call("send", {"job_id": job_id, "message": "Continue carefully."})
         self.wait_for(directory / "received", "Continue carefully.")
@@ -184,6 +234,13 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         )
         listed_jobs = json.loads(listed.stdout)["jobs"]
         self.assertEqual([item["job_id"] for item in listed_jobs], [job_id])
+
+        self.call("stop", {"job_id": job_id})
+        time.sleep(0.05)
+        self.assertNotIn(
+            "worker harness exited without a terminal report",
+            (directory / "status").read_text(),
+        )
 
     def test_project_job_persists_exact_context_snapshot(self) -> None:
         context = self.call("context", {"project": "projects/nova-protocol"})["result"]
@@ -238,7 +295,11 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
             (review_directory / "prompt.md").read_text(),
         )
         argv = json.loads((review_directory / "worker-argv.json").read_text())
-        self.assertIn("read,grep,find,ls", argv)
+        self.assertIn("read,grep,find,ls,scufris_report", argv)
+        self.assertIn(
+            str(REPOSITORY / "extensions/scufris/workflow/worker-report.ts"),
+            argv,
+        )
         review_record = json.loads((review_directory / "job.json").read_text())
         self.assertEqual(review_record["review_of"], job_id)
         self.assertEqual(review_record["working_directory"], str(self.project))

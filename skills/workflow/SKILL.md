@@ -29,7 +29,8 @@ the request explicitly introduces them.
 
 ## Events
 
-- `working` is quiet progress. Do not poll merely to repeat it.
+- `working` is quiet progress. Job status arrives through filesystem
+  notifications; do not poll merely to repeat it.
 - `needs-decision` asks for one user decision. Inspect the report first.
 - `blocked` reports an unblock condition. Inspect the report first.
 - `ready` describes a completed milestone. It does not request or authorize a

@@ -9,6 +9,12 @@ const jobsHelperPath = fileURLToPath(
 const JOB_ID = /^[a-f0-9]{12}$/;
 
 export const WORKER_REPORT_TOOL = "scufris_report";
+export const WORKER_REPORT_EVENTS = ["working", "blocked", "done"] as const;
+export type WorkerReportEvent = (typeof WORKER_REPORT_EVENTS)[number];
+
+export function workerReportTerminatesTurn(event: WorkerReportEvent): boolean {
+  return event !== "working";
+}
 
 export default function workerReport(pi: ExtensionAPI): void {
   if (process.env.SCUFRIS_ROLE !== "worker") return;
@@ -20,21 +26,13 @@ export default function workerReport(pi: ExtensionAPI): void {
       name: WORKER_REPORT_TOOL,
       label: "Report to Scufris",
       description:
-        "Replace this delegated job's detailed report and append one validated status event for foreground Scufris.",
+        "Replace this delegated job's detailed report and append working, blocked, or done for foreground Scufris. Harness failures are reported only by trusted orchestration.",
       executionMode: "sequential",
       parameters: Type.Object(
         {
-          event: StringEnum([
-            "working",
-            "needs-decision",
-            "blocked",
-            "ready",
-            "done",
-            "failed",
-          ] as const),
+          event: StringEnum(WORKER_REPORT_EVENTS),
           summary: Type.String({
-            description:
-              "One-line summary. For ready, use a lowercase milestone slug.",
+            description: "One-line status summary.",
             minLength: 1,
             maxLength: 500,
             pattern: "^[^\\r\\n]+$",
@@ -56,7 +54,12 @@ export default function workerReport(pi: ExtensionAPI): void {
         }>(jobsHelperPath, "report", { job_id: jobId, ...params }, signal);
         if (!envelope.ok || envelope.result === undefined)
           throw new Error(envelope.error ?? "Could not report to Scufris");
-        return toolResult(envelope.result);
+        return {
+          ...toolResult(envelope.result),
+          ...(workerReportTerminatesTurn(params.event)
+            ? { terminate: true }
+            : {}),
+        };
       },
     }),
   );

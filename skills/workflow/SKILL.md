@@ -31,15 +31,17 @@ explicitly introduces them.
 
 ## Events
 
-- `working` is quiet progress. Job status arrives through filesystem
-  notifications; do not poll merely to repeat it.
-- `needs-decision` asks for one user decision. Inspect the report first.
-- `blocked` reports an unblock condition. Inspect the report first.
-- `ready` describes a completed milestone. It does not request or authorize a
-  next action. Inspect the project context, prompt, report, and current state,
-  then choose the next tool from the request and preferences.
-- `done` is terminal success.
-- `failed` is terminal failure.
+- `working` means the worker is actively doing assigned work. Job status
+  arrives through filesystem notifications; do not poll merely to repeat it.
+- `blocked` means the worker cannot continue without mediation. Inspect the
+  report, then resolve it directly or ask the user when a user decision is
+  necessary.
+- `done` means the current assignment is complete. It does not stop the worker
+  or authorize a next action. Inspect the project context, prompt, report, and
+  current state, then decide whether to review, steer more work, open a human
+  review, land, or stop.
+- `failed` is generated only when trusted orchestration detects that the worker
+  can no longer work. Workers cannot report it themselves.
 
 Use `scufris_job_inspect` to recover bounded evidence after a wake or context
 compaction. Use `scufris_job_send` only for literal steering, then end the
@@ -63,4 +65,4 @@ Project preferences can select optional phases. They never run automatically.
   Plannotator since-base code review. Plannotator and Quick Review are separate
   tools and neither substitutes for the other.
 - Call `scufris_job_land` only after the selected workflow has supplied the
-  required approval. Landing is never implied by `done` or `ready`.
+  required approval. Landing is never implied by `done`.

@@ -22,10 +22,10 @@ JOB_ID = re.compile(r"^[a-f0-9]{12}$")
 PROJECT_ID = re.compile(r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
 FEATURE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 HANDOFF = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
-EVENTS = {"working", "needs-decision", "blocked", "ready", "done", "failed"}
+WORKER_EVENTS = {"working", "blocked", "done"}
+EVENTS = {*WORKER_EVENTS, "failed"}
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 WORKSPACES = {"temporary", "project", "sprout", "review"}
-TERMINAL = {"done", "failed", "stopped"}
 MAX_REQUEST = 2 * 1024 * 1024
 MAX_REPORT = 512 * 1024
 MAX_EVENT_LINE = 4096
@@ -380,17 +380,15 @@ Scufris.
 
 Allowed events:
 
-- `working: <summary>` for quiet progress.
-- `needs-decision: <summary>` when user input can change the outcome, then wait.
-- `blocked: <summary>` when you cannot continue, then wait.
-- `ready: <milestone-slug>` after a nonterminal milestone, then wait. The
-  lowercase slug describes what completed; it does not prescribe the next
-  action.
-- `done: <summary>` for terminal success, then wait.
-- `failed: <summary>` for terminal failure, then wait.
+- `working: <summary>` while you are actively doing assigned work.
+- `blocked: <summary>` when you cannot continue without mediation, then wait.
+- `done: <summary>` when the current assignment is complete, then wait.
 
-Do not invent another event keyword. Foreground Scufris decides what follows a
-ready milestone from the request, project preferences, prompt, and report.
+Do not invent another event keyword. You cannot report `failed`; trusted
+orchestration generates failure when the harness can no longer work. A `done`
+event does not stop this worker or select the next phase. Foreground Scufris
+inspects the request, project preferences, prompt, and report, then decides
+whether to review, steer more work, land, or stop.
 """
 
 
@@ -711,9 +709,8 @@ def launch(job_id: str) -> NoReturn:
         (parsed for line in reversed(event_lines) if (parsed := parse_event(line))),
         None,
     )
-    if (
-        not (job_dir(job_id) / ".stopping").exists()
-        and (last_event is None or last_event[0] not in {"done", "failed"})
+    if not (job_dir(job_id) / ".stopping").exists() and (
+        last_event is None or last_event[0] != "failed"
     ):
         existing_report = (job_dir(job_id) / "report.md").read_text(
             "utf-8", errors="replace"
@@ -722,13 +719,11 @@ def launch(job_id: str) -> NoReturn:
         if detail:
             detail += "\n\n"
         detail += f"Worker harness exited with status {completed.returncode}.\n"
-        report(
-            {
-                "job_id": job_id,
-                "event": "failed",
-                "summary": "worker harness exited without a terminal report",
-                "report": detail,
-            }
+        write_report(
+            job_id,
+            "failed",
+            "worker harness exited unexpectedly",
+            detail,
         )
     raise SystemExit(completed.returncode)
 
@@ -751,25 +746,14 @@ def parse_event(line: str) -> tuple[str, str] | None:
         or any(ord(char) < 32 for char in summary)
     ):
         return None
-    if state == "ready" and not HANDOFF.fullmatch(summary):
-        return None
     return state, summary
 
 
-def report(request: dict[str, Any]) -> dict[str, Any]:
-    validate_request(request, {"job_id", "event", "summary", "report"})
-    job_id = validate_job_id(request["job_id"])
-    event, summary, detail = (
-        request["event"],
-        request["summary"],
-        request["report"],
-    )
-    if not isinstance(event, str) or not isinstance(summary, str):
-        raise JobError("event and summary must be text")
+def write_report(job_id: str, event: str, summary: str, detail: str) -> None:
     line = f"{event}: {summary}"
     if parse_event(line) is None:
         raise JobError("invalid worker event")
-    if not isinstance(detail, str) or not detail.strip():
+    if not detail.strip():
         raise JobError("report must be nonempty text")
     encoded_report = detail.encode()
     if len(encoded_report) > MAX_REPORT:
@@ -797,6 +781,23 @@ def report(request: dict[str, Any]) -> dict[str, Any]:
         os.fsync(status_fd)
     finally:
         os.close(status_fd)
+
+
+def report(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id", "event", "summary", "report"})
+    job_id = validate_job_id(request["job_id"])
+    event, summary, detail = (
+        request["event"],
+        request["summary"],
+        request["report"],
+    )
+    if not isinstance(event, str) or not isinstance(summary, str):
+        raise JobError("event and summary must be text")
+    if event not in WORKER_EVENTS:
+        raise JobError("workers may report only working, blocked, or done")
+    if not isinstance(detail, str):
+        raise JobError("report must be text")
+    write_report(job_id, event, summary, detail)
     return {"job_id": job_id, "event": event, "summary": summary}
 
 

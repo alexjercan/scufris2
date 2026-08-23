@@ -67,19 +67,22 @@ periodically poll jobs. After Scufris spawns or steers a worker, it ends its
 foreground turn immediately. It never sleeps or waits for delegated progress.
 The next applicable filesystem event starts a later turn.
 
-Worker events are:
+Workers can report only:
 
-- `working: <summary>` records quiet progress.
-- `needs-decision: <summary>` requests user mediation.
-- `blocked: <summary>` reports an unblock condition.
-- `ready: <milestone-slug>` reports a completed nonterminal milestone.
-- `done: <summary>` reports terminal success.
-- `failed: <summary>` reports terminal failure.
+- `working: <summary>` while actively doing assigned work.
+- `blocked: <summary>` when work cannot continue without mediation.
+- `done: <summary>` when the current assignment is complete.
 
-A `ready` slug describes what completed, such as
-`implementation-complete` or `assets-collected`. It is not a command. The
-extension wakes foreground Scufris, which inspects the pinned context, worker
-prompt, report, and current state before choosing another tool.
+A `done` event is nonterminal for the worker channel. The worker remains
+available for more instructions. The extension wakes foreground Scufris, which
+inspects the pinned context, worker prompt, report, and current state before it
+decides whether to review, steer more work, open a human review, land, or stop.
+A later instruction returns the same worker to `working`.
+
+Workers cannot report `failed`. Trusted orchestration emits
+`failed: <summary>` only when the harness exits unexpectedly or the reporting
+protocol breaks. Runtime failure, explicit stop, and landing are the only
+terminal ownership states.
 
 Every worker runs in an owned tmux session. Shutdown targets only resources
 recorded for jobs owned by the foreground session.

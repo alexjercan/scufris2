@@ -24,18 +24,15 @@ const jobsHelperPath = fileURLToPath(
 
 const CONTEXT_ID = /^[a-f0-9]{24}$/;
 const JOB_ID = /^[a-f0-9]{12}$/;
-const MILESTONE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
-const TERMINAL_STATES = new Set(["done", "failed", "stopped", "landed"]);
+export const TERMINAL_OWNERSHIP_STATES: ReadonlySet<string> = new Set([
+  "failed",
+  "stopped",
+  "landed",
+]);
 export const QUICK_REVIEW_TOOL = "scufris_job_quick_review";
 export const PLANNOTATOR_REVIEW_TOOL = "scufris_job_plannotator_review";
 
-export type WorkerEventType =
-  | "working"
-  | "needs-decision"
-  | "blocked"
-  | "ready"
-  | "done"
-  | "failed";
+export type WorkerEventType = "working" | "blocked" | "done" | "failed";
 
 export interface WorkerEvent {
   type: WorkerEventType;
@@ -48,17 +45,9 @@ export function parseWorkerEvent(line: string): WorkerEvent | undefined {
   const type = line.slice(0, separator) as WorkerEventType;
   const value = line.slice(separator + 2);
   if (
-    ![
-      "working",
-      "needs-decision",
-      "blocked",
-      "ready",
-      "done",
-      "failed",
-    ].includes(type) ||
+    !["working", "blocked", "done", "failed"].includes(type) ||
     !value ||
-    /[\x00-\x1f\x7f]/.test(value) ||
-    (type === "ready" && !MILESTONE.test(value))
+    /[\x00-\x1f\x7f]/.test(value)
   ) {
     return undefined;
   }
@@ -183,7 +172,9 @@ function jobId(): string {
 }
 
 function activeJobPrompt(jobs: Iterable<OwnedJob>): string {
-  const active = [...jobs].filter((job) => !TERMINAL_STATES.has(job.state));
+  const active = [...jobs].filter(
+    (job) => !TERMINAL_OWNERSHIP_STATES.has(job.state),
+  );
   const index = active.length
     ? active
         .slice(-32)
@@ -199,8 +190,9 @@ Before planning every new project job, call scufris_project_context with an
 opaque project ID from scufris_projects. Follow the returned project guidance
 unless the user's explicit request overrides it or it is impossible. Use no
 project context for general work. A project context creates exactly one job.
-Treat ready events as completed milestone hints: inspect the job and decide
-what follows; never route from the milestone slug alone.
+Treat done events as completed assignments: inspect the job, project context,
+and report, then decide what follows. A done event never selects review,
+steering, landing, or shutdown by itself.
 
 After scufris_job_spawn or scufris_job_send returns, end the foreground turn
 immediately. Never call shell sleep, wait for a worker, poll status, or repeatedly
@@ -252,7 +244,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       do {
         readAgain = false;
         const active = [...jobs.values()].filter(
-          (job) => !TERMINAL_STATES.has(job.state),
+          (job) => !TERMINAL_OWNERSHIP_STATES.has(job.state),
         );
         if (active.length === 0) {
           if (extensionContext.hasUI)
@@ -298,7 +290,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             if (workerEventWakes(event.type)) sendEvent(job, line, true);
             else progress.push(`${job.job_id}: ${event.value}`);
           }
-          if (TERMINAL_STATES.has(job.state)) {
+          if (TERMINAL_OWNERSHIP_STATES.has(job.state)) {
             job.status_watcher?.close();
             job.status_watcher = undefined;
           }
@@ -306,7 +298,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         if (progress.length > 0 && extensionContext.hasUI)
           extensionContext.ui.notify(progress.join("\n"), "info");
         const running = [...jobs.values()].filter(
-          (job) => !TERMINAL_STATES.has(job.state),
+          (job) => !TERMINAL_OWNERSHIP_STATES.has(job.state),
         ).length;
         if (extensionContext.hasUI)
           extensionContext.ui.setStatus(
@@ -713,12 +705,12 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             await runHelper("invalidate-quick-review", {
               job_id: job.job_id,
             });
-          job.state = "ready";
+          job.state = "done";
           job.summary = milestone;
           pi.sendMessage(
             {
               customType: "scufris-job-event",
-              content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ready: ${milestone}. Inspect the Quick Review result and decide what follows from the project preferences.`,
+              content: `Scufris job ${job.job_id} (${job.project ?? "general"}): done: ${milestone}. Inspect the Quick Review result and decide what follows from the project preferences.`,
               display: true,
               details: {
                 job_id: job.job_id,

@@ -23,13 +23,22 @@ directory = prompt.parent
 (directory / 'worker-argv.json').write_text(__import__('json').dumps(sys.argv[1:]))
 with (directory / 'status').open('a') as stream:
     stream.write('working: fake worker started\\n')
-    stream.write('ready: report-complete\\n')
+    stream.write('done: report complete\\n')
 for line in sys.stdin:
     with (directory / 'received').open('a') as stream:
         stream.write(line)
     if line.strip() == '/exit':
         break
     time.sleep(0.01)
+"""
+
+FAKE_PI_EXIT_AFTER_DONE = """#!/usr/bin/env python3
+import pathlib
+import sys
+prompt = pathlib.Path(sys.argv[-1].removeprefix('Read and follow '))
+directory = prompt.parent
+with (directory / 'status').open('a') as stream:
+    stream.write('done: assignment complete\\n')
 """
 
 
@@ -127,6 +136,30 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
             time.sleep(0.05)
         self.fail(f"timed out waiting for {text!r} in {path}")
 
+    def test_done_remains_nonterminal_and_harness_exit_generates_failure(self) -> None:
+        executable = self.bin / "pi"
+        executable.write_text(FAKE_PI_EXIT_AFTER_DONE)
+        executable.chmod(0o755)
+        job_id = "aaa111bbb222"
+        self.call(
+            "spawn",
+            {
+                "job_id": job_id,
+                "instructions": "Finish and exit unexpectedly.",
+                "owner_session": "foreground-session",
+            },
+        )
+        self.jobs.append(job_id)
+        status = self.root / "state" / "scufris" / "jobs" / job_id / "status"
+        self.wait_for(status, "failed: worker harness exited unexpectedly")
+        self.assertEqual(
+            status.read_text().splitlines(),
+            [
+                "done: assignment complete",
+                "failed: worker harness exited unexpectedly",
+            ],
+        )
+
     def test_project_context_is_canonical_and_malformed_config_is_ignored(self) -> None:
         projects = self.call("projects", {})["result"]["projects"]
         self.assertEqual(projects, ["projects/nova-protocol"])
@@ -158,11 +191,14 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.assertEqual(result["model"], "openai-codex/gpt-5.6-sol")
         self.assertEqual(result["thinking"], "medium")
         directory = self.root / "state" / "scufris" / "jobs" / job_id
-        self.wait_for(directory / "status", "ready: report-complete")
+        self.wait_for(directory / "status", "done: report complete")
         self.assertTrue((directory / "workspace").is_dir())
         self.assertFalse((directory / "project-context.md").exists())
         prompt = (directory / "prompt.md").read_text()
-        self.assertIn("ready: <milestone-slug>", prompt)
+        self.assertIn("done: <summary>", prompt)
+        self.assertNotIn("ready:", prompt)
+        self.assertNotIn("needs-decision:", prompt)
+        self.assertIn("You cannot report `failed`", prompt)
         self.assertIn("Call the `scufris_report` tool.", prompt)
 
         events = self.call(
@@ -171,7 +207,7 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         )["result"]["jobs"][0]
         self.assertEqual(
             events["events"],
-            ["working: fake worker started", "ready: report-complete"],
+            ["working: fake worker started", "done: report complete"],
         )
         reporter_env = {**self.env, "SCUFRIS_JOB_ID": job_id}
         adapted = subprocess.run(
@@ -187,6 +223,30 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
             adapted.stdout,
             "reported working: report adapter verified\n",
         )
+        rejected_failure = self.call(
+            "report",
+            {
+                "job_id": job_id,
+                "event": "failed",
+                "summary": "worker selected failure",
+                "report": "# Invalid\n",
+            },
+            check=False,
+        )
+        self.assertFalse(rejected_failure["ok"])
+        self.assertIn("only working, blocked, or done", rejected_failure["error"])
+        rejected_adapter = subprocess.run(
+            [str(REPORTER), "failed", "worker selected failure"],
+            input="# Invalid\n",
+            text=True,
+            capture_output=True,
+            env=reporter_env,
+            check=False,
+            timeout=30,
+        )
+        self.assertEqual(rejected_adapter.returncode, 2)
+        self.assertIn("working, blocked, or done", rejected_adapter.stderr)
+
         reported = self.call(
             "report",
             {
@@ -238,7 +298,7 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.call("stop", {"job_id": job_id})
         time.sleep(0.05)
         self.assertNotIn(
-            "worker harness exited without a terminal report",
+            "worker harness exited unexpectedly",
             (directory / "status").read_text(),
         )
 
@@ -261,7 +321,7 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.jobs.append(job_id)
         self.assertEqual(result["workspace"], "project")
         directory = self.root / "state" / "scufris" / "jobs" / job_id
-        self.wait_for(directory / "status", "ready: report-complete")
+        self.wait_for(directory / "status", "done: report complete")
         self.assertEqual(
             (directory / "project-context.md").read_text(), context["markdown"]
         )
@@ -289,7 +349,7 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.jobs.append(review_id)
         self.assertEqual(review["workspace"], "review")
         review_directory = self.root / "state" / "scufris" / "jobs" / review_id
-        self.wait_for(review_directory / "status", "ready: report-complete")
+        self.wait_for(review_directory / "status", "done: report complete")
         self.assertIn(
             "independent read-only reviewer",
             (review_directory / "prompt.md").read_text(),
@@ -324,7 +384,7 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.jobs.append(job_id)
         self.assertEqual(result["workspace"], "sprout")
         directory = self.root / "state" / "scufris" / "jobs" / job_id
-        self.wait_for(directory / "status", "ready: report-complete")
+        self.wait_for(directory / "status", "done: report complete")
         record = json.loads((directory / "job.json").read_text())
         worktree = Path(record["working_directory"])
         target = self.call("review-target", {"job_id": job_id})["result"]

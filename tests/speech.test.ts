@@ -285,8 +285,8 @@ test("ordinary and extension-triggered turns each speak only their settled respo
     const wakes = [
       {
         customType: "scufris-job-event",
-        payload: "ready: implementation-complete",
-        response: "The milestone response is settled and safe.",
+        payload: "blocked: implementation needs mediation",
+        response: "The blockage response is settled and safe.",
       },
       {
         customType: "scufris-job-event",

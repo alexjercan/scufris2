@@ -1,6 +1,6 @@
 # Simplify delegated worker statuses
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 90
 - TAGS: workflow
 
@@ -46,3 +46,39 @@ when the harness exits unexpectedly or the reporting protocol fails.
 ## Dependencies
 
 Run after `20260823-153351`.
+
+## Decisions
+
+- Keep `failed` in the trusted event parser because filesystem and harness
+  failures must still wake foreground Scufris. Exclude it from every
+  worker-callable reporting schema and adapter.
+- Keep `done` out of terminal ownership state. The status watcher, tmux worker,
+  active-job context, and steering path remain available after completion.
+- Treat an actual harness exit after `done` as `failed`. A completed assignment
+  does not imply permission for the reusable worker process to disappear.
+- End a Pi worker's current model turn after `blocked` or `done`, but keep its
+  interactive process alive for foreground steering. A `working` report does
+  not end its turn.
+- Use `done` for completed Quick Review mediation. It reports completion but
+  still leaves the next workflow decision to foreground Scufris.
+
+## Implemented
+
+- Reduced worker report events to `working`, `blocked`, and `done`.
+- Removed worker `ready` and `needs-decision` parsing, prompts, guidance,
+  documentation, and tests.
+- Restricted both the Pi report extension and Claude adapter. The private helper
+  also rejects worker-submitted `failed` even if an adapter is bypassed.
+- Added an internal-only runtime failure write path for unexpected harness exit.
+- Made `done` nonterminal and retained steering after completion.
+- Updated Quick Review completion events from `ready` to `done`.
+
+## Verification evidence
+
+- `npm run check` passes typechecking, formatting, and 51 TypeScript tests.
+- Python unittest discovery passes 21 tests; the focused jobs suite passes 5.
+- Ruff, ShellCheck, Prettier, Alejandra, and `git diff --check` pass.
+- `nix flake check` passes all supported-system checks.
+- Focused integration tests prove a `done` worker remains available, workers
+  cannot report `failed` through either adapter or the helper, and an actual
+  harness exit after `done` generates trusted `failed` status.

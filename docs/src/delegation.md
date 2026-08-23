@@ -1,27 +1,84 @@
-# Delegated work and review
+# Project workflows and delegated jobs
 
-Scufris handles narrow project work directly when it should take seconds. This includes reading one named file, inspecting a small task record, and answering a focused repository question. It delegates work expected to take minutes, such as broad codebase review, substantial research, implementation, full checks, releases, and deployment. Routing uses expected scope and latency, not the presence of project tools.
+Scufris handles work expected to take seconds in the foreground and delegates
+work expected to take minutes. Delegation supports project work and general
+work such as research or external report creation.
 
-A delegated Pi or Claude worker runs in a Sprout worktree. The worker receives the request and must inspect applicable repository instructions, context, code, history, and checks. The foreground session owns the job, mediates decisions and blockers, and keeps landing local.
+## Project preferences
 
-Every job declares one review policy at spawn:
+A project can add `.scufris.toml` at its Git root. The file contains advisory
+workflow preferences:
 
-- `code`: implementation correctness and maintainability.
-- `consumer`: documentation, setup, and user outcomes.
-- `operations`: deployment, reliability, diagnostics, and rollback.
-- `interface`: APIs, schemas, protocols, and caller contracts.
-- `none`: a non-landable result.
+```toml
+version = 1
 
-A landable policy includes a concise accepted-outcome and audience brief. A `none` job finishes with `done` and cannot enter review-ready.
+[preferences.tracking]
+name = "tatr"
+guidance = """
+Use Tatr for substantial tracked work.
+"""
 
-## Landable review sequence
+[preferences.workspace]
+name = "sprout"
 
-1. The worker commits, synchronizes, checks, and reports `review-ready`.
-2. Scufris verifies the exact clean base and feature revisions.
-3. A fresh Pi reviewer runs in its visible interactive TUI in an input-capable `preflight-<review_id>` window in the worker's feature tmux session. Scufris announces the window without selecting a client. The reviewer has a separate cold session and does not receive the worker transcript, report, reasoning, or claims.
-4. The review prompt, progress, read-only tool activity, and final result remain visible in that window. User input is technically possible, but Scufris remains the only review owner and result consumer. Fix-worthy BLOCKER, MAJOR, or MINOR findings return through a bounded structured file, not pane scraping. The same window and reviewer session verify correction commits. A third change request stops for Pair mediation.
-5. Exact preflight approval opens the Plannotator since-base review.
-6. Plannotator feedback invalidates preflight approval. Scufris removes only the exact owned reviewer window and session. The next worker revision starts a fresh reviewer window and session.
-7. Human Plannotator approval remains the only landing approval. Scufris lands only the exact approved revisions after the worker's required acknowledgment.
+[preferences.implementation]
+name = "claude"
+options = { model = "opus-5", thinking = "xhigh" }
 
-One reviewer run has an exact 1800-second execution deadline. When the exact reviewer child starts in the pane, the helper sends a private readiness signal that resets the enclosing process deadline to 1810 seconds. This gives a fixed 10-second margin to stop the child and return the fail-closed result. Review failure, timeout, malformed output, identity drift, repository mutation, or revision drift fails closed. The finished pane remains visible with `remain-on-exit`. Scufris records exact reviewer window, pane, launcher, child, session, and review identities. Cancellation and shutdown remove only that owned reviewer window. Retain cleanup keeps reviewer evidence; remove cleanup lets Sprout remove the complete feature session.
+[preferences.review]
+name = "pi"
+options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
+guidance = """
+Review implementation before delivery. Return findings to implementation.
+"""
+```
+
+Preference keys are open-ended. Each preference accepts optional `name`,
+`options`, and `guidance` values. Scufris renders the complete file as prompt
+guidance. It follows that guidance unless the explicit request overrides it or
+following it is impossible. Missing or malformed files do not block work.
+
+Scufris loads a fresh project context for every new job. The resulting context
+ID creates one job and is then consumed. The exact rendered snapshot is stored
+as `project-context.md` beside that job. Jobs for different projects never
+share preferences.
+
+## General jobs
+
+A general job has no project context. It runs in a private temporary workspace
+and does not imply task tracking, Git, a worktree, review, or landing. When the
+request does not select execution settings, Scufris uses Pi with
+`openai-codex/gpt-5.6-sol` and medium thinking. An explicit external result
+path, such as `~/Downloads`, remains part of the worker request.
+
+## Worker events
+
+Workers append events to their private `status` file:
+
+- `working: <summary>` records quiet progress.
+- `needs-decision: <summary>` requests user mediation.
+- `blocked: <summary>` reports an unblock condition.
+- `ready: <milestone-slug>` reports a completed nonterminal milestone.
+- `done: <summary>` reports terminal success.
+- `failed: <summary>` reports terminal failure.
+
+A `ready` slug describes what completed, such as
+`implementation-complete` or `assets-collected`. It is not a command. The
+extension wakes foreground Scufris, which inspects the pinned context, worker
+prompt, report, and current state before choosing another tool.
+
+Every worker runs in an owned tmux session. Shutdown targets only resources
+recorded for jobs owned by the foreground session.
+
+## Optional tools
+
+Project preferences can guide Scufris to compose additional phases. None are
+part of the default job lifecycle.
+
+- A Sprout workspace is selected explicitly when spawning implementation work.
+- An independent review is another job with a fresh project context. It runs
+  read-only in the source job's exact workspace.
+- Quick Review is an explicit human since-base review for a Sprout job. Its
+  feedback returns to foreground Scufris and never lands automatically.
+- Local landing is an explicit guarded tool call after the selected workflow
+  supplies approval.

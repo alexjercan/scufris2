@@ -14,7 +14,6 @@ test("worker events use only the replacement protocol", () => {
     type: "ready",
     value: "implementation-complete",
   });
-  assert.equal(parseWorkerEvent("review-ready: changes committed"), undefined);
   assert.equal(parseWorkerEvent("ready: Review now"), undefined);
   assert.equal(parseWorkerEvent("ready: review: now"), undefined);
   assert.deepEqual(parseWorkerEvent("done: report saved"), {

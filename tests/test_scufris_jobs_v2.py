@@ -19,6 +19,7 @@ import time
 prompt = pathlib.Path(sys.argv[-1].removeprefix('Read and follow '))
 directory = prompt.parent
 (directory / 'worker-prompt.txt').write_text(prompt.read_text())
+(directory / 'worker-argv.json').write_text(__import__('json').dumps(sys.argv[1:]))
 with (directory / 'status').open('a') as stream:
     stream.write('working: fake worker started\\n')
     stream.write('ready: report-complete\\n')
@@ -141,7 +142,6 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.assertFalse((directory / "project-context.md").exists())
         prompt = (directory / "prompt.md").read_text()
         self.assertIn("ready: <milestone-slug>", prompt)
-        self.assertNotIn("review-ready", prompt)
 
         polled = self.call(
             "poll",
@@ -180,6 +180,37 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         record = json.loads((directory / "job.json").read_text())
         self.assertEqual(record["context_fingerprint"], context["fingerprint"])
         self.assertEqual(record["working_directory"], str(self.project))
+
+        review_context = self.call("context", {"project": "projects/nova-protocol"})[
+            "result"
+        ]
+        review_id = "111aaa222bbb"
+        review = self.call(
+            "spawn",
+            {
+                "job_id": review_id,
+                "instructions": "Review the implementation.",
+                "owner_session": "foreground-session",
+                "project": review_context["project"],
+                "project_root": review_context["project_root"],
+                "context_markdown": review_context["markdown"],
+                "context_fingerprint": review_context["fingerprint"],
+                "review_of": job_id,
+            },
+        )["result"]
+        self.jobs.append(review_id)
+        self.assertEqual(review["workspace"], "review")
+        review_directory = self.root / "state" / "scufris" / "jobs-v2" / review_id
+        self.wait_for(review_directory / "status", "ready: report-complete")
+        self.assertIn(
+            "independent read-only reviewer",
+            (review_directory / "prompt.md").read_text(),
+        )
+        argv = json.loads((review_directory / "worker-argv.json").read_text())
+        self.assertIn("read,grep,find,ls", argv)
+        review_record = json.loads((review_directory / "job.json").read_text())
+        self.assertEqual(review_record["review_of"], job_id)
+        self.assertEqual(review_record["working_directory"], str(self.project))
 
 
 if __name__ == "__main__":

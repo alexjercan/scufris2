@@ -181,16 +181,10 @@ in
       test -x ${voiceResources}/share/scufris/scripts/scufris-speak
       test ! -e ${resources}/share/scufris/prompts
       test -f ${resources}/share/scufris/extensions/scufris/agents.ts
-      test -f ${resources}/share/scufris/extensions/scufris/preflight-reviewer.ts
       test -f ${resources}/share/scufris/extensions/scufris/widgets.ts
-      test -x ${resources}/share/scufris/scripts/scufris-job
-      test -x ${resources}/share/scufris/scripts/scufris-jobs
-      test -x ${resources}/share/scufris/scripts/scufris-jobs-prune
+      test -x ${resources}/share/scufris/tools/jobs/scufris-jobs
       test -x ${resources}/share/scufris/scripts/scufris-artifacts-prune
       test -x ${resources}/share/scufris/scripts/scufris-dashboard
-      test -x ${resources}/share/scufris/tools/quick-review/quick_review.py
-      test ! -e ${resources}/bin/scufris-jobs-prune
-      test ! -e ${launcher}/bin/scufris-jobs-prune
       test -f ${resources}/share/scufris/skills/delegation/SKILL.md
       test -f ${resources}/share/scufris/skills/widgets/SKILL.md
       touch "$out"

@@ -204,4 +204,3 @@ preferences.
 - Exercise generic `ready` handoffs, unknown handoffs, quiet progress, and
   terminal result events.
 - Run `npm run check` after the extension integration is complete.
-

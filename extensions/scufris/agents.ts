@@ -15,7 +15,7 @@ const jobsHelperPath = fileURLToPath(
 const CONTEXT_ID = /^[a-f0-9]{24}$/;
 const JOB_ID = /^[a-f0-9]{12}$/;
 const MILESTONE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
-const TERMINAL_STATES = new Set(["done", "failed", "stopped"]);
+const TERMINAL_STATES = new Set(["done", "failed", "stopped", "landed"]);
 
 export type WorkerEventType =
   | "working"
@@ -75,7 +75,7 @@ interface SpawnResult {
   job_id: string;
   state: string;
   project: string | null;
-  workspace: "temporary" | "project" | "sprout";
+  workspace: "temporary" | "project" | "sprout" | "review";
   feature: string | null;
   harness: "pi" | "claude";
   model: string;
@@ -350,6 +350,13 @@ export default function scufrisJobs(pi: ExtensionAPI): void {
               maxLength: 48,
             }),
           ),
+          review_of: Type.Optional(
+            Type.String({
+              description:
+                "Owned project job to inspect read-only in this new review job.",
+              pattern: "^[a-f0-9]{12}$",
+            }),
+          ),
         },
         { additionalProperties: false },
       ),
@@ -368,6 +375,17 @@ export default function scufrisJobs(pi: ExtensionAPI): void {
           throw new Error("project workspace requires a project context");
         if (params.context_id === undefined && params.workspace === "sprout")
           throw new Error("sprout workspace requires a project context");
+        if (params.review_of !== undefined) {
+          const source = jobs.get(params.review_of);
+          if (!source)
+            throw new Error(
+              "review source is not owned by this Scufris session",
+            );
+          if (!resolved || source.project !== resolved.project)
+            throw new Error(
+              "review source and fresh project context must select the same project",
+            );
+        }
         const generatedJobId = jobId();
         const result = await runHelper<SpawnResult>(
           "spawn",
@@ -396,6 +414,9 @@ export default function scufrisJobs(pi: ExtensionAPI): void {
             ...(params.feature === undefined
               ? {}
               : { feature: params.feature }),
+            ...(params.review_of === undefined
+              ? {}
+              : { review_of: params.review_of }),
           },
           signal,
           120_000,
@@ -431,6 +452,103 @@ export default function scufrisJobs(pi: ExtensionAPI): void {
           ...result,
           ...(resolved ? { context_id: resolved.context_id } : {}),
         });
+      },
+    }),
+  );
+
+  pi.registerTool(
+    defineTool({
+      name: "scufris_job_quick_review",
+      label: "Open Quick Review",
+      description:
+        "Open an explicit human since-base review for one owned Sprout job. The review result wakes foreground Scufris; it does not land automatically.",
+      executionMode: "sequential",
+      parameters: Type.Object(
+        { job_id: Type.String({ pattern: "^[a-f0-9]{12}$" }) },
+        { additionalProperties: false },
+      ),
+      async execute(_id, params, signal) {
+        const job = jobs.get(params.job_id);
+        if (!job) throw new Error("job is not owned by this Scufris session");
+        const target = await runHelper<{
+          cwd: string;
+          default_branch: string;
+        }>("review-target", params, signal);
+        const requestId = `quick-review-${params.job_id}-${randomBytes(6).toString("hex")}`;
+        pi.events.emit("plannotator:request", {
+          requestId,
+          action: "code-review",
+          payload: {
+            cwd: target.cwd,
+            defaultBranch: target.default_branch,
+            diffType: "since-base",
+          },
+          respond: (response: unknown) => {
+            let encoded: string;
+            try {
+              encoded = JSON.stringify(response);
+            } catch {
+              encoded = '{"status":"error","error":"unserializable response"}';
+            }
+            if (Buffer.byteLength(encoded, "utf8") > 16 * 1024)
+              encoded =
+                '{"status":"error","error":"review response exceeded the mediation limit"}';
+            pi.sendMessage(
+              {
+                customType: "scufris-job-event",
+                content: `Quick Review completed for Scufris job ${job.job_id}. Inspect this structured result and decide what follows from the project preferences: ${encoded}`,
+                display: true,
+                details: {
+                  job_id: job.job_id,
+                  context_id: job.context_id,
+                  quick_review: response,
+                },
+              },
+              { deliverAs: "followUp", triggerTurn: true },
+            );
+          },
+        });
+        return toolResult({
+          job_id: job.job_id,
+          request_id: requestId,
+          state: "quick-review-opened",
+        });
+      },
+    }),
+  );
+
+  pi.registerTool(
+    defineTool({
+      name: "scufris_job_land",
+      label: "Land Scufris job",
+      description:
+        "Explicitly land one owned Sprout job after the selected workflow has supplied user approval. This tool never runs automatically.",
+      executionMode: "sequential",
+      parameters: Type.Object(
+        {
+          job_id: Type.String({ pattern: "^[a-f0-9]{12}$" }),
+          subject: Type.String({ minLength: 1, pattern: "^[^\\r\\n]+$" }),
+          remove_workspace: Type.Optional(Type.Boolean({ default: true })),
+        },
+        { additionalProperties: false },
+      ),
+      async execute(_id, params, signal) {
+        const job = jobs.get(params.job_id);
+        if (!job) throw new Error("job is not owned by this Scufris session");
+        const result = await runHelper(
+          "land",
+          {
+            job_id: params.job_id,
+            subject: params.subject,
+            remove_workspace: params.remove_workspace ?? true,
+          },
+          signal,
+          120_000,
+        );
+        job.state = "landed";
+        job.summary = "explicitly landed by foreground Scufris";
+        job.window_alive = false;
+        return toolResult(result);
       },
     }),
   );

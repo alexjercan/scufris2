@@ -22,7 +22,7 @@ FEATURE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 HANDOFF = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 EVENTS = {"working", "needs-decision", "blocked", "ready", "done", "failed"}
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
-WORKSPACES = {"temporary", "project", "sprout"}
+WORKSPACES = {"temporary", "project", "sprout", "review"}
 TERMINAL = {"done", "failed", "stopped"}
 MAX_REQUEST = 2 * 1024 * 1024
 MAX_REPORT = 512 * 1024
@@ -298,15 +298,20 @@ def selected_adapter(harness: Any, model: Any, thinking: Any) -> tuple[str, str,
     return selected_harness, selected_model, selected_thinking
 
 
-def worker_prompt(instructions: str, context_markdown: str | None) -> str:
+def worker_prompt(instructions: str, context_markdown: str | None, review: bool) -> str:
     project_section = (
         f"\n## Project workflow preferences\n\n{context_markdown.strip()}\n"
         if context_markdown
         else ""
     )
+    role = (
+        "You are an independent read-only reviewer. Inspect the assigned work without mutating files. Report concrete findings with paths and lines."
+        if review
+        else "You are a bounded worker for one foreground Scufris job. Complete only the request below."
+    )
     return f"""# Scufris delegated job
 
-You are a bounded worker for one foreground Scufris job. Complete only the request below. Do not spawn other workers. Read instructions and project-local skills from your working directory when relevant.
+{role} Do not spawn other workers. Read instructions and project-local skills from your working directory when relevant.
 {project_section}
 ## Request
 
@@ -383,6 +388,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
             "thinking",
             "workspace",
             "feature",
+            "review_of",
         },
     )
     job_id = validate_job_id(request["job_id"])
@@ -422,13 +428,23 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
         resolved_project, root = resolve_project(project)
         if resolved_project != project or root != Path(project_root_value).resolve():
             raise JobError("project context no longer resolves to the selected project")
-    workspace = request.get("workspace", "temporary" if root is None else "project")
+    review_of = request.get("review_of")
+    if review_of is not None:
+        source = load_job(validate_job_id(review_of))
+        if root is None or source.get("project") != project:
+            raise JobError("review job context must match the source project")
+        workspace = "review"
+    else:
+        source = None
+        workspace = request.get("workspace", "temporary" if root is None else "project")
     if workspace not in WORKSPACES:
         raise JobError("invalid workspace")
     if root is None and workspace != "temporary":
         raise JobError("general jobs require a temporary workspace")
     if root is not None and workspace == "temporary":
-        raise JobError("project jobs require project or sprout workspace")
+        raise JobError("project jobs require project, sprout, or review workspace")
+    if workspace == "review" and source is None:
+        raise JobError("review workspace requires a source job")
     feature = (
         safe_feature(request.get("feature"), job_id) if workspace == "sprout" else None
     )
@@ -446,14 +462,17 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
         elif workspace == "project":
             assert root is not None
             working = root
-        else:
+        elif workspace == "sprout":
             assert root is not None and feature is not None
             sprout(["new", feature], root)
             sprout_created = True
             working = Path(
                 sprout(["show", feature], root).stdout.decode().strip()
             ).resolve()
-        prompt = worker_prompt(instructions, context_markdown)
+        else:
+            assert source is not None
+            working = Path(source["working_directory"]).resolve()
+        prompt = worker_prompt(instructions, context_markdown, source is not None)
         write_new(directory / "prompt.md", prompt.encode(), 0o400)
         if context_markdown is not None:
             write_new(
@@ -469,7 +488,15 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
             "context_fingerprint": context_fingerprint,
             "workspace": workspace,
             "feature": feature,
+            "review_of": review_of,
             "working_directory": str(working),
+            "landing_branch": (
+                run(["git", "branch", "--show-current"], cwd=root)
+                .stdout.decode()
+                .strip()
+                if root is not None
+                else None
+            ),
             "harness": harness,
             "model": model,
             "thinking": thinking,
@@ -574,8 +601,10 @@ def launch(job_id: str) -> NoReturn:
             job["model"],
             "--thinking",
             job["thinking"],
-            prompt,
         ]
+        if job.get("workspace") == "review":
+            argv.extend(["--tools", "read,grep,find,ls", "--no-extensions"])
+        argv.append(prompt)
     elif job["harness"] == "claude":
         argv = [
             "claude",
@@ -747,6 +776,44 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def review_target(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id"})
+    job = load_job(validate_job_id(request["job_id"]))
+    if job.get("workspace") != "sprout" or not isinstance(
+        job.get("landing_branch"), str
+    ):
+        raise JobError("Quick Review requires a Sprout project job")
+    return {
+        "cwd": job["working_directory"],
+        "default_branch": job["landing_branch"],
+    }
+
+
+def land(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id", "subject"}, {"remove_workspace"})
+    job_id = validate_job_id(request["job_id"])
+    subject = request["subject"]
+    if not isinstance(subject, str) or not subject.strip() or "\n" in subject:
+        raise JobError("landing subject must be one nonempty line")
+    job = load_job(job_id)
+    if job.get("workspace") != "sprout":
+        raise JobError("landing requires a Sprout project job")
+    project = job.get("project")
+    feature = job.get("feature")
+    if not isinstance(project, str) or not isinstance(feature, str):
+        raise JobError("landing job metadata is invalid")
+    _, root = resolve_project(project)
+    sprout(["land", feature, "--dry-run", "-m", subject], root)
+    sprout(["land", feature, "-m", subject], root)
+    session = job.get("tmux_session_id")
+    if isinstance(session, str):
+        tmux(["kill-session", "-t", session], check=False)
+    removed = bool(request.get("remove_workspace", False))
+    if removed:
+        sprout(["rm", feature], root)
+    return {"job_id": job_id, "landed": True, "workspace_removed": removed}
+
+
 def stop(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(request, {"job_id"}, {"remove_workspace"})
     job_id = validate_job_id(request["job_id"])
@@ -803,6 +870,8 @@ def main() -> int:
         "poll": poll,
         "send": send,
         "inspect": inspect,
+        "review-target": review_target,
+        "land": land,
         "stop": stop,
         "orphans": orphans,
     }

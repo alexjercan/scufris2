@@ -285,8 +285,8 @@ test("ordinary and extension-triggered turns each speak only their settled respo
     const wakes = [
       {
         customType: "scufris-job-event",
-        payload: "review-ready: raw lifecycle payload",
-        response: "The review-ready response is settled and safe.",
+        payload: "ready: implementation-complete",
+        response: "The milestone response is settled and safe.",
       },
       {
         customType: "scufris-job-event",

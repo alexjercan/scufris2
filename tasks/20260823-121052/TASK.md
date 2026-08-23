@@ -61,4 +61,3 @@ Workflow preference work is tracked separately in
 `tasks/20260823-120412/TASK.md`. Its task-plan and lifecycle boundaries may
 clarify this notification contract, but this bug must remain independently
 verifiable.
-

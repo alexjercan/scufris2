@@ -23,7 +23,7 @@ import { Text } from "@earendil-works/pi-tui";
 import {
   appendScufrisIdentityPrompt,
   scufrisIdentityPrompt,
-} from "./identity.ts";
+} from "../workflow/identity.ts";
 
 export const spokenResponseInstruction =
   "The spoken field must be one short natural prose paragraph in complete sentences without Markdown, paths, hashes, URLs, or code.";

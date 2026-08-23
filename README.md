@@ -1,6 +1,6 @@
 # Scufris
 
-Scufris is a Pi-based assistant with delegation, widget control, Calm mode, and optional local voice.
+Scufris is a Pi-based assistant with a project workflow engine, delegated agents, Dashboardd control, Calm mode, and optional local voice.
 
 ## Quickstart
 

@@ -980,6 +980,7 @@ def quick_review_build(request: dict[str, Any]) -> dict[str, Any]:
         Path(__file__).resolve().parents[2]
         / "extensions"
         / "scufris"
+        / "workflow"
         / "walkthrough-reviewer.ts"
     )
     if not extension.is_file():

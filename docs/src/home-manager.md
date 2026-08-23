@@ -13,7 +13,7 @@ Import the module from the pinned flake input:
 }
 ```
 
-This installs the rendered normal launcher in `home.packages`. Delegation and widget control are enabled by default. Configure their enable options when the matching external service is not available.
+This installs the rendered normal launcher in `home.packages`. The core workflow, response shaping, and Calm extensions are always present. Dashboard control is enabled by default; set `dashboard.enable = false` when Dashboardd is unavailable.
 
 ## Compose with a configured Pi package
 

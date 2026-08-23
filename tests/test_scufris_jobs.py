@@ -257,7 +257,7 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
                 "context_markdown": context["markdown"],
                 "context_fingerprint": context["fingerprint"],
                 "workspace": "sprout",
-                "feature": "fixture-change",
+                "feature": f"fixture-{job_id}",
             },
         )["result"]
         self.jobs.append(job_id)

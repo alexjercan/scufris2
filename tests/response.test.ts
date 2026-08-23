@@ -21,8 +21,8 @@ import response, {
   promptInspectionMarkdown,
   responseText,
   splitDirectResponse,
-} from "../extensions/scufris/response.ts";
-import { lastSafeAssistantParagraph } from "../extensions/scufris/speech.ts";
+} from "../extensions/scufris/voice/response.ts";
+import { lastSafeAssistantParagraph } from "../extensions/scufris/voice/speech.ts";
 
 const usage = {
   input: 0,

@@ -17,11 +17,10 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/scufris/identity.ts",
-      "./extensions/scufris/response.ts",
+      "./extensions/scufris/workflow/index.ts",
+      "./extensions/scufris/voice/index.ts",
       "./extensions/scufris/calm.ts",
-      "./extensions/scufris/agents.ts",
-      "./extensions/scufris/widgets.ts"
+      "./extensions/scufris/dashboard/index.ts"
     ],
     "skills": [
       "./skills"

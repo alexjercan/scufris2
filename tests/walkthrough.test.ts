@@ -16,9 +16,9 @@ import {
   startWalkthroughServer,
   type WalkthroughState,
   validateWalkthroughState,
-} from "../extensions/scufris/walkthrough.ts";
-import { approvalInstruction } from "../extensions/scufris/walkthrough.ts";
-import { submitWalkthroughTool } from "../extensions/scufris/walkthrough-reviewer.ts";
+} from "../extensions/scufris/workflow/walkthrough.ts";
+import { approvalInstruction } from "../extensions/scufris/workflow/walkthrough.ts";
+import { submitWalkthroughTool } from "../extensions/scufris/workflow/walkthrough-reviewer.ts";
 
 const base = "1".repeat(40);
 const revision = "2".repeat(40);

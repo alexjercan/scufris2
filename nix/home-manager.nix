@@ -19,9 +19,8 @@
       then voiceResourcesFor system
       else resourcesFor system;
     piPackage = cfg.piPackage;
-    dashboardctlPackage = cfg.widgets.dashboardctlPackage;
-    delegation = cfg.delegation.enable;
-    widgets = cfg.widgets.enable;
+    dashboardctlPackage = cfg.dashboard.dashboardctlPackage;
+    dashboard = cfg.dashboard.enable;
     voice = cfg.voice.enable;
     piperPackage = cfg.voice.piper.package;
     piperModel = cfg.voice.piper.model;
@@ -56,19 +55,13 @@ in {
       description = "Rendered Scufris launcher package for desktop consumers.";
     };
 
-    delegation.enable =
-      lib.mkEnableOption "delegated Pi and Claude workers"
-      // {
-        default = true;
-      };
-
     projectRoots = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = ["~/personal" "~/work" "~/third-party"];
-      description = "Directories recursively searched for delegation projects.";
+      description = "Directories recursively searched for workflow projects.";
     };
 
-    widgets = {
+    dashboard = {
       enable =
         lib.mkEnableOption "dashboardd widget control"
         // {

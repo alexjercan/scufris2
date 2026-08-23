@@ -5,10 +5,10 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { runPrivateHelper, toolResult } from "./shared/runtime.ts";
+import { runPrivateHelper, toolResult } from "../shared/runtime.ts";
 
 const dashboardHelperPath = fileURLToPath(
-  new URL("../../scripts/scufris-dashboard", import.meta.url),
+  new URL("../../../tools/dashboard/scufris-dashboard", import.meta.url),
 );
 
 class DashboardError extends Error {

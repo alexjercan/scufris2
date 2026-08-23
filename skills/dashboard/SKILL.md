@@ -1,9 +1,9 @@
 ---
-name: widgets
+name: scufris-dashboard
 description: Open and control live native dashboard widgets for telemetry, projects, tasks, and daily information.
 ---
 
-# Widgets
+# Scufris dashboard
 
 Use dashboard widgets when the user asks to show or keep visible live information.
 The available widget and variant choices are discovered when the Pi session starts

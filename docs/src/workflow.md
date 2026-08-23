@@ -1,5 +1,10 @@
 # Project workflows and delegated jobs
 
+The workflow extension is Scufris's core engine. It owns foreground identity,
+project methodology, delegated-agent state, polling, review, and landing in one
+lifecycle. Agent spawn, inspect, send, and stop operations remain narrow parts
+of that engine rather than a separate loaded extension.
+
 Scufris handles work expected to take seconds in the foreground and delegates
 work expected to take minutes. Delegation supports project work and general
 work such as research or external report creation.

@@ -1,5 +1,8 @@
 # Spoken responses and private detail
 
+The voice extension owns response shaping in every Scufris package. Its speech
+module and Piper tool are present only in voice-capable resources.
+
 Foreground Scufris is a pair-programming companion. It keeps the conversation in the foreground, synthesizes gathered evidence in its own voice, and stops at meaningful decisions. It answers conversation and narrow project questions directly, but delegates work expected to take minutes. Scope and latency control routing, not the use of project tools.
 
 Every final answer has one short plain-prose paragraph. Optional Markdown detail is stored in a private sidecar beside the active Pi session. The transcript then shows one compact command:

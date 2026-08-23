@@ -1,9 +1,9 @@
 ---
-name: scufris-delegation
+name: scufris-workflow
 description: Resolve project workflow preferences and run independent project or general jobs. Use for work expected to take minutes.
 ---
 
-# Scufris delegation
+# Scufris workflow
 
 Use Scufris native job tools. Do not invoke tmux, Pi, Claude, or project
 workspace commands directly from the foreground session.

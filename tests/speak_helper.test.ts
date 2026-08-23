@@ -5,9 +5,10 @@ import { constants } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
-import { OwnedSpeechPlayback } from "../extensions/scufris/speech.ts";
+import { OwnedSpeechPlayback } from "../extensions/scufris/voice/speech.ts";
 
-const helper = new URL("../scripts/scufris-speak", import.meta.url).pathname;
+const helper = new URL("../tools/voice/scufris-speak", import.meta.url)
+  .pathname;
 const wavBuilder = `function wav(audio = Buffer.from("fake-audio")) {
   const output = Buffer.alloc(44 + audio.length);
   output.write("RIFF", 0);

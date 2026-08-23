@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-CLI = REPOSITORY / "scripts" / "scufris-dashboard"
+CLI = REPOSITORY / "tools" / "dashboard" / "scufris-dashboard"
 
 FAKE_DASHBOARDCTL = r"""#!/usr/bin/env python3
 import json

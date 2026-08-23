@@ -7,7 +7,7 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { runPrivateHelper, toolResult } from "./shared/runtime.ts";
+import { runPrivateHelper, toolResult } from "../shared/runtime.ts";
 import {
   initialWalkthroughState,
   parseWalkthrough,
@@ -18,7 +18,7 @@ import {
 } from "./walkthrough.ts";
 
 const jobsHelperPath = fileURLToPath(
-  new URL("../../tools/jobs/scufris-jobs", import.meta.url),
+  new URL("../../../tools/jobs/scufris-jobs", import.meta.url),
 );
 
 const CONTEXT_ID = /^[a-f0-9]{24}$/;
@@ -187,7 +187,7 @@ Active Scufris jobs:
 ${index}`;
 }
 
-export default function scufrisJobs(pi: ExtensionAPI): void {
+export default function workflowOrchestration(pi: ExtensionAPI): void {
   if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
 
   const contexts = new Map<string, ResolvedContext>();

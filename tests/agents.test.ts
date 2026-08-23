@@ -5,7 +5,7 @@ import {
   PLANNOTATOR_REVIEW_TOOL,
   QUICK_REVIEW_TOOL,
   workerEventWakes,
-} from "../extensions/scufris/agents.ts";
+} from "../extensions/scufris/workflow/orchestration.ts";
 
 test("worker events use only the replacement protocol", () => {
   assert.deepEqual(parseWorkerEvent("working: checking docs"), {

@@ -413,7 +413,7 @@ export interface WalkthroughServerOptions {
 }
 
 const quickReviewPath = fileURLToPath(
-  new URL("../../tools/quick-review/quick_review.py", import.meta.url),
+  new URL("../../../tools/quick-review/quick_review.py", import.meta.url),
 );
 
 function bridgeDocument(document: WalkthroughDocument) {

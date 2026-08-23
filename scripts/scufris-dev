@@ -58,11 +58,15 @@ fi
 export PATH="$system_path"
 
 extensions=(
-  "$root/extensions/scufris/identity.ts"
-  "$root/extensions/scufris/response.ts"
+  "$root/extensions/scufris/workflow/index.ts"
+  "$root/extensions/scufris/voice/index.ts"
   "$root/extensions/scufris/calm.ts"
+  "$root/extensions/scufris/dashboard/index.ts"
 )
-skills=()
+skills=(
+  "$root/skills/workflow"
+  "$root/skills/dashboard"
+)
 if [[ "$voice" == true ]]; then
   if [[ "${SCUFRIS_DEV_VOICE:-}" != 1 ]] \
     || [[ -z "${SCUFRIS_PIPER_MODEL:-}" ]] \
@@ -74,20 +78,13 @@ if [[ "$voice" == true ]]; then
     printf 'scufris-dev: voice requires the repository nix develop shell\n' >&2
     exit 2
   fi
+  export SCUFRIS_VOICE_AVAILABLE=1
   export SCUFRIS_SPEECH=1
   export SCUFRIS_CALM=1
-  extensions+=("$root/extensions/scufris/speech.ts")
 else
-  unset SCUFRIS_SPEECH SCUFRIS_CALM SCUFRIS_PIPER_MODEL SCUFRIS_PIPER_CONFIG
+  unset SCUFRIS_VOICE_AVAILABLE SCUFRIS_SPEECH SCUFRIS_CALM
+  unset SCUFRIS_PIPER_MODEL SCUFRIS_PIPER_CONFIG
 fi
-extensions+=(
-  "$root/extensions/scufris/agents.ts"
-  "$root/extensions/scufris/widgets.ts"
-)
-skills+=(
-  "$root/skills/delegation"
-  "$root/skills/widgets"
-)
 
 args=()
 for extension in "${extensions[@]}"; do

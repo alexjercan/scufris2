@@ -8,7 +8,7 @@ import type {
 import { plainProseParagraph } from "./response.ts";
 
 const speechHelperPath = fileURLToPath(
-  new URL("../../scripts/scufris-speak", import.meta.url),
+  new URL("../../../tools/voice/scufris-speak", import.meta.url),
 );
 const speechStateType = "scufris-speech-state-v1";
 const maxSpeechBytes = 1_000;

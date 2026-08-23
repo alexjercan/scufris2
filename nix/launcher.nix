@@ -3,8 +3,7 @@
   resources,
   piPackage,
   dashboardctlPackage,
-  delegation ? true,
-  widgets ? true,
+  dashboard ? true,
   voice ? false,
   piperPackage ? null,
   piperModel ? null,
@@ -15,45 +14,41 @@ assert !voice || (piperPackage != null && piperModel != null && piperConfig != n
   extensionArgs =
     [
       "--extension"
-      "${resources}/share/scufris/extensions/scufris/identity.ts"
+      "${resources}/share/scufris/extensions/scufris/workflow/index.ts"
+      "--skill"
+      "${resources}/share/scufris/skills/workflow"
       "--extension"
-      "${resources}/share/scufris/extensions/scufris/response.ts"
+      "${resources}/share/scufris/extensions/scufris/voice/index.ts"
       "--extension"
       "${resources}/share/scufris/extensions/scufris/calm.ts"
     ]
-    ++ pkgs.lib.optionals voice [
+    ++ pkgs.lib.optionals dashboard [
       "--extension"
-      "${resources}/share/scufris/extensions/scufris/speech.ts"
-    ]
-    ++ pkgs.lib.optionals delegation [
-      "--extension"
-      "${resources}/share/scufris/extensions/scufris/agents.ts"
+      "${resources}/share/scufris/extensions/scufris/dashboard/index.ts"
       "--skill"
-      "${resources}/share/scufris/skills/delegation"
-    ]
-    ++ pkgs.lib.optionals widgets [
-      "--extension"
-      "${resources}/share/scufris/extensions/scufris/widgets.ts"
-      "--skill"
-      "${resources}/share/scufris/skills/widgets"
+      "${resources}/share/scufris/skills/dashboard"
     ];
   renderedArgs = pkgs.lib.concatMapStringsSep " " pkgs.lib.escapeShellArg extensionArgs;
 in
   pkgs.writeShellApplication {
     name = "scufris";
     runtimeInputs =
-      pkgs.lib.optionals voice [
+      [
         pkgs.python3
+        pkgs.tmux
+      ]
+      ++ pkgs.lib.optionals voice [
         piperPackage
         pkgs.pipewire
       ]
-      ++ pkgs.lib.optional widgets dashboardctlPackage;
+      ++ pkgs.lib.optional dashboard dashboardctlPackage;
     text = ''
       if [[ -z "''${SCUFRIS_PROJECT_ROOTS+x}" ]]; then
         export SCUFRIS_PROJECT_ROOTS=${pkgs.lib.escapeShellArg (builtins.toJSON projectRoots)}
       fi
       export SCUFRIS_ROLE=orchestrator
       ${pkgs.lib.optionalString voice ''
+        export SCUFRIS_VOICE_AVAILABLE=1
         export SCUFRIS_PIPER_MODEL=${pkgs.lib.escapeShellArg (toString piperModel)}
         export SCUFRIS_PIPER_CONFIG=${pkgs.lib.escapeShellArg (toString piperConfig)}
       ''}

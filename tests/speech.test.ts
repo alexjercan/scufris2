@@ -7,7 +7,7 @@ import speech, {
   lastSafeAssistantParagraph,
   SpeechPlaybackError,
   type SpeechPlayback,
-} from "../extensions/scufris/speech.ts";
+} from "../extensions/scufris/voice/speech.ts";
 
 const usage = {
   input: 0,

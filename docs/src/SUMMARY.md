@@ -4,7 +4,7 @@
 - [Quickstart](quickstart.md)
 - [Flake interface](flake.md)
 - [Home Manager](home-manager.md)
-- [Delegated work and review](delegation.md)
+- [Workflow, agents, and review](workflow.md)
 - [Spoken responses and private detail](responses.md)
 - [Voice and desktop ownership](voice.md)
 - [Development and checks](development.md)

@@ -31,9 +31,9 @@ Scufris reports speech failures without failing the completed assistant turn.
 
 Voice input comes from Pi configuration. Check the speech-to-text capture and endpoint there.
 
-## Widget control fails
+## Dashboard control fails
 
-Dashboardd is external. Confirm that its desktop service and `dashboardctl` are available, or set `programs.scufris.widgets.enable = false`.
+Dashboardd is external. Confirm that its desktop service and `dashboardctl` are available, or set `programs.scufris.dashboard.enable = false`.
 
 ## Voice development rejects the environment
 

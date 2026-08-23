@@ -26,16 +26,19 @@ Update the tag deliberately. Release tags are immutable inputs.
 
 - `default` and `scufris`: normal launcher.
 - `scufris-voice`: Linux-only voice-capable launcher.
-- `resources`: normal packaged extensions, skills, and helpers.
-- `voice-resources`: resources that also contain the speech extension and helper.
+- `resources`: normal workflow, voice-response, Calm, and dashboard extensions,
+  their skills, and deterministic tools.
+- `voice-resources`: resources that also contain speech playback and its tool.
 - `docs`: this complete manual, including generated option documentation.
 
 Resource packages are composition inputs. Most users need only a launcher or the Home Manager module.
 
-## Module and component outputs
+## Module output
 
-- `homeModules.default`: the `programs.scufris` Home Manager module.
-- `extensions`: separately consumable Calm, speech, delegation, and widget extensions.
-- `skills`: separately consumable delegation and widget skills.
+`homeModules.default` is the `programs.scufris` Home Manager module. Extension
+composition is owned by the launcher and the Pi package manifest rather than
+nonstandard per-extension flake outputs.
 
-The default module resolves its Pi and Dashboardd package defaults from the Scufris flake inputs. A parent configuration can override those packages through the documented options.
+The default module resolves its Pi and Dashboardd package defaults from the
+Scufris flake inputs. A parent configuration can override those packages
+through the documented options.

@@ -9,6 +9,14 @@ npm ci
 
 The shell includes Node.js, Python, Ruff, ShellCheck, Alejandra, mdBook, Git, and tmux. On Linux it also includes the private Piper runtime, PipeWire, and trusted model paths.
 
+Repository ownership follows the runtime architecture:
+
+- `extensions/scufris/{workflow,voice,dashboard}` contain capability modules;
+  `calm.ts` remains a small independent extension.
+- `tools/` contains deterministic executables called by extensions.
+- `scripts/` contains commands called directly by people or development tasks.
+- `skills/` contains only broader model-facing workflow and dashboard policy.
+
 ## Run working-tree Scufris
 
 ```bash

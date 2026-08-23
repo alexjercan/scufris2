@@ -50,8 +50,8 @@
             chmod -R u+w "$out/share/scufris"
             rm "$out/share/scufris/scripts/scufris-dev"
             ${lib.optionalString (!voice) ''
-              rm "$out/share/scufris/extensions/scufris/speech.ts"
-              rm "$out/share/scufris/scripts/scufris-speak"
+              rm "$out/share/scufris/extensions/scufris/voice/speech.ts"
+              rm -R "$out/share/scufris/tools/voice"
             ''}
           '';
         resources = mkResources false;
@@ -137,40 +137,6 @@
       };
 
       flake = {
-        extensions = {
-          response = builtins.path {
-            path = ./extensions/scufris/response.ts;
-            name = "scufris-response-extension";
-          };
-          calm = builtins.path {
-            path = ./extensions/scufris/calm.ts;
-            name = "scufris-calm-extension";
-          };
-          speech = builtins.path {
-            path = ./extensions/scufris/speech.ts;
-            name = "scufris-speech-extension";
-          };
-          delegation = builtins.path {
-            path = ./extensions/scufris/agents.ts;
-            name = "scufris-delegation-extension";
-          };
-          widgets = builtins.path {
-            path = ./extensions/scufris/widgets.ts;
-            name = "scufris-widgets-extension";
-          };
-        };
-
-        skills = {
-          delegation = builtins.path {
-            path = ./skills/delegation;
-            name = "scufris-delegation-skill";
-          };
-          widgets = builtins.path {
-            path = ./skills/widgets;
-            name = "scufris-widgets-skill";
-          };
-        };
-
         homeModules.default = import ./nix/home-manager.nix {
           resourcesFor = system: self.packages.${system}.resources;
           voiceResourcesFor = system: self.packages.${system}.voice-resources;

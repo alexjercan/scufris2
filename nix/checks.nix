@@ -46,7 +46,7 @@
         programs.scufris = {
           enable = true;
           piPackage = systemPi;
-          widgets.enable = false;
+          dashboard.enable = false;
         };
       }
     ];
@@ -64,7 +64,7 @@
         programs.scufris = {
           enable = true;
           piPackage = systemPi;
-          widgets.enable = false;
+          dashboard.enable = false;
           voice.popup.enable = true;
         };
       }
@@ -89,8 +89,7 @@
         programs.scufris = {
           enable = true;
           piPackage = config.programs.pi.coding-agent.finalPackage;
-          delegation.enable = false;
-          widgets.enable = false;
+          dashboard.enable = false;
           voice = {
             enable = true;
             popup = {
@@ -141,19 +140,17 @@ in
 
         system-pi
         --extension
-        ${resources}/share/scufris/extensions/scufris/identity.ts
+        ${resources}/share/scufris/extensions/scufris/workflow/index.ts
+        --skill
+        ${resources}/share/scufris/skills/workflow
         --extension
-        ${resources}/share/scufris/extensions/scufris/response.ts
+        ${resources}/share/scufris/extensions/scufris/voice/index.ts
         --extension
         ${resources}/share/scufris/extensions/scufris/calm.ts
         --extension
-        ${resources}/share/scufris/extensions/scufris/agents.ts
+        ${resources}/share/scufris/extensions/scufris/dashboard/index.ts
         --skill
-        ${resources}/share/scufris/skills/delegation
-        --extension
-        ${resources}/share/scufris/extensions/scufris/widgets.ts
-        --skill
-        ${resources}/share/scufris/skills/widgets
+        ${resources}/share/scufris/skills/dashboard
         user-argument
         EOF
         diff -u expected actual
@@ -170,27 +167,29 @@ in
     '';
 
     resources = pkgs.runCommand "scufris-resources-check" {} ''
-      test -f ${resources}/share/scufris/extensions/scufris/identity.ts
-      test -f ${resources}/share/scufris/extensions/scufris/response.ts
+      test -f ${resources}/share/scufris/extensions/scufris/workflow/index.ts
+      test -f ${resources}/share/scufris/extensions/scufris/workflow/identity.ts
+      test -f ${resources}/share/scufris/extensions/scufris/workflow/orchestration.ts
+      test -f ${resources}/share/scufris/extensions/scufris/workflow/walkthrough.ts
+      test -f ${resources}/share/scufris/extensions/scufris/workflow/walkthrough-reviewer.ts
+      test -f ${resources}/share/scufris/extensions/scufris/voice/index.ts
+      test -f ${resources}/share/scufris/extensions/scufris/voice/response.ts
+      test ! -e ${resources}/share/scufris/extensions/scufris/voice/speech.ts
+      test ! -e ${resources}/share/scufris/tools/voice
       test -f ${resources}/share/scufris/extensions/scufris/calm.ts
-      test ! -e ${resources}/share/scufris/extensions/scufris/speech.ts
-      test ! -e ${resources}/share/scufris/scripts/scufris-speak
+      test -f ${resources}/share/scufris/extensions/scufris/dashboard/index.ts
+      test -f ${voiceResources}/share/scufris/extensions/scufris/voice/speech.ts
+      test -x ${voiceResources}/share/scufris/tools/voice/scufris-speak
       test ! -e ${resources}/share/scufris/scripts/scufris-dev
       test ! -e ${voiceResources}/share/scufris/scripts/scufris-dev
-      test -f ${voiceResources}/share/scufris/extensions/scufris/speech.ts
-      test -x ${voiceResources}/share/scufris/scripts/scufris-speak
       test ! -e ${resources}/share/scufris/prompts
-      test -f ${resources}/share/scufris/extensions/scufris/agents.ts
-      test -f ${resources}/share/scufris/extensions/scufris/widgets.ts
-      test -f ${resources}/share/scufris/extensions/scufris/walkthrough.ts
-      test -f ${resources}/share/scufris/extensions/scufris/walkthrough-reviewer.ts
       test -x ${resources}/share/scufris/tools/jobs/scufris-jobs
       test -x ${resources}/share/scufris/tools/quick-review/quick_review.py
+      test -x ${resources}/share/scufris/tools/dashboard/scufris-dashboard
       test -x ${resources}/share/scufris/scripts/scufris-jobs
       test -x ${resources}/share/scufris/scripts/scufris-artifacts-prune
-      test -x ${resources}/share/scufris/scripts/scufris-dashboard
-      test -f ${resources}/share/scufris/skills/delegation/SKILL.md
-      test -f ${resources}/share/scufris/skills/widgets/SKILL.md
+      test -f ${resources}/share/scufris/skills/workflow/SKILL.md
+      test -f ${resources}/share/scufris/skills/dashboard/SKILL.md
       touch "$out"
     '';
 
@@ -213,21 +212,17 @@ in
         ${pkgs.pipewire}/bin/pw-play
         system-pi
         --extension
-        ${voiceResources}/share/scufris/extensions/scufris/identity.ts
+        ${voiceResources}/share/scufris/extensions/scufris/workflow/index.ts
+        --skill
+        ${voiceResources}/share/scufris/skills/workflow
         --extension
-        ${voiceResources}/share/scufris/extensions/scufris/response.ts
+        ${voiceResources}/share/scufris/extensions/scufris/voice/index.ts
         --extension
         ${voiceResources}/share/scufris/extensions/scufris/calm.ts
         --extension
-        ${voiceResources}/share/scufris/extensions/scufris/speech.ts
-        --extension
-        ${voiceResources}/share/scufris/extensions/scufris/agents.ts
+        ${voiceResources}/share/scufris/extensions/scufris/dashboard/index.ts
         --skill
-        ${voiceResources}/share/scufris/skills/delegation
-        --extension
-        ${voiceResources}/share/scufris/extensions/scufris/widgets.ts
-        --skill
-        ${voiceResources}/share/scufris/skills/widgets
+        ${voiceResources}/share/scufris/skills/dashboard
         user-argument
         EOF
         diff -u expected actual
@@ -314,7 +309,7 @@ in
         export SCUFRIS_PIPER_CONFIG=${lib.escapeShellArg voice.config}
         export SCUFRIS_FIXTURE_WAV="$PWD/fixture.wav"
         printf %s 'The real Piper fixture is complete.' | \
-          python3 ${voiceResources}/share/scufris/scripts/scufris-speak
+          python3 ${voiceResources}/share/scufris/tools/voice/scufris-speak
         test -s fixture.wav
         test "$(head -c 4 fixture.wav)" = RIFF
         python3 - <<'PY'

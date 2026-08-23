@@ -309,8 +309,8 @@ test("local review server routes bounded actions and approval guard", async () =
     assert.equal((await action("action=approve")).status, 400);
     assert.equal(state.approved, false);
     approvalFailure = false;
-    assert.equal((await action("action=approve")).status, 400);
-    assert.equal(approvals, 0);
+    assert.equal((await action("action=approve")).status, 200);
+    assert.equal(approvals, 1);
   } finally {
     await server.close();
   }
@@ -332,8 +332,8 @@ test("viewed sections collapse, reopen, and approve with anchored comments", asy
         changeRequests++;
       },
       fullDiff: async () => undefined,
-      approved: async (comments) => {
-        approvals.push(approvalInstruction(comments));
+      approved: async (comments, overallComment) => {
+        approvals.push(approvalInstruction(comments, overallComment));
       },
       context: () => "context",
     },
@@ -368,7 +368,11 @@ test("viewed sections collapse, reopen, and approve with anchored comments", asy
     );
     let page = await (await fetch(server.url)).text();
     assert.match(page, /card viewed/);
-    assert.match(page, /data-action="reopen"/);
+    assert.match(page, /type="checkbox" data-viewed="runtime-filter" checked/);
+    assert.doesNotMatch(page, /data-action="reopen"/);
+    assert.doesNotMatch(page, /data-action="request-change"/);
+    assert.match(page, /review-comment-head/);
+    assert.match(page, /Comment on src\/actions\.ts:42-61/);
     assert.match(page, /Approve with comments/);
     assert.doesNotMatch(page, /Create follow-up task/);
     assert.doesNotMatch(page, /<script>alert\(1\)<\/script>/);
@@ -379,12 +383,81 @@ test("viewed sections collapse, reopen, and approve with anchored comments", asy
     assert.equal(state.sections["runtime-filter"], "not-reviewed");
     assert.equal((await action("action=approve-with-comments")).status, 400);
     await action("action=mark-viewed&section=runtime-filter");
-    assert.equal((await action("action=approve")).status, 400);
-    assert.equal((await action("action=approve-with-comments")).status, 200);
+    assert.equal(
+      (
+        await action(
+          new URLSearchParams({
+            action: "approve",
+            comment: "Overall implementation note.",
+          }),
+        )
+      ).status,
+      200,
+    );
     assert.equal(approvals.length, 1);
     assert.equal(changeRequests, 0);
     assert.match(approvals[0]!, /Keep this behavior documented/);
     assert.match(approvals[0]!, /src\/actions\.ts:42-61/);
+    assert.match(approvals[0]!, /Overall implementation note/);
+  } finally {
+    await server.close();
+  }
+});
+
+test("viewed checkbox mutations roll back when persistence fails", async () => {
+  const document = parseWalkthrough(valid);
+  const state = initialWalkthroughState(document);
+  const server = await startWalkthroughServer(
+    document,
+    state,
+    {
+      verify: async () => undefined,
+      persist: () => {
+        throw new Error("state disk is read-only");
+      },
+      explain: async () => "answer",
+      requestChanges: async () => undefined,
+      fullDiff: async () => undefined,
+      approved: async () => undefined,
+      context: () => "context",
+    },
+    { openBrowser: false },
+  );
+  try {
+    const response = await postAction(
+      server.url,
+      "action=mark-viewed&section=runtime-filter",
+    );
+    assert.equal(response.status, 400);
+    const result = (await response.json()) as {
+      error: string;
+      state: WalkthroughState;
+    };
+    assert.equal(result.error, "state disk is read-only");
+    assert.equal(result.state.viewed["runtime-filter"], false);
+    assert.equal(result.state.sections["runtime-filter"], "not-reviewed");
+    assert.equal(state.viewed["runtime-filter"], false);
+    assert.equal(state.sections["runtime-filter"], "not-reviewed");
+    let page = await (await fetch(server.url)).text();
+    assert.doesNotMatch(
+      page,
+      /type="checkbox" data-viewed="runtime-filter" checked/,
+    );
+    state.viewed["runtime-filter"] = true;
+    state.sections["runtime-filter"] = "looks-good";
+    const reopen = await postAction(
+      server.url,
+      "action=reopen&section=runtime-filter",
+    );
+    assert.equal(reopen.status, 400);
+    const reopenResult = (await reopen.json()) as { state: WalkthroughState };
+    assert.equal(reopenResult.state.viewed["runtime-filter"], true);
+    assert.equal(reopenResult.state.sections["runtime-filter"], "looks-good");
+    page = await (await fetch(server.url)).text();
+    assert.match(page, /type="checkbox" data-viewed="runtime-filter" checked/);
+    const script = await (await fetch(new URL("app.js", server.url))).text();
+    assert.match(script, /feedback\.className='feedback error'/);
+    assert.match(script, /renderState\(currentState\)/);
   } finally {
     await server.close();
   }
@@ -434,7 +507,7 @@ test("comment admission budgets the exact escaped approval instruction", async (
     };
     assert.throws(
       () => validateWalkthroughState(document, overflow),
-      /approval notes exceed/,
+      /approval comments exceed/,
     );
   } finally {
     await server.close();
@@ -478,7 +551,64 @@ test("in-flight explanation rechecks stale ownership before persistence", async 
   }
 });
 
-test("blocking feedback is serialized and budgeted before persistence", async () => {
+test("legacy section change requests stay visible and route with the overall explanation", async () => {
+  const document = parseWalkthrough(valid);
+  const state = initialWalkthroughState(document);
+  state.sections["runtime-filter"] = "change-requested";
+  state.changeRequests.push({
+    sectionId: "runtime-filter",
+    feedback: "Preserve this legacy blocking detail.",
+  });
+  let routed = "";
+  const server = await startWalkthroughServer(
+    document,
+    state,
+    {
+      verify: async () => undefined,
+      persist: () => undefined,
+      explain: async () => "answer",
+      requestChanges: async (message) => void (routed = message),
+      fullDiff: async () => undefined,
+      approved: async () => undefined,
+      context: () => "context",
+    },
+    { openBrowser: false },
+  );
+  try {
+    const page = await (await fetch(server.url)).text();
+    assert.match(page, /1<\/span> existing change requests/);
+    assert.match(page, /Existing change request on src\/actions\.ts:42-61/);
+    assert.match(page, /Preserve this legacy blocking detail/);
+    assert.match(page, /data-change-summary/);
+    assert.equal(
+      (await postAction(server.url, "action=request-changes")).status,
+      400,
+    );
+    const explanation = "The legacy request still needs resolution.";
+    assert.equal(
+      (
+        await postAction(
+          server.url,
+          new URLSearchParams({
+            action: "request-changes",
+            comment: explanation,
+          }),
+        )
+      ).status,
+      200,
+    );
+    assert.equal(
+      routed,
+      changeRequestInstruction(explanation, state.changeRequests),
+    );
+    assert.match(routed, /legacySectionRequests/);
+    assert.match(routed, /Preserve this legacy blocking detail/);
+  } finally {
+    await server.close();
+  }
+});
+
+test("only an overall review comment can request changes", async () => {
   const document = parseWalkthrough(valid);
   const state = initialWalkthroughState(document);
   let persisted = 0;
@@ -498,45 +628,86 @@ test("blocking feedback is serialized and budgeted before persistence", async ()
     { openBrowser: false },
   );
   try {
-    const post = (comment: string) =>
-      postAction(
-        server.url,
-        new URLSearchParams({
-          action: "request-change",
-          section: "runtime-filter",
-          comment,
-        }),
-      );
-    assert.equal((await post(`${"a".repeat(4095)}é`)).status, 400);
+    assert.equal(
+      (
+        await postAction(
+          server.url,
+          "action=request-change&section=runtime-filter&comment=Inline",
+        )
+      ).status,
+      400,
+    );
+    assert.equal(state.changeRequests.length, 0);
     assert.equal(persisted, 0);
-    assert.equal((await post("line one\nline two")).status, 200);
-    for (let index = 0; index < 3; index++)
-      assert.equal((await post("x".repeat(4090))).status, 200);
-    assert.equal(persisted, 4);
-    assert.equal(state.changeRequests.length, 4);
-    assert.equal((await post("x".repeat(4090))).status, 400);
-    assert.equal(persisted, 4);
-    assert.equal(state.changeRequests.length, 4);
     assert.equal(
       (await postAction(server.url, "action=request-changes")).status,
+      400,
+    );
+    const explanation =
+      "The final behavior needs a regression fix.\nAdd coverage.";
+    assert.equal(
+      (
+        await postAction(
+          server.url,
+          new URLSearchParams({
+            action: "request-changes",
+            comment: explanation,
+          }),
+        )
+      ).status,
       200,
     );
-    assert.equal(routed, changeRequestInstruction(state.changeRequests));
+    assert.equal(routed, changeRequestInstruction(explanation));
+    assert.match(routed, /"explanation"/);
+    assert.match(routed, /regression fix/);
     assert.doesNotMatch(routed, /[\r\n]/);
-    assert.match(routed, /line one\\nline two/);
   } finally {
     await server.close();
   }
+  assert.throws(() => changeRequestInstruction("  "), /overall review comment/);
+});
 
-  const overflow = initialWalkthroughState(document);
-  overflow.changeRequests = Array.from({ length: 4 }, () => ({
-    sectionId: "runtime-filter",
-    feedback: "x".repeat(4090),
-  }));
-  assert.throws(
-    () => validateWalkthroughState(document, overflow),
-    /blocking feedback exceeds/,
+test("failed approval finalization durably rolls approved state back", async () => {
+  const document = parseWalkthrough(valid);
+  const state = initialWalkthroughState(document);
+  state.sections["runtime-filter"] = "looks-good";
+  state.viewed["runtime-filter"] = true;
+  let durable = structuredClone(state);
+  let finalizationFails = true;
+  const persistedApproved: boolean[] = [];
+  const server = await startWalkthroughServer(
+    document,
+    state,
+    {
+      verify: async () => undefined,
+      persist: (next) => {
+        durable = structuredClone(next);
+        persistedApproved.push(next.approved);
+      },
+      explain: async () => "answer",
+      requestChanges: async () => undefined,
+      fullDiff: async () => undefined,
+      approved: async () => {
+        if (finalizationFails)
+          throw new Error("exact revision finalization failed");
+      },
+      context: () => "context",
+    },
+    { openBrowser: false },
   );
+  try {
+    assert.equal((await postAction(server.url, "action=approve")).status, 400);
+    assert.equal(state.approved, false);
+    assert.equal(durable.approved, false);
+    assert.deepEqual(persistedApproved, [true, false]);
+    finalizationFails = false;
+    assert.equal((await postAction(server.url, "action=approve")).status, 200);
+    assert.equal(state.approved, true);
+    assert.equal(durable.approved, true);
+    assert.deepEqual(persistedApproved, [true, false, true]);
+  } finally {
+    await server.close();
+  }
 });
 
 test("approval persistence completes before routing and can retry on local failure", async () => {
@@ -650,7 +821,7 @@ test("terminal callbacks can close the production server after correlated result
       server.url,
       terminalAction === "approve"
         ? "action=approve"
-        : "action=request-changes",
+        : "action=request-changes&comment=Change+this",
     );
     assert.equal(response.status, 200);
     const result = (await response.json()) as {

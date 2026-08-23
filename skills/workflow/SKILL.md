@@ -53,7 +53,8 @@ Project preferences can select optional phases. They never run automatically.
   reviewer runs read-only in the exact source workspace.
 - Call `scufris_job_quick_review` when project guidance selects the custom
   section-based Quick Review page. It generates an exact-revision walkthrough
-  with explanations, comments, change requests, and approval.
+  with explanations, non-blocking section comments, an overall review comment,
+  approval, and explained change requests.
 - Call `scufris_job_plannotator_review` when project guidance selects a
   Plannotator since-base code review. Plannotator and Quick Review are separate
   tools and neither substitutes for the other.

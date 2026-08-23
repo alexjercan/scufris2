@@ -94,7 +94,8 @@ part of the default job lifecycle.
 - An independent review is another job with a fresh project context. It runs
   read-only in the source job's exact workspace.
 - Quick Review is the custom local section-based walkthrough page. It supports
-  exact-revision explanations, comments, change requests, and approval.
+  exact-revision explanations, non-blocking section comments, an overall review
+  comment, approval, and explained change requests.
 - Plannotator review is a separate explicit since-base code-review tool. It
   does not replace Quick Review.
 - Local landing is an explicit guarded tool call after the selected workflow

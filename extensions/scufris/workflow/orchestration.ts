@@ -737,11 +737,14 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
               respond: () => undefined,
             });
           },
-          approved: async (comments: ReviewComment[]) => {
+          approved: async (
+            comments: ReviewComment[],
+            overallComment: string,
+          ) => {
             await verify();
             await finish(
               "quick-review-approved",
-              { comments, revision: built.revision },
+              { comments, overallComment, revision: built.revision },
               false,
             );
           },

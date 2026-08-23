@@ -81,11 +81,25 @@ class QuickReviewTest(unittest.TestCase):
             "view.querySelector('code').textContent=result.context", quick_review.JS
         )
         self.assertIn("fetch('action'", quick_review.JS)
+        self.assertIn('type="checkbox" data-viewed="safe-change"', page)
         self.assertIn('data-action="add-comment"', page)
-        self.assertIn('data-action="mark-viewed"', page)
-        self.assertIn('data-action="reopen"', page)
-        self.assertIn("Approve with comments", page)
+        self.assertNotIn('data-action="mark-viewed"', page)
+        self.assertNotIn('data-action="reopen"', page)
+        self.assertNotIn('data-action="request-change"', page)
+        self.assertIn('aria-label="Overall review comment"', page)
+        self.assertRegex(
+            page,
+            r'<div class="actions"><button[^>]+data-action="approve"[^>]*>Approve</button><button[^>]+data-action="request-changes"[^>]*hidden>Request changes</button></div>',
+        )
+        self.assertNotIn("Approve with comments", page)
         self.assertNotIn("Create follow-up task", page)
+        self.assertIn("checkbox.checked?'mark-viewed':'reopen'", quick_review.JS)
+        self.assertIn(
+            "approve.textContent=hasComments?'Approve with comments':'Approve'",
+            quick_review.JS,
+        )
+        self.assertIn("request.hidden=!hasOverall", quick_review.JS)
+        self.assertIn("feedback.className='feedback error'", quick_review.JS)
         self.assertIn("classList.toggle('viewed'", quick_review.JS)
 
     def test_anchored_comments_are_bounded_and_escaped(self) -> None:
@@ -102,12 +116,32 @@ class QuickReviewTest(unittest.TestCase):
         page = quick_review.render_page(
             quick_review.validate_init(value)["document"], value["state"]
         )
-        self.assertIn("src/safe.py:1-2", page)
+        self.assertIn("Comment on src/safe.py:1-2", page)
         self.assertIn("Note &lt;img onerror=alert(1)&gt;", page)
+        self.assertIn('class="review-comment-head"', page)
+        self.assertIn('class="review-comment-body"', page)
+        self.assertIn("Approve with comments", page)
         self.assertNotIn("<img onerror", page)
         value["state"]["comments"][0]["file"] = "other.py"
         with self.assertRaisesRegex(ValueError, "comments"):
             quick_review.validate_init(value)
+
+    def test_legacy_change_requests_are_visible_and_escaped(self) -> None:
+        value = descriptor()
+        value["state"]["changeRequests"] = [
+            {
+                "sectionId": "safe-change",
+                "feedback": "Fix <unsafe> behavior before approval.",
+            }
+        ]
+        page = quick_review.render_page(
+            quick_review.validate_init(value)["document"], value["state"]
+        )
+        self.assertIn("1</span> existing change requests", page)
+        self.assertIn("Existing change request on src/safe.py:1-2", page)
+        self.assertIn("Fix &lt;unsafe&gt; behavior before approval.", page)
+        self.assertIn("data-change-summary", page)
+        self.assertNotIn("Fix <unsafe>", page)
 
     def test_malformed_and_oversized_bridge_messages_fail(self) -> None:
         with self.assertRaisesRegex(ValueError, "malformed"):

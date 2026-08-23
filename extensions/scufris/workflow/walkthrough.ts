@@ -63,29 +63,36 @@ export const APPROVAL_INSTRUCTION =
   "Quick Review approved this exact revision. Foreground Scufris decides what follows.";
 const MAX_APPROVAL_INSTRUCTION_BYTES = 16 * 1024;
 
-export function approvalInstruction(comments: ReviewComment[]): string {
-  if (comments.length === 0) return APPROVAL_INSTRUCTION;
+export function approvalInstruction(
+  comments: ReviewComment[],
+  overallComment = "",
+): string {
+  const reviewComment = overallComment.trim();
+  if (comments.length === 0 && !reviewComment) return APPROVAL_INSTRUCTION;
   const notes = comments.map(({ sectionId, file, lines, body }) => ({
     sectionId,
     anchor: `${file}:${lines}`,
     body,
   }));
-  const message = `${APPROVAL_INSTRUCTION}\n\nNon-blocking review notes to include in the approval: ${JSON.stringify({ notes })}`;
+  const message = `${APPROVAL_INSTRUCTION}\n\nNon-blocking review comments to include in the approval: ${JSON.stringify({ notes, ...(reviewComment ? { overallComment: reviewComment } : {}) })}`;
   if (Buffer.byteLength(message, "utf8") > MAX_APPROVAL_INSTRUCTION_BYTES)
-    throw new Error("approval notes exceed the steering limit");
+    throw new Error("approval comments exceed the steering limit");
   return message;
 }
 
-const CHANGE_REQUEST_INSTRUCTION = "Walkthrough review requested changes.";
+const CHANGE_REQUEST_INSTRUCTION = "Walkthrough review requested changes";
 const MAX_CHANGE_REQUEST_INSTRUCTION_BYTES = 16 * 1024;
 
 export function changeRequestInstruction(
-  changeRequests: BlockingChangeRequest[],
+  explanation: string,
+  changeRequests: BlockingChangeRequest[] = [],
 ): string {
-  if (changeRequests.length === 0) return CHANGE_REQUEST_INSTRUCTION;
-  const message = `${CHANGE_REQUEST_INSTRUCTION.slice(0, -1)}: ${JSON.stringify({ changeRequests })}`;
+  const reviewComment = explanation.trim();
+  if (!reviewComment)
+    throw new Error("Request changes requires an overall review comment");
+  const message = `${CHANGE_REQUEST_INSTRUCTION}: ${JSON.stringify({ explanation: reviewComment, ...(changeRequests.length > 0 ? { legacySectionRequests: changeRequests } : {}) })}`;
   if (Buffer.byteLength(message, "utf8") > MAX_CHANGE_REQUEST_INSTRUCTION_BYTES)
-    throw new Error("blocking feedback exceeds the steering limit");
+    throw new Error("change request explanation exceeds the steering limit");
   return message;
 }
 
@@ -358,7 +365,7 @@ export function validateWalkthroughState(
   )
     throw new Error("review questions or change requests are invalid");
   approvalInstruction(state.comments);
-  changeRequestInstruction(state.changeRequests);
+  changeRequestInstruction("validation", state.changeRequests);
   if (
     state.approved &&
     (Object.values(state.viewed).some((item) => !item) ||
@@ -395,7 +402,7 @@ export interface WalkthroughActions {
   explain(section: string, question: string): Promise<string>;
   requestChanges(feedback: string): Promise<void>;
   fullDiff(): Promise<void>;
-  approved(comments: ReviewComment[]): Promise<void>;
+  approved(comments: ReviewComment[], overallComment: string): Promise<void>;
   context(section: WalkthroughSection): string;
 }
 type BridgeAction = {
@@ -500,18 +507,12 @@ export function startWalkthroughServer(
         "reopen",
         "add-comment",
         "explain",
-        "request-change",
         "context",
         "ask",
       ].includes(action);
       if (
         !sectionAction &&
-        ![
-          "approve",
-          "approve-with-comments",
-          "request-changes",
-          "full-diff",
-        ].includes(action)
+        !["approve", "request-changes", "full-diff"].includes(action)
       )
         throw new Error("unknown action");
       if (sectionAction && !section) throw new Error("unknown section");
@@ -520,22 +521,13 @@ export function startWalkthroughServer(
       const comment = (request.comment ?? "").trim();
       if (Buffer.byteLength(comment, "utf8") > 4096)
         throw new Error("review comment exceeds 4 KiB");
-      const feedback =
-        action === "request-change" ? comment || section!.prompt : undefined;
       const finalFeedback =
         action === "request-changes"
-          ? changeRequestInstruction(state.changeRequests)
+          ? changeRequestInstruction(comment, state.changeRequests)
           : undefined;
-      const terminalAction = [
-        "request-changes",
-        "approve",
-        "approve-with-comments",
-      ].includes(action);
-      if (["approve", "approve-with-comments"].includes(action)) {
-        if (action === "approve" && state.comments.length > 0)
-          throw new Error("non-blocking notes require Approve with comments");
-        if (action === "approve-with-comments" && state.comments.length === 0)
-          throw new Error("there are no review notes to include");
+      const terminalAction = ["request-changes", "approve"].includes(action);
+      if (action === "approve") {
+        approvalInstruction(state.comments, comment);
         approveWalkthrough(state);
         rollbackPending = () => void (state.approved = false);
       }
@@ -543,24 +535,37 @@ export function startWalkthroughServer(
         try {
           await actions.verify();
         } catch (error) {
-          if (["approve", "approve-with-comments"].includes(action))
-            state.approved = false;
+          if (action === "approve") state.approved = false;
           throw error;
         }
         terminal = "pending";
       }
-      if (action === "mark-viewed") {
+      if (["mark-viewed", "reopen"].includes(action)) {
+        const previous = {
+          approved: state.approved,
+          section: state.sections[sectionId]!,
+          viewed: state.viewed[sectionId]!,
+        };
         state.approved = false;
-        state.viewed[sectionId] = true;
-        if (state.sections[sectionId] !== "change-requested")
+        state.viewed[sectionId] = action === "mark-viewed";
+        if (
+          action === "mark-viewed" &&
+          state.sections[sectionId] !== "change-requested"
+        )
           state.sections[sectionId] = "looks-good";
-        actions.persist(state);
-      } else if (action === "reopen") {
-        state.approved = false;
-        state.viewed[sectionId] = false;
-        if (state.sections[sectionId] === "looks-good")
+        else if (
+          action === "reopen" &&
+          state.sections[sectionId] === "looks-good"
+        )
           state.sections[sectionId] = "not-reviewed";
-        actions.persist(state);
+        try {
+          actions.persist(state);
+        } catch (error) {
+          state.approved = previous.approved;
+          state.sections[sectionId] = previous.section;
+          state.viewed[sectionId] = previous.viewed;
+          throw error;
+        }
       } else if (action === "add-comment") {
         if (!comment) throw new Error("Add comment requires a review note");
         if (state.comments.length >= MAX_SECTIONS)
@@ -575,22 +580,12 @@ export function startWalkthroughServer(
         approvalInstruction([...state.comments, nextComment]);
         state.comments.push(nextComment);
         actions.persist(state);
-      } else if (["explain", "request-change"].includes(action)) {
-        if (action === "explain") {
-          applySectionAction(state, sectionId, "explain");
-          const question = comment || section!.prompt;
-          const answer = await actions.explain(sectionId, question);
-          await actions.verify();
-          state.questions.push({ sectionId, question, answer });
-        } else {
-          const nextChangeRequest = { sectionId, feedback: feedback! };
-          changeRequestInstruction([
-            ...state.changeRequests,
-            nextChangeRequest,
-          ]);
-          applySectionAction(state, sectionId, "request-change");
-          state.changeRequests.push(nextChangeRequest);
-        }
+      } else if (action === "explain") {
+        applySectionAction(state, sectionId, "explain");
+        const question = section!.prompt;
+        const answer = await actions.explain(sectionId, question);
+        await actions.verify();
+        state.questions.push({ sectionId, question, answer });
         actions.persist(state);
       } else if (action === "ask") {
         if (!comment) throw new Error("Ask reviewer requires a question");
@@ -608,20 +603,34 @@ export function startWalkthroughServer(
         };
       } else if (action === "full-diff") await actions.fullDiff();
       else if (action === "request-changes") {
-        terminal = "committed";
         await actions.requestChanges(finalFeedback!);
-      } else if (["approve", "approve-with-comments"].includes(action)) {
+        terminal = "committed";
+      } else if (action === "approve") {
         try {
           actions.persist(state);
         } catch (error) {
           state.approved = false;
           throw error;
         }
-        terminal = "committed";
         try {
-          await actions.approved([...state.comments]);
+          await actions.approved([...state.comments], comment);
+          terminal = "committed";
         } catch (error) {
           state.approved = false;
+          try {
+            actions.persist(state);
+          } catch (rollbackError) {
+            const detail =
+              rollbackError instanceof Error
+                ? rollbackError.message
+                : String(rollbackError);
+            throw new Error(
+              `approval failed and durable rollback failed: ${detail}`,
+              {
+                cause: error,
+              },
+            );
+          }
           throw error;
         }
       }

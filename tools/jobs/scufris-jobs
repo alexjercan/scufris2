@@ -31,6 +31,26 @@ MAX_REPORT = 512 * 1024
 MAX_EVENT_LINE = 4096
 MAX_QUICK_REVIEW_PATCH = 512 * 1024
 MAX_QUICK_REVIEW_ARTIFACT = 300 * 1024
+JOB_FIELDS = {
+    "job_id",
+    "owner_session",
+    "project",
+    "context_fingerprint",
+    "workspace",
+    "feature",
+    "review_of",
+    "working_directory",
+    "landing_branch",
+    "harness",
+    "model",
+    "thinking",
+    "state",
+    "summary",
+    "created_at",
+    "tmux_session_id",
+    "tmux_window_id",
+    "tmux_pane_id",
+}
 
 
 class JobError(Exception):
@@ -586,7 +606,11 @@ def load_job(job_id: str) -> dict[str, Any]:
         value = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as error:
         raise JobError("job record is unavailable") from error
-    if not isinstance(value, dict) or value.get("job_id") != job_id:
+    if (
+        not isinstance(value, dict)
+        or set(value) != JOB_FIELDS
+        or value.get("job_id") != job_id
+    ):
         raise JobError("job record is invalid")
     return value
 

@@ -50,8 +50,11 @@ Project preferences can select optional phases. They never run automatically.
 - For an independent review, resolve a fresh context for the same project and
   call `scufris_job_spawn` with `review_of` set to the implementation job. The
   reviewer runs read-only in the exact source workspace.
-- Call `scufris_job_quick_review` only when project guidance or the user selects
-  human since-base review for a Sprout job. Interpret its returned feedback in
-  foreground Scufris.
+- Call `scufris_job_quick_review` when project guidance selects the custom
+  section-based Quick Review page. It generates an exact-revision walkthrough
+  with explanations, comments, change requests, and approval.
+- Call `scufris_job_plannotator_review` when project guidance selects a
+  Plannotator since-base code review. Plannotator and Quick Review are separate
+  tools and neither substitutes for the other.
 - Call `scufris_job_land` only after the selected workflow has supplied the
   required approval. Landing is never implied by `done` or `ready`.

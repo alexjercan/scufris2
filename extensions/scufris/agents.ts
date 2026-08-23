@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import {
@@ -7,6 +8,14 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { runPrivateHelper, toolResult } from "./shared/runtime.ts";
+import {
+  initialWalkthroughState,
+  parseWalkthrough,
+  saveWalkthroughState,
+  startWalkthroughServer,
+  type ReviewComment,
+  type WalkthroughState,
+} from "./walkthrough.ts";
 
 const jobsHelperPath = fileURLToPath(
   new URL("../../tools/jobs/scufris-jobs", import.meta.url),
@@ -16,6 +25,8 @@ const CONTEXT_ID = /^[a-f0-9]{24}$/;
 const JOB_ID = /^[a-f0-9]{12}$/;
 const MILESTONE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const TERMINAL_STATES = new Set(["done", "failed", "stopped", "landed"]);
+export const QUICK_REVIEW_TOOL = "scufris_job_quick_review";
+export const PLANNOTATOR_REVIEW_TOOL = "scufris_job_plannotator_review";
 
 export type WorkerEventType =
   | "working"
@@ -93,6 +104,24 @@ interface OwnedJob extends SpawnResult {
   inode: number | null;
   window_alive: boolean;
   exit_reported: boolean;
+  quick_review?: { close(): Promise<void>; revision: string };
+}
+
+interface QuickReviewBuild {
+  job_id: string;
+  cwd: string;
+  default_branch: string;
+  base_revision: string;
+  revision: string;
+  artifact: string;
+  state: string;
+  model: string;
+  thinking: string;
+}
+
+interface QuickReviewSnapshot {
+  base_revision: string;
+  revision: string;
 }
 
 interface PollResult {
@@ -145,7 +174,17 @@ function activeJobPrompt(jobs: Iterable<OwnedJob>): string {
         )
         .join("\n")
     : "- none";
-  return `Scufris resolves project workflow preferences per job. Before planning every new project job, call scufris_project_context with an opaque project ID from scufris_projects. Follow the returned project guidance unless the user's explicit request overrides it or it is impossible. Use no project context for general work. A project context creates exactly one job. Treat ready events as completed milestone hints: inspect the job and decide what follows; never route from the milestone slug alone.\n\nActive Scufris jobs:\n${index}`;
+  return `Scufris resolves project workflow preferences per job.
+
+Before planning every new project job, call scufris_project_context with an
+opaque project ID from scufris_projects. Follow the returned project guidance
+unless the user's explicit request overrides it or it is impossible. Use no
+project context for general work. A project context creates exactly one job.
+Treat ready events as completed milestone hints: inspect the job and decide
+what follows; never route from the milestone slug alone.
+
+Active Scufris jobs:
+${index}`;
 }
 
 export default function scufrisJobs(pi: ExtensionAPI): void {
@@ -462,10 +501,10 @@ export default function scufrisJobs(pi: ExtensionAPI): void {
 
   pi.registerTool(
     defineTool({
-      name: "scufris_job_quick_review",
-      label: "Open Quick Review",
+      name: PLANNOTATOR_REVIEW_TOOL,
+      label: "Open Plannotator review",
       description:
-        "Open an explicit human since-base review for one owned Sprout job. The review result wakes foreground Scufris; it does not land automatically.",
+        "Open an explicit Plannotator since-base code review for one owned Sprout job. The review result wakes foreground Scufris; it does not land automatically.",
       executionMode: "sequential",
       parameters: Type.Object(
         { job_id: Type.String({ pattern: "^[a-f0-9]{12}$" }) },
@@ -478,7 +517,7 @@ export default function scufrisJobs(pi: ExtensionAPI): void {
           cwd: string;
           default_branch: string;
         }>("review-target", params, signal);
-        const requestId = `quick-review-${params.job_id}-${randomBytes(6).toString("hex")}`;
+        const requestId = `plannotator-review-${params.job_id}-${randomBytes(6).toString("hex")}`;
         pi.events.emit("plannotator:request", {
           requestId,
           action: "code-review",
@@ -501,12 +540,12 @@ export default function scufrisJobs(pi: ExtensionAPI): void {
             pi.sendMessage(
               {
                 customType: "scufris-job-event",
-                content: `Quick Review completed for Scufris job ${job.job_id}. Inspect this structured result and decide what follows from the project preferences: ${encoded}`,
+                content: `Plannotator review completed for Scufris job ${job.job_id}. Inspect this structured result and decide what follows from the project preferences: ${encoded}`,
                 display: true,
                 details: {
                   job_id: job.job_id,
                   context_id: job.context_id,
-                  quick_review: response,
+                  plannotator_review: response,
                 },
               },
               { deliverAs: "followUp", triggerTurn: true },
@@ -516,7 +555,184 @@ export default function scufrisJobs(pi: ExtensionAPI): void {
         return toolResult({
           job_id: job.job_id,
           request_id: requestId,
+          state: "plannotator-review-opened",
+        });
+      },
+    }),
+  );
+
+  pi.registerTool(
+    defineTool({
+      name: QUICK_REVIEW_TOOL,
+      label: "Open Quick Review",
+      description:
+        "Generate and open the custom Scufris Quick Review walkthrough for one owned Sprout job. This is separate from Plannotator and never lands automatically.",
+      executionMode: "sequential",
+      parameters: Type.Object(
+        {
+          job_id: Type.String({ pattern: "^[a-f0-9]{12}$" }),
+          model: Type.Optional(
+            Type.String({
+              description:
+                "Pi model used to generate and explain the walkthrough.",
+              minLength: 1,
+              maxLength: 200,
+            }),
+          ),
+          thinking: Type.Optional(
+            StringEnum([
+              "off",
+              "minimal",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+            ] as const),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+      async execute(_id, params, signal, _update, ctx) {
+        const job = jobs.get(params.job_id);
+        if (!job) throw new Error("job is not owned by this Scufris session");
+        if (job.quick_review)
+          throw new Error("Quick Review is already open for this job");
+
+        const built = await runHelper<QuickReviewBuild>(
+          "quick-review-build",
+          {
+            job_id: job.job_id,
+            model: params.model ?? "openai-codex/gpt-5.6-sol",
+            thinking: params.thinking ?? "medium",
+          },
+          signal,
+          920_000,
+        );
+        const document = parseWalkthrough(readFileSync(built.artifact, "utf8"));
+        if (
+          document.baseRevision !== built.base_revision ||
+          document.revision !== built.revision
+        )
+          throw new Error("Quick Review artifact revisions do not match");
+        const state: WalkthroughState = initialWalkthroughState(document);
+        saveWalkthroughState(built.state, state);
+        const contexts = new Map<string, string>();
+        for (const section of document.sections) {
+          const result = await runHelper<{ content: string }>(
+            "quick-review-context",
+            {
+              job_id: job.job_id,
+              base_revision: built.base_revision,
+              revision: built.revision,
+              file: section.file,
+            },
+            signal,
+          );
+          contexts.set(section.id, result.content);
+        }
+
+        const verify = async () => {
+          const snapshot = await runHelper<QuickReviewSnapshot>(
+            "quick-review-snapshot",
+            { job_id: job.job_id },
+          );
+          if (
+            snapshot.base_revision !== built.base_revision ||
+            snapshot.revision !== built.revision
+          )
+            throw new Error("Quick Review revision changed");
+        };
+        const finish = async (
+          milestone: string,
+          detail: Record<string, unknown>,
+          invalidate: boolean,
+        ) => {
+          const active = job.quick_review;
+          job.quick_review = undefined;
+          if (active) void active.close().catch(() => undefined);
+          if (invalidate)
+            await runHelper("invalidate-quick-review", {
+              job_id: job.job_id,
+            });
+          job.state = "ready";
+          job.summary = milestone;
+          pi.sendMessage(
+            {
+              customType: "scufris-job-event",
+              content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ready: ${milestone}. Inspect the Quick Review result and decide what follows from the project preferences.`,
+              display: true,
+              details: {
+                job_id: job.job_id,
+                context_id: job.context_id,
+                quick_review: detail,
+              },
+            },
+            { deliverAs: "followUp", triggerTurn: true },
+          );
+        };
+        const server = await startWalkthroughServer(document, state, {
+          verify,
+          persist: (next) => saveWalkthroughState(built.state, next),
+          context: (section) =>
+            contexts.get(section.id) ?? "Context unavailable.",
+          explain: async (section, question) => {
+            const answer = await runHelper<{ answer: string }>(
+              "quick-review-question",
+              {
+                job_id: job.job_id,
+                revision: built.revision,
+                section,
+                question,
+                model: built.model,
+                thinking: built.thinking,
+              },
+              undefined,
+              200_000,
+            );
+            return answer.answer;
+          },
+          requestChanges: async (feedback) => {
+            await verify();
+            await runHelper("send", {
+              job_id: job.job_id,
+              message: feedback,
+            });
+            await finish("quick-review-feedback-submitted", { feedback }, true);
+          },
+          fullDiff: async () => {
+            await verify();
+            pi.events.emit("plannotator:request", {
+              requestId: `quick-review-full-diff-${job.job_id}-${randomBytes(6).toString("hex")}`,
+              action: "code-review",
+              payload: {
+                cwd: built.cwd,
+                defaultBranch: built.default_branch,
+                diffType: "since-base",
+              },
+              respond: () => undefined,
+            });
+          },
+          approved: async (comments: ReviewComment[]) => {
+            await verify();
+            await finish(
+              "quick-review-approved",
+              { comments, revision: built.revision },
+              false,
+            );
+          },
+        });
+        job.quick_review = { close: server.close, revision: built.revision };
+        server.open();
+        if (ctx.hasUI)
+          ctx.ui.notify(
+            `Quick Review for job ${job.job_id}: ${server.url}`,
+            "info",
+          );
+        return toolResult({
+          job_id: job.job_id,
           state: "quick-review-opened",
+          revision: built.revision,
+          sections: document.sections.length,
         });
       },
     }),
@@ -661,6 +877,9 @@ export default function scufrisJobs(pi: ExtensionAPI): void {
       async execute(_id, params, signal) {
         const job = jobs.get(params.job_id);
         if (!job) throw new Error("job is not owned by this Scufris session");
+        const quickReview = job.quick_review;
+        job.quick_review = undefined;
+        if (quickReview) await quickReview.close();
         const result = await runHelper(
           "stop",
           {
@@ -710,11 +929,13 @@ export default function scufrisJobs(pi: ExtensionAPI): void {
     timer = undefined;
     while (polling) await new Promise((resolve) => setTimeout(resolve, 25));
     await Promise.allSettled(
-      [...jobs.values()]
-        .filter((job) => job.window_alive)
-        .map((job) =>
-          runHelper("stop", { job_id: job.job_id }, undefined, 15_000),
-        ),
+      [...jobs.values()].map(async (job) => {
+        const quickReview = job.quick_review;
+        job.quick_review = undefined;
+        if (quickReview) await quickReview.close();
+        if (job.window_alive)
+          await runHelper("stop", { job_id: job.job_id }, undefined, 15_000);
+      }),
     );
     if (extensionContext?.hasUI)
       extensionContext.ui.setStatus("scufris", undefined);

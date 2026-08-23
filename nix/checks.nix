@@ -182,7 +182,11 @@ in
       test ! -e ${resources}/share/scufris/prompts
       test -f ${resources}/share/scufris/extensions/scufris/agents.ts
       test -f ${resources}/share/scufris/extensions/scufris/widgets.ts
+      test -f ${resources}/share/scufris/extensions/scufris/walkthrough.ts
+      test -f ${resources}/share/scufris/extensions/scufris/walkthrough-reviewer.ts
       test -x ${resources}/share/scufris/tools/jobs/scufris-jobs
+      test -x ${resources}/share/scufris/tools/quick-review/quick_review.py
+      test -x ${resources}/share/scufris/scripts/scufris-jobs
       test -x ${resources}/share/scufris/scripts/scufris-artifacts-prune
       test -x ${resources}/share/scufris/scripts/scufris-dashboard
       test -f ${resources}/share/scufris/skills/delegation/SKILL.md

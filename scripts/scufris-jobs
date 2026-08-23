@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""List every replacement Scufris job stored for the current user."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+from pathlib import Path
+from typing import Any
+
+JOB_ID_PATTERN = "????????????"
+
+
+def jobs_root() -> Path:
+    state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+    return state / "scufris" / "jobs"
+
+
+def helper_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "tools" / "jobs" / "scufris-jobs"
+
+
+def inspect(job_id: str) -> dict[str, Any]:
+    completed = subprocess.run(
+        [str(helper_path()), "inspect"],
+        input=json.dumps({"job_id": job_id}),
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=15,
+    )
+    try:
+        envelope = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return {
+            "job_id": job_id,
+            "state": "invalid",
+            "summary": "invalid helper response",
+        }
+    if completed.returncode != 0 or not envelope.get("ok"):
+        return {
+            "job_id": job_id,
+            "state": "invalid",
+            "summary": str(envelope.get("error", "inspection failed")),
+        }
+    return envelope["result"]
+
+
+def all_jobs() -> list[dict[str, Any]]:
+    root = jobs_root()
+    if not root.is_dir():
+        return []
+    return [
+        inspect(path.name)
+        for path in sorted(root.glob(JOB_ID_PATTERN))
+        if path.is_dir()
+    ]
+
+
+def text_row(job: dict[str, Any]) -> str:
+    project = job.get("project") or "general"
+    state = job.get("state") or "unknown"
+    workspace = job.get("workspace") or "unknown"
+    harness = job.get("harness") or "unknown"
+    model = job.get("model") or "unknown"
+    alive = "running" if job.get("window_alive") else "stopped"
+    summary = str(job.get("summary") or "")
+    return (
+        f"{job.get('job_id', 'unknown')}  {state:<14}  {alive:<7}  "
+        f"{project}  {workspace}  {harness}/{model}  {summary}"
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--json", action="store_true", help="print structured JSON")
+    arguments = parser.parse_args()
+    jobs = all_jobs()
+    if arguments.json:
+        print(json.dumps({"jobs": jobs}, indent=2, sort_keys=True))
+    elif jobs:
+        for job in jobs:
+            print(text_row(job))
+    else:
+        print("No Scufris jobs.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

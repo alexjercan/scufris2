@@ -10,8 +10,6 @@ A project can add `.scufris.toml` at its Git root. The file contains advisory
 workflow preferences:
 
 ```toml
-version = 1
-
 [preferences.tracking]
 name = "tatr"
 guidance = """
@@ -70,6 +68,9 @@ prompt, report, and current state before choosing another tool.
 Every worker runs in an owned tmux session. Shutdown targets only resources
 recorded for jobs owned by the foreground session.
 
+Run `scripts/scufris-jobs` to list all stored jobs across foreground sessions.
+Use `scripts/scufris-jobs --json` for structured diagnostics.
+
 ## Optional tools
 
 Project preferences can guide Scufris to compose additional phases. None are
@@ -78,7 +79,9 @@ part of the default job lifecycle.
 - A Sprout workspace is selected explicitly when spawning implementation work.
 - An independent review is another job with a fresh project context. It runs
   read-only in the source job's exact workspace.
-- Quick Review is an explicit human since-base review for a Sprout job. Its
-  feedback returns to foreground Scufris and never lands automatically.
+- Quick Review is the custom local section-based walkthrough page. It supports
+  exact-revision explanations, comments, change requests, and approval.
+- Plannotator review is a separate explicit since-base code-review tool. It
+  does not replace Quick Review.
 - Local landing is an explicit guarded tool call after the selected workflow
   supplies approval.

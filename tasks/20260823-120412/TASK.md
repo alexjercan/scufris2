@@ -1,6 +1,6 @@
 # Add project workflow preferences and generic delegation planning
 
-- STATUS: CLOSED
+- STATUS: IN_PROGRESS
 - PRIORITY: 100
 - TAGS: orchestration, configuration, preferences, delegation
 
@@ -59,8 +59,6 @@ design.
 Use TOML with open-ended preference keys and one common record shape:
 
 ```toml
-version = 1
-
 [preferences.tracking]
 name = "tatr"
 options = {}
@@ -189,8 +187,25 @@ preferences.
   guarded landing.
 - Foreground tools expose project resolution, generic spawn, independent review
   jobs, Quick Review, landing, inspection, steering, and exact owned cleanup.
-- The fixed review and landing lifecycle, its helpers, tests, and documentation
-  were deleted. No compatibility or migration path remains.
+- The fixed review and landing lifecycle was deleted. No compatibility or
+  migration path remains.
+
+## Quick Review correction
+
+- Restored the custom Python Quick Review page and its TypeScript bridge as an
+  explicit optional tool.
+- Removed the fixed preflight dependency from the walkthrough document format.
+- Quick Review now generates an exact-revision section walkthrough, supports
+  explanations, comments, change requests, and approval, and returns its result
+  to foreground Scufris without landing.
+- Added `scufris_job_plannotator_review` as a separate Plannotator since-base
+  tool. It does not substitute for `scufris_job_quick_review`.
+- Restored `scripts/scufris-jobs` for human-readable or JSON listing of every
+  stored job.
+- Job records remain under the normal `jobs` directory and contain no product
+  generation label or compatibility version.
+- Formatted TypeScript and Markdown with Prettier and Python with Ruff. Long
+  generated prompts use readable multiline source strings.
 
 ## Verification evidence
 
@@ -203,7 +218,10 @@ preferences.
 - Exercise generic `ready` handoffs, unknown handoffs, quiet progress, and
   terminal result events.
 - `npm run check` passes.
-- `python3 -m unittest discover -s tests -p 'test_*.py'` passes 13 tests.
+- `npm test` passes 44 TypeScript tests, including the Quick Review bridge and
+  the separate tool identities.
+- `python3 -m unittest discover -s tests -p 'test_*.py'` passes 19 tests,
+  including the Quick Review server, generator, job listing, and landing flow.
 - `ruff check .` and `ruff format --check .` pass.
 - `nix fmt -- --check .` passes.
 - `nix flake check` passes all supported-system checks.

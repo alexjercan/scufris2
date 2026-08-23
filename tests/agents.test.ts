@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   parseWorkerEvent,
+  PLANNOTATOR_REVIEW_TOOL,
+  QUICK_REVIEW_TOOL,
   workerEventWakes,
 } from "../extensions/scufris/agents.ts";
 
@@ -20,6 +22,12 @@ test("worker events use only the replacement protocol", () => {
     type: "done",
     value: "report saved",
   });
+});
+
+test("Quick Review and Plannotator remain separate tools", () => {
+  assert.equal(QUICK_REVIEW_TOOL, "scufris_job_quick_review");
+  assert.equal(PLANNOTATOR_REVIEW_TOOL, "scufris_job_plannotator_review");
+  assert.notEqual(QUICK_REVIEW_TOOL, PLANNOTATOR_REVIEW_TOOL);
 });
 
 test("all actionable and terminal events wake foreground Scufris", () => {

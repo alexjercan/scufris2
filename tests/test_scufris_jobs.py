@@ -34,7 +34,7 @@ for line in sys.stdin:
 
 class ReplacementJobsTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(prefix="scufris-v2-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="scufris-jobs-")
         self.root = Path(self.temporary.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
@@ -63,9 +63,7 @@ class ReplacementJobsTest(unittest.TestCase):
         )
         (self.project / "README.md").write_text("# Fixture\n")
         (self.project / ".scufris.toml").write_text(
-            """version = 1
-
-[preferences.tracking]
+            """[preferences.tracking]
 name = "tatr"
 guidance = "Use project tasks."
 
@@ -158,7 +156,7 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.assertEqual(result["harness"], "pi")
         self.assertEqual(result["model"], "openai-codex/gpt-5.6-sol")
         self.assertEqual(result["thinking"], "medium")
-        directory = self.root / "state" / "scufris" / "jobs-v2" / job_id
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
         self.wait_for(directory / "status", "ready: report-complete")
         self.assertTrue((directory / "workspace").is_dir())
         self.assertFalse((directory / "project-context.md").exists())
@@ -175,6 +173,17 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         )
         self.call("send", {"job_id": job_id, "message": "Continue carefully."})
         self.wait_for(directory / "received", "Continue carefully.")
+
+        listed = subprocess.run(
+            [str(REPOSITORY / "scripts" / "scufris-jobs"), "--json"],
+            text=True,
+            capture_output=True,
+            env=self.env,
+            check=True,
+            timeout=30,
+        )
+        listed_jobs = json.loads(listed.stdout)["jobs"]
+        self.assertEqual([item["job_id"] for item in listed_jobs], [job_id])
 
     def test_project_job_persists_exact_context_snapshot(self) -> None:
         context = self.call("context", {"project": "projects/nova-protocol"})["result"]
@@ -194,7 +203,7 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         )["result"]
         self.jobs.append(job_id)
         self.assertEqual(result["workspace"], "project")
-        directory = self.root / "state" / "scufris" / "jobs-v2" / job_id
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
         self.wait_for(directory / "status", "ready: report-complete")
         self.assertEqual(
             (directory / "project-context.md").read_text(), context["markdown"]
@@ -222,7 +231,7 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         )["result"]
         self.jobs.append(review_id)
         self.assertEqual(review["workspace"], "review")
-        review_directory = self.root / "state" / "scufris" / "jobs-v2" / review_id
+        review_directory = self.root / "state" / "scufris" / "jobs" / review_id
         self.wait_for(review_directory / "status", "ready: report-complete")
         self.assertIn(
             "independent read-only reviewer",
@@ -253,7 +262,7 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         )["result"]
         self.jobs.append(job_id)
         self.assertEqual(result["workspace"], "sprout")
-        directory = self.root / "state" / "scufris" / "jobs-v2" / job_id
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
         self.wait_for(directory / "status", "ready: report-complete")
         record = json.loads((directory / "job.json").read_text())
         worktree = Path(record["working_directory"])
@@ -269,6 +278,62 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
             check=True,
             capture_output=True,
         )
+
+        snapshot = self.call("quick-review-snapshot", {"job_id": job_id})["result"]
+        walkthrough = f"""# Fixture Quick Review
+
+Review the exact fixture change.
+
+:::walkthrough
+status: ready
+revision: {snapshot["revision"]}
+baseRevision: {snapshot["base_revision"]}
+files: 1
+added: 1
+removed: 0
+:::
+
+:::change
+id: result-file
+importance: important
+file: RESULT.md
+lines: 1
+:::
+
+The implementation adds the requested result.
+
+```diff
++replacement works
+```
+
+:::review
+Confirm that the result content is correct.
+:::
+"""
+        self.env["SCUFRIS_FAKE_QUICK_REVIEW_OUTPUT"] = json.dumps(
+            {
+                "revision": snapshot["revision"],
+                "markdown": walkthrough,
+                "sectionCount": 1,
+            }
+        )
+        try:
+            quick_review = self.call(
+                "quick-review-build",
+                {
+                    "job_id": job_id,
+                    "model": "openai-codex/gpt-5.6-sol",
+                    "thinking": "medium",
+                },
+            )["result"]
+        finally:
+            self.env.pop("SCUFRIS_FAKE_QUICK_REVIEW_OUTPUT", None)
+        self.assertEqual(quick_review["revision"], snapshot["revision"])
+        self.assertEqual(
+            Path(quick_review["artifact"]).read_text(),
+            walkthrough,
+        )
+
         landed = self.call(
             "land",
             {

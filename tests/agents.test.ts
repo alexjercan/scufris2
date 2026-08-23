@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  deliverRuntimeFailure,
+  deliverWorkerEvent,
   foregroundCommandWaits,
   parseWorkerEvent,
   PLANNOTATOR_REVIEW_TOOL,
   QUICK_REVIEW_TOOL,
+  resolveWakeCommand,
   TERMINAL_OWNERSHIP_STATES,
+  wakeModeFromEntries,
   workerEventWakes,
 } from "../extensions/scufris/workflow/orchestration.ts";
 import {
@@ -64,9 +68,135 @@ test("done remains steerable and only runtime lifecycle states terminate ownersh
   assert.equal(TERMINAL_OWNERSHIP_STATES.has("landed"), true);
 });
 
-test("all actionable and terminal events wake foreground Scufris", () => {
-  assert.equal(workerEventWakes("working"), false);
-  for (const type of ["blocked", "done", "failed"] as const) {
-    assert.equal(workerEventWakes(type), true);
+test("minimal and all wake modes are deterministic", () => {
+  assert.equal(workerEventWakes("working", "minimal"), false);
+  assert.equal(workerEventWakes("working", "all"), true);
+  for (const mode of ["minimal", "all"] as const) {
+    for (const type of ["blocked", "done", "failed"] as const) {
+      assert.equal(workerEventWakes(type, mode), true);
+    }
+  }
+});
+
+test("wake commands report state, change explicitly, and reject unknown values", () => {
+  assert.deepEqual(resolveWakeCommand("", "minimal"), {
+    mode: "minimal",
+    changed: false,
+    notice: "Wake mode minimal.",
+    warning: false,
+  });
+  assert.equal(resolveWakeCommand("minimal", "minimal").changed, false);
+  assert.deepEqual(resolveWakeCommand("ALL", "minimal"), {
+    mode: "all",
+    changed: true,
+    notice: "Wake mode all.",
+    warning: false,
+  });
+  assert.deepEqual(resolveWakeCommand("off", "all"), {
+    mode: "all",
+    changed: false,
+    notice: "Use /wake minimal or all.",
+    warning: true,
+  });
+});
+
+test("wake mode restores the latest valid session entry", () => {
+  assert.equal(wakeModeFromEntries([]), "minimal");
+  assert.equal(
+    wakeModeFromEntries([
+      {
+        type: "custom",
+        customType: "scufris-wake-state-v1",
+        data: { version: 1, mode: "all" },
+      },
+      {
+        type: "custom",
+        customType: "scufris-wake-state-v1",
+        data: { version: 1, mode: "invalid" },
+      },
+    ]),
+    "all",
+  );
+});
+
+test("orchestration delivers exact worker wakes and quiet progress by mode", () => {
+  const job = {
+    job_id: "abcdef123456",
+    project: "personal/scufris2",
+    context_id: "1".repeat(24),
+  };
+  const ordinaryEvents = [
+    { type: "working", value: "implementation underway" },
+    { type: "blocked", value: "needs mediation" },
+    { type: "done", value: "implementation complete" },
+  ] as const;
+
+  for (const mode of ["minimal", "all"] as const) {
+    const messages: Array<{ message: any; options: any }> = [];
+    const notices: Array<{ message: string; type: string }> = [];
+    const pi = {
+      sendMessage(message: any, options: any) {
+        messages.push({ message, options });
+      },
+    };
+    const context = {
+      hasUI: true,
+      ui: {
+        notify(message: string, type: string) {
+          notices.push({ message, type });
+        },
+      },
+    };
+
+    for (const event of ordinaryEvents)
+      deliverWorkerEvent(pi as never, context as never, job, event, mode);
+    deliverRuntimeFailure(
+      pi as never,
+      context as never,
+      job,
+      "worker harness exited unexpectedly",
+      mode,
+    );
+
+    const expectedTypes =
+      mode === "minimal"
+        ? ["blocked", "done", "failed"]
+        : ["working", "blocked", "done", "failed"];
+    assert.deepEqual(
+      messages.map(({ message }) => message.details.event.split(":", 1)[0]),
+      expectedTypes,
+    );
+    for (const { message, options } of messages) {
+      assert.deepEqual(options, {
+        deliverAs: "followUp",
+        triggerTurn: true,
+      });
+      assert.equal(message.customType, "scufris-job-event");
+      assert.equal(message.display, true);
+      assert.equal(message.details.job_id, job.job_id);
+      assert.equal(message.details.project, job.project);
+      assert.equal(message.details.context_id, job.context_id);
+      assert.match(message.content, new RegExp(message.details.event));
+    }
+    assert.deepEqual(
+      notices,
+      mode === "minimal"
+        ? [
+            {
+              message: "abcdef123456: implementation underway",
+              type: "info",
+            },
+            {
+              message: "Job abcdef123456: worker harness exited unexpectedly",
+              type: "error",
+            },
+          ]
+        : [
+            {
+              message: "Job abcdef123456: worker harness exited unexpectedly",
+              type: "error",
+            },
+          ],
+    );
   }
 });

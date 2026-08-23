@@ -1,6 +1,6 @@
 # Add explicit wake and Calm commands
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 80
 - TAGS: workflow
 
@@ -43,3 +43,33 @@ mode.
 
 Run after `20260823-153411` because wake policy depends on the simplified state
 model.
+
+## Decisions
+
+- Store Wake and Calm values as versioned Pi custom session entries. Restore the
+  latest valid entry on session start and tree navigation.
+- Keep wake delivery in the workflow extension. Every selected wake uses a
+  `followUp` custom message with `triggerTurn: true`; quiet `working` events use
+  only the existing UI notification path.
+- Do not append duplicate state entries for idempotent commands. State queries
+  and invalid arguments also do not mutate the session.
+- Preserve Calm's existing enabled default. A stored session value takes
+  precedence over that default.
+
+## Verification
+
+- `node --experimental-strip-types --test --test-concurrency=1 tests/agents.test.ts tests/calm.test.ts` - 10 tests passed.
+- `npm run typecheck` - passed.
+- `npm run check` - passed: type checking, all 55 tests, and repository format
+  verification.
+- `npm run format:check` - passed after formatting the final workflow edit.
+- `git diff --check` - passed.
+
+### Independent review follow-up
+
+- Added a production-path delivery helper test for `working`, `blocked`, `done`,
+  and runtime-generated `failed` updates in both Wake modes. It asserts the
+  exact `deliverAs: "followUp"` and `triggerTurn: true` options, event message
+  metadata, mandatory wakes, and the quiet `working` notification in `minimal`.
+- `node --experimental-strip-types --test --test-concurrency=1 tests/agents.test.ts` - 9 tests passed.
+- `npm run check` - passed with all 55 tests.

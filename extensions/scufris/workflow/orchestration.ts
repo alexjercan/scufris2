@@ -33,10 +33,24 @@ export const QUICK_REVIEW_TOOL = "scufris_job_quick_review";
 export const PLANNOTATOR_REVIEW_TOOL = "scufris_job_plannotator_review";
 
 export type WorkerEventType = "working" | "blocked" | "done" | "failed";
+export type WakeMode = "minimal" | "all";
+
+const wakeStateType = "scufris-wake-state-v1";
+
+interface WakeStateEntry {
+  version: 1;
+  mode: WakeMode;
+}
 
 export interface WorkerEvent {
   type: WorkerEventType;
   value: string;
+}
+
+export interface WorkerEventTarget {
+  job_id: string;
+  project: string | null;
+  context_id?: string;
 }
 
 export function parseWorkerEvent(line: string): WorkerEvent | undefined {
@@ -54,8 +68,102 @@ export function parseWorkerEvent(line: string): WorkerEvent | undefined {
   return { type, value };
 }
 
-export function workerEventWakes(type: WorkerEventType): boolean {
-  return type !== "working";
+export function workerEventWakes(
+  type: WorkerEventType,
+  mode: WakeMode = "minimal",
+): boolean {
+  return type !== "working" || mode === "all";
+}
+
+export function resolveWakeCommand(
+  args: string,
+  current: WakeMode,
+): { mode: WakeMode; changed: boolean; notice: string; warning: boolean } {
+  const command = args.trim().toLowerCase();
+  if (command === "") {
+    return {
+      mode: current,
+      changed: false,
+      notice: `Wake mode ${current}.`,
+      warning: false,
+    };
+  }
+  if (command === "minimal" || command === "all") {
+    return {
+      mode: command,
+      changed: command !== current,
+      notice: `Wake mode ${command}.`,
+      warning: false,
+    };
+  }
+  return {
+    mode: current,
+    changed: false,
+    notice: "Use /wake minimal or all.",
+    warning: true,
+  };
+}
+
+export function wakeModeFromEntries(
+  entries: Iterable<{
+    type: string;
+    customType?: string;
+    data?: unknown;
+  }>,
+  fallback: WakeMode = "minimal",
+): WakeMode {
+  let mode = fallback;
+  for (const entry of entries) {
+    if (entry.type !== "custom" || entry.customType !== wakeStateType) continue;
+    const data = entry.data as Partial<WakeStateEntry> | undefined;
+    if (data?.version === 1 && (data.mode === "minimal" || data.mode === "all"))
+      mode = data.mode;
+  }
+  return mode;
+}
+
+function restoredWakeMode(context: ExtensionContext): WakeMode {
+  return wakeModeFromEntries(context.sessionManager.getBranch());
+}
+
+export function deliverWorkerEvent(
+  pi: Pick<ExtensionAPI, "sendMessage">,
+  context: Pick<ExtensionContext, "hasUI" | "ui">,
+  job: WorkerEventTarget,
+  event: WorkerEvent,
+  mode: WakeMode,
+): void {
+  if (!workerEventWakes(event.type, mode)) {
+    if (context.hasUI)
+      context.ui.notify(`${job.job_id}: ${event.value}`, "info");
+    return;
+  }
+  const line = `${event.type}: ${event.value}`;
+  pi.sendMessage(
+    {
+      customType: "scufris-job-event",
+      content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ${line}. Inspect the pinned job context, prompt, report, and state before deciding what follows.`,
+      display: true,
+      details: {
+        job_id: job.job_id,
+        project: job.project,
+        context_id: job.context_id,
+        event: line,
+      },
+    },
+    { deliverAs: "followUp", triggerTurn: true },
+  );
+}
+
+export function deliverRuntimeFailure(
+  pi: Pick<ExtensionAPI, "sendMessage">,
+  context: Pick<ExtensionContext, "hasUI" | "ui">,
+  job: WorkerEventTarget,
+  error: string,
+  mode: WakeMode,
+): void {
+  if (context.hasUI) context.ui.notify(`Job ${job.job_id}: ${error}`, "error");
+  deliverWorkerEvent(pi, context, job, { type: "failed", value: error }, mode);
 }
 
 export function foregroundCommandWaits(command: string): boolean {
@@ -213,23 +321,35 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   let shuttingDown = false;
   let extensionContext: ExtensionContext | undefined;
   let eventError: string | undefined;
+  let wakeMode: WakeMode = "minimal";
 
-  const sendEvent = (job: OwnedJob, line: string, triggerTurn: boolean) => {
-    pi.sendMessage(
-      {
-        customType: "scufris-job-event",
-        content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ${line}. Inspect the pinned job context, prompt, report, and state before deciding what follows.`,
-        display: true,
-        details: {
-          job_id: job.job_id,
-          project: job.project,
-          context_id: job.context_id,
-          event: line,
-        },
-      },
-      { deliverAs: "followUp", triggerTurn },
-    );
+  const persistWakeMode = () => {
+    pi.appendEntry(wakeStateType, {
+      version: 1,
+      mode: wakeMode,
+    } satisfies WakeStateEntry);
   };
+
+  pi.registerCommand("wake", {
+    description: "Control delegated-worker progress wakes: minimal or all.",
+    getArgumentCompletions: (prefix) => {
+      const values: WakeMode[] = ["minimal", "all"];
+      const matches = values.filter((value) =>
+        value.startsWith(prefix.trim().toLowerCase()),
+      );
+      return matches.length
+        ? matches.map((value) => ({ value, label: value }))
+        : null;
+    },
+    handler: async (args, context) => {
+      const result = resolveWakeCommand(args, wakeMode);
+      if (result.changed) {
+        wakeMode = result.mode;
+        persistWakeMode();
+      }
+      context.ui.notify(result.notice, result.warning ? "warning" : "info");
+    },
+  });
 
   const readEvents = async () => {
     if (shuttingDown || !extensionContext) return;
@@ -264,7 +384,6 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           controller.signal,
         );
         if (shuttingDown) return;
-        const progress: string[] = [];
         for (const update of result.jobs) {
           const job = jobs.get(update.job_id);
           if (!job) continue;
@@ -273,30 +392,22 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           job.inode = update.inode;
           job.window_alive = update.window_alive;
           for (const error of update.errors) {
-            if (extensionContext.hasUI)
-              extensionContext.ui.notify(
-                `Job ${job.job_id}: ${error}`,
-                "error",
-              );
             job.state = "failed";
             job.summary = error;
-            sendEvent(job, `failed: ${error}`, true);
+            deliverRuntimeFailure(pi, extensionContext, job, error, wakeMode);
           }
           for (const line of update.events) {
             const event = parseWorkerEvent(line);
             if (!event) continue;
             job.state = event.type;
             job.summary = event.value;
-            if (workerEventWakes(event.type)) sendEvent(job, line, true);
-            else progress.push(`${job.job_id}: ${event.value}`);
+            deliverWorkerEvent(pi, extensionContext, job, event, wakeMode);
           }
           if (TERMINAL_OWNERSHIP_STATES.has(job.state)) {
             job.status_watcher?.close();
             job.status_watcher = undefined;
           }
         }
-        if (progress.length > 0 && extensionContext.hasUI)
-          extensionContext.ui.notify(progress.join("\n"), "info");
         const running = [...jobs.values()].filter(
           (job) => !TERMINAL_OWNERSHIP_STATES.has(job.state),
         ).length;
@@ -979,6 +1090,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     extensionContext = ctx;
     shuttingDown = false;
+    wakeMode = restoredWakeMode(ctx);
     try {
       const result = await runHelper<{ job_ids: string[] }>("orphans", {
         owner_session: ctx.sessionManager.getSessionId(),
@@ -995,6 +1107,10 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           "error",
         );
     }
+  });
+
+  pi.on("session_tree", (_event, ctx) => {
+    wakeMode = restoredWakeMode(ctx);
   });
 
   pi.on("session_shutdown", async () => {

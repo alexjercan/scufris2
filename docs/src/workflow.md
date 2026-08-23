@@ -67,6 +67,12 @@ periodically poll jobs. After Scufris spawns or steers a worker, it ends its
 foreground turn immediately. It never sleeps or waits for delegated progress.
 The next applicable filesystem event starts a later turn.
 
+Use `/wake` to inspect the session's worker wake mode. `/wake minimal` keeps
+`working` updates quiet while `blocked`, `done`, and runtime-generated `failed`
+events start foreground turns. `/wake all` also starts a turn for each
+`working` event. Mandatory continuation events cannot be disabled. The default
+is `minimal`, and an explicit mode is restored with the session.
+
 Workers can report only:
 
 - `working: <summary>` while actively doing assigned work.
@@ -89,6 +95,13 @@ recorded for jobs owned by the foreground session.
 
 Run `scripts/scufris-jobs` to list all stored jobs across foreground sessions.
 Use `scripts/scufris-jobs --json` for structured diagnostics.
+
+## Calm mode
+
+Use `/calm` to inspect the current Calm presentation state. Use `/calm on` or
+`/calm off` to set it explicitly. Repeating either command does not invert the
+state. Calm remains on by default and restores an explicit value with the
+session.
 
 ## Optional tools
 

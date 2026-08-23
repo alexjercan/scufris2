@@ -7,10 +7,10 @@ Skip task creation when the user explicitly requests untracked work.
 """
 
 [preferences.workspace]
-name = "project"
+name = "sprout"
 guidance = """
-Work directly on master. Use Sprout only when the user explicitly requests an
-isolated worktree. Do not create another worktree by default.
+Use a Sprout workspace for project implementation. Keep the main checkout on
+master and land the completed Sprout explicitly.
 """
 
 [preferences.implementation]
@@ -23,11 +23,12 @@ complexity. Follow repository AGENTS.md instructions and existing conventions.
 """
 
 [preferences.review]
-name = "foreground"
+name = "independent-then-quick-review"
 guidance = """
-Review changes in foreground Scufris. Use an independent reviewer, custom Quick
-Review, or Plannotator only when the user requests it or the change has enough
-risk to justify that explicit step. Keep Quick Review and Plannotator separate.
+Run an independent read-only reviewer against the implementation job first.
+Resolve its findings before opening the custom Quick Review for user approval.
+Quick Review and Plannotator remain separate; this workflow selects Quick
+Review after independent review.
 """
 
 [preferences.verification]
@@ -39,9 +40,9 @@ focused integration tests and small end-to-end examples where practical.
 """
 
 [preferences.landing]
-name = "explicit"
+name = "sprout"
 guidance = """
-Commit directly on master when the request asks for a full send. Never infer
-landing from worker completion or review approval. Use guarded Sprout landing
-only for an explicitly selected Sprout workspace.
+Land the approved Sprout with the guarded Sprout landing operation. Never infer
+landing from worker completion or independent review. Land only after Quick
+Review approval.
 """

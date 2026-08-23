@@ -96,12 +96,11 @@ class ReplacementJobsTest(unittest.TestCase):
         (self.project / "README.md").write_text("# Fixture\n")
         (self.project / ".scufris.toml").write_text(
             """[preferences.tracking]
-name = "tatr"
+keywords = { tool = "tatr" }
 guidance = "Use project tasks."
 
 [preferences.implementation]
-name = "pi"
-options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
+keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
 """
         )
         subprocess.run(
@@ -490,13 +489,39 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         context = self.call("context", {"project": "projects/nova-protocol"})["result"]
         self.assertTrue(context["configured"])
         self.assertIn("## tracking", context["markdown"])
-        self.assertIn("Preferred selection: tatr", context["markdown"])
-        self.assertIn('"thinking": "medium"', context["markdown"])
+        self.assertIn("tool: tatr", context["markdown"])
+        # Exact tokens the orchestrator must reproduce stay on their own line.
+        self.assertIn("model: openai-codex/gpt-5.6-sol", context["markdown"])
+        self.assertIn("thinking: medium", context["markdown"])
 
         (self.project / ".scufris.toml").write_text("not = [valid")
         ignored = self.call("context", {"project": "projects/nova-protocol"})["result"]
         self.assertFalse(ignored["configured"])
         self.assertIn("ignored .scufris.toml", ignored["diagnostic"])
+
+        # The retired name/options shape is refused rather than half-read.
+        (self.project / ".scufris.toml").write_text(
+            '[preferences.implementation]\nname = "pi"\n'
+        )
+        retired = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        self.assertFalse(retired["configured"])
+        self.assertIn("keywords and guidance", retired["diagnostic"])
+
+        # Keyword values must stay flat so they render as copyable scalars.
+        (self.project / ".scufris.toml").write_text(
+            "[preferences.implementation]\nkeywords = { model = { nested = 1 } }\n"
+        )
+        nested = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        self.assertFalse(nested["configured"])
+        self.assertIn("scalars", nested["diagnostic"])
+
+        # A list of scalars is a legitimate keyword value.
+        (self.project / ".scufris.toml").write_text(
+            '[preferences.verification]\nkeywords = { checks = ["npm run check", "nix flake check"] }\n'
+        )
+        listed = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        self.assertTrue(listed["configured"])
+        self.assertIn("checks: npm run check, nix flake check", listed["markdown"])
 
     def test_general_job_uses_temporary_workspace_and_generic_events(self) -> None:
         job_id = "abc123def456"

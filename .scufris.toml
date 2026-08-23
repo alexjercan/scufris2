@@ -1,5 +1,5 @@
 [preferences.tracking]
-name = "tatr"
+keywords = { tool = "tatr", scope = "one-task-per-request" }
 guidance = """
 Use Tatr for substantial tracked work. Keep one task for one request and its
 follow-up work. Record decisions and verification evidence under the task.
@@ -7,23 +7,22 @@ Skip task creation when the user explicitly requests untracked work.
 """
 
 [preferences.workspace]
-name = "sprout"
+keywords = { workspace = "sprout", base = "master" }
 guidance = """
 Use a Sprout workspace for project implementation. Keep the main checkout on
 master and land the completed Sprout explicitly.
 """
 
 [preferences.implementation]
-name = "pi"
-options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
+keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
 guidance = """
-Use Pi with Sol and medium thinking by default. Keep orchestration narrow.
-Prefer product skills and small deterministic helpers over extension
-complexity. Follow repository AGENTS.md instructions and existing conventions.
+Keep orchestration narrow. Prefer product skills and small deterministic
+helpers over extension complexity. Follow repository AGENTS.md instructions and
+existing conventions.
 """
 
 [preferences.review]
-name = "independent-then-quick-review"
+keywords = { review = "independent-then-quick-review", order = "independent-first" }
 guidance = """
 Run an independent read-only reviewer against the implementation job first.
 Resolve its findings before opening the custom Quick Review for user approval.
@@ -32,17 +31,15 @@ Review after independent review.
 """
 
 [preferences.verification]
-name = "focused"
+keywords = { verification = "focused", typescript = "npm run check", packaging = "nix flake check" }
 guidance = """
-Run the cheapest relevant focused checks first. Run npm run check for
-TypeScript behavior and nix flake check for broad package integration. Use
-focused integration tests and small end-to-end examples where practical.
+Run the cheapest relevant focused checks first. Use focused integration tests
+and small end-to-end examples where practical.
 """
 
 [preferences.landing]
-name = "sprout"
+keywords = { landing = "sprout", gate = "quick-review-approval" }
 guidance = """
 Land the approved Sprout with the guarded Sprout landing operation. Never infer
-landing from worker completion or independent review. Land only after Quick
-Review approval.
+landing from worker completion or independent review.
 """

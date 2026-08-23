@@ -407,16 +407,20 @@ def resolve_project(project: Any) -> tuple[str, Path]:
     return project, root
 
 
-def option_value(value: Any) -> bool:
-    if value is None or isinstance(value, (str, bool, int, float)):
-        return True
+def keyword_text(value: Any) -> str:
+    # Keywords carry values the orchestrator must reproduce exactly, so they
+    # render as flat scalars. Guidance prose carries every judgement.
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        if not value.strip() or len(value) > 200 or not value.isprintable():
+            raise ValueError("keyword values must be short printable text")
+        return value.strip()
     if isinstance(value, list):
-        return all(option_value(item) for item in value)
-    if isinstance(value, dict):
-        return all(
-            isinstance(key, str) and option_value(item) for key, item in value.items()
-        )
-    return False
+        return ", ".join(keyword_text(item) for item in value)
+    raise ValueError("keyword values must be scalars or a list of scalars")
 
 
 def render_context(project: str, source: Path) -> dict[str, Any]:
@@ -446,39 +450,30 @@ def render_context(project: str, source: Path) -> dict[str, Any]:
                 r"[A-Za-z0-9][A-Za-z0-9_-]*", key
             ):
                 raise ValueError("preference names must be simple identifiers")
-            if not isinstance(entry, dict) or set(entry) - {
-                "name",
-                "options",
-                "guidance",
-            }:
-                raise ValueError(f"preference {key} has invalid fields")
-            name = entry.get("name")
-            options = entry.get("options")
+            if not isinstance(entry, dict) or set(entry) - {"keywords", "guidance"}:
+                raise ValueError(f"preference {key} accepts only keywords and guidance")
+            keywords = entry.get("keywords")
             guidance = entry.get("guidance")
-            if name is not None and (not isinstance(name, str) or not name.strip()):
-                raise ValueError(f"preference {key} name must be nonempty text")
-            if options is not None and (
-                not isinstance(options, dict) or not option_value(options)
-            ):
-                raise ValueError(f"preference {key} options are invalid")
+            if keywords is not None and not isinstance(keywords, dict):
+                raise ValueError(f"preference {key} keywords must be a table")
             if guidance is not None and (
                 not isinstance(guidance, str) or not guidance.strip()
             ):
                 raise ValueError(f"preference {key} guidance must be nonempty text")
+            if keywords is None and guidance is None:
+                raise ValueError(f"preference {key} is empty")
             sections.extend(["", f"## {key}"])
-            if name is not None:
-                sections.extend(["", f"Preferred selection: {name.strip()}"])
-            if options:
-                sections.extend(
-                    [
-                        "",
-                        "Options:",
-                        "",
-                        "```json",
-                        json.dumps(options, sort_keys=True, indent=2),
-                        "```",
-                    ]
-                )
+            if keywords:
+                rendered = []
+                for label, value in keywords.items():
+                    if not isinstance(label, str) or not re.fullmatch(
+                        r"[A-Za-z0-9][A-Za-z0-9_-]*", label
+                    ):
+                        raise ValueError(
+                            f"preference {key} keyword names must be simple identifiers"
+                        )
+                    rendered.append(f"{label}: {keyword_text(value)}")
+                sections.extend(["", *rendered])
             if guidance is not None:
                 sections.extend(["", guidance.strip()])
         sections.extend(

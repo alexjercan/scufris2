@@ -148,11 +148,13 @@ Quick Review, and guarded local landing. Keep Pi lifecycle ownership and narrow
 native tool registration in `extensions/scufris/`; keep each tool's process and
 filesystem mechanics in its owning `tools/` directory.
 
-No tool is an implicit phase of every job. `.scufris.toml` names and describes
-preferred capabilities as prompt guidance. Foreground Scufris chooses explicit
-tool calls after considering that guidance and the current request. Tool
-contracts remain narrow and deterministic; unknown preference values never
-become commands.
+No tool is an implicit phase of every job. `.scufris.toml` describes preferred
+capabilities as prompt guidance only. Each `[preferences.<name>]` section takes
+an open `keywords` table for values the orchestrator must reproduce exactly and
+a `guidance` string for judgement. Section and keyword names are free-form.
+Foreground Scufris chooses explicit tool calls after considering that guidance
+and the current request. Tool contracts remain narrow and deterministic;
+unknown preference values never become commands.
 
 ## Generic worker event protocol
 

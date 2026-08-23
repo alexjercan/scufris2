@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import datetime as dt
 import fcntl
 import hashlib
 import json
@@ -29,6 +30,8 @@ EVENTS = {*WORKER_EVENTS, "failed"}
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 WORKSPACES = {"temporary", "project", "sprout", "review"}
 MAX_REQUEST = 2 * 1024 * 1024
+MAX_JOB_RECORD = 64 * 1024
+MAX_STATUS_DETAIL = 256 * 1024
 MAX_REPORT_DETAIL = 512 * 1024
 MAX_EVENT_LINE = 4096
 MAX_REPORT_ENTRY = MAX_REPORT_DETAIL + MAX_EVENT_LINE + 5
@@ -700,19 +703,201 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
         raise
 
 
+def open_regular(path: Path) -> int:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as error:
+        raise JobError(f"job artifact is unavailable: {path.name}") from error
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise JobError(f"job artifact is not a regular file: {path.name}")
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def read_descriptor(descriptor: int, maximum: int) -> bytes:
+    chunks: list[bytes] = []
+    remaining = maximum
+    while remaining:
+        chunk = os.read(descriptor, min(65536, remaining))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def read_regular(
+    path: Path,
+    maximum: int,
+    *,
+    optional: bool = False,
+    truncate: bool = False,
+) -> bytes | None:
+    try:
+        descriptor = open_regular(path)
+    except JobError:
+        if optional:
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return None
+            except OSError:
+                pass
+        raise
+    try:
+        size = os.fstat(descriptor).st_size
+        if size > maximum and not truncate:
+            raise JobError(f"job artifact is too large: {path.name}")
+        limit = maximum if truncate else maximum + 1
+        data = read_descriptor(descriptor, limit)
+        if len(data) > maximum:
+            raise JobError(f"job artifact is too large: {path.name}")
+        return data
+    finally:
+        os.close(descriptor)
+
+
+def read_regular_tail(path: Path, maximum: int) -> bytes:
+    descriptor = open_regular(path)
+    try:
+        size = os.fstat(descriptor).st_size
+        offset = max(0, size - maximum)
+        os.lseek(descriptor, offset, os.SEEK_SET)
+        data = read_descriptor(descriptor, maximum)
+        if offset and b"\n" in data:
+            data = data.split(b"\n", 1)[1]
+        elif offset:
+            data = b""
+        return data
+    finally:
+        os.close(descriptor)
+
+
+def valid_record_text(value: Any, maximum: int) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return 0 < len(encoded) <= maximum and all(
+        character.isprintable() for character in value
+    )
+
+
+def validate_job_record(value: Any, job_id: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != JOB_FIELDS:
+        raise JobError("job record is invalid")
+    if value.get("job_id") != job_id:
+        raise JobError("job record is invalid")
+    if not valid_record_text(value.get("owner_session"), 512):
+        raise JobError("job record is invalid")
+    project = value.get("project")
+    if project is not None and (
+        not isinstance(project, str) or not PROJECT_ID.fullmatch(project)
+    ):
+        raise JobError("job record is invalid")
+    fingerprint = value.get("context_fingerprint")
+    if fingerprint is not None and (
+        not isinstance(fingerprint, str)
+        or re.fullmatch(r"[a-f0-9]{64}", fingerprint) is None
+    ):
+        raise JobError("job record is invalid")
+    workspace = value.get("workspace")
+    if workspace not in WORKSPACES:
+        raise JobError("job record is invalid")
+    feature = value.get("feature")
+    if feature is not None and (
+        not isinstance(feature, str)
+        or len(feature) > 48
+        or FEATURE.fullmatch(feature) is None
+    ):
+        raise JobError("job record is invalid")
+    review_of = value.get("review_of")
+    if review_of is not None and (
+        not isinstance(review_of, str) or JOB_ID.fullmatch(review_of) is None
+    ):
+        raise JobError("job record is invalid")
+    working_directory = value.get("working_directory")
+    if (
+        not valid_record_text(working_directory, 4096)
+        or not Path(working_directory).is_absolute()
+        or ".." in Path(working_directory).parts
+    ):
+        raise JobError("job record is invalid")
+    landing_branch = value.get("landing_branch")
+    if landing_branch is not None and not valid_record_text(landing_branch, 1024):
+        raise JobError("job record is invalid")
+    harness = value.get("harness")
+    thinking = value.get("thinking")
+    if harness not in {"pi", "claude"}:
+        raise JobError("job record is invalid")
+    if not valid_record_text(value.get("model"), 200):
+        raise JobError("job record is invalid")
+    if (
+        thinking not in THINKING
+        or (harness == "pi" and thinking == "max")
+        or (harness == "claude" and thinking in {"off", "minimal"})
+        or value.get("state") not in EVENTS
+    ):
+        raise JobError("job record is invalid")
+    if not valid_record_text(value.get("summary"), 500):
+        raise JobError("job record is invalid")
+    created_at = value.get("created_at")
+    if not isinstance(created_at, str):
+        raise JobError("job record is invalid")
+    try:
+        parsed = dt.datetime.strptime(created_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=dt.timezone.utc
+        )
+    except ValueError as error:
+        raise JobError("job record is invalid") from error
+    if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != created_at:
+        raise JobError("job record is invalid")
+    for key, prefix in (
+        ("tmux_session_id", "$"),
+        ("tmux_window_id", "@"),
+        ("tmux_pane_id", "%"),
+    ):
+        identity = value.get(key)
+        if (
+            not isinstance(identity, str)
+            or re.fullmatch(re.escape(prefix) + r"[0-9]+", identity) is None
+        ):
+            raise JobError("job record is invalid")
+    if project is None:
+        consistent = (
+            fingerprint is None
+            and workspace == "temporary"
+            and feature is None
+            and review_of is None
+            and landing_branch is None
+        )
+    else:
+        consistent = (
+            fingerprint is not None
+            and workspace != "temporary"
+            and landing_branch is not None
+            and (workspace == "sprout") == (feature is not None)
+            and (workspace == "review") == (review_of is not None)
+        )
+    if not consistent:
+        raise JobError("job record is invalid")
+    return value
+
+
 def load_job(job_id: str) -> dict[str, Any]:
     path = job_dir(job_id) / "job.json"
     try:
-        value = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as error:
-        raise JobError("job record is unavailable") from error
-    if (
-        not isinstance(value, dict)
-        or set(value) != JOB_FIELDS
-        or value.get("job_id") != job_id
-    ):
-        raise JobError("job record is invalid")
-    return value
+        raw = read_regular(path, MAX_JOB_RECORD)
+        assert raw is not None
+        value = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise JobError("job record is invalid") from error
+    return validate_job_record(value, job_id)
 
 
 def worker_environment() -> dict[str, str]:
@@ -808,7 +993,9 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
         raise JobError(f"harness executable not found: {argv[0]}")
     completed = subprocess.run([executable, *argv[1:]], env=env, check=False)
     event_lines = (
-        (job_dir(job_id) / "status").read_text("utf-8", errors="replace").splitlines()
+        read_regular_tail(job_dir(job_id) / "status", MAX_STATUS_DETAIL)
+        .decode("utf-8", errors="replace")
+        .splitlines()
     )
     last_event = next(
         (parsed for line in reversed(event_lines) if (parsed := parse_event(line))),
@@ -858,7 +1045,7 @@ def write_all(descriptor: int, data: bytes) -> None:
 
 def open_job_artifact(path: Path, flags: int) -> int:
     try:
-        descriptor = os.open(path, flags | os.O_NOFOLLOW)
+        descriptor = os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError as error:
         raise JobError(f"job artifact is unavailable: {path.name}") from error
     if not stat.S_ISREG(os.fstat(descriptor).st_mode):
@@ -998,13 +1185,18 @@ def read_events(request: dict[str, Any]) -> dict[str, Any]:
         ):
             raise JobError("invalid event cursor values")
         path = job_dir(job_id) / "status"
-        info = path.stat()
-        if inode != info.st_ino or offset > info.st_size:
-            offset, tail = 0, ""
-        with path.open("rb") as stream:
-            stream.seek(offset)
-            chunk = stream.read()
-            next_offset = stream.tell()
+        descriptor = open_regular(path)
+        try:
+            info = os.fstat(descriptor)
+            if inode != info.st_ino or offset > info.st_size:
+                offset, tail = 0, ""
+            os.lseek(descriptor, offset, os.SEEK_SET)
+            chunk = read_descriptor(descriptor, MAX_REQUEST + 1)
+            if len(chunk) > MAX_REQUEST:
+                raise JobError("status update is too large")
+            next_offset = os.lseek(descriptor, 0, os.SEEK_CUR)
+        finally:
+            os.close(descriptor)
         text = tail + chunk.decode("utf-8", "replace")
         lines = text.split("\n")
         next_tail = lines.pop()
@@ -1069,20 +1261,29 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
         key: job.get(key)
         for key in (
             "job_id",
+            "owner_session",
             "project",
             "workspace",
             "feature",
             "review_of",
+            "working_directory",
+            "landing_branch",
             "harness",
             "model",
             "thinking",
             "state",
             "summary",
+            "created_at",
             "context_fingerprint",
+            "tmux_session_id",
+            "tmux_window_id",
+            "tmux_pane_id",
         )
     }
     result["window_alive"] = pane_alive(job)
-    status = (directory / "status").read_text("utf-8", errors="replace")
+    status = read_regular_tail(directory / "status", MAX_STATUS_DETAIL).decode(
+        "utf-8", errors="replace"
+    )
     event_lines = status.splitlines()
     result["events"] = event_lines[-100:]
     for line in reversed(event_lines):
@@ -1099,11 +1300,16 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
         ),
         (request.get("include_prompt", False), "prompt.md", "prompt"),
     ):
-        path = directory / name
-        if enabled and os.path.lexists(path):
+        if enabled:
             maximum = MAX_REPORT_FILE if name == "report.md" else MAX_REPORT_DETAIL
-            data = read_bounded_artifact(path, maximum)
-            result[key] = data.decode("utf-8", "replace")
+            data = read_regular(
+                directory / name,
+                maximum,
+                optional=name == "project-context.md",
+                truncate=True,
+            )
+            if data is not None:
+                result[key] = data.decode("utf-8", "replace")
     return result
 
 

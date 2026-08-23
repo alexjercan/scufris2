@@ -112,8 +112,32 @@ and landing are the only terminal ownership states.
 Every worker runs in an owned tmux session. Shutdown targets only resources
 recorded for jobs owned by the foreground session.
 
-Run `scripts/scufris-jobs` to list all stored jobs across foreground sessions.
-Use `scripts/scufris-jobs --json` for structured diagnostics.
+Run `scripts/scufris-jobs all` to list all stored jobs across foreground
+sessions. `--all` is the flag alias, and the original no-argument form remains
+supported. The plain-text list uses fixed columns for job ID, latest state,
+worker-pane liveness, project, workspace, harness/model, and latest summary. It
+uses the same stable layout in a terminal and in a pipe. Column clipping and
+padding use Unicode display-cell widths without an external runtime library.
+Control and format characters are visibly escaped in all human output so job
+content cannot emit terminal control sequences. JSON retains the original
+string values.
+
+Run `scripts/scufris-jobs <id>` for one job's events, report, pinned project
+context, prompt, worker configuration, and current pane state. A unique
+lowercase hexadecimal ID prefix is accepted. Missing and ambiguous prefixes
+fail without selecting a job. Add `--json` to either form for structured
+output. An empty list is `{"jobs": []}` in JSON and `No Scufris jobs.` in
+plain text.
+
+Inspection validates the exact durable record fields, types, identifier
+domains, timestamps, workspace relationships, and tmux identities. Invalid
+records appear as `invalid` rows in a complete list and fail direct lookup.
+Job records and inspected status, report, context, and prompt artifacts are
+opened by descriptor with no symlink following and must be regular files. Reads
+are bounded: job records are rejected above 64 KiB, status inspection retains a
+bounded recent tail, report output is capped at 2 MiB, and context and prompt
+output are each capped at 512 KiB. Missing optional project context remains
+valid; missing or unsafe required artifacts fail inspection.
 
 ## Calm mode
 

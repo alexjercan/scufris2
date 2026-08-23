@@ -8,6 +8,7 @@ import os
 import subprocess
 import tempfile
 import time
+import unicodedata
 import unittest
 from pathlib import Path
 from typing import Any
@@ -153,6 +154,54 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
             self.fail(f"helper failed: {value} stderr={result.stderr}")
         return value
 
+    def cli(
+        self, *arguments: str, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        result = subprocess.run(
+            [str(REPOSITORY / "scripts" / "scufris-jobs"), *arguments],
+            text=True,
+            capture_output=True,
+            env=self.env,
+            timeout=30,
+            check=False,
+        )
+        if check and result.returncode != 0:
+            self.fail(
+                f"CLI failed: {result.returncode} stdout={result.stdout} "
+                f"stderr={result.stderr}"
+            )
+        return result
+
+    def fixture_job(self, job_id: str, overrides: dict[str, Any] | None = None) -> Path:
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
+        directory.mkdir(parents=True)
+        record: dict[str, Any] = {
+            "job_id": job_id,
+            "owner_session": "fixture-owner",
+            "project": None,
+            "context_fingerprint": None,
+            "workspace": "temporary",
+            "feature": None,
+            "review_of": None,
+            "working_directory": str(directory / "workspace"),
+            "landing_branch": None,
+            "harness": "pi",
+            "model": "fixture-model",
+            "thinking": "medium",
+            "state": "working",
+            "summary": "fixture starting",
+            "created_at": "2026-08-23T12:00:00Z",
+            "tmux_session_id": "$99991",
+            "tmux_window_id": "@99992",
+            "tmux_pane_id": "%99993",
+        }
+        record.update(overrides or {})
+        (directory / "job.json").write_text(json.dumps(record))
+        (directory / "status").write_text("working: fixture started\n")
+        (directory / "report.md").write_text("")
+        (directory / "prompt.md").write_text("Fixture prompt.\n")
+        return directory
+
     def worker_capability(self, job_id: str) -> str:
         path = self.root / "state" / "scufris" / "jobs" / job_id / "worker-capability"
         self.wait_for(path, "")
@@ -165,6 +214,153 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
                 return
             time.sleep(0.05)
         self.fail(f"timed out waiting for {text!r} in {path}")
+
+    def test_jobs_cli_empty_aliases_and_lookup_errors(self) -> None:
+        for arguments in ((), ("all",), ("--all",)):
+            result = self.cli(*arguments)
+            self.assertEqual(result.stdout, "No Scufris jobs.\n")
+        self.assertEqual(json.loads(self.cli("all", "--json").stdout), {"jobs": []})
+
+        jobs = self.root / "state" / "scufris" / "jobs"
+        (jobs / "abc111111111").mkdir(parents=True)
+        (jobs / "abc222222222").mkdir()
+        ambiguous = self.cli("abc", check=False)
+        self.assertEqual(ambiguous.returncode, 1)
+        self.assertIn("ambiguous job ID abc", ambiguous.stderr)
+        missing = self.cli("def", "--json", check=False)
+        self.assertEqual(missing.returncode, 1)
+        self.assertEqual(json.loads(missing.stdout), {"error": "job ID not found: def"})
+        invalid = self.cli("not-an-id", check=False)
+        self.assertEqual(invalid.returncode, 1)
+        self.assertIn("lowercase hexadecimal", invalid.stderr)
+        usage = self.cli("abc111111111", "--all", check=False)
+        self.assertEqual(usage.returncode, 2)
+        self.assertIn("--all cannot be used with a job ID", usage.stderr)
+
+    def test_jobs_cli_rejects_invalid_records_and_unsafe_artifacts(self) -> None:
+        invalid_records = {
+            "100000000001": {"unexpected": True},
+            "100000000002": {"owner_session": 7},
+            "100000000003": {"harness": "shell"},
+            "100000000004": {"workspace": "sprout"},
+        }
+        for job_id, override in invalid_records.items():
+            directory = self.fixture_job(job_id, override)
+            if "unexpected" in override:
+                record = json.loads((directory / "job.json").read_text())
+                record["unexpected"] = record.pop("unexpected")
+                (directory / "job.json").write_text(json.dumps(record))
+
+        malformed = self.fixture_job("200000000001")
+        (malformed / "job.json").write_text("{")
+        oversized = self.fixture_job("200000000002")
+        (oversized / "job.json").write_bytes(b" " * (64 * 1024 + 1))
+        symlinked = self.fixture_job("200000000003")
+        (symlinked / "job.json").unlink()
+        (symlinked / "job.json").symlink_to(malformed / "job.json")
+        special = self.fixture_job("200000000004")
+        (special / "job.json").unlink()
+        os.mkfifo(special / "job.json")
+
+        listed = json.loads(self.cli("all", "--json").stdout)["jobs"]
+        self.assertEqual(len(listed), 8)
+        self.assertTrue(all(job["state"] == "invalid" for job in listed))
+        for job_id in invalid_records:
+            detail = self.cli(job_id, "--json", check=False)
+            self.assertEqual(detail.returncode, 1)
+            self.assertIn("job record is invalid", json.loads(detail.stdout)["error"])
+        self.assertIn(
+            "job record is invalid",
+            json.loads(self.cli("200000000001", "--json", check=False).stdout)["error"],
+        )
+        self.assertIn(
+            "too large",
+            json.loads(self.cli("200000000002", "--json", check=False).stdout)["error"],
+        )
+        for job_id in ("200000000003", "200000000004"):
+            result = self.cli(job_id, "--json", check=False)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("job.json", json.loads(result.stdout)["error"])
+
+        safe = self.fixture_job("300000000001")
+        outside = self.root / "outside"
+        outside.write_text("working: followed unsafe path\n")
+        for name in ("status", "report.md", "project-context.md"):
+            path = safe / name
+            path.unlink(missing_ok=True)
+            path.symlink_to(outside)
+            result = self.cli("300000000001", "--json", check=False)
+            self.assertEqual(result.returncode, 1, name)
+            self.assertIn(name, json.loads(result.stdout)["error"])
+            path.unlink()
+            path.write_text("" if name != "status" else "working: restored\n")
+        prompt = safe / "prompt.md"
+        prompt.unlink()
+        os.mkfifo(prompt)
+        result = self.cli("300000000001", "--json", check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("prompt.md", json.loads(result.stdout)["error"])
+
+    def test_jobs_cli_bounds_artifacts_and_escapes_only_human_output(self) -> None:
+        directory = self.fixture_job("400000000001")
+        escape_text = "line\x1b[31m red\x07\rnext"
+        (directory / "report.md").write_text(escape_text)
+        (directory / "project-context.md").write_text(escape_text)
+        (directory / "prompt.md").write_text(escape_text)
+        status_summary = "status\u009b31m text"
+        status_lines = (
+            "".join(f"working: update {index}\n" for index in range(20000))
+            + f"working: {status_summary}\n"
+        )
+        (directory / "status").write_text(status_lines)
+
+        detail = json.loads(self.cli("400000000001", "--json").stdout)
+        self.assertEqual(detail["report"], escape_text)
+        self.assertEqual(detail["project_context"], escape_text)
+        self.assertEqual(detail["prompt"], escape_text)
+        self.assertEqual(detail["summary"], status_summary)
+        self.assertLessEqual(len(detail["events"]), 100)
+        human = self.cli("400000000001").stdout
+        self.assertNotIn("\x1b", human)
+        self.assertNotIn("\x07", human)
+        self.assertNotIn("\r", human)
+        self.assertIn(r"\x1b[31m red\x07\x0dnext", human)
+        self.assertIn(r"status\x9b31m text", human)
+
+        detail_maximum = 512 * 1024
+        report_maximum = 2 * 1024 * 1024
+        (directory / "report.md").write_bytes(b"r" * (report_maximum + 100))
+        (directory / "project-context.md").write_bytes(b"c" * (detail_maximum + 100))
+        (directory / "prompt.md").write_bytes(b"p" * (detail_maximum + 100))
+        bounded = json.loads(self.cli("400000000001", "--json").stdout)
+        self.assertEqual(len(bounded["report"]), report_maximum)
+        self.assertEqual(len(bounded["project_context"]), detail_maximum)
+        self.assertEqual(len(bounded["prompt"]), detail_maximum)
+
+    def test_jobs_cli_uses_unicode_display_cell_widths(self) -> None:
+        model = "界" * 20
+        summary = ("界e\u0301" * 40) + " end"
+        directory = self.fixture_job("500000000001", {"model": model})
+        (directory / "status").write_text(f"working: {summary}\n")
+        parsed = json.loads(self.cli("all", "--json").stdout)["jobs"][0]
+        self.assertEqual(parsed["model"], model)
+        self.assertEqual(parsed["summary"], summary)
+
+        lines = self.cli("all").stdout.splitlines()
+        separator, row = lines[2], lines[3]
+
+        def cells(text: str) -> int:
+            return sum(
+                0
+                if unicodedata.combining(character)
+                else 2
+                if unicodedata.east_asian_width(character) in {"W", "F"}
+                else 1
+                for character in text
+            )
+
+        self.assertEqual(cells(row), cells(separator))
+        self.assertIn("...", row)
 
     def test_done_remains_nonterminal_and_harness_exit_generates_failure(self) -> None:
         executable = self.bin / "pi"
@@ -351,16 +547,28 @@ options = { model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
         self.call("send", {"job_id": job_id, "message": "Continue carefully."})
         self.wait_for(directory / "received", "Continue carefully.")
 
-        listed = subprocess.run(
-            [str(REPOSITORY / "scripts" / "scufris-jobs"), "--json"],
-            text=True,
-            capture_output=True,
-            env=self.env,
-            check=True,
-            timeout=30,
-        )
-        listed_jobs = json.loads(listed.stdout)["jobs"]
+        listed_jobs = json.loads(self.cli("all", "--json").stdout)["jobs"]
         self.assertEqual([item["job_id"] for item in listed_jobs], [job_id])
+        self.assertEqual(
+            self.cli("--all", "--json").stdout,
+            self.cli("--json").stdout,
+        )
+        table = self.cli("all").stdout
+        self.assertIn("Columns: ID=job ID; STATE=latest event; LIVE=worker pane", table)
+        self.assertIn("ID            STATE", table)
+        self.assertIn(job_id, table)
+
+        detail = self.cli(job_id[:6]).stdout
+        self.assertIn(f"Job ID: {job_id}", detail)
+        self.assertIn("Created: ", detail)
+        self.assertIn(f"Working directory: {directory / 'workspace'}", detail)
+        self.assertIn("Tmux pane ID: %", detail)
+        self.assertIn("  working: report adapter verified\n", detail)
+        self.assertIn("Report:\n# working: bounded update 4", detail)
+        self.assertIn("Prompt:\n# Scufris delegated job", detail)
+        json_detail = json.loads(self.cli(job_id, "--json").stdout)
+        self.assertEqual(json_detail["job_id"], job_id)
+        self.assertEqual(json_detail["report"], bounded_report)
 
         self.call("stop", {"job_id": job_id})
         time.sleep(0.05)

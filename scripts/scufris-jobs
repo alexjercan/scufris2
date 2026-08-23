@@ -1,16 +1,33 @@
 #!/usr/bin/env python3
-"""List every replacement Scufris job stored for the current user."""
+"""Inspect stored Scufris jobs without changing them."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
 import subprocess
+import sys
+import unicodedata
 from pathlib import Path
 from typing import Any
 
-JOB_ID_PATTERN = "????????????"
+JOB_ID = re.compile(r"^[a-f0-9]{12}$")
+JOB_ID_PREFIX = re.compile(r"^[a-f0-9]{1,12}$")
+TABLE_FIELDS = (
+    ("ID", 12),
+    ("STATE", 10),
+    ("LIVE", 7),
+    ("PROJECT", 24),
+    ("WORKSPACE", 9),
+    ("WORKER", 28),
+    ("SUMMARY", 60),
+)
+
+
+class CliError(Exception):
+    """An expected lookup or inspection error."""
 
 
 def jobs_root() -> Path:
@@ -22,70 +39,271 @@ def helper_path() -> Path:
     return Path(__file__).resolve().parents[1] / "tools" / "jobs" / "scufris-jobs"
 
 
-def inspect(job_id: str) -> dict[str, Any]:
-    completed = subprocess.run(
-        [str(helper_path()), "inspect"],
-        input=json.dumps({"job_id": job_id}),
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=15,
-    )
+def inspect(job_id: str, *, full: bool = False) -> dict[str, Any]:
+    request: dict[str, Any] = {"job_id": job_id}
+    if full:
+        request.update(
+            {
+                "include_report": True,
+                "include_context": True,
+                "include_prompt": True,
+            }
+        )
+    try:
+        completed = subprocess.run(
+            [str(helper_path()), "inspect"],
+            input=json.dumps(request),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise CliError(f"cannot inspect job {job_id}: {error}") from error
     try:
         envelope = json.loads(completed.stdout)
-    except json.JSONDecodeError:
-        return {
-            "job_id": job_id,
-            "state": "invalid",
-            "summary": "invalid helper response",
-        }
+    except json.JSONDecodeError as error:
+        raise CliError(
+            f"cannot inspect job {job_id}: invalid helper response"
+        ) from error
+    if not isinstance(envelope, dict):
+        raise CliError(f"cannot inspect job {job_id}: invalid helper response")
     if completed.returncode != 0 or not envelope.get("ok"):
-        return {
-            "job_id": job_id,
-            "state": "invalid",
-            "summary": str(envelope.get("error", "inspection failed")),
-        }
-    return envelope["result"]
+        message = envelope.get("error", "inspection failed")
+        raise CliError(f"cannot inspect job {job_id}: {message}")
+    result = envelope.get("result")
+    if not isinstance(result, dict):
+        raise CliError(f"cannot inspect job {job_id}: invalid helper result")
+    return result
+
+
+def job_ids() -> list[str]:
+    root = jobs_root()
+    try:
+        with os.scandir(root) as entries:
+            return sorted(
+                entry.name
+                for entry in entries
+                if JOB_ID.fullmatch(entry.name) and entry.is_dir(follow_symlinks=False)
+            )
+    except FileNotFoundError:
+        return []
+    except OSError as error:
+        raise CliError(f"cannot list jobs: {error}") from error
+
+
+def invalid_job(job_id: str, error: CliError) -> dict[str, Any]:
+    return {
+        "job_id": job_id,
+        "state": "invalid",
+        "summary": str(error),
+        "window_alive": False,
+    }
 
 
 def all_jobs() -> list[dict[str, Any]]:
-    root = jobs_root()
-    if not root.is_dir():
-        return []
-    return [
-        inspect(path.name)
-        for path in sorted(root.glob(JOB_ID_PATTERN))
-        if path.is_dir()
-    ]
+    jobs: list[dict[str, Any]] = []
+    for job_id in job_ids():
+        try:
+            jobs.append(inspect(job_id))
+        except CliError as error:
+            jobs.append(invalid_job(job_id, error))
+    return jobs
 
 
-def text_row(job: dict[str, Any]) -> str:
-    project = job.get("project") or "general"
-    state = job.get("state") or "unknown"
-    workspace = job.get("workspace") or "unknown"
-    harness = job.get("harness") or "unknown"
-    model = job.get("model") or "unknown"
-    alive = "running" if job.get("window_alive") else "stopped"
-    summary = str(job.get("summary") or "")
-    return (
-        f"{job.get('job_id', 'unknown')}  {state:<14}  {alive:<7}  "
-        f"{project}  {workspace}  {harness}/{model}  {summary}"
+def resolve_job_id(value: str) -> str:
+    if not JOB_ID_PREFIX.fullmatch(value):
+        raise CliError("job ID must be 1 to 12 lowercase hexadecimal characters")
+    matches = [job_id for job_id in job_ids() if job_id.startswith(value)]
+    if not matches:
+        raise CliError(f"job ID not found: {value}")
+    if len(matches) > 1:
+        raise CliError(f"ambiguous job ID {value}: {', '.join(matches)}")
+    return matches[0]
+
+
+def escaped_control(character: str) -> str:
+    codepoint = ord(character)
+    if codepoint <= 0xFF:
+        return f"\\x{codepoint:02x}"
+    if codepoint <= 0xFFFF:
+        return f"\\u{codepoint:04x}"
+    return f"\\U{codepoint:08x}"
+
+
+def terminal_safe(value: Any, *, multiline: bool = False) -> str:
+    text = str(value if value is not None else "-")
+    rendered: list[str] = []
+    for character in text:
+        if multiline and character == "\n":
+            rendered.append(character)
+        elif unicodedata.category(character).startswith("C"):
+            rendered.append(escaped_control(character))
+        else:
+            rendered.append(character)
+    return "".join(rendered)
+
+
+def clean_text(value: Any) -> str:
+    return " ".join(terminal_safe(value).split())
+
+
+def display_width(value: str) -> int:
+    return sum(
+        0
+        if unicodedata.combining(character)
+        else 2
+        if unicodedata.east_asian_width(character) in {"W", "F"}
+        else 1
+        for character in value
     )
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--json", action="store_true", help="print structured JSON")
-    arguments = parser.parse_args()
-    jobs = all_jobs()
-    if arguments.json:
-        print(json.dumps({"jobs": jobs}, indent=2, sort_keys=True))
-    elif jobs:
-        for job in jobs:
-            print(text_row(job))
-    else:
+def clipped(value: Any, width: int) -> str:
+    text = clean_text(value)
+    if display_width(text) <= width:
+        return text
+    available = width - 3
+    rendered: list[str] = []
+    used = 0
+    for character in text:
+        cells = display_width(character)
+        if used + cells > available:
+            break
+        rendered.append(character)
+        used += cells
+    return "".join(rendered) + "..."
+
+
+def padded(value: Any, width: int) -> str:
+    text = clipped(value, width)
+    return text + " " * (width - display_width(text))
+
+
+def table_row(job: dict[str, Any]) -> str:
+    values = (
+        job.get("job_id", "unknown"),
+        job.get("state") or "unknown",
+        "running" if job.get("window_alive") else "stopped",
+        job.get("project") or "general",
+        job.get("workspace") or "unknown",
+        f"{job.get('harness') or 'unknown'}/{job.get('model') or 'unknown'}",
+        job.get("summary") or "-",
+    )
+    cells = [
+        padded(value, width)
+        for value, (_, width) in zip(values, TABLE_FIELDS, strict=True)
+    ]
+    return "  ".join(cells).rstrip()
+
+
+def print_table(jobs: list[dict[str, Any]]) -> None:
+    if not jobs:
         print("No Scufris jobs.")
-    return 0
+        return
+    print(
+        "Columns: ID=job ID; STATE=latest event; LIVE=worker pane; "
+        "PROJECT; WORKSPACE; WORKER=harness/model; SUMMARY=latest event summary."
+    )
+    print("  ".join(f"{name:<{width}}" for name, width in TABLE_FIELDS).rstrip())
+    print("  ".join("-" * width for _, width in TABLE_FIELDS).rstrip())
+    for job in jobs:
+        print(table_row(job))
+
+
+def print_field(label: str, value: Any) -> None:
+    print(f"{label}: {clean_text(value)}")
+
+
+def print_block(label: str, value: Any) -> None:
+    print(f"{label}:")
+    text = terminal_safe(value or "", multiline=True)
+    if text:
+        print(text, end="" if text.endswith("\n") else "\n")
+    else:
+        print("  (none)")
+
+
+def print_detail(job: dict[str, Any]) -> None:
+    print_field("Job ID", job.get("job_id"))
+    print_field("State", job.get("state"))
+    print_field("Summary", job.get("summary"))
+    print_field("Worker pane", "running" if job.get("window_alive") else "stopped")
+    print_field("Created", job.get("created_at"))
+    print_field("Owner session", job.get("owner_session"))
+    print_field("Project", job.get("project") or "general")
+    print_field("Workspace", job.get("workspace"))
+    print_field("Working directory", job.get("working_directory"))
+    print_field("Feature", job.get("feature"))
+    print_field("Landing branch", job.get("landing_branch"))
+    print_field("Review of", job.get("review_of"))
+    print_field("Harness", job.get("harness"))
+    print_field("Model", job.get("model"))
+    print_field("Thinking", job.get("thinking"))
+    print_field("Context fingerprint", job.get("context_fingerprint"))
+    print_field("Tmux session ID", job.get("tmux_session_id"))
+    print_field("Tmux window ID", job.get("tmux_window_id"))
+    print_field("Tmux pane ID", job.get("tmux_pane_id"))
+    print("Events:")
+    events = job.get("events")
+    if isinstance(events, list) and events:
+        for event in events:
+            print(f"  {clean_text(event)}")
+    else:
+        print("  (none)")
+    print_block("Report", job.get("report"))
+    print_block("Project context", job.get("project_context"))
+    print_block("Prompt", job.get("prompt"))
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(
+        description="List all stored Scufris jobs or inspect one job by ID.",
+        epilog=(
+            "Use 'all' or --all to list every job; no argument remains an alias for "
+            "backward compatibility. ID prefixes are accepted when unique. Human "
+            "table output is stable and identical in terminals and pipes."
+        ),
+    )
+    result.add_argument("command", nargs="?", metavar="all|ID")
+    result.add_argument(
+        "--all", action="store_true", dest="all_flag", help="list every stored job"
+    )
+    result.add_argument("--json", action="store_true", help="print structured JSON")
+    return result
+
+
+def emit_error(error: CliError, *, json_output: bool) -> int:
+    if json_output:
+        print(json.dumps({"error": str(error)}, sort_keys=True))
+    else:
+        print(f"scufris-jobs: {error}", file=sys.stderr)
+    return 1
+
+
+def main() -> int:
+    argument_parser = parser()
+    arguments = argument_parser.parse_args()
+    if arguments.all_flag and arguments.command not in (None, "all"):
+        argument_parser.error("--all cannot be used with a job ID")
+    list_all = arguments.all_flag or arguments.command in (None, "all")
+    try:
+        if list_all:
+            jobs = all_jobs()
+            if arguments.json:
+                print(json.dumps({"jobs": jobs}, indent=2, sort_keys=True))
+            else:
+                print_table(jobs)
+            return 0
+        job_id = resolve_job_id(arguments.command)
+        job = inspect(job_id, full=True)
+        if arguments.json:
+            print(json.dumps(job, indent=2, sort_keys=True))
+        else:
+            print_detail(job)
+        return 0
+    except CliError as error:
+        return emit_error(error, json_output=arguments.json)
 
 
 if __name__ == "__main__":

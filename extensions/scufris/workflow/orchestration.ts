@@ -212,6 +212,7 @@ interface SpawnResult {
 }
 
 interface OwnedJob extends SpawnResult {
+  trusted_capability: string;
   context_id?: string;
   context_fingerprint?: string;
   summary: string;
@@ -392,9 +393,18 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           job.inode = update.inode;
           job.window_alive = update.window_alive;
           for (const error of update.errors) {
-            job.state = "failed";
-            job.summary = error;
-            deliverRuntimeFailure(pi, extensionContext, job, error, wakeMode);
+            if (extensionContext.hasUI)
+              extensionContext.ui.notify(
+                `Job ${job.job_id}: ${error}`,
+                "error",
+              );
+            await runHelper("failure", {
+              job_id: job.job_id,
+              capability: job.trusted_capability,
+              summary: error,
+              report: `Trusted orchestration rejected a worker status record: ${error}`,
+            });
+            readAgain = true;
           }
           for (const line of update.events) {
             const event = parseWorkerEvent(line);
@@ -585,12 +595,14 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             );
         }
         const generatedJobId = jobId();
+        const trustedCapability = randomBytes(32).toString("hex");
         const result = await runHelper<SpawnResult>(
           "spawn",
           {
             job_id: generatedJobId,
             instructions: params.instructions,
             owner_session: ctx.sessionManager.getSessionId(),
+            trusted_capability: trustedCapability,
             ...(resolved
               ? {
                   project: resolved.project,
@@ -636,6 +648,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         const job: OwnedJob = {
           ...publicResult,
           status_file,
+          trusted_capability: trustedCapability,
           ...(resolved
             ? {
                 context_id: resolved.context_id,

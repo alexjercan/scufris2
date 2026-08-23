@@ -7,11 +7,12 @@ import sys
 from pathlib import Path
 
 WORKER_EVENTS = {"working", "blocked", "done"}
+MAX_REPORT_DETAIL = 512 * 1024
 
 
 def main() -> int:
     if len(sys.argv) != 3:
-        print("usage: scufris-report EVENT SUMMARY", file=sys.stderr)
+        print("usage: scufris-report EVENT SUMMARY < REPORT.md", file=sys.stderr)
         return 2
     if sys.argv[1] not in WORKER_EVENTS:
         print(
@@ -20,12 +21,22 @@ def main() -> int:
         )
         return 2
     job_id = os.environ.get("SCUFRIS_JOB_ID")
-    if not job_id:
-        print("scufris-report: SCUFRIS_JOB_ID is unavailable", file=sys.stderr)
+    capability = os.environ.get("SCUFRIS_REPORT_CAPABILITY")
+    if not job_id or not capability:
+        print("scufris-report: worker report identity is unavailable", file=sys.stderr)
         return 2
-    report = sys.stdin.read(512 * 1024 + 1)
+    encoded_report = sys.stdin.buffer.read(MAX_REPORT_DETAIL + 1)
+    if len(encoded_report) > MAX_REPORT_DETAIL:
+        print("scufris-report: report detail exceeds 512 KiB", file=sys.stderr)
+        return 2
+    try:
+        report = encoded_report.decode("utf-8")
+    except UnicodeDecodeError:
+        print("scufris-report: report detail must be valid UTF-8", file=sys.stderr)
+        return 2
     request = {
         "job_id": job_id,
+        "capability": capability,
         "event": sys.argv[1],
         "summary": sys.argv[2],
         "report": report,
@@ -45,7 +56,7 @@ def main() -> int:
         print(f"scufris-report: {error}", file=sys.stderr)
         return result.returncode
     value = json.loads(result.stdout)["result"]
-    print(f"reported {value['event']}: {value['summary']}")
+    print(f"appended {value['event']}: {value['summary']}")
     return 0
 
 

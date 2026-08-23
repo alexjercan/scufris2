@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ import secrets
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -27,8 +29,10 @@ EVENTS = {*WORKER_EVENTS, "failed"}
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 WORKSPACES = {"temporary", "project", "sprout", "review"}
 MAX_REQUEST = 2 * 1024 * 1024
-MAX_REPORT = 512 * 1024
+MAX_REPORT_DETAIL = 512 * 1024
 MAX_EVENT_LINE = 4096
+MAX_REPORT_ENTRY = MAX_REPORT_DETAIL + MAX_EVENT_LINE + 5
+MAX_REPORT_FILE = 2 * 1024 * 1024
 MAX_QUICK_REVIEW_PATCH = 512 * 1024
 MAX_QUICK_REVIEW_ARTIFACT = 300 * 1024
 JOB_FIELDS = {
@@ -74,6 +78,62 @@ def validate_job_id(value: Any) -> str:
     if not isinstance(value, str) or not JOB_ID.fullmatch(value):
         raise JobError("invalid job ID")
     return value
+
+
+def validate_capability(value: Any) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value):
+        raise JobError("invalid report capability")
+    return value
+
+
+def capability_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("ascii")).hexdigest()
+
+
+def load_report_auth(job_id: str) -> dict[str, Any]:
+    path = job_dir(job_id) / ".report-auth.json"
+    descriptor = open_job_artifact(path, os.O_RDONLY)
+    try:
+        raw = os.read(descriptor, 1024)
+        if os.read(descriptor, 1):
+            raise JobError("report authorization record is too large")
+    finally:
+        os.close(descriptor)
+    try:
+        value = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise JobError("report authorization record is invalid") from error
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {
+            "launch_capability_hash",
+            "report_capability_hash",
+            "trusted_capability_hash",
+        }
+        or not isinstance(value["trusted_capability_hash"], str)
+        or not re.fullmatch(r"[a-f0-9]{64}", value["trusted_capability_hash"])
+        or any(
+            value[field] is not None
+            and (
+                not isinstance(value[field], str)
+                or not re.fullmatch(r"[a-f0-9]{64}", value[field])
+            )
+            for field in ("launch_capability_hash", "report_capability_hash")
+        )
+    ):
+        raise JobError("report authorization record is invalid")
+    return value
+
+
+def authorize_capability(job_id: str, value: Any, trusted: bool) -> None:
+    capability = validate_capability(value)
+    field = "trusted_capability_hash" if trusted else "report_capability_hash"
+    expected = load_report_auth(job_id)[field]
+    if not isinstance(expected, str) or not secrets.compare_digest(
+        capability_hash(capability), expected
+    ):
+        raise JobError("report capability does not authorize this job")
 
 
 def validate_request(
@@ -374,8 +434,8 @@ your working directory when relevant.
 
 ## Communication
 
-{reporting} Do not modify `status` or `report.md` directly. Each report replaces
-the current detailed evidence and appends one validated event for foreground
+{reporting} Do not modify `status` or `report.md` directly. Each report appends
+one status-linked Markdown entry and then its validated event for foreground
 Scufris.
 
 Allowed events:
@@ -434,7 +494,7 @@ def create_tmux(job_id: str, cwd: Path) -> tuple[str, str, str]:
 def spawn(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(
         request,
-        {"job_id", "instructions", "owner_session"},
+        {"job_id", "instructions", "owner_session", "trusted_capability"},
         {
             "project",
             "project_root",
@@ -451,6 +511,8 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
     job_id = validate_job_id(request["job_id"])
     instructions = request["instructions"]
     owner_session = request["owner_session"]
+    trusted_capability = validate_capability(request["trusted_capability"])
+    launch_capability = secrets.token_hex(32)
     if (
         not isinstance(instructions, str)
         or not instructions.strip()
@@ -544,6 +606,19 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
             )
         write_new(directory / "status", b"", 0o600)
         write_new(directory / "report.md", b"", 0o600)
+        write_new(directory / "report.lock", b"", 0o600)
+        write_new(
+            directory / ".report-auth.json",
+            json.dumps(
+                {
+                    "launch_capability_hash": capability_hash(launch_capability),
+                    "report_capability_hash": None,
+                    "trusted_capability_hash": capability_hash(trusted_capability),
+                },
+                sort_keys=True,
+            ).encode(),
+            0o400,
+        )
         record = {
             "job_id": job_id,
             "owner_session": owner_session,
@@ -593,7 +668,13 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
                 "-c",
                 str(working),
                 shlex.join(
-                    [sys.executable, str(Path(__file__).resolve()), "launch", job_id]
+                    [
+                        sys.executable,
+                        str(Path(__file__).resolve()),
+                        "launch",
+                        job_id,
+                        launch_capability,
+                    ]
                 ),
             ]
         )
@@ -647,13 +728,21 @@ def worker_environment() -> dict[str, str]:
         "PI_PROVIDER",
         "PI_MODEL",
         "PI_REASONING_LEVEL",
+        "SCUFRIS_REPORT_CAPABILITY",
     ):
         env.pop(variable, None)
     return env
 
 
-def launch(job_id: str) -> NoReturn:
+def launch(job_id: str, launch_capability: str) -> NoReturn:
     job = load_job(job_id)
+    capability = validate_capability(launch_capability)
+    auth = load_report_auth(job_id)
+    expected_launch = auth["launch_capability_hash"]
+    if not isinstance(expected_launch, str) or not secrets.compare_digest(
+        capability_hash(capability), expected_launch
+    ):
+        raise JobError("launch capability does not authorize this job")
     prompt = f"Read and follow {job_dir(job_id) / 'prompt.md'}"
     if job["harness"] == "pi":
         report_extension = (
@@ -693,9 +782,25 @@ def launch(job_id: str) -> NoReturn:
         ]
     else:
         raise JobError("invalid harness")
+    report_capability = secrets.token_hex(32)
+    auth["launch_capability_hash"] = None
+    auth["report_capability_hash"] = capability_hash(report_capability)
+    auth_path = job_dir(job_id) / ".report-auth.json"
+    auth_temporary = job_dir(job_id) / f".report-auth-{secrets.token_hex(16)}.tmp"
+    try:
+        write_new(auth_temporary, json.dumps(auth, sort_keys=True).encode(), 0o400)
+        os.replace(auth_temporary, auth_path)
+        directory_fd = os.open(job_dir(job_id), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        auth_temporary.unlink(missing_ok=True)
     env = worker_environment()
     env["SCUFRIS_ROLE"] = "worker"
     env["SCUFRIS_JOB_ID"] = job_id
+    env["SCUFRIS_REPORT_CAPABILITY"] = report_capability
     if job["harness"] == "claude":
         env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] = "false"
     executable = shutil.which(argv[0], path=env.get("PATH"))
@@ -712,18 +817,11 @@ def launch(job_id: str) -> NoReturn:
     if not (job_dir(job_id) / ".stopping").exists() and (
         last_event is None or last_event[0] != "failed"
     ):
-        existing_report = (job_dir(job_id) / "report.md").read_text(
-            "utf-8", errors="replace"
-        )
-        detail = existing_report.rstrip()
-        if detail:
-            detail += "\n\n"
-        detail += f"Worker harness exited with status {completed.returncode}.\n"
         write_report(
             job_id,
             "failed",
             "worker harness exited unexpectedly",
-            detail,
+            f"Worker harness exited with status {completed.returncode}.",
         )
     raise SystemExit(completed.returncode)
 
@@ -749,43 +847,106 @@ def parse_event(line: str) -> tuple[str, str] | None:
     return state, summary
 
 
+def write_all(descriptor: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        written = os.write(descriptor, view)
+        if written == 0:
+            raise JobError("could not write job artifact")
+        view = view[written:]
+
+
+def open_job_artifact(path: Path, flags: int) -> int:
+    try:
+        descriptor = os.open(path, flags | os.O_NOFOLLOW)
+    except OSError as error:
+        raise JobError(f"job artifact is unavailable: {path.name}") from error
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        raise JobError(f"job artifact is not a regular file: {path.name}")
+    return descriptor
+
+
+def read_bounded_artifact(path: Path, maximum: int) -> bytes:
+    descriptor = open_job_artifact(path, os.O_RDONLY)
+    try:
+        data = bytearray()
+        while len(data) <= maximum:
+            chunk = os.read(descriptor, min(64 * 1024, maximum + 1 - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+        if len(data) > maximum:
+            raise JobError(f"job artifact is too large: {path.name}")
+        return bytes(data)
+    finally:
+        os.close(descriptor)
+
+
 def write_report(job_id: str, event: str, summary: str, detail: str) -> None:
     line = f"{event}: {summary}"
+    try:
+        encoded_line = line.encode("utf-8")
+        encoded_detail = detail.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise JobError("report must be valid UTF-8 text") from error
     if parse_event(line) is None:
         raise JobError("invalid worker event")
-    if not detail.strip():
+    if len(encoded_detail) > MAX_REPORT_DETAIL:
+        raise JobError("report detail is too large")
+    body = detail.strip()
+    if not body:
         raise JobError("report must be nonempty text")
-    encoded_report = detail.encode()
-    if len(encoded_report) > MAX_REPORT:
-        raise JobError("report is too large")
+    encoded_body = body.encode("utf-8")
+    entry = b"# " + encoded_line + b"\n\n" + encoded_body + b"\n"
+    if len(entry) > MAX_REPORT_ENTRY:
+        raise JobError("report entry is too large")
 
     directory = job_dir(job_id)
     load_job(job_id)
-    report_fd = os.open(
-        directory / "report.md",
-        os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW,
-    )
+    lock_fd = open_job_artifact(directory / "report.lock", os.O_RDWR)
+    temporary = directory / f".report-{secrets.token_hex(16)}.tmp"
     try:
-        view = memoryview(encoded_report)
-        while view:
-            view = view[os.write(report_fd, view) :]
-        os.fsync(report_fd)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        current = read_bounded_artifact(directory / "report.md", MAX_REPORT_FILE)
+        separator = b"\n" if current else b""
+        updated = current + separator + entry
+        if len(updated) > MAX_REPORT_FILE:
+            updated = entry
+
+        temporary_fd = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+        )
+        try:
+            write_all(temporary_fd, updated)
+            os.fsync(temporary_fd)
+        finally:
+            os.close(temporary_fd)
+        os.replace(temporary, directory / "report.md")
+        directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+
+        status_fd = open_job_artifact(directory / "status", os.O_WRONLY | os.O_APPEND)
+        try:
+            write_all(status_fd, f"{line}\n".encode())
+            os.fsync(status_fd)
+        finally:
+            os.close(status_fd)
     finally:
-        os.close(report_fd)
-    status_fd = os.open(
-        directory / "status",
-        os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW,
-    )
-    try:
-        os.write(status_fd, f"{line}\n".encode())
-        os.fsync(status_fd)
-    finally:
-        os.close(status_fd)
+        temporary.unlink(missing_ok=True)
+        os.close(lock_fd)
 
 
 def report(request: dict[str, Any]) -> dict[str, Any]:
-    validate_request(request, {"job_id", "event", "summary", "report"})
+    validate_request(request, {"job_id", "capability", "event", "summary", "report"})
     job_id = validate_job_id(request["job_id"])
+    load_job(job_id)
+    authorize_capability(job_id, request["capability"], False)
     event, summary, detail = (
         request["event"],
         request["summary"],
@@ -799,6 +960,18 @@ def report(request: dict[str, Any]) -> dict[str, Any]:
         raise JobError("report must be text")
     write_report(job_id, event, summary, detail)
     return {"job_id": job_id, "event": event, "summary": summary}
+
+
+def failure(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id", "capability", "summary", "report"})
+    job_id = validate_job_id(request["job_id"])
+    load_job(job_id)
+    authorize_capability(job_id, request["capability"], True)
+    summary, detail = request["summary"], request["report"]
+    if not isinstance(summary, str) or not isinstance(detail, str):
+        raise JobError("summary and report must be text")
+    write_report(job_id, "failed", summary, detail)
+    return {"job_id": job_id, "event": "failed", "summary": summary}
 
 
 def read_events(request: dict[str, Any]) -> dict[str, Any]:
@@ -927,10 +1100,9 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
         (request.get("include_prompt", False), "prompt.md", "prompt"),
     ):
         path = directory / name
-        if enabled and path.exists():
-            data = path.read_bytes()
-            if len(data) > MAX_REPORT:
-                data = data[:MAX_REPORT]
+        if enabled and os.path.lexists(path):
+            maximum = MAX_REPORT_FILE if name == "report.md" else MAX_REPORT_DETAIL
+            data = read_bounded_artifact(path, maximum)
             result[key] = data.decode("utf-8", "replace")
     return result
 
@@ -971,13 +1143,7 @@ def quick_review_snapshot(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def bounded_file(path: Path, maximum: int) -> bytes:
-    try:
-        data = path.read_bytes()
-    except OSError as error:
-        raise JobError(f"required job artifact is unavailable: {path.name}") from error
-    if len(data) > maximum:
-        raise JobError(f"job artifact is too large: {path.name}")
-    return data
+    return read_bounded_artifact(path, maximum)
 
 
 def run_quick_review_model(
@@ -1068,10 +1234,10 @@ def quick_review_build(request: dict[str, Any]) -> dict[str, Any]:
     directory = job_dir(snapshot["job_id"])
     handoff = b"\n\n---\n\n".join(
         [
-            bounded_file(directory / "prompt.md", MAX_REPORT),
-            bounded_file(directory / "report.md", MAX_REPORT),
+            bounded_file(directory / "prompt.md", MAX_REPORT_DETAIL),
+            bounded_file(directory / "report.md", MAX_REPORT_FILE),
         ]
-    )[:MAX_REPORT].decode("utf-8", "ignore")
+    )[-MAX_REPORT_DETAIL:].decode("utf-8", "ignore")
     prompt_path = directory / ".quick-review-prompt.md"
     result_path = directory / ".quick-review-result.json"
     artifact_path = directory / "quick-review.md"
@@ -1348,8 +1514,8 @@ def orphans(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> int:
-    if len(sys.argv) == 3 and sys.argv[1] == "launch":
-        launch(validate_job_id(sys.argv[2]))
+    if len(sys.argv) == 4 and sys.argv[1] == "launch":
+        launch(validate_job_id(sys.argv[2]), validate_capability(sys.argv[3]))
     if len(sys.argv) != 2:
         raise JobError("use one helper command")
     command = sys.argv[1]
@@ -1359,6 +1525,7 @@ def main() -> int:
         "spawn": spawn,
         "events": read_events,
         "report": report,
+        "failure": failure,
         "send": send,
         "inspect": inspect,
         "quick-review-snapshot": quick_review_snapshot,

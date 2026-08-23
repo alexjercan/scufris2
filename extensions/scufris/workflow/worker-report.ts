@@ -19,14 +19,21 @@ export function workerReportTerminatesTurn(event: WorkerReportEvent): boolean {
 export default function workerReport(pi: ExtensionAPI): void {
   if (process.env.SCUFRIS_ROLE !== "worker") return;
   const jobId = process.env.SCUFRIS_JOB_ID;
-  if (!jobId || !JOB_ID.test(jobId)) return;
+  const capability = process.env.SCUFRIS_REPORT_CAPABILITY;
+  if (
+    !jobId ||
+    !JOB_ID.test(jobId) ||
+    !capability ||
+    !/^[a-f0-9]{64}$/.test(capability)
+  )
+    return;
 
   pi.registerTool(
     defineTool({
       name: WORKER_REPORT_TOOL,
       label: "Report to Scufris",
       description:
-        "Replace this delegated job's detailed report and append working, blocked, or done for foreground Scufris. Harness failures are reported only by trusted orchestration.",
+        "Append one status-linked report entry and then working, blocked, or done for foreground Scufris. Harness failures are reported only by trusted orchestration.",
       executionMode: "sequential",
       parameters: Type.Object(
         {
@@ -39,7 +46,7 @@ export default function workerReport(pi: ExtensionAPI): void {
           }),
           report: Type.String({
             description:
-              "Current detailed Markdown evidence for foreground Scufris.",
+              "Detailed Markdown evidence linked to this status event.",
             minLength: 1,
             maxLength: 524288,
           }),
@@ -51,7 +58,16 @@ export default function workerReport(pi: ExtensionAPI): void {
           job_id: string;
           event: string;
           summary: string;
-        }>(jobsHelperPath, "report", { job_id: jobId, ...params }, signal);
+        }>(
+          jobsHelperPath,
+          "report",
+          {
+            job_id: jobId,
+            capability,
+            ...params,
+          },
+          signal,
+        );
         if (!envelope.ok || envelope.result === undefined)
           throw new Error(envelope.error ?? "Could not report to Scufris");
         return {

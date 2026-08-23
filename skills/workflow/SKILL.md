@@ -43,6 +43,10 @@ explicitly introduces them.
 - `failed` is generated only when trusted orchestration detects that the worker
   can no longer work. Workers cannot report it themselves.
 
+Each worker report is chronological Markdown. Every entry starts with the exact
+status line as a heading and contains evidence for that event. Inspect the full
+report after a wake instead of treating it as only the latest worker snapshot.
+
 Use `scufris_job_inspect` to recover bounded evidence after a wake or context
 compaction. Use `scufris_job_send` only for literal steering, then end the
 foreground turn immediately. Never call shell `sleep`, wait for a worker, poll

@@ -56,10 +56,29 @@ path, such as `~/Downloads`, remains part of the worker request.
 
 ## Worker events
 
-Workers call the dedicated `scufris_report` tool to replace their detailed
-Markdown report and append one validated event. Pi reviewers retain only
-read-only code tools plus this reporting tool. Claude workers use the matching
-`scufris-report` adapter described in their private prompt.
+Workers call the dedicated `scufris_report` tool to append one detailed
+Markdown entry and then its validated event. The entry heading is the exact
+event line, for example `# working: checking tests`, followed by that event's
+evidence. Inspection returns the entries in chronological order. Pi reviewers
+retain only read-only code tools plus this reporting tool. Claude workers use
+the matching `scufris-report` adapter described in their private prompt.
+
+Each UTF-8 evidence body is at most 512 KiB, each complete entry is at most 516
+KiB, and `report.md` is at most 2 MiB. If a new entry would exceed the file
+bound, Scufris discards the older history and keeps the new complete entry. A
+private lock serializes report operations. Scufris writes and flushes a private
+temporary report, atomically replaces `report.md`, flushes the job directory,
+and only then appends and flushes the matching status notification. A visible
+event therefore always has durable linked evidence, including across rollover
+or an interrupted write.
+
+Each worker receives a random report capability that authorizes only its own
+job. Foreground orchestration retains a separate random capability for trusted
+`failed` publication. A one-use launch capability protects the harness path
+that can generate failures, and it is invalidated before the worker starts.
+Only capability hashes are stored. Inspection and Quick Review open bounded
+report artifacts with no symlink following and require regular files. Report,
+lock, status, and authorization files remain private.
 
 The workflow extension watches each owned status file through filesystem
 notifications. It reads events only after a change notification; it does not
@@ -85,10 +104,10 @@ inspects the pinned context, worker prompt, report, and current state before it
 decides whether to review, steer more work, open a human review, land, or stop.
 A later instruction returns the same worker to `working`.
 
-Workers cannot report `failed`. Trusted orchestration emits
-`failed: <summary>` only when the harness exits unexpectedly or the reporting
-protocol breaks. Runtime failure, explicit stop, and landing are the only
-terminal ownership states.
+Workers cannot report `failed`. Trusted orchestration appends a linked
+`failed: <summary>` report entry and event only when the harness exits
+unexpectedly or the reporting protocol breaks. Runtime failure, explicit stop,
+and landing are the only terminal ownership states.
 
 Every worker runs in an owned tmux session. Shutdown targets only resources
 recorded for jobs owned by the foreground session.

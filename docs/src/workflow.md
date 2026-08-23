@@ -157,6 +157,8 @@ part of the default job lifecycle.
 - Quick Review is the custom local section-based walkthrough page. It supports
   exact-revision explanations, non-blocking section comments, an overall review
   comment, approval, and explained change requests.
+  `tools/quick-review/preview.py` serves the page against a deterministic
+  local fixture bridge for visual checks.
 - Plannotator review is a separate explicit since-base code-review tool. It
   does not replace Quick Review.
 - Local landing is an explicit guarded tool call after the selected workflow

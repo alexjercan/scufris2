@@ -27,16 +27,273 @@ MAX_CONTEXT_BYTES = 256 * 1024
 MAX_SECTIONS = 40
 
 CSS = r"""
-:root{color-scheme:light dark;--bg:#f6f8fa;--panel:#fff;--text:#1f2328;--muted:#656d76;--border:#d0d7de;--blue:#0969da;--green:#1a7f37;--red:#cf222e;--purple:#8250df;--orange:#bc4c00;--add:#dafbe1;--del:#ffebe9;--hunk:#ddf4ff;--code:#f6f8fa;--shadow:0 1px 2px rgba(31,35,40,.08)}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1120px;margin:auto;padding:40px 24px 80px}.hero,.card,.final{background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}.hero{padding:28px 32px;margin-bottom:22px}.eyebrow{color:var(--muted);font-weight:600;margin:0 0 5px}.hero h1{font-size:30px;line-height:1.25;margin:0 0 16px}.chips,.meta,.actions{display:flex;flex-wrap:wrap;gap:8px}.chip,.badge{display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:999px;padding:3px 9px;font-size:12px;font-weight:600;background:var(--bg)}.chip.good{color:var(--green);background:#dafbe1;border-color:#aceebb}.chip.add{color:var(--green)}.chip.del{color:var(--red)}.built{border-top:1px solid var(--border);margin-top:20px;padding-top:18px}.built h2{font-size:16px;margin:0 0 7px}.built p,.prose p{margin:6px 0}.progress-wrap{margin:20px 0}.progress-label{display:flex;justify-content:space-between;color:var(--muted);margin-bottom:7px}.progress{appearance:none;width:100%;height:8px;border:0;border-radius:99px;background:#d8dee4;overflow:hidden}.progress::-webkit-progress-bar{background:#d8dee4}.progress::-webkit-progress-value{background:var(--green)}.progress::-moz-progress-bar{background:var(--green)}.card{margin:16px 0;overflow:hidden}.card-head{padding:20px 24px 14px;display:flex;gap:16px;justify-content:space-between;align-items:flex-start}.card h2{font-size:19px;margin:0 0 7px}.number{color:var(--muted);font-weight:500}.meta{color:var(--muted);font-size:13px}.meta code{background:var(--code);border-radius:5px;padding:2px 6px}.importance-critical{color:var(--red);background:#ffebe9}.importance-important{color:var(--orange);background:#fff8c5}.importance-supporting{color:var(--purple);background:#fbefff}.state-not-reviewed{color:var(--muted)}.state-looks-good{color:var(--green);background:#dafbe1}.state-needs-explanation{color:var(--blue);background:#ddf4ff}.state-change-requested{color:var(--red);background:#ffebe9}.prose{padding:0 24px 16px;font-size:15px}.diff{margin:0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);overflow:auto;background:var(--code);font:12px/20px ui-monospace,SFMono-Regular,Consolas,monospace}.diff-line{display:block;white-space:pre;min-width:max-content;padding:0 16px;border-left:3px solid transparent}.diff-add{background:var(--add);border-color:var(--green)}.diff-del{background:var(--del);border-color:var(--red)}.diff-hunk{background:var(--hunk);color:var(--blue)}.diff-file{font-weight:600;color:var(--muted)}.prompt{margin:18px 24px;padding:12px 14px;border-left:4px solid var(--blue);background:#ddf4ff;border-radius:0 6px 6px 0}.prompt strong{display:block;color:var(--blue);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.answers{padding:0 24px}.answer{border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin:10px 0;background:var(--bg)}.answer strong{display:block;margin-bottom:4px}.controls{padding:16px 24px 22px}.comment,.question,.overall-comment{width:100%;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text);padding:9px 11px;margin:0 0 10px;font:inherit}.comment,.overall-comment{min-height:76px;resize:vertical}.button{appearance:none;border:1px solid rgba(31,35,40,.15);border-radius:0;background:#f6f8fa;color:#24292f;font-weight:600;padding:7px 13px;cursor:pointer;box-shadow:0 1px 0 rgba(31,35,40,.04)}.button:hover{background:#f3f4f6}.button:disabled{opacity:.55;cursor:wait}.button.primary{color:#fff;background:#1f883d}.button.danger{color:#fff;background:#cf222e}.button.link{color:var(--blue);background:var(--panel)}.feedback{min-height:22px;margin-top:8px;color:var(--muted)}.feedback.error{color:var(--red)}.feedback.success{color:var(--green)}.context-view{max-height:420px;overflow:auto;margin:10px 0 0;padding:12px 14px;border:1px solid var(--border);border-radius:6px;background:var(--code);color:var(--text);font:12px/20px ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre}.final{padding:24px 28px;margin-top:24px}.final h2{margin:0 0 4px}.final .actions{margin-top:16px}.warnings{color:var(--orange);margin:12px 0}.revision{font-family:ui-monospace,monospace}.spinner{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;margin-right:6px;vertical-align:-2px}@keyframes spin{to{transform:rotate(360deg)}}
-.card.viewed .card-details{display:none}.card.viewed{border-color:#aceebb}.view-control{display:flex;align-items:center;gap:7px;color:var(--muted);font-weight:600;white-space:nowrap}.view-control input{width:16px;height:16px;margin:0;accent-color:var(--green)}.button.subtle{background:transparent;color:var(--muted);box-shadow:none}.button.comment-action{color:#fff;background:var(--blue)}.comment-composer,.question-composer{border-top:1px solid var(--border);padding-top:14px;margin-top:14px}.comment-thread,.blocking-thread{border:1px solid var(--border);border-radius:6px;margin:10px 0;overflow:hidden}.comment-thread:empty,.blocking-thread:empty{display:none}.review-comment+.review-comment,.blocking-change+.blocking-change{border-top:1px solid var(--border)}.review-comment-head,.blocking-change-head{padding:7px 10px;background:var(--bg);font:12px ui-monospace,monospace;color:var(--muted)}.review-comment-body,.blocking-change-body{padding:10px;background:var(--panel);white-space:pre-wrap}.blocking-thread{border-color:var(--red)}.blocking-change-head{color:var(--red)}.review-summary:empty{display:none}.review-summary{margin-top:12px}.final-counts{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-weight:600;margin-top:10px}.overall-label{display:block;font-weight:600;margin:18px 0 6px}.hero-tools{margin-top:18px}.feedback.compact{display:none}
-@media(max-width:650px){main{padding:18px 10px 50px}.hero{padding:21px}.card-head{padding:17px;display:block}.card-head>.badge{margin-top:10px}.prose,.controls,.answers{padding-left:17px;padding-right:17px}.prompt{margin-left:17px;margin-right:17px}.actions .button{flex:1}}
-@media(prefers-color-scheme:dark){:root{--bg:#0d1117;--panel:#161b22;--text:#e6edf3;--muted:#8b949e;--border:#30363d;--blue:#58a6ff;--green:#3fb950;--red:#f85149;--purple:#bc8cff;--orange:#d29922;--add:#12261e;--del:#2d1619;--hunk:#13283a;--code:#0d1117}.button{background:#21262d;color:#e6edf3;border-color:#30363d}.chip.good,.state-looks-good{background:#12261e;border-color:#238636}.importance-critical,.state-change-requested{background:#2d1619}.importance-important{background:#302b13}.importance-supporting{background:#21183c}.state-needs-explanation,.prompt{background:#13283a}}
+:root {
+  color-scheme: light dark;
+  --bg: #eceeed;
+  --panel: #fbfcfb;
+  --ink: #1a1f20;
+  --muted: #535e5d;
+  --line: #c3cbc9;
+  --strong: #87958f;
+  --accent: #00587a;
+  --ok: #17632a;
+  --err: #9e1b26;
+  --warn: #7a4e00;
+  --add-bg: #e1f1e3;
+  --del-bg: #f6e3e3;
+  --hunk-bg: #e2ecf1;
+  --code-bg: #f0f2f1;
+  --hover: #e5e9e8;
+  --on-solid: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111514;
+    --panel: #171c1b;
+    --ink: #d9e1de;
+    --muted: #939d99;
+    --line: #2e3634;
+    --strong: #4d5a57;
+    --accent: #4fb3d9;
+    --ok: #46a05e;
+    --err: #e06058;
+    --warn: #cf9a3d;
+    --add-bg: #142b1c;
+    --del-bg: #33191b;
+    --hunk-bg: #122733;
+    --code-bg: #131817;
+    --hover: #1f2624;
+    --on-solid: #101413;
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.6 ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas,
+    "DejaVu Sans Mono", "Liberation Mono", monospace;
+}
+main { max-width: 1080px; margin: 0 auto; padding: 28px 20px 90px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 10;
+  background: var(--panel);
+  border: 1px solid var(--strong);
+  padding: 8px 12px;
+  color: var(--ink);
+}
+.skip:focus { left: 12px; top: 12px; }
+
+.masthead { background: var(--panel); border: 1px solid var(--line); padding: 22px 24px; margin-bottom: 18px; }
+.mast-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.eyebrow { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+.mast-rev { color: var(--muted); font-size: 12px; border: 1px solid var(--line); background: var(--code-bg); padding: 1px 8px; }
+h1 { margin: 0 0 10px; font-size: 19px; line-height: 1.35; }
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  margin: 16px 0 0;
+}
+.fact {
+  background: var(--panel);
+  padding: 8px 12px;
+  min-width: 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.fact dt { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 0 0 3px; }
+.fact dd { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.added { color: var(--ok); font-weight: 700; }
+.removed { color: var(--err); font-weight: 700; }
+.passed { color: var(--ok); font-weight: 700; }
+.warning { margin: 14px 0 0; padding: 8px 12px; border: 1px solid var(--warn); border-left-width: 3px; color: var(--warn); }
+.mast-tools { margin-top: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+.index { background: var(--panel); border: 1px solid var(--line); padding: 16px 20px; margin-bottom: 18px; }
+.index-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.index h2, .final h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+.index-progress { color: var(--muted); font-size: 12px; }
+.progress { appearance: none; display: block; width: 100%; height: 10px; border: 1px solid var(--line); background: var(--code-bg); }
+.progress::-webkit-progress-bar { background: var(--code-bg); }
+.progress::-webkit-progress-value { background: var(--ok); }
+.progress::-moz-progress-bar { background: var(--ok); }
+.index-list { list-style: none; margin: 12px 0 0; padding: 0; border-top: 1px solid var(--line); }
+.index-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+  min-width: 0;
+}
+.index-row:hover { background: var(--hover); }
+.index-mark { color: var(--muted); flex: none; }
+.index-mark.done { color: var(--ok); font-weight: 700; }
+.index-title { font-weight: 600; flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.index-file { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; min-width: 0; flex: 1; }
+.kbd-hint { margin: 10px 0 0; color: var(--muted); font-size: 11px; }
+kbd { border: 1px solid var(--strong); background: var(--code-bg); padding: 0 5px; font: inherit; font-size: 11px; }
+
+.tag, .badge {
+  display: inline-block;
+  border: 1px solid var(--line);
+  background: var(--code-bg);
+  color: var(--muted);
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.importance-critical { color: var(--err); border-color: var(--err); }
+.importance-important { color: var(--warn); border-color: var(--warn); }
+.importance-supporting { color: var(--muted); border-color: var(--strong); }
+.state-not-reviewed { color: var(--muted); }
+.state-looks-good { color: var(--ok); border-color: var(--ok); }
+.state-needs-explanation { color: var(--accent); border-color: var(--accent); }
+.state-change-requested { color: var(--err); border-color: var(--err); }
+
+.card { background: var(--panel); border: 1px solid var(--line); margin: 0 0 18px; scroll-margin-top: 16px; }
+.card.viewed { border-left: 3px solid var(--ok); }
+.card.viewed .card-details { display: none; }
+.card.viewed .card-head { border-bottom: 0; }
+.card.viewed h2 { color: var(--muted); }
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.card-title { min-width: 0; }
+.card-count { margin: 0 0 4px; color: var(--muted); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
+.card h2 { margin: 0 0 6px; font-size: 15px; }
+.meta { margin: 4px 0 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; min-width: 0; }
+.card-file { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.view-control {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+  flex: none;
+  cursor: pointer;
+}
+.view-control input { width: 15px; height: 15px; margin: 0; accent-color: var(--ok); }
+
+.prose { padding: 14px 20px; overflow-wrap: break-word; }
+.prose.intro { padding: 0; }
+.prose p { margin: 8px 0; }
+.prose h3, .prose h4, .prose h5, .prose h6 { margin: 14px 0 6px; font-size: 13px; letter-spacing: 0.05em; text-transform: uppercase; }
+.prose h3 { font-size: 14px; }
+.prose ul, .prose ol { margin: 8px 0; padding-left: 22px; }
+.prose li { margin: 3px 0; }
+.prose blockquote { margin: 10px 0; padding: 2px 12px; border-left: 3px solid var(--strong); color: var(--muted); }
+.prose hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
+.prose code { background: var(--code-bg); border: 1px solid var(--line); padding: 0 4px; font-size: 12px; overflow-wrap: anywhere; }
+.prose .md-code { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); background: var(--code-bg); overflow-x: auto; font-size: 12px; line-height: 18px; }
+.prose .md-code code { border: 0; background: none; padding: 0; }
+
+.diff { margin: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); overflow-x: auto; background: var(--code-bg); font-size: 12px; line-height: 20px; }
+.diff-line { display: block; white-space: pre; min-width: max-content; padding: 0 14px; border-left: 3px solid transparent; }
+.diff-add { background: var(--add-bg); border-left-color: var(--ok); }
+.diff-del { background: var(--del-bg); border-left-color: var(--err); }
+.diff-hunk { background: var(--hunk-bg); color: var(--accent); }
+.diff-file { color: var(--muted); font-weight: 600; }
+
+.prompt { margin: 14px 20px; padding: 10px 14px; border: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--code-bg); }
+.prompt strong { display: block; color: var(--accent); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; }
+.answers { margin: 0 20px; }
+.answer { border: 1px solid var(--line); background: var(--code-bg); padding: 10px 14px; margin: 10px 0; }
+.answer strong { display: block; margin-bottom: 4px; }
+.answer div { white-space: pre-wrap; overflow-wrap: anywhere; }
+.controls { padding: 14px 20px 20px; }
+
+.comment-thread, .blocking-thread { border: 1px solid var(--line); margin: 10px 0; }
+.comment-thread:empty, .blocking-thread:empty { display: none; }
+.review-comment + .review-comment, .blocking-change + .blocking-change { border-top: 1px solid var(--line); }
+.review-comment-head, .blocking-change-head { padding: 6px 12px; background: var(--code-bg); border-bottom: 1px solid var(--line); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.review-comment-body, .blocking-change-body { padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.blocking-thread { border-color: var(--err); }
+.blocking-change-head { color: var(--err); }
+
+.comment, .question, .overall-comment {
+  width: 100%;
+  border: 1px solid var(--strong);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  font: inherit;
+}
+.comment, .overall-comment { min-height: 84px; resize: vertical; }
+::placeholder { color: var(--muted); opacity: 0.8; }
+.comment-composer, .question-composer { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 14px; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+
+.button {
+  appearance: none;
+  border: 1px solid var(--strong);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.button:hover { background: var(--hover); }
+.button:disabled { opacity: 0.45; cursor: not-allowed; }
+.button.primary { background: var(--ok); border-color: var(--ok); color: var(--on-solid); }
+.button.danger { background: var(--err); border-color: var(--err); color: var(--on-solid); }
+.button.comment-action { background: var(--accent); border-color: var(--accent); color: var(--on-solid); }
+.button.primary:hover, .button.danger:hover, .button.comment-action:hover { filter: brightness(1.12); }
+
+.feedback { min-height: 20px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.feedback.error { color: var(--err); font-weight: 600; }
+.feedback.success { color: var(--ok); }
+.feedback.compact { width: 100%; min-height: 0; margin: 0; white-space: normal; text-align: right; }
+.feedback.compact:empty { display: none; }
+.spinner { display: inline-block; width: 9px; height: 9px; background: currentColor; margin-right: 7px; vertical-align: -1px; animation: pulse 1s steps(2, start) infinite; }
+@keyframes pulse { to { opacity: 0; } }
+.context-view { max-height: 420px; overflow: auto; margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--line); background: var(--code-bg); font-size: 12px; line-height: 18px; white-space: pre; }
+
+.final { background: var(--panel); border: 1px solid var(--line); padding: 20px 24px; margin-top: 24px; }
+.final-counts { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-weight: 600; font-size: 12px; margin-top: 12px; }
+.review-summary { margin-top: 12px; }
+.review-summary:empty { display: none; }
+.overall-label { display: block; font-weight: 700; margin: 16px 0 6px; }
+.final-note { color: var(--muted); font-size: 12px; margin: 10px 0; }
+
+@media (max-width: 680px) {
+  main { padding: 14px 10px 60px; }
+  .masthead, .index, .final { padding: 14px; }
+  .card-head { flex-direction: column; gap: 10px; }
+  .view-control { justify-content: flex-start; }
+  .prose, .controls { padding-left: 14px; padding-right: 14px; }
+  .prompt, .answers { margin-left: 14px; margin-right: 14px; }
+  .actions .button { flex: 1; }
+  .index-row { flex-wrap: wrap; }
+  .index-file { flex-basis: 100%; }
+  .index-row .tag { margin-left: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .spinner { animation: none; }
+}
 """
 
 JS = r"""
 const root=document.querySelector('main');
+const cards=[...root.querySelectorAll('[data-card]')];
 let currentState=null;
+let activeCard=-1;
 const stateLabels={'not-reviewed':'Not viewed','looks-good':'Viewed','needs-explanation':'Needs explanation','change-requested':'Change requested'};
 function escapeText(value){return document.createTextNode(value)}
 function commentBox(item){const box=document.createElement('div');box.className='review-comment';const head=document.createElement('div');head.className='review-comment-head';head.textContent=`Comment on ${item.file}:${item.lines}`;const body=document.createElement('div');body.className='review-comment-body';body.textContent=item.body;box.append(head,body);return box}
@@ -53,6 +310,7 @@ function renderState(state){
     if(state.viewed[id])viewed++;
     const card=document.querySelector(`[data-card="${CSS.escape(id)}"]`);if(card)card.classList.toggle('viewed',state.viewed[id]);
     const checkbox=document.querySelector(`[data-viewed="${CSS.escape(id)}"]`);if(checkbox)checkbox.checked=state.viewed[id];
+    const mark=document.querySelector(`[data-nav-viewed="${CSS.escape(id)}"]`);if(mark){mark.textContent=state.viewed[id]?'[x]':'[ ]';mark.classList.toggle('done',state.viewed[id]);}
     const badge=document.querySelector(`[data-state="${CSS.escape(id)}"]`);
     if(badge){badge.className=`badge state-${value}`;badge.replaceChildren(escapeText(stateLabels[value]||value));}
     const answers=document.querySelector(`[data-answers="${CSS.escape(id)}"]`);
@@ -78,6 +336,15 @@ async function act(control,action=control.dataset.action){
 root.addEventListener('click',event=>{const button=event.target.closest('button[data-action]');if(button){event.preventDefault();act(button)}});
 root.addEventListener('change',event=>{const checkbox=event.target.closest('input[data-viewed]');if(checkbox)act(checkbox,checkbox.checked?'mark-viewed':'reopen')});
 root.addEventListener('input',event=>{if(event.target.matches('.overall-comment'))syncFinalActions()});
+root.addEventListener('focusin',event=>{const card=event.target.closest('[data-card]');if(card)activeCard=cards.indexOf(card)});
+function focusCard(index){if(cards.length===0)return;activeCard=Math.min(cards.length-1,Math.max(0,index));const card=cards[activeCard];card.focus({preventScroll:true});card.scrollIntoView({block:'start'})}
+function typingTarget(target){return target instanceof HTMLElement&&(target.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(target.tagName))}
+document.addEventListener('keydown',event=>{
+  if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||typingTarget(event.target))return;
+  if(event.key==='j'){event.preventDefault();focusCard(activeCard+1)}
+  else if(event.key==='k'){event.preventDefault();focusCard(activeCard<=0?0:activeCard-1)}
+  else if(event.key==='v'&&activeCard>=0){const checkbox=cards[activeCard].querySelector('input[data-viewed]');if(checkbox&&!checkbox.disabled){event.preventDefault();checkbox.checked=!checkbox.checked;act(checkbox,checkbox.checked?'mark-viewed':'reopen')}}
+});
 """
 
 
@@ -271,12 +538,111 @@ def read_json_line(stream: BinaryIO, maximum: int = MAX_LINE_BYTES) -> Any:
         raise ValueError("bridge message is malformed") from error
 
 
-def prose(value: str) -> str:
-    return "".join(
-        f"<p>{html.escape(part).replace(chr(10), '<br>')}</p>"
-        for part in value.split("\n\n")
-        if part.strip()
-    )
+INLINE_CODE_PATTERN = re.compile(r"`([^`\n]+)`")
+LINK_PATTERN = re.compile(r"\[([^\]\n]+)\]\(([^()\s]+)\)")
+BOLD_PATTERN = re.compile(r"\*\*([^*\n]+?)\*\*")
+ITALIC_PATTERN = re.compile(r"(?<!\*)\*([^*\n]+?)\*(?!\*)")
+HEADING_PATTERN = re.compile(r"(#{1,6}) +(.+)")
+ORDERED_PATTERN = re.compile(r"[0-9]{1,9}[.)] +(.+)")
+
+
+def _emphasis(value: str) -> str:
+    value = LINK_PATTERN.sub(r'\1 <code class="md-link">\2</code>', value)
+    value = BOLD_PATTERN.sub(r"<strong>\1</strong>", value)
+    value = ITALIC_PATTERN.sub(r"<em>\1</em>", value)
+    return value
+
+
+def _inline(value: str) -> str:
+    escaped = html.escape(value)
+    parts: list[str] = []
+    position = 0
+    for match in INLINE_CODE_PATTERN.finditer(escaped):
+        parts.append(_emphasis(escaped[position : match.start()]))
+        parts.append(f"<code>{match.group(1)}</code>")
+        position = match.end()
+    parts.append(_emphasis(escaped[position:]))
+    return "".join(parts)
+
+
+def render_markdown(value: str) -> str:
+    """Render a safe structured Markdown subset to fully escaped HTML."""
+    blocks: list[str] = []
+    paragraph: list[str] = []
+    items: list[str] = []
+    list_tag = ""
+    quote: list[str] = []
+
+    def flush_paragraph() -> None:
+        if paragraph:
+            blocks.append(f"<p>{_inline(' '.join(paragraph))}</p>")
+            paragraph.clear()
+
+    def flush_list() -> None:
+        nonlocal list_tag
+        if items:
+            body = "".join(f"<li>{item}</li>" for item in items)
+            blocks.append(f"<{list_tag}>{body}</{list_tag}>")
+            items.clear()
+        list_tag = ""
+
+    def flush_quote() -> None:
+        if quote:
+            blocks.append(f"<blockquote><p>{_inline(' '.join(quote))}</p></blockquote>")
+            quote.clear()
+
+    def flush() -> None:
+        flush_paragraph()
+        flush_list()
+        flush_quote()
+
+    lines = value.split("\n")
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if stripped.startswith("```"):
+            flush()
+            code: list[str] = []
+            index += 1
+            while index < len(lines) and not lines[index].strip().startswith("```"):
+                code.append(lines[index])
+                index += 1
+            escaped = html.escape("\n".join(code))
+            blocks.append(f'<pre class="md-code"><code>{escaped}</code></pre>')
+        elif heading := HEADING_PATTERN.fullmatch(stripped):
+            flush()
+            level = min(len(heading.group(1)) + 2, 6)
+            blocks.append(f"<h{level}>{_inline(heading.group(2))}</h{level}>")
+        elif stripped in {"---", "***", "___"}:
+            flush()
+            blocks.append("<hr>")
+        elif stripped.startswith(("- ", "* ", "+ ")):
+            flush_paragraph()
+            flush_quote()
+            if list_tag != "ul":
+                flush_list()
+                list_tag = "ul"
+            items.append(_inline(stripped[2:].strip()))
+        elif ordered := ORDERED_PATTERN.fullmatch(stripped):
+            flush_paragraph()
+            flush_quote()
+            if list_tag != "ol":
+                flush_list()
+                list_tag = "ol"
+            items.append(_inline(ordered.group(1)))
+        elif stripped.startswith(">"):
+            flush_paragraph()
+            flush_list()
+            quote.append(stripped[1:].strip())
+        elif not stripped:
+            flush()
+        else:
+            flush_list()
+            flush_quote()
+            paragraph.append(stripped)
+        index += 1
+    flush()
+    return "".join(blocks)
 
 
 def diff_html(value: str) -> str:
@@ -297,56 +663,193 @@ def diff_html(value: str) -> str:
     return "".join(lines)
 
 
-def render_page(document: dict[str, Any], state: dict[str, Any]) -> str:
-    reviewed = sum(state["viewed"].values())
-    total = len(document["sections"])
-    cards = []
-    labels = {
-        "not-reviewed": "Not viewed",
-        "looks-good": "Viewed",
-        "needs-explanation": "Needs explanation",
-        "change-requested": "Change requested",
-    }
-    for index, section in enumerate(document["sections"], 1):
-        section_id = html.escape(section["id"], quote=True)
-        value = state["sections"][section["id"]]
-        answers = "".join(
-            f'<div class="answer"><strong>{html.escape(item["question"])}</strong><div>{html.escape(item["answer"])}</div></div>'
-            for item in state.get("questions", [])
-            if item.get("sectionId") == section["id"] and item.get("answer")
-        )
-        comments = "".join(
-            f'<div class="review-comment"><div class="review-comment-head">Comment on {html.escape(item["file"])}:{html.escape(item["lines"])}</div><div class="review-comment-body">{html.escape(item["body"])}</div></div>'
-            for item in state.get("comments", [])
-            if item.get("sectionId") == section["id"]
-        )
-        blocking = "".join(
-            f'<div class="blocking-change"><div class="blocking-change-head">Existing change request on {html.escape(section["file"])}:{html.escape(section["lines"])}</div><div class="blocking-change-body">{html.escape(item["feedback"])}</div></div>'
-            for item in state.get("changeRequests", [])
-            if item.get("sectionId") == section["id"]
-        )
-        viewed_class = " viewed" if state["viewed"][section["id"]] else ""
-        checked = " checked" if state["viewed"][section["id"]] else ""
-        cards.append(
-            f'''<article class="card{viewed_class}" id="change-{section_id}" data-card="{section_id}"><header class="card-head"><div><h2><span class="number">{index}.</span> {html.escape(section["id"].replace("-", " ").title())}</h2><div class="meta"><span class="badge importance-{section["importance"]}">{html.escape(section["importance"].title())}</span><code>{html.escape(section["file"])}:{html.escape(section["lines"])}</code><span class="badge state-{value}" data-state="{section_id}">{labels[value]}</span></div></div><label class="view-control" data-scope data-section="{section_id}"><input type="checkbox" data-viewed="{section_id}"{checked}><span>Viewed</span><span class="feedback compact" role="status" aria-live="polite"></span></label></header><div class="card-details"><div class="prose">{prose(section["markdown"])}</div><pre class="diff" aria-label="Git diff">{diff_html(section["diff"])}</pre><div class="prompt"><strong>Review prompt</strong>{html.escape(section["prompt"])}</div><div class="answers" data-answers="{section_id}">{answers}</div><div class="controls" data-scope data-section="{section_id}"><div class="blocking-thread" data-blocks="{section_id}">{blocking}</div><div class="comment-thread" data-comments="{section_id}">{comments}</div><div class="comment-composer"><textarea class="comment" maxlength="4096" placeholder="Leave a comment on this section" aria-label="Section review comment"></textarea><button class="button comment-action" data-action="add-comment" data-input=".comment">Add comment</button></div><div class="actions"><button class="button" data-action="explain">Explain review prompt</button><button class="button" data-action="context">Show context</button></div><div class="question-composer"><input class="question" maxlength="4096" placeholder="Ask a question about this exact revision" aria-label="Question for reviewer"><button class="button link" data-action="ask" data-input=".question">Ask reviewer</button></div><div class="feedback" role="status" aria-live="polite"></div><pre class="context-view" aria-label="Exact-revision file context" hidden><code></code></pre></div></div></article>'''
-        )
+STATE_LABELS = {
+    "not-reviewed": "Not viewed",
+    "looks-good": "Viewed",
+    "needs-explanation": "Needs explanation",
+    "change-requested": "Change requested",
+}
+
+
+def _title(section_id: str) -> str:
+    return section_id.replace("-", " ").title()
+
+
+def _comment_html(item: dict[str, Any]) -> str:
+    return (
+        '<div class="review-comment">'
+        f'<div class="review-comment-head">Comment on {html.escape(item["file"])}:{html.escape(item["lines"])}</div>'
+        f'<div class="review-comment-body">{html.escape(item["body"])}</div></div>'
+    )
+
+
+def _blocking_html(anchor: str, feedback: str) -> str:
+    return (
+        '<div class="blocking-change">'
+        f'<div class="blocking-change-head">Existing change request on {html.escape(anchor)}</div>'
+        f'<div class="blocking-change-body">{html.escape(feedback)}</div></div>'
+    )
+
+
+def _masthead(document: dict[str, Any]) -> str:
     warnings = "".join(
-        f'<div class="warnings">Warning: {html.escape(item)}</div>'
+        f'<div class="warning" role="note">warn: {html.escape(item)}</div>'
         for item in document["warnings"]
     )
+    return (
+        '<header class="masthead">'
+        '<div class="mast-line"><span class="eyebrow">scufris // quick review</span>'
+        f'<code class="mast-rev" title="Reviewed revision">{html.escape(document["revision"][:12])}</code></div>'
+        f"<h1>{html.escape(document['title'])}</h1>"
+        f'<div class="prose intro">{render_markdown(document["summary"])}</div>'
+        '<dl class="facts">'
+        f'<div class="fact"><dt>revision</dt><dd><code>{html.escape(document["revision"])}</code></dd></div>'
+        f'<div class="fact"><dt>base</dt><dd><code>{html.escape(document["baseRevision"])}</code></dd></div>'
+        f'<div class="fact"><dt>files</dt><dd>{document["files"]}</dd></div>'
+        f'<div class="fact"><dt>lines</dt><dd><span class="added">+{document["added"]}</span> <span class="removed">-{document["removed"]}</span></dd></div>'
+        '<div class="fact"><dt>preflight</dt><dd class="passed">passed</dd></div>'
+        "</dl>"
+        f"{warnings}"
+        '<div class="mast-tools" data-scope>'
+        '<button class="button" data-action="full-diff">View exact full diff</button>'
+        '<div class="feedback" role="status" aria-live="polite"></div>'
+        "</div></header>"
+    )
+
+
+def _index(document: dict[str, Any], state: dict[str, Any]) -> str:
+    rows = []
+    for section in document["sections"]:
+        section_id = html.escape(section["id"], quote=True)
+        viewed = state["viewed"][section["id"]]
+        rows.append(
+            f'<li><a class="index-row" href="#change-{section_id}">'
+            f'<span class="index-mark{" done" if viewed else ""}" data-nav-viewed="{section_id}">{"[x]" if viewed else "[ ]"}</span>'
+            f'<span class="index-title">{html.escape(_title(section["id"]))}</span>'
+            f'<code class="index-file">{html.escape(section["file"])}:{html.escape(section["lines"])}</code>'
+            f'<span class="tag importance-{section["importance"]}">{html.escape(section["importance"])}</span>'
+            "</a></li>"
+        )
+    reviewed = sum(state["viewed"].values())
+    total = len(document["sections"])
+    return (
+        '<nav class="index" id="changes" aria-label="Changes">'
+        f'<div class="index-head"><h2>Changes ({total})</h2>'
+        f'<span class="index-progress"><span data-reviewed>{reviewed}</span>/<span data-total>{total}</span> viewed</span></div>'
+        f'<progress class="progress" data-progress value="{reviewed}" max="{total}"></progress>'
+        f'<ol class="index-list">{"".join(rows)}</ol>'
+        '<p class="kbd-hint">keys: <kbd>j</kbd> next change / <kbd>k</kbd> previous change / <kbd>v</kbd> toggle viewed</p>'
+        "</nav>"
+    )
+
+
+def _card(
+    index: int, total: int, section: dict[str, Any], state: dict[str, Any]
+) -> str:
+    section_id = html.escape(section["id"], quote=True)
+    value = state["sections"][section["id"]]
+    answers = "".join(
+        f'<div class="answer"><strong>{html.escape(item["question"])}</strong><div>{html.escape(item["answer"])}</div></div>'
+        for item in state.get("questions", [])
+        if item.get("sectionId") == section["id"] and item.get("answer")
+    )
+    comments = "".join(
+        _comment_html(item)
+        for item in state.get("comments", [])
+        if item.get("sectionId") == section["id"]
+    )
+    anchor = f"{section['file']}:{section['lines']}"
+    blocking = "".join(
+        _blocking_html(anchor, item["feedback"])
+        for item in state.get("changeRequests", [])
+        if item.get("sectionId") == section["id"]
+    )
+    viewed = state["viewed"][section["id"]]
+    return (
+        f'<article class="card{" viewed" if viewed else ""}" id="change-{section_id}" data-card="{section_id}" tabindex="-1">'
+        '<header class="card-head"><div class="card-title">'
+        f'<p class="card-count">change {index} of {total}</p>'
+        f"<h2>{html.escape(_title(section['id']))}</h2>"
+        f'<p class="meta"><code class="card-file">{html.escape(section["file"])}:{html.escape(section["lines"])}</code></p>'
+        f'<p class="meta tags"><span class="tag importance-{section["importance"]}">{html.escape(section["importance"])}</span>'
+        f'<span class="badge state-{value}" data-state="{section_id}">{STATE_LABELS[value]}</span></p>'
+        "</div>"
+        f'<label class="view-control" data-scope data-section="{section_id}">'
+        f'<input type="checkbox" data-viewed="{section_id}"{" checked" if viewed else ""}><span>Viewed</span>'
+        '<span class="feedback compact" role="status" aria-live="polite"></span></label></header>'
+        '<div class="card-details">'
+        f'<div class="prose">{render_markdown(section["markdown"])}</div>'
+        f'<pre class="diff" tabindex="0" aria-label="Git diff">{diff_html(section["diff"])}</pre>'
+        f'<div class="prompt"><strong>Review prompt</strong>{html.escape(section["prompt"])}</div>'
+        f'<div class="answers" data-answers="{section_id}">{answers}</div>'
+        f'<div class="controls" data-scope data-section="{section_id}">'
+        f'<div class="blocking-thread" data-blocks="{section_id}">{blocking}</div>'
+        f'<div class="comment-thread" data-comments="{section_id}">{comments}</div>'
+        '<div class="comment-composer"><textarea class="comment" maxlength="4096" placeholder="Leave a comment on this section" aria-label="Section review comment"></textarea>'
+        '<button class="button comment-action" data-action="add-comment" data-input=".comment">Add comment</button></div>'
+        '<div class="actions"><button class="button" data-action="explain">Explain review prompt</button>'
+        '<button class="button" data-action="context">Show context</button></div>'
+        '<div class="question-composer"><input class="question" maxlength="4096" placeholder="Ask a question about this exact revision" aria-label="Question for reviewer">'
+        '<button class="button" data-action="ask" data-input=".question">Ask reviewer</button></div>'
+        '<div class="feedback" role="status" aria-live="polite"></div>'
+        '<pre class="context-view" aria-label="Exact-revision file context" hidden><code></code></pre>'
+        "</div></div></article>"
+    )
+
+
+def _final(document: dict[str, Any], state: dict[str, Any]) -> str:
+    reviewed = sum(state["viewed"].values())
+    total = len(document["sections"])
     comments = state.get("comments", [])
     blocks = state.get("changeRequests", [])
-    summary_notes = "".join(
-        f'<div class="review-comment"><div class="review-comment-head">Comment on {html.escape(item["file"])}:{html.escape(item["lines"])}</div><div class="review-comment-body">{html.escape(item["body"])}</div></div>'
-        for item in comments
-    )
-    can_approve = reviewed == total and not blocks and not state["approved"]
+    anchors = {
+        section["id"]: f"{section['file']}:{section['lines']}"
+        for section in document["sections"]
+    }
+    summary_notes = "".join(_comment_html(item) for item in comments)
     blocking_summary = "".join(
-        f'<div class="blocking-change"><div class="blocking-change-head">Existing change request on {html.escape(item["sectionId"])}</div><div class="blocking-change-body">{html.escape(item["feedback"])}</div></div>'
+        _blocking_html(
+            anchors.get(item["sectionId"], item["sectionId"]), item["feedback"]
+        )
         for item in blocks
     )
+    can_approve = reviewed == total and not blocks and not state["approved"]
     approval_label = "Approve with comments" if comments else "Approve"
-    return f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>{html.escape(document["title"])}</title><link rel="stylesheet" href="style.css"></head><body><main><section class="hero"><p class="eyebrow">Scufris implementation walkthrough</p><h1>{html.escape(document["title"])}</h1><div class="chips"><span class="chip good">Preflight passed</span><span class="chip">{document["files"]} files</span><span class="chip add">+{document["added"]}</span><span class="chip del">-{document["removed"]}</span><span class="chip revision">{html.escape(document["revision"][:12])}</span></div><div class="built"><h2>What was built</h2>{prose(document["summary"])}</div>{warnings}<div class="hero-tools" data-scope><button class="button" data-action="full-diff">View exact full diff</button><div class="feedback" role="status" aria-live="polite"></div></div></section><div class="progress-wrap"><div class="progress-label"><strong>Review progress</strong><span><span data-reviewed>{reviewed}</span>/<span data-total>{total}</span> sections viewed</span></div><progress class="progress" data-progress value="{reviewed}" max="{total}"></progress></div>{"".join(cards)}<section class="final" data-scope><h2>Final review</h2><div class="final-counts"><span><span data-reviewed>{reviewed}</span>/<span data-total>{total}</span> viewed</span><span><span data-note-count>{len(comments)}</span> section comments</span><span><span data-block-count>{len(blocks)}</span> existing change requests</span></div><div class="review-summary comment-thread" data-review-summary>{summary_notes}</div><div class="blocking-thread" data-change-summary>{blocking_summary}</div><label class="overall-label" for="overall-review-comment">Overall review comment</label><textarea id="overall-review-comment" class="overall-comment" maxlength="4096" placeholder="Leave an optional approval comment, or explain why changes are needed" aria-label="Overall review comment"></textarea><p>Approval requires every section to be viewed. Request changes requires an overall explanation and includes any existing section change requests shown above.</p><div class="actions"><button class="button primary" data-action="approve" data-input=".overall-comment" {"" if can_approve else "disabled"}>{approval_label}</button><button class="button danger" data-action="request-changes" data-input=".overall-comment" hidden>Request changes</button></div><div class="feedback" role="status" aria-live="polite"></div></section></main><script src="app.js" defer></script></body></html>"""
+    return (
+        '<section class="final" data-scope>'
+        "<h2>Final review</h2>"
+        '<div class="final-counts">'
+        f"<span><span data-reviewed>{reviewed}</span>/<span data-total>{total}</span> viewed</span>"
+        f"<span><span data-note-count>{len(comments)}</span> section comments</span>"
+        f"<span><span data-block-count>{len(blocks)}</span> existing change requests</span></div>"
+        f'<div class="review-summary comment-thread" data-review-summary>{summary_notes}</div>'
+        f'<div class="blocking-thread" data-change-summary>{blocking_summary}</div>'
+        '<label class="overall-label" for="overall-review-comment">Overall review comment</label>'
+        '<textarea id="overall-review-comment" class="overall-comment" maxlength="4096" placeholder="Leave an optional approval comment, or explain why changes are needed" aria-label="Overall review comment"></textarea>'
+        '<p class="final-note">Approval requires every section to be viewed. Request changes requires an overall explanation and includes any existing section change requests shown above.</p>'
+        f'<div class="actions"><button class="button primary" data-action="approve" data-input=".overall-comment" {"" if can_approve else "disabled"}>{approval_label}</button>'
+        '<button class="button danger" data-action="request-changes" data-input=".overall-comment" hidden>Request changes</button></div>'
+        '<div class="feedback" role="status" aria-live="polite"></div>'
+        "</section>"
+    )
+
+
+def render_page(document: dict[str, Any], state: dict[str, Any]) -> str:
+    total = len(document["sections"])
+    cards = "".join(
+        _card(index, total, section, state)
+        for index, section in enumerate(document["sections"], 1)
+    )
+    return (
+        '<!doctype html><html><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta name="referrer" content="no-referrer">'
+        f"<title>{html.escape(document['title'])}</title>"
+        '<link rel="stylesheet" href="style.css"></head><body>'
+        '<a class="skip" href="#changes">Skip to changes</a>'
+        f"<main>{_masthead(document)}{_index(document, state)}{cards}{_final(document, state)}</main>"
+        '<script src="app.js" defer></script></body></html>'
+    )
 
 
 @dataclass

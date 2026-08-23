@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import re
 import sys
 import threading
 import time
@@ -68,10 +69,8 @@ class QuickReviewTest(unittest.TestCase):
         self.assertIn('class="diff-line diff-add"', page)
         self.assertIn('class="diff-line diff-context"', page)
         self.assertNotIn('style="', page)
-        self.assertIn(
-            ".button{appearance:none;border:1px solid rgba(31,35,40,.15);border-radius:0;",
-            quick_review.CSS,
-        )
+        self.assertNotIn("border-radius", quick_review.CSS)
+        self.assertNotIn("box-shadow", quick_review.CSS)
         self.assertNotIn("<form", page)
         self.assertIn(
             '<pre class="context-view" aria-label="Exact-revision file context" hidden><code></code></pre>',
@@ -101,6 +100,85 @@ class QuickReviewTest(unittest.TestCase):
         self.assertIn("request.hidden=!hasOverall", quick_review.JS)
         self.assertIn("feedback.className='feedback error'", quick_review.JS)
         self.assertIn("classList.toggle('viewed'", quick_review.JS)
+
+    def test_prose_renders_structured_markdown_safely(self) -> None:
+        rendered = quick_review.render_markdown(
+            "# Heading\n"
+            "\n"
+            "Intro **bold** and *italic* with `x < y` inline code.\n"
+            "\n"
+            "- first <item>\n"
+            "- second\n"
+            "\n"
+            "1. one\n"
+            "2. two\n"
+            "\n"
+            "> quoted note\n"
+            "\n"
+            "```py\n"
+            "<script>alert(1)</script>\n"
+            "```\n"
+            "\n"
+            "See [docs](https://example.com/guide)."
+        )
+        self.assertIn("<h3>Heading</h3>", rendered)
+        self.assertIn("<strong>bold</strong>", rendered)
+        self.assertIn("<em>italic</em>", rendered)
+        self.assertIn("<code>x &lt; y</code>", rendered)
+        self.assertIn("<ul><li>first &lt;item&gt;</li><li>second</li></ul>", rendered)
+        self.assertIn("<ol><li>one</li><li>two</li></ol>", rendered)
+        self.assertIn("<blockquote><p>quoted note</p></blockquote>", rendered)
+        self.assertIn(
+            '<pre class="md-code"><code>&lt;script&gt;alert(1)&lt;/script&gt;'
+            "</code></pre>",
+            rendered,
+        )
+        self.assertIn(
+            'docs <code class="md-link">https://example.com/guide</code>', rendered
+        )
+        self.assertNotIn("<script>", rendered)
+        self.assertNotIn("<a ", rendered)
+
+    def test_navigation_index_and_internal_links_only(self) -> None:
+        value = quick_review.validate_init(descriptor())
+        page = quick_review.render_page(value["document"], value["state"])
+        self.assertIn('<nav class="index" id="changes" aria-label="Changes">', page)
+        self.assertIn('href="#change-safe-change"', page)
+        self.assertIn('data-nav-viewed="safe-change">[ ]<', page)
+        self.assertIn(
+            '<progress class="progress" data-progress value="0" max="1">', page
+        )
+        self.assertIn("<kbd>j</kbd>", page)
+        self.assertEqual(
+            sorted(set(re.findall(r'href="([^"]+)"', page))),
+            ["#change-safe-change", "#changes", "style.css"],
+        )
+
+    def test_viewed_section_collapses_and_marks_navigation(self) -> None:
+        value = descriptor()
+        value["state"]["viewed"]["safe-change"] = True
+        value["state"]["sections"]["safe-change"] = "looks-good"
+        page = quick_review.render_page(
+            quick_review.validate_init(value)["document"], value["state"]
+        )
+        self.assertIn('class="card viewed"', page)
+        self.assertIn('data-nav-viewed="safe-change">[x]<', page)
+        self.assertIn('data-viewed="safe-change" checked', page)
+        self.assertIn(
+            'data-action="approve" data-input=".overall-comment" >Approve</button>',
+            page,
+        )
+
+    def test_keyboard_navigation_wiring(self) -> None:
+        self.assertIn("document.addEventListener('keydown'", quick_review.JS)
+        self.assertIn("event.key==='j'", quick_review.JS)
+        self.assertIn("event.key==='k'", quick_review.JS)
+        self.assertIn("event.key==='v'", quick_review.JS)
+        self.assertIn("typingTarget(event.target)", quick_review.JS)
+        self.assertIn("data-nav-viewed", quick_review.JS)
+        value = quick_review.validate_init(descriptor())
+        page = quick_review.render_page(value["document"], value["state"])
+        self.assertIn('data-card="safe-change" tabindex="-1"', page)
 
     def test_anchored_comments_are_bounded_and_escaped(self) -> None:
         value = descriptor()

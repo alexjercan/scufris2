@@ -1,5 +1,21 @@
 # Roadmap: staged work
 
+## Resequenced after post-research pairing (2026-08-24)
+
+The stages below remain valid as work packages, but the order changed
+and the library work moves to the curator tool outside the-den:
+
+1. scufris-desktop HUD v1 (task `20260822-132001`; architecture
+   decided: own Tauri app, future third host of dashboardd-runtime).
+2. today CLI and widget improvement, using the local widget dev loop
+   (locally run dashboardd, DASHBOARDD_WIDGET_PATH at repo bundles).
+3. Scufris x today (stage 1 below).
+4. The curator: stages 2 through 5 below transfer to it, with its own
+   store outside the-den. Stage 6 (briefing) follows Scufris x today
+   and later moves onto the HUD canvas.
+
+Original staging follows.
+
 Stages are ordered by dependency and value density. Each is a small
 vertical slice that ships through the release gate (prototype, test,
 release, pin in nix.dotfiles, rebuild) and is useful on its own. The

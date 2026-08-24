@@ -1,6 +1,6 @@
 # Research the Jarvis vision: Scufris over the-den with widget answers
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 80
 - TAGS: research
 

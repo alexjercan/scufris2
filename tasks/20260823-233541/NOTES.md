@@ -44,8 +44,10 @@ Do not spend research effort on these. They were considered and dropped.
 - "Everything is a widget." i3 plus rofi already handle application-level
   workflow. Widgets are for assistant-driven presentation and interaction,
   not a second window manager.
-- Restructuring the-den. The current format is good enough. Growth is
-  additive only: possibly `.ics` files, a research library, attachments.
+- Restructuring the-den for its own sake. Round 2: per-domain formats
+  are negotiable when they serve the today CLI and widgets; the-den
+  stays personal notes, journal, and tracking. The research library
+  moved out to the curator tool.
 - Merging repositories. Composition happens in nix.dotfiles.
 
 ## The pieces and their roles
@@ -172,8 +174,12 @@ mostly built.
 
 ## The library
 
-The den's biggest planned growth. It starts empty; collection comes
-before retrieval.
+Round-2 update: the library's home moves out of the-den into the
+curator tool's own store. The design below - division of labor,
+storage, retrieval, ingestion, course builder - transfers to the
+curator unchanged.
+
+It starts empty; collection comes before retrieval.
 
 Purpose: a place where research material accumulates and stays useful.
 Concrete first use cases:
@@ -292,6 +298,46 @@ Full suite, in this task directory, refocused on the vision above.
 - Models: local-first; cloud per modality only when justified.
 - Course builder: vision pillar with UX flow and HTML concept now,
   build after library capture exists.
+
+## Decisions from pairing, round 2 (2026-08-24, post-research)
+
+These supersede earlier lines where they conflict.
+
+- Sequence: the scufris-desktop HUD comes first, then today CLI and
+  widget improvement, then Scufris x today, then the curator. Today
+  can wait until tomorrow.
+- The one-place invariant is the today CLI, not the daily Markdown
+  file. Per-domain storage is negotiable: Markdown where prose wins,
+  JSON or SQLite where structure wins, wrapped external CLIs where one
+  already fits. The single-spine versus per-domain-stores decision is
+  deferred until the CLI and widget work makes it obvious.
+- the-den is personal notes, journal, and tracking only. The library
+  and learning material move out of the-den into the curator: a
+  separate CLI-first tool (SDK-shaped, a platform could grow later)
+  with its own store. Scufris asks it to research a topic from seed
+  references; it produces curated artifacts - research brief with
+  citations, explainer, or course with checks. The capture, ingestion,
+  retrieval, and reference-display research transfers to it wholesale.
+- scufris-desktop is its own Tauri app living in the scufris2 repo as
+  a `desktop/` cargo workspace (scufris2 is a Pi package; npm there is
+  LSP tooling, not a build system), shipped as a separate flake
+  package. V1 is the pill: an always-on-top Siri-style overlay (the
+  desktop stays usable while it listens), transcript review, tray.
+  V2 adds the full-screen conversation mode. Same stack as
+  dashboardd-desktop on purpose: v3 embeds dashboardd-runtime as a
+  third host and takes over primary widget hosting, demoting
+  dashboardd-desktop to a manual tool. dashboardd itself stays
+  Scufris-agnostic. STT is a configurable endpoint with an optional
+  bundled whisper-server (the Piper precedent), so scufris works out
+  of the box on any Nix system. No window manager gets built; i3
+  remains the app-level answer.
+- Widget iteration runs against a locally started dashboardd with
+  DASHBOARDD_WIDGET_PATH pointed at repo-built bundles; release-time
+  skew is avoided by bumping related pins in one nix.dotfiles commit
+  (the switch is atomic).
+- Morning briefing delivery: conversation answer plus opened widgets
+  now; the HUD full-screen mode becomes the briefing canvas later; no
+  briefing page-builder tool.
 
 ## Open questions for pairing
 

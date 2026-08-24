@@ -24,7 +24,10 @@ Orchestration tools:
   into Markdown guidance and return a single-use 24-hex context ID.
 - `scufris_job_spawn`: start one worker. Optional harness, model, thinking,
   workspace, feature, and `review_of` selections. A project context ID is
-  consumed exactly once; `project` and `sprout` workspaces require one.
+  consumed exactly once; `project` and `sprout` workspaces require one. Review
+  jobs honor Pi or Claude selections and return the enforced built-in tool
+  allowlist, explicit `not-os-sandboxed` filesystem isolation, and trusted host
+  boundaries. Claude names managed hook/plugin policy as trusted.
 - `scufris_job_list`, `scufris_job_inspect`: owned-job index and bounded
   inspection with optional report, context, prompt, and conversation.
 - `scufris_job_send`: append one guidance line and restart the job in a new

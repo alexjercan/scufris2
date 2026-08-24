@@ -40,6 +40,9 @@ LOGICAL_STATES = {*EVENTS, "suspended"}
 TERMINAL_EVENTS = {"blocked", "done", "failed"}
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 WORKSPACES = {"temporary", "project", "sprout", "review"}
+PI_REVIEW_TOOLS = "read,grep,find,ls,scufris_report"
+CLAUDE_REVIEW_TOOLS = "Read,Glob,Grep"
+CLAUDE_DENIED_REVIEW_TOOLS = "Bash,Edit,Write,NotebookEdit,Task,WebFetch,WebSearch"
 RECORD_VERSION = 2
 MAX_REQUEST = 2 * 1024 * 1024
 MAX_JOB_RECORD = 64 * 1024
@@ -456,6 +459,17 @@ def render_context(project: str, source: Path) -> dict[str, Any]:
             guidance = entry.get("guidance")
             if keywords is not None and not isinstance(keywords, dict):
                 raise ValueError(f"preference {key} keywords must be a table")
+            if keywords is not None and "harness" in keywords:
+                try:
+                    selected_adapter(
+                        keywords["harness"],
+                        keywords.get("model"),
+                        keywords.get("thinking"),
+                    )
+                except JobError as error:
+                    raise ValueError(
+                        f"preference {key} has an unsupported adapter: {error}"
+                    ) from error
             if guidance is not None and (
                 not isinstance(guidance, str) or not guidance.strip()
             ):
@@ -522,6 +536,8 @@ def context(request: dict[str, Any]) -> dict[str, Any]:
 
 def selected_adapter(harness: Any, model: Any, thinking: Any) -> tuple[str, str, str]:
     selected_harness = "pi" if harness is None else harness
+    if not isinstance(selected_harness, str):
+        raise JobError("harness must be pi or claude")
     defaults = {
         "pi": ("openai-codex/gpt-5.6-sol", "medium"),
         "claude": ("opus", "xhigh"),
@@ -533,17 +549,37 @@ def selected_adapter(harness: Any, model: Any, thinking: Any) -> tuple[str, str,
     selected_thinking = default_thinking if thinking is None else thinking
     if (
         not isinstance(selected_model, str)
-        or not selected_model
+        or not selected_model.strip()
         or len(selected_model) > 200
+        or not selected_model.isprintable()
     ):
         raise JobError("invalid model")
-    if selected_thinking not in THINKING:
+    if not isinstance(selected_thinking, str) or selected_thinking not in THINKING:
         raise JobError("invalid thinking level")
     if selected_harness == "pi" and selected_thinking == "max":
         raise JobError("Pi does not support max thinking")
     if selected_harness == "claude" and selected_thinking in {"off", "minimal"}:
         raise JobError("Claude does not support off or minimal thinking")
     return selected_harness, selected_model, selected_thinking
+
+
+def review_isolation(harness: str, workspace: str) -> dict[str, Any] | None:
+    if workspace != "review":
+        return None
+    return {
+        "enforcement": "model-tool-allowlist",
+        "filesystem": "not-os-sandboxed",
+        "tools": (
+            PI_REVIEW_TOOLS.split(",")
+            if harness == "pi"
+            else CLAUDE_REVIEW_TOOLS.split(",")
+        ),
+        "trusted_boundary": (
+            ["harness-executable"]
+            if harness == "pi"
+            else ["harness-executable", "managed-claude-policy"]
+        ),
+    }
 
 
 def worker_prompt(
@@ -573,30 +609,27 @@ def worker_prompt(
             """
         ).strip()
     )
-    reporting = (
-        "Call the `scufris_report` tool."
-        if harness == "pi"
-        else dedent(
-            f"""\
-            Send reports through `{Path(__file__).with_name("scufris-report")}`.
-            Pass the event and one-line summary as arguments and the detailed
-            Markdown report on standard input.
-            """
-        ).strip()
-    )
-    return f"""# Scufris delegated job
+    if review and harness == "claude":
+        communication = """## Communication
 
-{role}
-
-Do not spawn other workers. Read instructions and project-local skills from
-your working directory when relevant. On a restarted execution, also read the
-adjacent durable `report.md` and `conversation.md` before continuing.
-{project_section}
-## Request
-
-{instructions.strip()}
-
-## Communication
+Return one concrete Markdown review as your final response. Scufris records
+that response as the terminal review report. You cannot send progress events
+or mutate the implementation workspace. If the review cannot complete, explain
+the blocker in the final response. The trusted runtime reports harness failures.
+"""
+    else:
+        reporting = (
+            "Call the `scufris_report` tool."
+            if harness == "pi"
+            else dedent(
+                f"""\
+                Send reports through `{Path(__file__).with_name("scufris-report")}`.
+                Pass the event and one-line summary as arguments and the detailed
+                Markdown report on standard input.
+                """
+            ).strip()
+        )
+        communication = f"""## Communication
 
 {reporting} Do not modify `status` or `report.md` directly. Each report appends
 one status-linked Markdown entry and then its validated event for foreground
@@ -620,6 +653,19 @@ and conversation, then decides whether to review, land, stop, or continue. If
 it continues, you resume in this same session with its guidance appended to
 `conversation.md`, so do not repeat work you already finished.
 """
+    return f"""# Scufris delegated job
+
+{role}
+
+Do not spawn other workers. Read instructions and project-local skills from
+your working directory when relevant. On a restarted execution, also read the
+adjacent durable `report.md` and `conversation.md` before continuing.
+{project_section}
+## Request
+
+{instructions.strip()}
+
+{communication}"""
 
 
 def safe_feature(value: Any, job_id: str) -> str:
@@ -676,6 +722,7 @@ def prepare_execution(record: dict[str, Any]) -> tuple[dict[str, Any], str]:
 
 
 def start_execution(record: dict[str, Any], launch_capability: str) -> dict[str, Any]:
+    validate_workspace_identity(record)
     name = record["tmux_session_name"]
     result = tmux(
         [
@@ -833,8 +880,6 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
     review_of = request.get("review_of")
     source: dict[str, Any] | None = None
     if review_of is not None:
-        if harness != "pi":
-            raise JobError("independent review jobs require the read-only Pi harness")
         source = load_job(validate_job_id(review_of))
         source_root = load_job(source["root_job"])
         if source_root["cleanup"] is not None:
@@ -872,6 +917,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
     directory.mkdir(mode=0o700)
     fsync_directory(root_jobs)
     working: Path | None = None
+    working_identity: tuple[str, int, int] | None = None
     sprout_created = False
     try:
         if workspace == "temporary":
@@ -889,16 +935,17 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
             )
         else:
             assert source is not None
-            working = canonical_path(Path(source["working_directory"]))
-            identity = path_identity(working)
-            if identity != (
+            working_identity = path_identity(Path(source["working_directory"]))
+            working = Path(working_identity[0])
+            if working_identity != (
                 source["working_directory"],
                 source["workspace_device"],
                 source["workspace_inode"],
             ):
                 raise JobError("review source workspace identity changed")
         assert working is not None
-        working_identity = path_identity(working)
+        if working_identity is None:
+            working_identity = path_identity(working)
         prompt = worker_prompt(
             instructions, context_markdown, source is not None, harness
         )
@@ -987,6 +1034,7 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
             "tmux_session": running["tmux_session_name"],
             "status_file": str(directory / "status"),
             "message": "Worker started.",
+            "review_isolation": review_isolation(harness, workspace),
         }
     except Exception:
         # A durable record is intentionally retained if execution creation began.
@@ -1315,6 +1363,17 @@ def load_legacy_job_for_reporting(job_id: str) -> dict[str, Any]:
     return value
 
 
+def validate_execution_cwd(job: dict[str, Any]) -> None:
+    info = os.stat(".")
+    current = canonical_path(Path.cwd())
+    if (
+        str(current) != job["working_directory"]
+        or info.st_dev != job["workspace_device"]
+        or info.st_ino != job["workspace_inode"]
+    ):
+        raise JobError("execution working directory identity changed")
+
+
 def worker_environment() -> dict[str, str]:
     env = os.environ.copy()
     for variable in (
@@ -1345,6 +1404,7 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
         or not secrets.compare_digest(capability_hash(capability), expected_launch)
     ):
         raise JobError("launch capability does not authorize this generation")
+    validate_execution_cwd(job)
     directory = job_dir(job_id)
     # Generation 1 opens the pinned prompt. Every later generation restores the
     # same harness session and continues it with the foreground's guidance.
@@ -1385,7 +1445,34 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
             job["harness_session"],
         ]
         if job["workspace"] == "review":
-            argv.extend(["--tools", "read,grep,find,ls,scufris_report"])
+            argv.extend(["--tools", PI_REVIEW_TOOLS])
+        argv.append(prompt)
+    elif job["workspace"] == "review":
+        argv = [
+            "claude",
+            "--print",
+            "--model",
+            job["model"],
+            "--effort",
+            job["thinking"],
+            "--permission-mode",
+            "dontAsk",
+            "--tools",
+            CLAUDE_REVIEW_TOOLS,
+            "--disallowed-tools",
+            CLAUDE_DENIED_REVIEW_TOOLS,
+            "--disable-slash-commands",
+            "--strict-mcp-config",
+            "--mcp-config",
+            '{"mcpServers":{}}',
+            "--setting-sources",
+            "",
+        ]
+        argv.extend(
+            ["--resume", job["harness_session"]]
+            if resuming
+            else ["--session-id", job["harness_session"]]
+        )
         argv.append(prompt)
     else:
         argv = [
@@ -1417,23 +1504,27 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
     env["SCUFRIS_ROLE"] = "worker"
     env["SCUFRIS_JOB_ID"] = job_id
     env["SCUFRIS_JOB_GENERATION"] = str(job["generation"])
-    env["SCUFRIS_REPORT_CAPABILITY"] = report_capability
+    capture_review = job["workspace"] == "review" and job["harness"] == "claude"
+    if not capture_review:
+        env["SCUFRIS_REPORT_CAPABILITY"] = report_capability
     if job["harness"] == "claude":
         env["CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"] = "false"
     executable = shutil.which(argv[0], path=env.get("PATH"))
     if executable is None:
         raise JobError(f"harness executable not found: {argv[0]}")
-    completed = subprocess.run([executable, *argv[1:]], env=env, check=False)
-    current = load_job(job_id)
-    if current["generation"] == job["generation"] and current["execution_state"]:
-        latest = latest_event(job_id)
-        if latest is None or latest["event"] not in TERMINAL_EVENTS:
-            write_report(
-                job_id,
-                "failed",
-                "worker harness exited unexpectedly",
-                f"Worker harness exited with status {completed.returncode}.",
-            )
+    completed = subprocess.run(
+        [executable, *argv[1:]],
+        env=env,
+        check=False,
+        stdout=subprocess.PIPE if capture_review else None,
+        stderr=subprocess.PIPE if capture_review else None,
+    )
+    publish_harness_completion(
+        job_id,
+        job["generation"],
+        completed,
+        capture_review=capture_review,
+    )
     raise SystemExit(completed.returncode)
 
 
@@ -1514,6 +1605,7 @@ def record_snapshot(job: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, 
 def finish_precreated_execution(
     job: dict[str, Any], snapshot: dict[str, Any]
 ) -> dict[str, Any]:
+    validate_workspace_identity(job)
     job = record_snapshot(job, snapshot)
     launch_path = job_dir(job["job_id"]) / ".launch-capability"
     launch_capability = read_bounded_artifact(launch_path, 128).decode("ascii")
@@ -1736,6 +1828,7 @@ def write_report(
     detail: str,
     *,
     legacy: bool = False,
+    expected_generation: int | None = None,
 ) -> None:
     display = f"{event}: {summary}"
     try:
@@ -1765,6 +1858,8 @@ def write_report(
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
         generation = 0 if legacy else load_job(job_id)["generation"]
+        if expected_generation is not None and generation != expected_generation:
+            raise JobError("job generation changed before report publication")
         current = read_bounded_artifact(directory / "report.md", MAX_REPORT_FILE)
         updated = current + (b"\n" if current else b"") + entry
         if len(updated) > MAX_REPORT_FILE:
@@ -1795,6 +1890,65 @@ def write_report(
     finally:
         temporary.unlink(missing_ok=True)
         os.close(lock_fd)
+
+
+def publish_harness_completion(
+    job_id: str,
+    expected_generation: int,
+    completed: subprocess.CompletedProcess[bytes],
+    *,
+    capture_review: bool,
+) -> bool:
+    with workflow_lock():
+        current = load_job(job_id, archived=True)
+        if (
+            current["archived_at"] is not None
+            or current["generation"] != expected_generation
+            or current["execution_state"] is None
+        ):
+            return False
+        latest = latest_event(job_id, current)
+        if (
+            latest is not None
+            and latest["generation"] == expected_generation
+            and latest["event"] in TERMINAL_EVENTS
+        ):
+            return False
+        if capture_review and completed.returncode == 0:
+            assert completed.stdout is not None
+            output = completed.stdout.decode("utf-8", "replace").strip()
+            if output and len(output.encode("utf-8")) <= MAX_REPORT_DETAIL:
+                write_report(
+                    job_id,
+                    "done",
+                    "independent review complete",
+                    output,
+                    expected_generation=expected_generation,
+                )
+            else:
+                reason = "returned no report" if not output else "report was too large"
+                write_report(
+                    job_id,
+                    "failed",
+                    "Claude review output was invalid",
+                    f"The read-only Claude reviewer {reason}.",
+                    expected_generation=expected_generation,
+                )
+        else:
+            detail = f"Worker harness exited with status {completed.returncode}."
+            if capture_review:
+                assert completed.stderr is not None
+                stderr = completed.stderr.decode("utf-8", "replace").strip()
+                if stderr:
+                    detail += f"\n\n{stderr[-4000:]}"
+            write_report(
+                job_id,
+                "failed",
+                "worker harness exited unexpectedly",
+                detail,
+                expected_generation=expected_generation,
+            )
+        return True
 
 
 def report(request: dict[str, Any]) -> dict[str, Any]:
@@ -1971,21 +2125,23 @@ def acknowledge_event(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_workspace_identity(job: dict[str, Any]) -> Path:
-    workspace = canonical_path(Path(job["working_directory"]))
-    if path_identity(workspace) != (
+    workspace_identity = path_identity(Path(job["working_directory"]))
+    if workspace_identity != (
         job["working_directory"],
         job["workspace_device"],
         job["workspace_inode"],
     ):
         raise JobError("workspace identity changed")
+    workspace = Path(workspace_identity[0])
     if job["project"] is not None:
-        root = canonical_path(Path(job["project_root"]))
-        if path_identity(root) != (
+        root_identity = path_identity(Path(job["project_root"]))
+        if root_identity != (
             job["project_root"],
             job["project_root_device"],
             job["project_root_inode"],
         ):
             raise JobError("project root identity changed")
+        root = Path(root_identity[0])
         resolved_project, configured = resolve_project(job["project"])
         if resolved_project != job["project"] or canonical_path(configured) != root:
             raise JobError("project configuration drifted from the recorded root")
@@ -2096,6 +2252,7 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
         )
     }
     result["window_alive"] = pane_alive(job)
+    result["review_isolation"] = review_isolation(job["harness"], job["workspace"])
     status = read_regular_tail(directory / "status", MAX_STATUS_DETAIL).decode(
         "utf-8", errors="replace"
     )
@@ -2890,6 +3047,7 @@ def recover(request: dict[str, Any]) -> dict[str, Any]:
                 "trusted_capability": capability,
                 "summary": job["summary"],
                 "window_alive": pane_alive(job),
+                "review_isolation": review_isolation(job["harness"], job["workspace"]),
             }
         )
     return {"jobs": recovered}

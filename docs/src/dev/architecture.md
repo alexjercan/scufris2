@@ -67,6 +67,13 @@ shape with text on stdin and exit codes instead of JSON.
   files, and every read is bounded. Symlinked paths fail closed.
 - Repository content, worker reports, and review handoffs are treated as
   untrusted data in prompts, never as instructions.
+- Independent reviewers receive an enforced harness-specific built-in tool
+  allowlist. Pi gets only read tools plus authenticated reporting. Claude gets
+  only Read, Glob, and Grep; the trusted wrapper records its final response.
+  This is not an OS filesystem sandbox. The harness executable is trusted, and
+  Claude managed policy is also trusted because policy hooks and plugin hooks
+  execute outside the built-in tool list. Review metadata states these
+  boundaries explicitly.
 
 ## Data at rest
 

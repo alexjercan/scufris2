@@ -29,6 +29,10 @@ state = pathlib.Path(os.environ['XDG_STATE_HOME'])
 directory = state / 'scufris' / 'jobs' / os.environ['SCUFRIS_JOB_ID']
 (directory / 'worker-prompt.txt').write_text(sys.argv[-1])
 (directory / 'worker-argv.json').write_text(__import__('json').dumps(sys.argv[1:]))
+if '--tools' in sys.argv:
+    tools = set(sys.argv[sys.argv.index('--tools') + 1].split(','))
+    if {'bash', 'edit', 'write'} & tools:
+        (pathlib.Path.cwd() / 'PI_MUTATION').write_text('unsafe tools exposed\\n')
 (directory / 'worker-capability').write_text(__import__('os').environ['SCUFRIS_REPORT_CAPABILITY'])
 generation = int(__import__('os').environ['SCUFRIS_JOB_GENERATION'])
 with (directory / 'status').open('a') as stream:
@@ -523,6 +527,31 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         self.assertTrue(listed["configured"])
         self.assertIn("checks: npm run check, nix flake check", listed["markdown"])
 
+        (self.project / ".scufris.toml").write_text(
+            "[preferences.review]\n"
+            'keywords = { harness = "claude", model = "opus", thinking = "xhigh" }\n'
+        )
+        claude_review = self.call("context", {"project": "projects/nova-protocol"})[
+            "result"
+        ]
+        self.assertTrue(claude_review["configured"])
+        self.assertIn("harness: claude", claude_review["markdown"])
+        self.assertIsNone(claude_review["diagnostic"])
+
+        for adapter in (
+            '{ harness = "claude", model = "opus", thinking = "minimal" }',
+            '{ harness = "unknown", model = "reviewer", thinking = "medium" }',
+            '{ harness = "pi", model = "reviewer", thinking = "max" }',
+        ):
+            (self.project / ".scufris.toml").write_text(
+                f"[preferences.review]\nkeywords = {adapter}\n"
+            )
+            unsupported = self.call("context", {"project": "projects/nova-protocol"})[
+                "result"
+            ]
+            self.assertFalse(unsupported["configured"])
+            self.assertIn("unsupported adapter", unsupported["diagnostic"])
+
     def test_general_job_uses_temporary_workspace_and_generic_events(self) -> None:
         job_id = "abc123def456"
         result = self.call(
@@ -969,6 +998,15 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         )["result"]
         self.jobs.append(review_id)
         self.assertEqual(review["workspace"], "review")
+        self.assertEqual(
+            review["review_isolation"],
+            {
+                "enforcement": "model-tool-allowlist",
+                "filesystem": "not-os-sandboxed",
+                "tools": ["read", "grep", "find", "ls", "scufris_report"],
+                "trusted_boundary": ["harness-executable"],
+            },
+        )
         review_directory = self.root / "state" / "scufris" / "jobs" / review_id
         self.wait_for(review_directory / "status", "done: report complete")
         self.assertIn(
@@ -981,9 +1019,372 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
             str(REPOSITORY / "extensions/scufris/workflow/worker-report.ts"),
             argv,
         )
+        self.assertFalse((self.project / "PI_MUTATION").exists())
         review_record = json.loads((review_directory / "job.json").read_text())
         self.assertEqual(review_record["review_of"], job_id)
         self.assertEqual(review_record["working_directory"], str(self.project))
+        source_record = json.loads((directory / "job.json").read_text())
+        self.assertEqual(
+            (
+                review_record["working_directory"],
+                review_record["workspace_device"],
+                review_record["workspace_inode"],
+            ),
+            (
+                source_record["working_directory"],
+                source_record["workspace_device"],
+                source_record["workspace_inode"],
+            ),
+        )
+
+    def test_claude_review_uses_enforced_read_tools_and_captured_report(self) -> None:
+        claude_review = """#!/usr/bin/env python3
+import json
+import os
+import pathlib
+import sys
+state = pathlib.Path(os.environ['XDG_STATE_HOME'])
+directory = state / 'scufris' / 'jobs' / os.environ['SCUFRIS_JOB_ID']
+generation = int(os.environ['SCUFRIS_JOB_GENERATION'])
+argv = sys.argv[1:]
+(directory / 'worker-argv.json').write_text(json.dumps(argv))
+(directory / f'worker-argv-g{generation}.json').write_text(json.dumps(argv))
+(directory / 'worker-env.json').write_text(json.dumps({
+    'report_capability': 'SCUFRIS_REPORT_CAPABILITY' in os.environ,
+}))
+tools = argv[argv.index('--tools') + 1].split(',')
+if {'Bash', 'Edit', 'Write', 'NotebookEdit'} & set(tools):
+    (pathlib.Path.cwd() / 'CLAUDE_MUTATION').write_text('unsafe tools exposed\\n')
+print(f'# Claude independent review generation {generation}\\n\\nNo findings.')
+"""
+        (self.bin / "claude").write_text(claude_review)
+        (self.bin / "claude").chmod(0o755)
+        context = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        source_id = "c1a0de000001"
+        common = {
+            "owner_session": "claude-review-owner",
+            "project": context["project"],
+            "project_root": context["project_root"],
+            "context_markdown": context["markdown"],
+            "context_fingerprint": context["fingerprint"],
+        }
+        self.call(
+            "spawn",
+            {
+                "job_id": source_id,
+                "instructions": "Implement the review fixture.",
+                **common,
+            },
+        )
+        self.jobs.append(source_id)
+        review_context = self.call("context", {"project": "projects/nova-protocol"})[
+            "result"
+        ]
+        review_id = "c1a0de000002"
+        result = self.call(
+            "spawn",
+            {
+                "job_id": review_id,
+                "instructions": "Review the implementation for concrete defects.",
+                "owner_session": "claude-review-owner",
+                "project": review_context["project"],
+                "project_root": review_context["project_root"],
+                "context_markdown": review_context["markdown"],
+                "context_fingerprint": review_context["fingerprint"],
+                "review_of": source_id,
+                "harness": "claude",
+                "model": "opus",
+                "thinking": "xhigh",
+            },
+        )["result"]
+        self.jobs.append(review_id)
+        self.assertEqual(result["harness"], "claude")
+        self.assertEqual(result["model"], "opus")
+        self.assertEqual(result["thinking"], "xhigh")
+        self.assertEqual(
+            result["review_isolation"],
+            {
+                "enforcement": "model-tool-allowlist",
+                "filesystem": "not-os-sandboxed",
+                "tools": ["Read", "Glob", "Grep"],
+                "trusted_boundary": [
+                    "harness-executable",
+                    "managed-claude-policy",
+                ],
+            },
+        )
+        review_directory = self.root / "state" / "scufris" / "jobs" / review_id
+        self.wait_for(
+            review_directory / "status",
+            "done: independent review complete",
+        )
+        argv = json.loads((review_directory / "worker-argv.json").read_text())
+        self.assertIn("--print", argv)
+        self.assertNotIn("--dangerously-skip-permissions", argv)
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
+        self.assertEqual(argv[argv.index("--tools") + 1], "Read,Glob,Grep")
+        self.assertEqual(argv[argv.index("--setting-sources") + 1], "")
+        self.assertIn("Bash", argv[argv.index("--disallowed-tools") + 1])
+        self.assertIn("--session-id", argv)
+        worker_env = json.loads((review_directory / "worker-env.json").read_text())
+        self.assertFalse(worker_env["report_capability"])
+        self.assertFalse((self.project / "CLAUDE_MUTATION").exists())
+        prompt = (review_directory / "prompt.md").read_text()
+        self.assertIn("Return one concrete Markdown review", prompt)
+        self.assertNotIn("Send reports through", prompt)
+        inspected = self.call("inspect", {"job_id": review_id, "include_report": True})[
+            "result"
+        ]
+        self.assertEqual(inspected["working_directory"], str(self.project))
+        self.assertEqual(inspected["review_isolation"], result["review_isolation"])
+        self.assertIn("# Claude independent review generation 1", inspected["report"])
+
+        first_events = self.call("events", {"jobs": [{"job_id": review_id}]})["result"][
+            "jobs"
+        ][0]["events"]
+        for event in first_events:
+            self.call("ack-event", {"job_id": review_id, "event_id": event["id"]})
+        resumed = self.call(
+            "send", {"job_id": review_id, "message": "Recheck the correction."}
+        )["result"]
+        self.assertEqual(resumed["generation"], 2)
+        self.wait_for(
+            review_directory / "status",
+            '"generation":2,"event":"done","summary":"independent review complete"',
+        )
+        second_argv = json.loads((review_directory / "worker-argv-g2.json").read_text())
+        self.assertIn("--resume", second_argv)
+        self.assertNotIn("--session-id", second_argv)
+        report = (review_directory / "report.md").read_text()
+        self.assertIn("# Claude independent review generation 1", report)
+        self.assertIn("# Claude independent review generation 2", report)
+        self.assertEqual(report.count("# done: independent review complete"), 2)
+
+        jobs_module = load_jobs_module()
+        stale = subprocess.CompletedProcess(
+            ["claude"], 0, b"# Stale generation one output\n", b""
+        )
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            self.assertFalse(
+                jobs_module.publish_harness_completion(
+                    review_id, 1, stale, capture_review=True
+                )
+            )
+        self.assertNotIn(
+            "Stale generation one output",
+            (review_directory / "report.md").read_text(),
+        )
+        with (
+            mock.patch.dict(os.environ, self.env, clear=True),
+            self.assertRaisesRegex(
+                jobs_module.JobError,
+                "job generation changed before report publication",
+            ),
+        ):
+            jobs_module.write_report(
+                review_id,
+                "done",
+                "stale publication",
+                "Must not publish.",
+                expected_generation=1,
+            )
+        self.assertNotIn(
+            "Must not publish.", (review_directory / "report.md").read_text()
+        )
+
+    def test_adapter_rejects_unsupported_harness_thinking_combinations(self) -> None:
+        jobs_module = load_jobs_module()
+        cases = (
+            ("pi", "reviewer", "max", "Pi does not support max thinking"),
+            ("claude", "opus", "minimal", "Claude does not support"),
+            ("other", "reviewer", "medium", "harness must be pi or claude"),
+        )
+        for harness, model, thinking, message in cases:
+            with self.assertRaisesRegex(jobs_module.JobError, message):
+                jobs_module.selected_adapter(harness, model, thinking)
+
+    def test_review_launches_refuse_replaced_workspace_identity(self) -> None:
+        context = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        source_id = "c0ffee000001"
+        review_id = "c0ffee000002"
+        common = {
+            "owner_session": "identity-review-owner",
+            "project": context["project"],
+            "project_root": context["project_root"],
+            "context_markdown": context["markdown"],
+            "context_fingerprint": context["fingerprint"],
+        }
+        self.call(
+            "spawn",
+            {"job_id": source_id, "instructions": "Own the workspace.", **common},
+        )
+        self.jobs.append(source_id)
+        self.call(
+            "spawn",
+            {
+                "job_id": review_id,
+                "instructions": "Review the exact workspace.",
+                "review_of": source_id,
+                **common,
+            },
+        )
+        self.jobs.append(review_id)
+        review_directory = self.root / "state" / "scufris" / "jobs" / review_id
+        self.wait_for(review_directory / "status", "done: report complete")
+        events = self.call("events", {"jobs": [{"job_id": review_id}]})["result"][
+            "jobs"
+        ][0]["events"]
+        for event in events:
+            self.call("ack-event", {"job_id": review_id, "event_id": event["id"]})
+
+        jobs_module = load_jobs_module()
+        token = "d" * 64
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            record = jobs_module.load_job(review_id)
+            creating = {
+                **record,
+                "generation": 2,
+                "state": "working",
+                "summary": "recovery launch pending",
+                "execution_state": "creating",
+                "tmux_session_name": jobs_module.execution_session_name(
+                    review_id, 2, token
+                ),
+                "tmux_session_id": None,
+                "tmux_window_id": None,
+                "tmux_pane_id": None,
+                "execution_token": token,
+            }
+            jobs_module.store_job(creating)
+            jobs_module.atomic_write(
+                review_directory / ".launch-capability", b"0" * 64, 0o400
+            )
+
+        original = self.root / "original-project"
+        self.project.rename(original)
+        shutil.copytree(original, self.project)
+        previous_cwd = Path.cwd()
+        try:
+            with mock.patch.dict(os.environ, self.env, clear=True):
+                with (
+                    mock.patch.object(jobs_module, "tmux") as tmux_call,
+                    self.assertRaisesRegex(
+                        jobs_module.JobError, "workspace identity changed"
+                    ),
+                ):
+                    jobs_module.start_execution(creating, "0" * 64)
+                tmux_call.assert_not_called()
+
+                with (
+                    mock.patch.object(jobs_module, "tmux") as tmux_call,
+                    self.assertRaisesRegex(
+                        jobs_module.JobError, "workspace identity changed"
+                    ),
+                ):
+                    jobs_module.finish_precreated_execution(creating, {})
+                tmux_call.assert_not_called()
+
+                with (
+                    mock.patch.object(
+                        jobs_module, "execution_snapshot", return_value=None
+                    ),
+                    self.assertRaisesRegex(
+                        jobs_module.JobError, "workspace identity changed"
+                    ),
+                ):
+                    jobs_module.recover_job(creating)
+
+                os.chdir(self.project)
+                with self.assertRaisesRegex(
+                    jobs_module.JobError,
+                    "execution working directory identity changed",
+                ):
+                    jobs_module.validate_execution_cwd(creating)
+        finally:
+            os.chdir(previous_cwd)
+            shutil.rmtree(self.project)
+            original.rename(self.project)
+
+    def test_claude_review_creation_recovery_captures_terminal_report(self) -> None:
+        claude_review = """#!/usr/bin/env python3
+import json
+import os
+import pathlib
+import sys
+state = pathlib.Path(os.environ['XDG_STATE_HOME'])
+directory = state / 'scufris' / 'jobs' / os.environ['SCUFRIS_JOB_ID']
+(directory / 'recovered-argv.json').write_text(json.dumps(sys.argv[1:]))
+print('# Recovered Claude review\\n\\nNo findings.')
+"""
+        (self.bin / "claude").write_text(claude_review)
+        (self.bin / "claude").chmod(0o755)
+        context = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        source_id = "decade000001"
+        review_id = "decade000002"
+        common = {
+            "owner_session": "claude-recovery-owner",
+            "project": context["project"],
+            "project_root": context["project_root"],
+            "context_markdown": context["markdown"],
+            "context_fingerprint": context["fingerprint"],
+        }
+        self.call(
+            "spawn",
+            {"job_id": source_id, "instructions": "Own the workspace.", **common},
+        )
+        self.jobs.append(source_id)
+
+        jobs_module = load_jobs_module()
+        request = {
+            "job_id": review_id,
+            "instructions": "Recover this Claude review creation.",
+            "trusted_capability": hashlib.sha256(b"trusted:recovery").hexdigest(),
+            "review_of": source_id,
+            "harness": "claude",
+            "model": "opus",
+            "thinking": "xhigh",
+            **common,
+        }
+        original_store = jobs_module.store_job
+        injected = False
+
+        def crash_after_server_creation(record: dict[str, Any]) -> None:
+            nonlocal injected
+            if (
+                not injected
+                and record.get("execution_state") == "creating"
+                and record.get("tmux_session_id") is not None
+            ):
+                injected = True
+                raise OSError("injected Claude review creation crash")
+            original_store(record)
+
+        with (
+            mock.patch.dict(os.environ, self.env, clear=True),
+            mock.patch.object(
+                jobs_module, "store_job", side_effect=crash_after_server_creation
+            ),
+            self.assertRaisesRegex(OSError, "injected Claude review creation crash"),
+        ):
+            jobs_module.spawn(request)
+        self.jobs.append(review_id)
+
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            durable = jobs_module.load_job(review_id)
+            self.assertEqual(durable["execution_state"], "creating")
+            recovered = jobs_module.recover({"owner_session": "claude-recovery-owner"})
+            self.assertTrue(
+                next(job for job in recovered["jobs"] if job["job_id"] == review_id)[
+                    "window_alive"
+                ]
+            )
+        review_directory = self.root / "state" / "scufris" / "jobs" / review_id
+        self.wait_for(review_directory / "status", "done: independent review complete")
+        argv = json.loads((review_directory / "recovered-argv.json").read_text())
+        self.assertIn("--session-id", argv)
+        self.assertIn(
+            "# Recovered Claude review", (review_directory / "report.md").read_text()
+        )
 
     def test_generation_cursor_is_lossless_and_restart_does_not_replay(self) -> None:
         job_id = "aabbccddeeff"

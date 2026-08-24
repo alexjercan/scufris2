@@ -80,8 +80,12 @@ result is still needed.
 Project preferences can select optional phases. They never run automatically.
 
 - For an independent review, resolve a fresh context for the same project and
-  call `scufris_job_spawn` with `review_of` set to the implementation job. The
-  reviewer runs read-only in the exact source workspace.
+  call `scufris_job_spawn` with `review_of` set to the implementation job.
+  Reproduce the configured or explicitly requested review harness, model, and
+  thinking. Pi and Claude reviewers run in the exact source workspace with an
+  enforced built-in model-tool read allowlist. This is not an OS filesystem
+  sandbox. Inspect the returned isolation and trusted-boundary diagnostics;
+  Claude managed hook/plugin policy remains part of the trusted host boundary.
 - Call `scufris_job_quick_review` when project guidance selects the custom
   section-based Quick Review page. It generates an exact-revision walkthrough
   with explanations, non-blocking section comments, an overall review comment,

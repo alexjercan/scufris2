@@ -53,12 +53,14 @@ checked against the worker namespace before the command is built.
 
 ## Pane lifecycle
 
-The launch command inside the pane consumes the one-use launch capability,
-writes the worker's report capability into its environment, and runs the
-harness in the job's working directory. `remain-on-exit` keeps the pane (and
-its scrollback) visible after the harness exits. When the harness exits
-without a terminal event, the wrapper publishes a trusted `failed` report for
-that generation.
+The launch command inside the pane consumes the one-use launch capability and
+runs the harness in the job's working directory. Adapters that report directly
+receive the worker report capability in their environment. Claude reviewers do
+not receive it: they run in bounded print mode, and the trusted wrapper captures
+their final response and publishes the terminal `done` report.
+`remain-on-exit` keeps the pane and its scrollback visible after the harness
+exits. When any harness exits without its expected terminal result, the wrapper
+publishes a trusted `failed` report for that exact generation.
 
 A terminal event stops the execution session promptly from the `events` read
 path; steering kills the old execution the same exact way before starting the

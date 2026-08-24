@@ -28,9 +28,14 @@ the implementation harness and model, review, and the landing gate.
 
 Workers report progress events. `working` is quiet by default. `blocked`,
 `done`, and runtime-generated `failed` events wake Scufris, which inspects the
-job report and decides what follows. Landing never happens implicitly; the
-configured review must approve first, and Scufris then lands with an explicit
-guarded operation.
+job report and decides what follows. Independent review uses the configured Pi
+or Claude harness and model against the implementation job's exact workspace.
+Both adapters expose only read built-in tools to the reviewer model. This is
+enforced at the model-tool boundary, not by an operating-system read-only
+filesystem sandbox. The harness executable remains trusted; for Claude,
+administrator-managed hook and plugin policy is trusted too. Landing never
+happens implicitly; the configured review must approve
+first, and Scufris then lands with an explicit guarded operation.
 
 Each worker runs in a named tmux session on the default server. Attach to it
 read-only to watch, but do not type into worker panes.

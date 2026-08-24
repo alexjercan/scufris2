@@ -368,6 +368,12 @@ interface SpawnResult {
   tmux_session: string | null;
   status_file: string;
   message: string;
+  review_isolation: {
+    enforcement: "model-tool-allowlist";
+    filesystem: "not-os-sandboxed";
+    tools: string[];
+    trusted_boundary: string[];
+  } | null;
 }
 
 interface OwnedJob extends SpawnResult {
@@ -1194,6 +1200,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             harness: job.harness,
             model: job.model,
             thinking: job.thinking,
+            review_isolation: job.review_isolation,
             window_alive: job.window_alive,
           })),
         });

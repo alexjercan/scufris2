@@ -41,7 +41,11 @@ report authority, validates the recorded workspace identity, and starts a new
 execution. Generation 1 opens `prompt.md`; every later generation restores the
 job's own harness session, so a continuation is a true restore, not a prompt
 replay. Pi passes `--session-id` every time; Claude pins the ID first and
-resumes it after.
+resumes it after. Initial creation, precreated completion, restart, and recovery
+revalidate the recorded workspace path, device, and inode before tmux launch.
+The launch wrapper then validates its inherited current-directory inode before
+starting the harness, closing the path replacement window between checking a
+pathname and entering it.
 
 ## Projects and preferences
 
@@ -60,8 +64,13 @@ Use a Sprout workspace for project implementation.
 
 The rendered context includes the file's SHA-256 fingerprint. Preferences are
 advisory: a missing or malformed file degrades to inference, never an error.
-Every new project job consumes a fresh single-use context; the exact snapshot
-is stored beside the job.
+When a preference declares `harness`, its optional `model` and `thinking`
+keywords are validated by the same adapter resolver used at spawn. Supported
+harnesses are `pi` and `claude`; Pi rejects `max`, and Claude rejects `off` and
+`minimal`. An unsupported tuple makes the file unusable and returns an
+`ignored .scufris.toml` diagnostic instead of promising a workflow runtime
+cannot start. Every new project job consumes a fresh single-use context; the
+exact snapshot is stored beside the job.
 
 ## Spawn
 
@@ -75,15 +84,30 @@ the workspace:
 - `project`: the project root itself.
 - `sprout`: a new Sprout worktree for a validated feature name.
 - `review`: the exact workspace of an owned source job, revalidated by path,
-  device, and inode. Selected implicitly by `review_of`; reviewers require
-  the read-only Pi harness and share the source's owner and project.
+  device, and inode. Selected implicitly by `review_of`; reviewers use the
+  requested Pi or Claude adapter and share the source's owner and project.
 
 The worker prompt embeds the role (bounded worker or read-only reviewer), the
 rendered project context, the request, and the reporting contract. Pi workers
-launch with `--approve --no-extensions` plus only the report extension;
-review workers are restricted to `read,grep,find,ls,scufris_report`. Claude
-workers launch with `--dangerously-skip-permissions` and report through the
-`scufris-report` command line adapter.
+launch with `--approve --no-extensions` plus only the report extension. Pi
+reviewers are restricted to `read,grep,find,ls,scufris_report`. Claude
+implementation workers retain the normal interactive adapter and report
+through `scufris-report`. Claude reviewers instead run in print mode with
+`Read,Glob,Grep`, `dontAsk`, no user/project/local settings sources, no
+request-supplied MCP servers, no slash commands, and explicit denial of shell,
+mutation, web, and subagent tools. The trusted wrapper stores their bounded
+final Markdown response as the terminal report for the exact generation.
+
+Both review adapters enforce read-only built-in model capabilities with a tool
+allowlist. The role prompt is defense in depth, not the enforcement. This is
+not an operating-system read-only filesystem sandbox: the trusted harness and
+wrapper can still write their own session and report state. Claude managed
+policy can also install hooks or plugin hooks outside the built-in tool list;
+Scufris cannot disable that host policy while retaining normal managed
+operation, so `managed-claude-policy` is an explicit trusted boundary for
+Claude reviews. Spawn and inspect report the allowlist, `not-os-sandboxed`
+filesystem isolation, and these trusted boundaries rather than claiming a
+stronger guarantee.
 
 If execution creation began, a failed spawn keeps the durable record so
 recovery can finish or safely stop it; otherwise the directory and any created

@@ -75,6 +75,7 @@ Active. Designed as sync server, not local vault storage.
 ## Desktop Notifications
 
 Khal + vdirsyncer stack can integrate with:
+
 - **libnotify + notify-send:** Desktop notifications via DBUS.
 - **dunst:** Simple notification daemon.
 - **systemd timers:** Schedule khal agenda queries via systemd.startAt.

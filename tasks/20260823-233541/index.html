@@ -1,317 +1,499 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Jarvis research walkthrough - task 20260823-233541</title>
-<style>
-  :root {
-    --bg: #16161a;
-    --surface: #1e1e24;
-    --surface-2: #26262e;
-    --border: #34343e;
-    --text: #d8d8de;
-    --muted: #9a9aa6;
-    --accent: #6ea8e8;
-    --accent-dim: #3e5f88;
-    --good: #7dc98f;
-    --warn: #d9a866;
-    --mono: "JetBrains Mono", "Fira Mono", ui-monospace, monospace;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font: 15px/1.6 system-ui, sans-serif;
-    padding: 48px 24px 96px;
-  }
-  main { max-width: 880px; margin: 0 auto; }
-  header { margin-bottom: 40px; }
-  .task-id {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--muted);
-    letter-spacing: 0.06em;
-  }
-  h1 { font-size: 26px; font-weight: 650; margin: 6px 0 10px; }
-  .vision {
-    font-size: 17px;
-    color: var(--accent);
-    font-style: italic;
-    margin-bottom: 14px;
-  }
-  .lede { color: var(--muted); max-width: 68ch; }
-  .badges { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
-  .badge {
-    font-family: var(--mono);
-    font-size: 11px;
-    padding: 3px 10px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    color: var(--muted);
-  }
-  .badge.live { color: var(--good); border-color: #2e4a36; }
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jarvis research walkthrough - task 20260823-233541</title>
+    <style>
+      :root {
+        --bg: #16161a;
+        --surface: #1e1e24;
+        --surface-2: #26262e;
+        --border: #34343e;
+        --text: #d8d8de;
+        --muted: #9a9aa6;
+        --accent: #6ea8e8;
+        --accent-dim: #3e5f88;
+        --good: #7dc98f;
+        --warn: #d9a866;
+        --mono: "JetBrains Mono", "Fira Mono", ui-monospace, monospace;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font:
+          15px/1.6 system-ui,
+          sans-serif;
+        padding: 48px 24px 96px;
+      }
+      main {
+        max-width: 880px;
+        margin: 0 auto;
+      }
+      header {
+        margin-bottom: 40px;
+      }
+      .task-id {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--muted);
+        letter-spacing: 0.06em;
+      }
+      h1 {
+        font-size: 26px;
+        font-weight: 650;
+        margin: 6px 0 10px;
+      }
+      .vision {
+        font-size: 17px;
+        color: var(--accent);
+        font-style: italic;
+        margin-bottom: 14px;
+      }
+      .lede {
+        color: var(--muted);
+        max-width: 68ch;
+      }
+      .badges {
+        margin-top: 16px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .badge {
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 3px 10px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        color: var(--muted);
+      }
+      .badge.live {
+        color: var(--good);
+        border-color: #2e4a36;
+      }
 
-  nav.toc {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 18px 22px;
-    margin-bottom: 44px;
-    font-size: 14px;
-  }
-  nav.toc strong { display: block; margin-bottom: 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
-  nav.toc a { color: var(--accent); text-decoration: none; }
-  nav.toc a:hover { text-decoration: underline; }
-  nav.toc ol { margin-left: 20px; }
-  nav.toc li { margin: 3px 0; }
+      nav.toc {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 18px 22px;
+        margin-bottom: 44px;
+        font-size: 14px;
+      }
+      nav.toc strong {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+      nav.toc a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      nav.toc a:hover {
+        text-decoration: underline;
+      }
+      nav.toc ol {
+        margin-left: 20px;
+      }
+      nav.toc li {
+        margin: 3px 0;
+      }
 
-  section { margin-bottom: 48px; }
-  h2 {
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--muted);
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 8px;
-    margin-bottom: 6px;
-  }
-  .section-note { color: var(--muted); font-size: 14px; margin-bottom: 18px; max-width: 70ch; }
+      section {
+        margin-bottom: 48px;
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 8px;
+        margin-bottom: 6px;
+      }
+      .section-note {
+        color: var(--muted);
+        font-size: 14px;
+        margin-bottom: 18px;
+        max-width: 70ch;
+      }
 
-  .doc {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px 20px;
-    margin-bottom: 12px;
-  }
-  .doc-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-  .doc-head a {
-    font-family: var(--mono);
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--accent);
-    text-decoration: none;
-  }
-  .doc-head a:hover { text-decoration: underline; }
-  .doc-tag {
-    font-size: 11px;
-    font-family: var(--mono);
-    color: var(--muted);
-  }
-  .doc-purpose { font-weight: 600; font-size: 14px; margin-top: 6px; }
-  .doc-body { color: var(--muted); font-size: 14px; margin-top: 4px; max-width: 72ch; }
-  .doc-body em { color: var(--text); font-style: normal; }
+      .doc {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px 20px;
+        margin-bottom: 12px;
+      }
+      .doc-head {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .doc-head a {
+        font-family: var(--mono);
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .doc-head a:hover {
+        text-decoration: underline;
+      }
+      .doc-tag {
+        font-size: 11px;
+        font-family: var(--mono);
+        color: var(--muted);
+      }
+      .doc-purpose {
+        font-weight: 600;
+        font-size: 14px;
+        margin-top: 6px;
+      }
+      .doc-body {
+        color: var(--muted);
+        font-size: 14px;
+        margin-top: 4px;
+        max-width: 72ch;
+      }
+      .doc-body em {
+        color: var(--text);
+        font-style: normal;
+      }
 
-  .sub {
-    border-left: 2px solid var(--border);
-    margin: 10px 0 4px 8px;
-    padding-left: 16px;
-  }
-  .sub .doc { background: var(--surface-2); padding: 10px 16px; margin-bottom: 8px; }
-  .sub .doc-head a { font-size: 13px; }
-  .sub .doc-body { font-size: 13px; margin-top: 2px; }
+      .sub {
+        border-left: 2px solid var(--border);
+        margin: 10px 0 4px 8px;
+        padding-left: 16px;
+      }
+      .sub .doc {
+        background: var(--surface-2);
+        padding: 10px 16px;
+        margin-bottom: 8px;
+      }
+      .sub .doc-head a {
+        font-size: 13px;
+      }
+      .sub .doc-body {
+        font-size: 13px;
+        margin-top: 2px;
+      }
 
-  pre.diagram {
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 18px;
-    font-family: var(--mono);
-    font-size: 12px;
-    line-height: 1.45;
-    color: var(--muted);
-    overflow-x: auto;
-    margin: 16px 0;
-  }
-  pre.diagram b { color: var(--accent); font-weight: 600; }
+      pre.diagram {
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 18px;
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.45;
+        color: var(--muted);
+        overflow-x: auto;
+        margin: 16px 0;
+      }
+      pre.diagram b {
+        color: var(--accent);
+        font-weight: 600;
+      }
 
-  .paths {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-top: 16px;
-  }
-  @media (max-width: 640px) { .paths { grid-template-columns: 1fr; } }
-  .path {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 18px;
-    font-size: 13px;
-  }
-  .path strong { display: block; margin-bottom: 6px; color: var(--text); }
-  .path { color: var(--muted); }
-  .path a { color: var(--accent); text-decoration: none; font-family: var(--mono); font-size: 12px; }
+      .paths {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 16px;
+      }
+      @media (max-width: 640px) {
+        .paths {
+          grid-template-columns: 1fr;
+        }
+      }
+      .path {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 18px;
+        font-size: 13px;
+      }
+      .path strong {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--text);
+      }
+      .path {
+        color: var(--muted);
+      }
+      .path a {
+        color: var(--accent);
+        text-decoration: none;
+        font-family: var(--mono);
+        font-size: 12px;
+      }
 
-  footer { margin-top: 56px; color: var(--muted); font-size: 12px; font-family: var(--mono); }
-</style>
-</head>
-<body>
-<main>
+      footer {
+        margin-top: 56px;
+        color: var(--muted);
+        font-size: 12px;
+        font-family: var(--mono);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="task-id">tasks/20260823-233541</div>
+        <h1>Jarvis research: walkthrough</h1>
+        <div class="vision">
+          "I control the machine with my voice, and the machine talks back with
+          what it knows."
+        </div>
+        <p class="lede">
+          This task turned that sentence into a grounded plan: what already
+          exists across scufris2, today, dashboardd, the-den, and nix.dotfiles;
+          what the market teaches; the architecture, UX, and staged roadmap; and
+          three working visual concepts. This page is the reading guide - every
+          document below is linked, in the order it makes sense to read.
+        </p>
+        <div class="badges">
+          <span class="badge live">status: research complete, in review</span>
+          <span class="badge">11 documents</span>
+          <span class="badge">8 evidence reports</span>
+          <span class="badge">3 interactive concepts</span>
+        </div>
+      </header>
 
-<header>
-  <div class="task-id">tasks/20260823-233541</div>
-  <h1>Jarvis research: walkthrough</h1>
-  <div class="vision">"I control the machine with my voice, and the machine talks back with what it knows."</div>
-  <p class="lede">
-    This task turned that sentence into a grounded plan: what already exists
-    across scufris2, today, dashboardd, the-den, and nix.dotfiles; what the
-    market teaches; the architecture, UX, and staged roadmap; and three
-    working visual concepts. This page is the reading guide - every document
-    below is linked, in the order it makes sense to read.
-  </p>
-  <div class="badges">
-    <span class="badge live">status: research complete, in review</span>
-    <span class="badge">11 documents</span>
-    <span class="badge">8 evidence reports</span>
-    <span class="badge">3 interactive concepts</span>
-  </div>
-</header>
+      <nav class="toc">
+        <strong>Reading order</strong>
+        <ol>
+          <li><a href="#vision">The vision and the task</a> - NOTES, TASK</li>
+          <li><a href="#baseline">What exists today</a> - INVENTORY</li>
+          <li>
+            <a href="#learned">What we learned</a> - RESEARCH, MARKET, raw
+            reports
+          </li>
+          <li>
+            <a href="#design">The design</a> - ARCHITECTURE, UX, visual concepts
+          </li>
+          <li>
+            <a href="#direction">The direction</a> - ROADMAP, IDEAS,
+            RECOMMENDATION
+          </li>
+        </ol>
+      </nav>
 
-<nav class="toc">
-  <strong>Reading order</strong>
-  <ol>
-    <li><a href="#vision">The vision and the task</a> - NOTES, TASK</li>
-    <li><a href="#baseline">What exists today</a> - INVENTORY</li>
-    <li><a href="#learned">What we learned</a> - RESEARCH, MARKET, raw reports</li>
-    <li><a href="#design">The design</a> - ARCHITECTURE, UX, visual concepts</li>
-    <li><a href="#direction">The direction</a> - ROADMAP, IDEAS, RECOMMENDATION</li>
-  </ol>
-</nav>
+      <section id="vision">
+        <h2>1. The vision and the task</h2>
+        <p class="section-note">
+          Start here. These two files are the settled ground: what Scufris is
+          becoming, what was decided in pairing, and what was explicitly
+          rejected.
+        </p>
 
-<section id="vision">
-  <h2>1. The vision and the task</h2>
-  <p class="section-note">
-    Start here. These two files are the settled ground: what Scufris is
-    becoming, what was decided in pairing, and what was explicitly rejected.
-  </p>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="NOTES.md">NOTES.md</a
+            ><span class="doc-tag">the authoritative vision</span>
+          </div>
+          <div class="doc-purpose">
+            Why this exists and what it must become.
+          </div>
+          <div class="doc-body">
+            The pieces and their roles (Scufris the brain, the HUD the face,
+            the-den the knowledge, today the proven contract, dashboardd the
+            display, nix.dotfiles the gate), the library plan (Scufris fetches,
+            a deterministic CLI persists), the course-builder pillar, all
+            <em>decisions from pairing</em>, and the rejected directions - no
+            canonical database, no custom calendar or workout CLIs, no
+            "everything is a widget", no Scufris hooks inside dashboardd.
+          </div>
+        </div>
 
-  <div class="doc">
-    <div class="doc-head"><a href="NOTES.md">NOTES.md</a><span class="doc-tag">the authoritative vision</span></div>
-    <div class="doc-purpose">Why this exists and what it must become.</div>
-    <div class="doc-body">
-      The pieces and their roles (Scufris the brain, the HUD the face,
-      the-den the knowledge, today the proven contract, dashboardd the
-      display, nix.dotfiles the gate), the library plan (Scufris fetches,
-      a deterministic CLI persists), the course-builder pillar, all
-      <em>decisions from pairing</em>, and the rejected directions - no
-      canonical database, no custom calendar or workout CLIs, no
-      "everything is a widget", no Scufris hooks inside dashboardd.
-    </div>
-  </div>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="TASK.md">TASK.md</a
+            ><span class="doc-tag">the tracked task</span>
+          </div>
+          <div class="doc-purpose">
+            Objective, deliverables, completion criteria.
+          </div>
+          <div class="doc-body">
+            The Tatr record. Its completion criteria are the checklist for
+            closing this task: rejected directions stay out, the first slice has
+            a verifiable plan, proactivity is designed but deferred, everything
+            fits the NixOS lifecycle.
+          </div>
+        </div>
+      </section>
 
-  <div class="doc">
-    <div class="doc-head"><a href="TASK.md">TASK.md</a><span class="doc-tag">the tracked task</span></div>
-    <div class="doc-purpose">Objective, deliverables, completion criteria.</div>
-    <div class="doc-body">
-      The Tatr record. Its completion criteria are the checklist for
-      closing this task: rejected directions stay out, the first slice has
-      a verifiable plan, proactivity is designed but deferred, everything
-      fits the NixOS lifecycle.
-    </div>
-  </div>
-</section>
+      <section id="baseline">
+        <h2>2. What exists today</h2>
+        <p class="section-note">
+          The factual baseline, verified 2026-08-23 by parallel source surveys
+          of all five repositories. Every claim carries a file path.
+        </p>
 
-<section id="baseline">
-  <h2>2. What exists today</h2>
-  <p class="section-note">
-    The factual baseline, verified 2026-08-23 by parallel source surveys
-    of all five repositories. Every claim carries a file path.
-  </p>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="INVENTORY.md">INVENTORY.md</a
+            ><span class="doc-tag">verified state</span>
+          </div>
+          <div class="doc-purpose">What each repo actually does right now.</div>
+          <div class="doc-body">
+            Key facts: the voice loop already works end to end (Whisper in,
+            Piper out, Mod4+s popup); Scufris can already open and drive
+            widgets; the today CLI and its six widget variants are deployed.
+            What does not exist: any Scufris observation of den data, any
+            library, any reference display, any proactive path. Also documents
+            the HUD companion task (20260822-132001) as the parallel interaction
+            layer.
+          </div>
+        </div>
+      </section>
 
-  <div class="doc">
-    <div class="doc-head"><a href="INVENTORY.md">INVENTORY.md</a><span class="doc-tag">verified state</span></div>
-    <div class="doc-purpose">What each repo actually does right now.</div>
-    <div class="doc-body">
-      Key facts: the voice loop already works end to end (Whisper in, Piper
-      out, Mod4+s popup); Scufris can already open and drive widgets; the
-      today CLI and its six widget variants are deployed. What does not
-      exist: any Scufris observation of den data, any library, any
-      reference display, any proactive path. Also documents the HUD
-      companion task (20260822-132001) as the parallel interaction layer.
-    </div>
-  </div>
-</section>
+      <section id="learned">
+        <h2>3. What we learned</h2>
+        <p class="section-note">
+          Two synthesis documents, backed by eight raw evidence reports written
+          by parallel research agents. Read the syntheses; drop into a raw
+          report when you want sources and details.
+        </p>
 
-<section id="learned">
-  <h2>3. What we learned</h2>
-  <p class="section-note">
-    Two synthesis documents, backed by eight raw evidence reports written
-    by parallel research agents. Read the syntheses; drop into a raw
-    report when you want sources and details.
-  </p>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="RESEARCH.md">RESEARCH.md</a
+            ><span class="doc-tag">component judgments</span>
+          </div>
+          <div class="doc-purpose">Which existing tools to reuse, and why.</div>
+          <div class="doc-body">
+            The capture shortlist (monolith, single-file-cli, yt-dlp,
+            gallery-dl, trafilatura - all in nixpkgs), the dual-artifact rule
+            (snapshot for display, extract for retrieval), the video pipeline
+            your existing whisper-server already enables, the staged retrieval
+            ladder (rg, then SQLite FTS5, embeddings only on evidence),
+            reference display split by content type, and the parked
+            khal+vdirsyncer calendar verdict. No new daemons anywhere.
+          </div>
+        </div>
 
-  <div class="doc">
-    <div class="doc-head"><a href="RESEARCH.md">RESEARCH.md</a><span class="doc-tag">component judgments</span></div>
-    <div class="doc-purpose">Which existing tools to reuse, and why.</div>
-    <div class="doc-body">
-      The capture shortlist (monolith, single-file-cli, yt-dlp, gallery-dl,
-      trafilatura - all in nixpkgs), the dual-artifact rule (snapshot for
-      display, extract for retrieval), the video pipeline your existing
-      whisper-server already enables, the staged retrieval ladder (rg,
-      then SQLite FTS5, embeddings only on evidence), reference display
-      split by content type, and the parked khal+vdirsyncer calendar
-      verdict. No new daemons anywhere.
-    </div>
-  </div>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="MARKET.md">MARKET.md</a
+            ><span class="doc-tag">market lessons</span>
+          </div>
+          <div class="doc-purpose">
+            What similar projects teach - especially the dead ones.
+          </div>
+          <div class="doc-body">
+            Nobody ships your combination; <em>the den is the moat</em>. Six
+            reusable-now patterns (ArchiveBox's manifest layout, the MCP
+            filesystem contract shape, Karakeep's CLI triad, the Wyoming
+            protocol lesson) and eight ranked mistakes to avoid, led by
+            Omnivore's 15-day death: does it still work after the acquihire?
+          </div>
+        </div>
 
-  <div class="doc">
-    <div class="doc-head"><a href="MARKET.md">MARKET.md</a><span class="doc-tag">market lessons</span></div>
-    <div class="doc-purpose">What similar projects teach - especially the dead ones.</div>
-    <div class="doc-body">
-      Nobody ships your combination; <em>the den is the moat</em>. Six
-      reusable-now patterns (ArchiveBox's manifest layout, the MCP
-      filesystem contract shape, Karakeep's CLI triad, the Wyoming
-      protocol lesson) and eight ranked mistakes to avoid, led by
-      Omnivore's 15-day death: does it still work after the acquihire?
-    </div>
-  </div>
+        <div class="sub">
+          <div class="doc">
+            <div class="doc-head">
+              <a href="research/capture.md">research/capture.md</a>
+            </div>
+            <div class="doc-body">
+              Web capture and archival tools, per-tool nixpkgs checks, format
+              comparison, and why ArchiveBox-style all-in-one tools are
+              wrong-shaped here.
+            </div>
+          </div>
+          <div class="doc">
+            <div class="doc-head">
+              <a href="research/ingestion.md">research/ingestion.md</a>
+            </div>
+            <div class="doc-body">
+              Multimodal ingestion: word-timestamp transcription, ffmpeg
+              keyframes, docling for PDFs, GPU cost estimates, and the
+              recommended local-only v1 pipeline.
+            </div>
+          </div>
+          <div class="doc">
+            <div class="doc-head">
+              <a href="research/retrieval.md">research/retrieval.md</a>
+            </div>
+            <div class="doc-body">
+              The retrieval ladder in depth: why rg is a legitimate v1, FTS5 as
+              the embedded next step, and the concrete evidence gate before
+              sqlite-vec embeddings.
+            </div>
+          </div>
+          <div class="doc">
+            <div class="doc-head">
+              <a href="research/reference-display.md"
+                >research/reference-display.md</a
+              >
+            </div>
+            <div class="doc-body">
+              Grounded in dashboardd source: why iframes are structurally
+              blocked, the sanitized tatr-tasks viewer precedent, and the
+              browser-with-i3-rules path for live pages.
+            </div>
+          </div>
+          <div class="doc">
+            <div class="doc-head">
+              <a href="research/calendar.md">research/calendar.md</a>
+            </div>
+            <div class="doc-body">
+              The parked calendar domain: khal + vdirsyncer as the presumptive
+              answer, one .ics per event, agenda via khal list --json.
+            </div>
+          </div>
+          <div class="doc">
+            <div class="doc-head">
+              <a href="research/market-github.md">research/market-github.md</a>
+            </div>
+            <div class="doc-body">
+              Sixteen open-source projects with live activity data: Leon, Khoj,
+              OVOS, Open Interpreter, Reor, ArchiveBox, Omnivore, Karakeep and
+              more - what to reuse, how they died.
+            </div>
+          </div>
+          <div class="doc">
+            <div class="doc-head">
+              <a href="research/market-web.md">research/market-web.md</a>
+            </div>
+            <div class="doc-body">
+              Beyond GitHub: product postmortems (Rewind, Humane, Rabbit,
+              Mycroft, Omnivore, Evernote), local-first essays, personal-RAG
+              practitioner consensus, calm-technology research,
+              explorable-explanations prior art.
+            </div>
+          </div>
+          <div class="doc">
+            <div class="doc-head">
+              <a href="research/ideas-raw.md">research/ideas-raw.md</a>
+            </div>
+            <div class="doc-body">
+              The raw 53-idea brainstorm across ten lenses, generated under the
+              hard constraints. Curated into IDEAS.md below.
+            </div>
+          </div>
+        </div>
+      </section>
 
-  <div class="sub">
-    <div class="doc">
-      <div class="doc-head"><a href="research/capture.md">research/capture.md</a></div>
-      <div class="doc-body">Web capture and archival tools, per-tool nixpkgs checks, format comparison, and why ArchiveBox-style all-in-one tools are wrong-shaped here.</div>
-    </div>
-    <div class="doc">
-      <div class="doc-head"><a href="research/ingestion.md">research/ingestion.md</a></div>
-      <div class="doc-body">Multimodal ingestion: word-timestamp transcription, ffmpeg keyframes, docling for PDFs, GPU cost estimates, and the recommended local-only v1 pipeline.</div>
-    </div>
-    <div class="doc">
-      <div class="doc-head"><a href="research/retrieval.md">research/retrieval.md</a></div>
-      <div class="doc-body">The retrieval ladder in depth: why rg is a legitimate v1, FTS5 as the embedded next step, and the concrete evidence gate before sqlite-vec embeddings.</div>
-    </div>
-    <div class="doc">
-      <div class="doc-head"><a href="research/reference-display.md">research/reference-display.md</a></div>
-      <div class="doc-body">Grounded in dashboardd source: why iframes are structurally blocked, the sanitized tatr-tasks viewer precedent, and the browser-with-i3-rules path for live pages.</div>
-    </div>
-    <div class="doc">
-      <div class="doc-head"><a href="research/calendar.md">research/calendar.md</a></div>
-      <div class="doc-body">The parked calendar domain: khal + vdirsyncer as the presumptive answer, one .ics per event, agenda via khal list --json.</div>
-    </div>
-    <div class="doc">
-      <div class="doc-head"><a href="research/market-github.md">research/market-github.md</a></div>
-      <div class="doc-body">Sixteen open-source projects with live activity data: Leon, Khoj, OVOS, Open Interpreter, Reor, ArchiveBox, Omnivore, Karakeep and more - what to reuse, how they died.</div>
-    </div>
-    <div class="doc">
-      <div class="doc-head"><a href="research/market-web.md">research/market-web.md</a></div>
-      <div class="doc-body">Beyond GitHub: product postmortems (Rewind, Humane, Rabbit, Mycroft, Omnivore, Evernote), local-first essays, personal-RAG practitioner consensus, calm-technology research, explorable-explanations prior art.</div>
-    </div>
-    <div class="doc">
-      <div class="doc-head"><a href="research/ideas-raw.md">research/ideas-raw.md</a></div>
-      <div class="doc-body">The raw 53-idea brainstorm across ten lenses, generated under the hard constraints. Curated into IDEAS.md below.</div>
-    </div>
-  </div>
-</section>
+      <section id="design">
+        <h2>4. The design</h2>
+        <p class="section-note">
+          How the system fits together, what using it feels like, and three
+          interactive concept pages you can open and play with.
+        </p>
 
-<section id="design">
-  <h2>4. The design</h2>
-  <p class="section-note">
-    How the system fits together, what using it feels like, and three
-    interactive concept pages you can open and play with.
-  </p>
-
-  <pre class="diagram">                  +---------------------------+
+        <pre class="diagram">                  +---------------------------+
                   |         <b>the-den</b>           |
                   |  Daily/  Notes/  Library/ |
                   +------+-------------+------+
@@ -328,131 +510,166 @@
             | <b>dashboardd</b>  |
             +-------------+</pre>
 
-  <div class="doc">
-    <div class="doc-head"><a href="ARCHITECTURE.md">ARCHITECTURE.md</a><span class="doc-tag">options and recommendations</span></div>
-    <div class="doc-purpose">The technical shape of each build area.</div>
-    <div class="doc-body">
-      Recommends grouped <em>scufris_den_read / scufris_den_write</em>
-      tools over one-tool-per-subcommand; the
-      <em>Library/items/&lt;id&gt;/</em> layout (tracked manifest and
-      extract, ignored blobs); a new den repo in the today mold; the
-      viewer widget plus scufris-browse; the proactive policy layer; and
-      the trust boundary - the fetch/persist split is the
-      prompt-injection firebreak.
-    </div>
-  </div>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="ARCHITECTURE.md">ARCHITECTURE.md</a
+            ><span class="doc-tag">options and recommendations</span>
+          </div>
+          <div class="doc-purpose">The technical shape of each build area.</div>
+          <div class="doc-body">
+            Recommends grouped <em>scufris_den_read / scufris_den_write</em>
+            tools over one-tool-per-subcommand; the
+            <em>Library/items/&lt;id&gt;/</em> layout (tracked manifest and
+            extract, ignored blobs); a new den repo in the today mold; the
+            viewer widget plus scufris-browse; the proactive policy layer; and
+            the trust boundary - the fetch/persist split is the prompt-injection
+            firebreak.
+          </div>
+        </div>
 
-  <div class="doc">
-    <div class="doc-head"><a href="UX.md">UX.md</a><span class="doc-tag">end-to-end flows</span></div>
-    <div class="doc-purpose">What using it actually feels like.</div>
-    <div class="doc-body">
-      Ten flows with exact tool calls, spoken lines, opened surfaces, and
-      failure paths: tomorrow's plan, voice task capture, weight trend,
-      collecting references, "look what I found", recall with citations,
-      video as transcript plus frames, the morning briefing, policy-gated
-      findings, and the course flow. Ends with the interaction
-      invariants.
-    </div>
-  </div>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="UX.md">UX.md</a
+            ><span class="doc-tag">end-to-end flows</span>
+          </div>
+          <div class="doc-purpose">What using it actually feels like.</div>
+          <div class="doc-body">
+            Ten flows with exact tool calls, spoken lines, opened surfaces, and
+            failure paths: tomorrow's plan, voice task capture, weight trend,
+            collecting references, "look what I found", recall with citations,
+            video as transcript plus frames, the morning briefing, policy-gated
+            findings, and the course flow. Ends with the interaction invariants.
+          </div>
+        </div>
 
-  <div class="doc">
-    <div class="doc-head"><a href="designs/morning-briefing.html">designs/morning-briefing.html</a><span class="doc-tag">interactive concept</span></div>
-    <div class="doc-purpose">The 09:00 surface: readable in five seconds.</div>
-    <div class="doc-body">
-      Spoken transcript first, tasks and habits next, weight sparkline
-      after, and the proactive "Scufris found" card deliberately last -
-      offer, don't act, easy to skip.
-    </div>
-  </div>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="designs/morning-briefing.html"
+              >designs/morning-briefing.html</a
+            ><span class="doc-tag">interactive concept</span>
+          </div>
+          <div class="doc-purpose">
+            The 09:00 surface: readable in five seconds.
+          </div>
+          <div class="doc-body">
+            Spoken transcript first, tasks and habits next, weight sparkline
+            after, and the proactive "Scufris found" card deliberately last -
+            offer, don't act, easy to skip.
+          </div>
+        </div>
 
-  <div class="doc">
-    <div class="doc-head"><a href="designs/reference-viewer.html">designs/reference-viewer.html</a><span class="doc-tag">interactive concept</span></div>
-    <div class="doc-purpose">"Look what I found": provenance-first viewing.</div>
-    <div class="doc-body">
-      Provenance header with trust label and hash, an article mode with
-      the cited passage highlighted, a video mode with a keyframe strip
-      synced to the transcript, and the keep/discard triage moment built
-      in.
-    </div>
-  </div>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="designs/reference-viewer.html"
+              >designs/reference-viewer.html</a
+            ><span class="doc-tag">interactive concept</span>
+          </div>
+          <div class="doc-purpose">
+            "Look what I found": provenance-first viewing.
+          </div>
+          <div class="doc-body">
+            Provenance header with trust label and hash, an article mode with
+            the cited passage highlighted, a video mode with a keyframe strip
+            synced to the transcript, and the keep/discard triage moment built
+            in.
+          </div>
+        </div>
 
-  <div class="doc">
-    <div class="doc-head"><a href="designs/course-concept.html">designs/course-concept.html</a><span class="doc-tag">interactive concept</span></div>
-    <div class="doc-purpose">The course-builder pillar, made tangible.</div>
-    <div class="doc-body">
-      An A* pathfinding mini-course: hook, ladder of abstraction, and a
-      sandbox running a <em>real</em> A* on an editable grid, one graded
-      check with a spaced-repetition hint, and every claim cited back to
-      library items. Click cells to toggle walls.
-    </div>
-  </div>
-</section>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="designs/course-concept.html">designs/course-concept.html</a
+            ><span class="doc-tag">interactive concept</span>
+          </div>
+          <div class="doc-purpose">
+            The course-builder pillar, made tangible.
+          </div>
+          <div class="doc-body">
+            An A* pathfinding mini-course: hook, ladder of abstraction, and a
+            sandbox running a <em>real</em> A* on an editable grid, one graded
+            check with a spaced-repetition hint, and every claim cited back to
+            library items. Click cells to toggle walls.
+          </div>
+        </div>
+      </section>
 
-<section id="direction">
-  <h2>5. The direction</h2>
-  <p class="section-note">
-    Where this goes, in what order, and the short answers to the seven
-    questions the vision posed.
-  </p>
+      <section id="direction">
+        <h2>5. The direction</h2>
+        <p class="section-note">
+          Where this goes, in what order, and the short answers to the seven
+          questions the vision posed.
+        </p>
 
-  <div class="doc">
-    <div class="doc-head"><a href="ROADMAP.md">ROADMAP.md</a><span class="doc-tag">staged plan</span></div>
-    <div class="doc-purpose">Six shippable stages, each verified cheaply.</div>
-    <div class="doc-body">
-      1 Scufris x today, 2 den CLI and capture, 3 viewer widget and
-      browser helper, 4 FTS5 search, 5 video and document ingestion,
-      6 morning briefing. Then the evidence-gated tail (embeddings,
-      course builder, calendar, watcher) and the explicit not-built
-      list. Every stage rides the release gate: prototype, test,
-      release, pin, rebuild.
-    </div>
-  </div>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="ROADMAP.md">ROADMAP.md</a
+            ><span class="doc-tag">staged plan</span>
+          </div>
+          <div class="doc-purpose">
+            Six shippable stages, each verified cheaply.
+          </div>
+          <div class="doc-body">
+            1 Scufris x today, 2 den CLI and capture, 3 viewer widget and
+            browser helper, 4 FTS5 search, 5 video and document ingestion, 6
+            morning briefing. Then the evidence-gated tail (embeddings, course
+            builder, calendar, watcher) and the explicit not-built list. Every
+            stage rides the release gate: prototype, test, release, pin,
+            rebuild.
+          </div>
+        </div>
 
-  <div class="doc">
-    <div class="doc-head"><a href="IDEAS.md">IDEAS.md</a><span class="doc-tag">curated ideas</span></div>
-    <div class="doc-purpose">The future, organized by what unlocks it.</div>
-    <div class="doc-body">
-      The 53 raw ideas curated by unlock stage, with four promoted to
-      stage requirements (provenance ledger, quiet-hours plus escalation
-      ladder, stale-index detector, tool-gap friction log) and threads
-      for game-dev workflows, learning, self-improvement, and the
-      genuinely fun.
-    </div>
-  </div>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="IDEAS.md">IDEAS.md</a
+            ><span class="doc-tag">curated ideas</span>
+          </div>
+          <div class="doc-purpose">
+            The future, organized by what unlocks it.
+          </div>
+          <div class="doc-body">
+            The 53 raw ideas curated by unlock stage, with four promoted to
+            stage requirements (provenance ledger, quiet-hours plus escalation
+            ladder, stale-index detector, tool-gap friction log) and threads for
+            game-dev workflows, learning, self-improvement, and the genuinely
+            fun.
+          </div>
+        </div>
 
-  <div class="doc">
-    <div class="doc-head"><a href="RECOMMENDATION.md">RECOMMENDATION.md</a><span class="doc-tag">the seven answers</span></div>
-    <div class="doc-purpose">The conclusion, in one page.</div>
-    <div class="doc-body">
-      Answers the seven questions from NOTES.md. The heart of it: build
-      stage 1 first - two grouped native tools over the today contract -
-      because it is the smallest slice that makes Scufris feel like
-      Jarvis: <em>it knows your day</em>. Everything else builds on its
-      plumbing.
-    </div>
-  </div>
+        <div class="doc">
+          <div class="doc-head">
+            <a href="RECOMMENDATION.md">RECOMMENDATION.md</a
+            ><span class="doc-tag">the seven answers</span>
+          </div>
+          <div class="doc-purpose">The conclusion, in one page.</div>
+          <div class="doc-body">
+            Answers the seven questions from NOTES.md. The heart of it: build
+            stage 1 first - two grouped native tools over the today contract -
+            because it is the smallest slice that makes Scufris feel like
+            Jarvis: <em>it knows your day</em>. Everything else builds on its
+            plumbing.
+          </div>
+        </div>
 
-  <div class="paths">
-    <div class="path">
-      <strong>Short on time?</strong>
-      Read <a href="NOTES.md">NOTES.md</a> and
-      <a href="RECOMMENDATION.md">RECOMMENDATION.md</a>, then open
-      <a href="designs/course-concept.html">the course concept</a>
-      for the fun part.
-    </div>
-    <div class="path">
-      <strong>Ready to build?</strong>
-      <a href="ROADMAP.md">ROADMAP.md</a> stage 1 plus
-      <a href="ARCHITECTURE.md">ARCHITECTURE.md</a> area 1 are the
-      implementation brief for the first slice.
-    </div>
-  </div>
-</section>
+        <div class="paths">
+          <div class="path">
+            <strong>Short on time?</strong>
+            Read <a href="NOTES.md">NOTES.md</a> and
+            <a href="RECOMMENDATION.md">RECOMMENDATION.md</a>, then open
+            <a href="designs/course-concept.html">the course concept</a>
+            for the fun part.
+          </div>
+          <div class="path">
+            <strong>Ready to build?</strong>
+            <a href="ROADMAP.md">ROADMAP.md</a> stage 1 plus
+            <a href="ARCHITECTURE.md">ARCHITECTURE.md</a> area 1 are the
+            implementation brief for the first slice.
+          </div>
+        </div>
+      </section>
 
-<footer>
-  tasks/20260823-233541 - research complete 2026-08-24 - NOTES.md is authoritative for the vision
-</footer>
-
-</main>
-</body>
+      <footer>
+        tasks/20260823-233541 - research complete 2026-08-24 - NOTES.md is
+        authoritative for the vision
+      </footer>
+    </main>
+  </body>
 </html>

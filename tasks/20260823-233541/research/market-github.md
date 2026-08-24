@@ -13,6 +13,7 @@ lesson (win or failure).
 ## 1. Voice assistants
 
 ### Mycroft AI (`MycroftAI/mycroft-core`) - dead, but the reason matters
+
 One-liner: the original open-source "Jarvis" voice assistant platform;
 skills in Python, wake word + STT + intent parser + TTS pipeline.
 Storage: skills as Python packages with `.dialog`/`.voc` files; no vault
@@ -36,6 +37,7 @@ https://www.theregister.com/2023/02/13/linux_ai_assistant_killed_off/ ,
 https://www.hackster.io/news/mycroft-closes-its-crowdfunding-campaign-with-rewards-undelivered-as-it-runs-out-of-runway-00a1103e7f61
 
 ### OpenVoiceOS (`OpenVoiceOS/ovos-core`) - the fork that survived
+
 One-liner: community continuation of Mycroft, modularized (STT/TTS/intent
 parsers/PHAL hardware abstraction are separate pip packages) and boringly
 maintained.
@@ -61,6 +63,7 @@ https://blog.openvoiceos.org/posts/2025-05-20-ovos-and-mycroft-a-fork-that-wasnt
 https://dev.to/goldyfruit/from-mycroft-and-ansible-to-openvoiceos-boring-installs-easy-updates-11cl
 
 ### Rhasspy / Wyoming protocol (`rhasspy/rhasspy`, `rhasspy/rhasspy3`) - archived, but its protocol won
+
 One-liner: offline voice assistant toolkit; v3 introduced the Wyoming
 protocol, a minimal newline-delimited-JSON-plus-binary-payload wire format
 for chaining STT/TTS/wake-word services over TCP.
@@ -76,8 +79,8 @@ Scufris's own tool contracts (native tools wrapping `today --json`) should
 look if they ever need to run out-of-process: small JSON events over a
 pipe/socket, one verb per message, no framework tax. `dashboardctl`'s
 Unix-socket JSON contract already follows this shape independently.
-Learn (mixed): Rhasspy the *product* stalled and was archived, but Rhasspy
-the *protocol design* was absorbed wholesale into Home Assistant's Assist
+Learn (mixed): Rhasspy the _product_ stalled and was archived, but Rhasspy
+the _protocol design_ was absorbed wholesale into Home Assistant's Assist
 pipeline and is now the de facto standard for local voice satellites
 (`wyoming-piper`, `wyoming-whisper`, `wyoming-satellite`). The lesson:
 a narrow, dependency-free protocol can outlive the application that spawned
@@ -89,6 +92,7 @@ https://github.com/rhasspy/wyoming-satellite ,
 https://grokipedia.com/page/Wyoming_Home_Assistant_integration
 
 ### Willow (`HeyWillow/willow`, formerly `toverainc/willow`)
+
 One-liner: ESP32-S3-BOX firmware for an Echo/Google-Home-class voice
 satellite; local wake word, streams audio to a self-hosted inference server
 (Willow Inference Server) or Home Assistant/openHAB.
@@ -114,6 +118,7 @@ https://blog.adafruit.com/2025/03/17/willow-an-open-source-low-cost-voice-assist
 ## 2. LLM desktop/personal assistants ("Jarvis" attempts)
 
 ### Open Interpreter (`OpenInterpreter/open-interpreter`) - pivoted away from being an assistant
+
 One-liner: originally "a natural-language interface for your computer" --
 an LLM that writes and executes code locally to control your machine
 conversationally. As of this sweep its own GitHub description reads "A
@@ -140,6 +145,7 @@ Sources: https://github.com/OpenInterpreter/open-interpreter ,
 https://simonwillison.net/2024/Nov/24/open-interpreter/
 
 ### Open Interpreter's 01 device (`OpenInterpreter/01`) - the hardware bet that failed
+
 One-liner: "the #1 open-source voice interface for desktop, mobile, and
 ESP32 chips" -- a $99 "01 Light" wearable/desktop hardware device meant to
 be a physical Jarvis, paired with an open firmware + server stack.
@@ -163,6 +169,7 @@ https://www.geeky-gadgets.com/pocket-ai-agent/ ,
 https://starlog.is/articles/developer-tools/openinterpreter-01/
 
 ### Leon AI (`leon-ai/leon`) - the closest architectural analog
+
 One-liner: open-source personal assistant with voice/text I/O, built around
 "native skills" (deterministic, hard-coded actions) and "agent skills"
 (SKILL.md-backed, LLM-planned workflows) -- the same native-tool-vs-skill
@@ -195,10 +202,11 @@ Sources: https://github.com/leon-ai/leon , https://getleon.ai/
 ## 3. AI + PKM over plain files
 
 ### Khoj (`khoj-ai/khoj`)
+
 One-liner: "AI second brain" -- chat, semantic search, and scheduled
 automations over your own docs (Markdown, org-mode, PDF, Notion) plus the
 web; Obsidian/Emacs/desktop clients sync into it.
-Storage: not the-den's model. Files are the *input*, but Khoj ingests them
+Storage: not the-den's model. Files are the _input_, but Khoj ingests them
 into its own server-side index/DB (hybrid local vector index) for
 retrieval; canonical truth moves off the plain files once synced. Real-time
 sync keeps a vault mirrored, but the assistant reasons over the derived
@@ -223,6 +231,7 @@ Sources: https://github.com/khoj-ai/khoj , https://docs.khoj.dev/clients/obsidia
 https://blog.khoj.dev/posts/obsidian-ux-revamp/
 
 ### Reor (`reorproject/reor`) - archived, worth reading as an autopsy
+
 One-liner: Electron desktop app, "private & local AI PKM for high entropy
 people" -- auto-linked notes, semantic search, and Q&A entirely on-device,
 Obsidian-like markdown editor.
@@ -248,6 +257,7 @@ Sources: https://github.com/reorproject/reor ,
 https://alternativeto.net/software/reor-1/about/
 
 ### Obsidian Smart Connections (`brianpetro/obsidian-smart-connections`)
+
 One-liner: Obsidian plugin, local embedding model for "related notes" and
 semantic search inside the vault; explicitly "zero setup, no API key."
 Storage: reads the vault's own Markdown files directly; stores its
@@ -262,7 +272,7 @@ Reuse: the "index lives next to the data, fully local embedding model,
 zero external API" posture is precisely what a the-den library embedding
 index should look like if one is ever built -- proof this is viable at
 personal-vault scale without a server.
-Learn (win): Smart Connections survives specifically *because* it declined
+Learn (win): Smart Connections survives specifically _because_ it declined
 to be a whole app -- it's a thin layer over an existing plain-file host
 (Obsidian) instead of reimplementing a note editor. Reor tried to
 out-build Obsidian and died; Smart Connections rode on top of it and
@@ -272,10 +282,11 @@ what already exists rather than replacing it.
 Sources: https://github.com/brianpetro/obsidian-smart-connections
 
 ### org-ai (`rksm/org-ai`)
+
 One-liner: Emacs package that turns org-mode buffers into an AI chat/agent
 surface -- inline completions, image gen, speech input/output, all inside
 plain `.org` text files.
-Storage: none of its own -- the org-mode buffer *is* the storage; AI
+Storage: none of its own -- the org-mode buffer _is_ the storage; AI
 responses are inserted as plain text blocks in the same file the human
 edits, versioned by whatever the user already uses for their org files.
 CLI/API: N/A, Emacs Lisp package, editor-native only.
@@ -298,6 +309,7 @@ Sources: https://github.com/rksm/org-ai
 ## 4. Local RAG stacks
 
 ### PrivateGPT / Zylon (`zylon-ai/private-gpt`)
+
 One-liner: "interact with your documents privately" -- was the original
 breakout local-RAG project (hit #1 across all GitHub categories twice in
 2023), now "complete API layer for private AI applications: RAG, skills,
@@ -322,6 +334,7 @@ tool, but a clean pattern if scope ever grows.
 Sources: https://github.com/zylon-ai/private-gpt , https://www.zylon.ai/
 
 ### AnythingLLM (`Mintplex-Labs/anything-llm`)
+
 One-liner: "everything you need for a powerful local-first agent
 experience" -- desktop app + server, document ingestion, agents, multi-model
 support, workspace-based RAG.
@@ -346,6 +359,7 @@ plain-file durability, not multi-user/multi-model breadth.
 Sources: https://github.com/Mintplex-Labs/anything-llm
 
 ### Onyx, formerly Danswer (`onyx-dot-app/onyx`)
+
 One-liner: open-source "AI platform" / enterprise search -- connectors to
 many data sources (Slack, Confluence, Google Drive, etc.), RAG chat, agents.
 Storage: Postgres + vector DB (Vespa), fully server-side; no plain-file
@@ -376,6 +390,7 @@ https://techcrunch.com/2025/03/12/why-onyx-thinks-its-open-source-solution-will-
 ## 5. Read-later / archival
 
 ### ArchiveBox (`ArchiveBox/ArchiveBox`)
+
 One-liner: self-hosted web archiving -- takes URLs (or browser history,
 bookmarks, Pocket/Pinboard exports) and saves HTML, PDF, screenshots, WARC,
 media, git repos, per URL.
@@ -383,7 +398,7 @@ Storage: exactly the pattern the-den's library wants. One folder per
 snapshot under `data/archive/<timestamp>/`, each containing the raw
 extractor outputs (`.html`, `.pdf`, `warc/`, `media/`, `screenshot.png`,
 etc.) plus a redundant `index.json` and `index.html` describing that
-snapshot. A single `data/index.sqlite3` is a *rebuildable* aggregate index
+snapshot. A single `data/index.sqlite3` is a _rebuildable_ aggregate index
 over all the folders -- delete it and `archivebox update` regenerates it
 from the folders, which are the actual source of truth. Newer dev versions
 reorganize by user/date/domain/UUID but keep the same folder-is-truth,
@@ -408,6 +423,7 @@ Sources: https://github.com/ArchiveBox/ArchiveBox ,
 https://docs.archivebox.io/dev/README.html , https://deepwiki.com/ArchiveBox/ArchiveBox
 
 ### Omnivore (`omnivore-app/omnivore`) - shut down, the sharpest lesson in this survey
+
 One-liner: was a full-featured open-source read-it-later app (clean reader
 view, highlights, labels, newsletter capture, offline mobile apps) -- widely
 considered the best Pocket alternative before it closed.
@@ -431,7 +447,7 @@ text, highlights, tags.
 Learn (failure, the clearest one here): Omnivore did not fail on product or
 adoption -- it was well-loved and actively used. It failed because it was
 venture-funded with no independent revenue model, so when a better exit
-(acquihire) appeared, the team took it and the *hosted service* died
+(acquihire) appeared, the team took it and the _hosted service_ died
 overnight, taking self-hosters' comfort in "we'll always be able to
 self-host" along with it for anyone who hadn't set up their own instance
 already. The org's data-deletion timeline (14 days) is a stark reminder
@@ -446,6 +462,7 @@ https://molodtsov.me/2024/10/omnivore-is-dead-where-to-go-next/ ,
 https://gleamr.io/blog/omnivore-shut-down-alternatives
 
 ### Wallabag (`wallabag/wallabag`)
+
 One-liner: long-running self-hostable read-it-later app (PHP/Symfony),
 the "boring, mature" alternative that predates and outlived Omnivore.
 Storage: MySQL/Postgres/SQLite backend; articles stored as extracted
@@ -466,6 +483,7 @@ Sources: https://github.com/wallabag/wallabag ,
 https://www.readless.app/blog/omnivore-alternatives-2026
 
 ### Karakeep, formerly Hoarder (`karakeep-app/karakeep`)
+
 One-liner: self-hosted "bookmark everything" app (links, notes, images)
 with AI auto-tagging and full-text/semantic search; the project the
 community converged on as Omnivore's actual successor.
@@ -500,13 +518,14 @@ https://jameskilby.co.uk/2025/01/how-i-migrated-from-pocket-to-hoarder-and-intro
 
 ## 6. Personal dashboards / widget systems
 
-Framing: all three below are *browser-tab* dashboards (one page, many
+Framing: all three below are _browser-tab_ dashboards (one page, many
 tiles/feeds), fundamentally different from dashboardd's model of
 independent native windows (Tauri/SPA-over-SSE) that i3 places and manages
 individually. They're still useful as config-format and
 integration-breadth precedent.
 
 ### Glance (`glanceapp/glance`)
+
 One-liner: single static Go binary, single YAML config, widget-first
 feed/status dashboard (RSS, weather, stocks, server stats, bookmarks) --
 "an RSS reader crossed with a status board."
@@ -527,8 +546,9 @@ below) -- directly consistent with dashboardd's existing typed-widget,
 explicit-catalog approach rather than an auto-discovery model.
 
 ### Homepage (`gethomepage/homepage`)
+
 One-liner: YAML-configured homepage/startpage with deep service-integration
-API widgets (pulls live data from ~100 self-hosted services: *arr apps,
+API widgets (pulls live data from ~100 self-hosted services: \*arr apps,
 Docker, Proxmox, Pi-hole, etc.).
 Storage: YAML config files (services.yaml, widgets.yaml, settings.yaml);
 config is git-trackable, matches the-den's plain-file philosophy at the
@@ -549,6 +569,7 @@ the "maximizes simplicity" end -- dashboardd already sits where it should
 page), no repositioning suggested by this comparison.
 
 ### Homarr (`homarr-labs/homarr`)
+
 One-liner: dashboard configured entirely through a drag-and-drop web UI
 (no YAML authoring) with ~40+ live service integrations.
 Storage: moved from YAML to a database-backed model in its 1.0 rewrite --
@@ -575,6 +596,7 @@ https://homelabcompass.com/alternatives/self-hosted-dashboard
 ## 7. Agent-tool contracts (MCP servers)
 
 ### Official filesystem server (`modelcontextprotocol/servers`, `src/filesystem`)
+
 One-liner: the reference implementation for exposing a scoped filesystem to
 an LLM agent as tools.
 Contract: 14 tools split cleanly into read-only (`read_text_file`,
@@ -605,6 +627,7 @@ cheap for a human to reason about what an agent could do wrong.
 Sources: https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem
 
 ### Official memory server (`modelcontextprotocol/servers`, `src/memory`)
+
 One-liner: reference "persistent memory" MCP server -- a local knowledge
 graph of entities, relations, and observations.
 Contract: storage is a JSONL file (one entity/relation per line, trivially
@@ -616,7 +639,7 @@ notifications for subscribed clients.
 Reuse: the entity/relation/observation shape and the JSONL storage choice
 are a reasonable, lightweight reference if Scufris ever wants a durable
 cross-session memory store distinct from the-den's daily notes and the
-library's manifests -- notably it is *not* a vector index, it's a plain
+library's manifests -- notably it is _not_ a vector index, it's a plain
 structured-text graph, which fits the local-first/plain-file bar better
 than most "AI memory" products.
 Learn: a second confirmation (after ArchiveBox and org-ai) that the
@@ -626,6 +649,7 @@ anything richer (embeddings, DBs) as optional and derived.
 Sources: https://github.com/modelcontextprotocol/servers/tree/main/src/memory
 
 ### Community Obsidian MCP servers (`MarkusPfundstein/mcp-obsidian` and ~9 forks/variants)
+
 One-liner: the dominant pattern for exposing a plain-file Markdown vault to
 an LLM agent is a thin MCP server that either shells out to Obsidian's
 "Local REST API" community plugin, or reads the vault files directly.
@@ -652,6 +676,7 @@ servers" down the line.
 Sources: gh search results for `mcp obsidian`, https://github.com/MarkusPfundstein/mcp-obsidian
 
 ### Community Google Calendar MCP servers (`markelaugust74/mcp-google-calendar` and ~9 variants)
+
 One-liner: same fragmentation pattern as Obsidian, applied to calendar:
 a dozen small, mostly-abandoned or barely-maintained MCP wrappers around
 the Google Calendar API (create/list/update events, check availability),

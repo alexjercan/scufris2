@@ -9,13 +9,13 @@ Install Nix with flakes enabled.
 Run the normal package from the current release tag:
 
 ```bash
-nix run github:alexjercan/scufris2/v0.2.0#scufris
+nix run github:alexjercan/scufris2/v0.3.0#scufris
 ```
 
 Run the voice-capable package on Linux:
 
 ```bash
-nix run github:alexjercan/scufris2/v0.2.0#scufris-voice
+nix run github:alexjercan/scufris2/v0.3.0#scufris-voice
 ```
 
 The voice-capable package starts silent. Enable speech inside the session with
@@ -36,7 +36,7 @@ Pin a release tag and share `nixpkgs` with the parent flake:
 ```nix
 {
   inputs.scufris = {
-    url = "github:alexjercan/scufris2/v0.2.0";
+    url = "github:alexjercan/scufris2/v0.3.0";
     inputs.nixpkgs.follows = "nixpkgs";
   };
 }

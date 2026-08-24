@@ -1,11 +1,11 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>A* Pathfinding for Grid Games - course concept</title>
-<style>
-  /* ---------------------------------------------------------------------
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A* Pathfinding for Grid Games - course concept</title>
+    <style>
+      /* ---------------------------------------------------------------------
      Design concept: an AI-compiled interactive learning course page.
      Scope: visual + interaction design only, one topic, one long page.
      Not production Scufris code - a mockup of what "compile my library
@@ -35,1139 +35,1712 @@
      magnitude encoding on the page: the g(n) cost-ring diagram.
   --------------------------------------------------------------------- */
 
-  :root {
-    color-scheme: dark;
-    --page:        #0d0d0d;
-    --surface:     #1a1a19;
-    --surface-2:   rgba(255, 255, 255, 0.04);
-    --border:      rgba(255, 255, 255, 0.10);
-    --gridline:    #2c2c2a;
-    --baseline:    #383835;
+      :root {
+        color-scheme: dark;
+        --page: #0d0d0d;
+        --surface: #1a1a19;
+        --surface-2: rgba(255, 255, 255, 0.04);
+        --border: rgba(255, 255, 255, 0.1);
+        --gridline: #2c2c2a;
+        --baseline: #383835;
 
-    --text-primary:   #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted:     #898781;
+        --text-primary: #ffffff;
+        --text-secondary: #c3c2b7;
+        --text-muted: #898781;
 
-    --series-1: #3987e5; /* blue   - start / g(n) */
-    --series-2: #d95926; /* orange - goal  / h(n) */
-    --status-good:     #0ca30c;
-    --status-warning:  #fab219;
-    --status-critical: #d03b3b;
+        --series-1: #3987e5; /* blue   - start / g(n) */
+        --series-2: #d95926; /* orange - goal  / h(n) */
+        --status-good: #0ca30c;
+        --status-warning: #fab219;
+        --status-critical: #d03b3b;
 
-    --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-    --radius: 10px;
-    --radius-sm: 6px;
-  }
+        --font-ui:
+          system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+        --radius: 10px;
+        --radius-sm: 6px;
+      }
 
-  * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
 
-  html, body {
-    margin: 0;
-    padding: 0;
-    background: var(--page);
-    color: var(--text-secondary);
-  }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--page);
+        color: var(--text-secondary);
+      }
 
-  body {
-    font-family: var(--font-ui);
-    line-height: 1.55;
-    padding: 3rem 1.25rem 6rem;
-  }
+      body {
+        font-family: var(--font-ui);
+        line-height: 1.55;
+        padding: 3rem 1.25rem 6rem;
+      }
 
-  .col {
-    max-width: 800px;
-    margin: 0 auto;
-  }
+      .col {
+        max-width: 800px;
+        margin: 0 auto;
+      }
 
-  h1, h2, h3 { color: var(--text-primary); font-weight: 650; line-height: 1.25; }
-  h1 { font-size: 1.9rem; margin: 0.35rem 0 0.4rem; }
-  h2 { font-size: 1.3rem; margin: 0 0 0.6rem; }
-  h3 { font-size: 1.05rem; margin: 0 0 0.4rem; }
-  p  { margin: 0 0 0.85rem; }
-  strong { color: var(--text-primary); font-weight: 600; }
-  code {
-    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0.05rem 0.35rem;
-    font-size: 0.92em;
-    color: var(--text-primary);
-  }
-  a { color: var(--series-1); }
-  a:hover { color: #6ba6ee; }
+      h1,
+      h2,
+      h3 {
+        color: var(--text-primary);
+        font-weight: 650;
+        line-height: 1.25;
+      }
+      h1 {
+        font-size: 1.9rem;
+        margin: 0.35rem 0 0.4rem;
+      }
+      h2 {
+        font-size: 1.3rem;
+        margin: 0 0 0.6rem;
+      }
+      h3 {
+        font-size: 1.05rem;
+        margin: 0 0 0.4rem;
+      }
+      p {
+        margin: 0 0 0.85rem;
+      }
+      strong {
+        color: var(--text-primary);
+        font-weight: 600;
+      }
+      code {
+        font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 0.05rem 0.35rem;
+        font-size: 0.92em;
+        color: var(--text-primary);
+      }
+      a {
+        color: var(--series-1);
+      }
+      a:hover {
+        color: #6ba6ee;
+      }
 
-  .eyebrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.3rem 0.7rem;
-  }
-  .eyebrow .dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--status-good);
-    flex: none;
-  }
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 0.3rem 0.7rem;
+      }
+      .eyebrow .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--status-good);
+        flex: none;
+      }
 
-  .subtitle { color: var(--text-secondary); font-size: 1rem; margin: 0 0 1.5rem; }
+      .subtitle {
+        color: var(--text-secondary);
+        font-size: 1rem;
+        margin: 0 0 1.5rem;
+      }
 
-  /* ---- progress indicator ---- */
-  .progress {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.85rem 1rem 1rem;
-    margin: 0 0 2.5rem;
-  }
-  .progress-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 0.55rem;
-  }
-  .progress-head span:first-child { color: var(--text-primary); font-size: 0.85rem; font-weight: 600; }
-  .progress-head span:last-child { color: var(--text-muted); font-size: 0.78rem; }
-  .progress-track {
-    height: 6px;
-    border-radius: 999px;
-    background: var(--gridline);
-    overflow: hidden;
-    margin-bottom: 0.7rem;
-  }
-  .progress-fill {
-    height: 100%;
-    background: var(--series-1);
-    width: 0%;
-    transition: width 400ms ease;
-  }
-  .progress-steps {
-    list-style: none;
-    display: flex;
-    gap: 0.5rem;
-    margin: 0; padding: 0;
-    flex-wrap: wrap;
-  }
-  .progress-steps li {
-    font-size: 0.76rem;
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.22rem 0.6rem 0.22rem 0.45rem;
-  }
-  .progress-steps li::before {
-    content: "";
-    width: 14px; height: 14px;
-    border-radius: 50%;
-    border: 1.5px solid var(--text-muted);
-    flex: none;
-  }
-  .progress-steps li.done {
-    color: var(--text-primary);
-    border-color: rgba(12, 163, 12, 0.4);
-    background: rgba(12, 163, 12, 0.08);
-  }
-  .progress-steps li.done::before {
-    content: "\2713";
-    font-size: 10px;
-    line-height: 12px;
-    text-align: center;
-    color: #06280a;
-    background: var(--status-good);
-    border-color: var(--status-good);
-  }
+      /* ---- progress indicator ---- */
+      .progress {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 0.85rem 1rem 1rem;
+        margin: 0 0 2.5rem;
+      }
+      .progress-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 0.55rem;
+      }
+      .progress-head span:first-child {
+        color: var(--text-primary);
+        font-size: 0.85rem;
+        font-weight: 600;
+      }
+      .progress-head span:last-child {
+        color: var(--text-muted);
+        font-size: 0.78rem;
+      }
+      .progress-track {
+        height: 6px;
+        border-radius: 999px;
+        background: var(--gridline);
+        overflow: hidden;
+        margin-bottom: 0.7rem;
+      }
+      .progress-fill {
+        height: 100%;
+        background: var(--series-1);
+        width: 0%;
+        transition: width 400ms ease;
+      }
+      .progress-steps {
+        list-style: none;
+        display: flex;
+        gap: 0.5rem;
+        margin: 0;
+        padding: 0;
+        flex-wrap: wrap;
+      }
+      .progress-steps li {
+        font-size: 0.76rem;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 0.22rem 0.6rem 0.22rem 0.45rem;
+      }
+      .progress-steps li::before {
+        content: "";
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        border: 1.5px solid var(--text-muted);
+        flex: none;
+      }
+      .progress-steps li.done {
+        color: var(--text-primary);
+        border-color: rgba(12, 163, 12, 0.4);
+        background: rgba(12, 163, 12, 0.08);
+      }
+      .progress-steps li.done::before {
+        content: "\2713";
+        font-size: 10px;
+        line-height: 12px;
+        text-align: center;
+        color: #06280a;
+        background: var(--status-good);
+        border-color: var(--status-good);
+      }
 
-  section { margin: 0 0 3.2rem; }
-  section > .kicker {
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-muted);
-    margin: 0 0 0.4rem;
-  }
+      section {
+        margin: 0 0 3.2rem;
+      }
+      section > .kicker {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        margin: 0 0 0.4rem;
+      }
 
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 1.25rem 1.35rem 1.4rem;
-  }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.25rem 1.35rem 1.4rem;
+      }
 
-  .cite { font-size: 0.72em; }
-  .cite a {
-    color: var(--text-muted);
-    text-decoration: none;
-    border-bottom: 1px dotted var(--text-muted);
-  }
-  .cite a:hover { color: var(--series-1); border-color: var(--series-1); }
-  .cite-target { transition: background 900ms ease; border-radius: 6px; }
-  .cite-target.flash { background: rgba(57, 135, 229, 0.16); }
+      .cite {
+        font-size: 0.72em;
+      }
+      .cite a {
+        color: var(--text-muted);
+        text-decoration: none;
+        border-bottom: 1px dotted var(--text-muted);
+      }
+      .cite a:hover {
+        color: var(--series-1);
+        border-color: var(--series-1);
+      }
+      .cite-target {
+        transition: background 900ms ease;
+        border-radius: 6px;
+      }
+      .cite-target.flash {
+        background: rgba(57, 135, 229, 0.16);
+      }
 
-  button {
-    font-family: inherit;
-    cursor: pointer;
-  }
-  .btn {
-    background: var(--series-1);
-    color: #06162c;
-    border: none;
-    border-radius: var(--radius-sm);
-    padding: 0.55rem 1.05rem;
-    font-size: 0.88rem;
-    font-weight: 600;
-  }
-  .btn:hover { background: #559eee; }
-  .btn:disabled { background: var(--baseline); color: var(--text-muted); cursor: not-allowed; }
-  .btn-ghost {
-    background: transparent;
-    color: var(--text-secondary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 0.5rem 0.9rem;
-    font-size: 0.85rem;
-  }
-  .btn-ghost:hover { border-color: var(--text-muted); color: var(--text-primary); }
-  .btn-row { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin: 0.9rem 0 0; }
+      button {
+        font-family: inherit;
+        cursor: pointer;
+      }
+      .btn {
+        background: var(--series-1);
+        color: #06162c;
+        border: none;
+        border-radius: var(--radius-sm);
+        padding: 0.55rem 1.05rem;
+        font-size: 0.88rem;
+        font-weight: 600;
+      }
+      .btn:hover {
+        background: #559eee;
+      }
+      .btn:disabled {
+        background: var(--baseline);
+        color: var(--text-muted);
+        cursor: not-allowed;
+      }
+      .btn-ghost {
+        background: transparent;
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 0.5rem 0.9rem;
+        font-size: 0.85rem;
+      }
+      .btn-ghost:hover {
+        border-color: var(--text-muted);
+        color: var(--text-primary);
+      }
+      .btn-row {
+        display: flex;
+        gap: 0.6rem;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 0.9rem 0 0;
+      }
 
-  :focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+      :focus-visible {
+        outline: 2px solid var(--series-1);
+        outline-offset: 2px;
+      }
 
-  /* ---- generic board (grid) ---- */
-  .board-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.7rem; }
-  .board {
-    display: grid;
-    grid-template-columns: repeat(var(--cols), 1fr);
-    gap: 3px;
-    width: min(100%, var(--board-w, 440px));
-  }
-  .cell {
-    aspect-ratio: 1 / 1;
-    border-radius: 4px;
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.68rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    transition: background-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
-  }
-  .board.interactive .cell { cursor: pointer; }
-  .board.interactive .cell:hover:not(.start):not(.goal) { background: rgba(255, 255, 255, 0.09); }
-  .board:not(.interactive) .cell { cursor: default; }
+      /* ---- generic board (grid) ---- */
+      .board-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.7rem;
+      }
+      .board {
+        display: grid;
+        grid-template-columns: repeat(var(--cols), 1fr);
+        gap: 3px;
+        width: min(100%, var(--board-w, 440px));
+      }
+      .cell {
+        aspect-ratio: 1 / 1;
+        border-radius: 4px;
+        border: 1px solid var(--border);
+        background: var(--surface-2);
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.68rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        transition:
+          background-color 150ms ease,
+          transform 150ms ease,
+          box-shadow 150ms ease;
+      }
+      .board.interactive .cell {
+        cursor: pointer;
+      }
+      .board.interactive .cell:hover:not(.start):not(.goal) {
+        background: rgba(255, 255, 255, 0.09);
+      }
+      .board:not(.interactive) .cell {
+        cursor: default;
+      }
 
-  .cell.wall {
-    background-color: var(--baseline);
-    background-image: repeating-linear-gradient(
-      45deg,
-      var(--gridline) 0 4px,
-      var(--baseline) 4px 8px
-    );
-  }
-  .cell.start { background: var(--series-1); color: #06162c; }
-  .cell.goal  { background: var(--series-2); color: #2c0f00; }
-  .cell.visited { background: rgba(57, 135, 229, 0.30); }
-  .cell.path {
-    background: var(--status-good);
-    color: #06280a;
-    animation: pulsePath 650ms ease-out 1;
-  }
-  .cell.path-bad {
-    background: var(--status-critical);
-    color: #2c0505;
-  }
-  @keyframes pulsePath {
-    0%   { box-shadow: 0 0 0 0 rgba(12, 163, 12, 0.55); }
-    100% { box-shadow: 0 0 0 6px rgba(12, 163, 12, 0); }
-  }
+      .cell.wall {
+        background-color: var(--baseline);
+        background-image: repeating-linear-gradient(
+          45deg,
+          var(--gridline) 0 4px,
+          var(--baseline) 4px 8px
+        );
+      }
+      .cell.start {
+        background: var(--series-1);
+        color: #06162c;
+      }
+      .cell.goal {
+        background: var(--series-2);
+        color: #2c0f00;
+      }
+      .cell.visited {
+        background: rgba(57, 135, 229, 0.3);
+      }
+      .cell.path {
+        background: var(--status-good);
+        color: #06280a;
+        animation: pulsePath 650ms ease-out 1;
+      }
+      .cell.path-bad {
+        background: var(--status-critical);
+        color: #2c0505;
+      }
+      @keyframes pulsePath {
+        0% {
+          box-shadow: 0 0 0 0 rgba(12, 163, 12, 0.55);
+        }
+        100% {
+          box-shadow: 0 0 0 6px rgba(12, 163, 12, 0);
+        }
+      }
 
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem 1.1rem;
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    justify-content: center;
-  }
-  .legend .item { display: flex; align-items: center; gap: 0.4rem; }
-  .legend .swatch {
-    width: 13px; height: 13px;
-    border-radius: 3px;
-    border: 1px solid var(--border);
-    flex: none;
-  }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem 1.1rem;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        justify-content: center;
+      }
+      .legend .item {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .legend .swatch {
+        width: 13px;
+        height: 13px;
+        border-radius: 3px;
+        border: 1px solid var(--border);
+        flex: none;
+      }
 
-  .stat-line {
-    font-size: 0.83rem;
-    color: var(--text-muted);
-    text-align: center;
-    min-height: 1.2em;
-  }
-  .stat-line strong { color: var(--text-primary); }
-  .stat-line.warn strong { color: var(--status-warning); }
+      .stat-line {
+        font-size: 0.83rem;
+        color: var(--text-muted);
+        text-align: center;
+        min-height: 1.2em;
+      }
+      .stat-line strong {
+        color: var(--text-primary);
+      }
+      .stat-line.warn strong {
+        color: var(--status-warning);
+      }
 
-  /* ---- hook ---- */
-  #hook .card { display: flex; flex-direction: column; align-items: center; gap: 0.9rem; }
+      /* ---- hook ---- */
+      #hook .card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.9rem;
+      }
 
-  /* ---- ladder ---- */
-  .rung { margin: 0 0 2.1rem; }
-  .rung:last-child { margin-bottom: 0; }
-  .rung .rung-num {
-    display: inline-flex;
-    width: 22px; height: 22px;
-    align-items: center; justify-content: center;
-    border-radius: 50%;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    color: var(--text-primary);
-    font-size: 0.78rem;
-    font-weight: 700;
-    margin-right: 0.5rem;
-  }
-  .rung-visual {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 1rem;
-    margin-top: 0.7rem;
-  }
+      /* ---- ladder ---- */
+      .rung {
+        margin: 0 0 2.1rem;
+      }
+      .rung:last-child {
+        margin-bottom: 0;
+      }
+      .rung .rung-num {
+        display: inline-flex;
+        width: 22px;
+        height: 22px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        color: var(--text-primary);
+        font-size: 0.78rem;
+        font-weight: 700;
+        margin-right: 0.5rem;
+      }
+      .rung-visual {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1rem;
+        margin-top: 0.7rem;
+      }
 
-  .mini-pair { display: flex; gap: 1.6rem; flex-wrap: wrap; justify-content: center; }
-  .mini-board-block { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
-  .mini-board-block .label { font-size: 0.78rem; color: var(--text-muted); }
-  .mini-board-block .label strong { color: var(--text-primary); }
+      .mini-pair {
+        display: flex;
+        gap: 1.6rem;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .mini-board-block {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .mini-board-block .label {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+      }
+      .mini-board-block .label strong {
+        color: var(--text-primary);
+      }
 
-  .rings-row { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
-  .ramp-strip {
-    display: flex;
-    width: min(100%, 220px);
-    height: 10px;
-    border-radius: 999px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-  }
-  .ramp-strip span { flex: 1; }
-  .ramp-caption {
-    display: flex;
-    justify-content: space-between;
-    width: min(100%, 220px);
-    font-size: 0.72rem;
-    color: var(--text-muted);
-  }
+      .rings-row {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.6rem;
+      }
+      .ramp-strip {
+        display: flex;
+        width: min(100%, 220px);
+        height: 10px;
+        border-radius: 999px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+      }
+      .ramp-strip span {
+        flex: 1;
+      }
+      .ramp-caption {
+        display: flex;
+        justify-content: space-between;
+        width: min(100%, 220px);
+        font-size: 0.72rem;
+        color: var(--text-muted);
+      }
 
-  .fgh-rows { display: flex; flex-direction: column; gap: 0.6rem; width: 100%; max-width: 420px; margin: 0 auto; }
-  .fgh-row { display: flex; align-items: center; gap: 0.6rem; }
-  .fgh-name { width: 62px; font-size: 0.8rem; color: var(--text-secondary); flex: none; }
-  .fgh-name strong { color: var(--text-primary); }
-  .fgh-bar {
-    display: flex;
-    gap: 2px;
-    height: 16px;
-    background: var(--surface);
-    border-radius: 3px;
-    flex: 1;
-  }
-  .fgh-seg { height: 100%; border-radius: 2px; }
-  .fgh-seg.g { background: var(--series-1); }
-  .fgh-seg.h { background: var(--series-2); }
-  .fgh-total { width: 44px; text-align: right; font-size: 0.78rem; color: var(--text-muted); flex: none; }
-  .fgh-total strong { color: var(--text-primary); }
-  .fgh-row.chosen .fgh-name strong::after {
-    content: " (chosen)";
-    color: var(--status-good);
-    font-weight: 600;
-    font-size: 0.75em;
-  }
-  .fgh-row.chosen .fgh-bar { box-shadow: 0 0 0 1.5px var(--status-good); }
+      .fgh-rows {
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+        width: 100%;
+        max-width: 420px;
+        margin: 0 auto;
+      }
+      .fgh-row {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+      }
+      .fgh-name {
+        width: 62px;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        flex: none;
+      }
+      .fgh-name strong {
+        color: var(--text-primary);
+      }
+      .fgh-bar {
+        display: flex;
+        gap: 2px;
+        height: 16px;
+        background: var(--surface);
+        border-radius: 3px;
+        flex: 1;
+      }
+      .fgh-seg {
+        height: 100%;
+        border-radius: 2px;
+      }
+      .fgh-seg.g {
+        background: var(--series-1);
+      }
+      .fgh-seg.h {
+        background: var(--series-2);
+      }
+      .fgh-total {
+        width: 44px;
+        text-align: right;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        flex: none;
+      }
+      .fgh-total strong {
+        color: var(--text-primary);
+      }
+      .fgh-row.chosen .fgh-name strong::after {
+        content: " (chosen)";
+        color: var(--status-good);
+        font-weight: 600;
+        font-size: 0.75em;
+      }
+      .fgh-row.chosen .fgh-bar {
+        box-shadow: 0 0 0 1.5px var(--status-good);
+      }
 
-  /* ---- sandbox ---- */
-  #sandbox .board { --board-w: 460px; }
-  .sandbox-hint { font-size: 0.82rem; color: var(--text-muted); text-align: center; margin: -0.3rem 0 0; }
+      /* ---- sandbox ---- */
+      #sandbox .board {
+        --board-w: 460px;
+      }
+      .sandbox-hint {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        text-align: center;
+        margin: -0.3rem 0 0;
+      }
 
-  /* ---- quiz ---- */
-  .quiz-q { color: var(--text-primary); font-weight: 600; margin: 0 0 0.9rem; }
-  .quiz-options { list-style: none; margin: 0 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
-  .quiz-opt {
-    width: 100%;
-    text-align: left;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 0.6rem 0.8rem;
-    color: var(--text-secondary);
-    font-size: 0.92rem;
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-  }
-  .quiz-opt:hover:not(:disabled) { border-color: var(--text-muted); color: var(--text-primary); }
-  .quiz-opt .mark {
-    width: 18px; height: 18px; border-radius: 50%;
-    border: 1.5px solid var(--text-muted);
-    flex: none;
-    font-size: 0.68rem;
-    display: flex; align-items: center; justify-content: center;
-    color: transparent;
-  }
-  .quiz-opt.correct { border-color: rgba(12, 163, 12, 0.55); background: rgba(12, 163, 12, 0.10); color: var(--text-primary); }
-  .quiz-opt.correct .mark { background: var(--status-good); border-color: var(--status-good); color: #06280a; content: none; }
-  .quiz-opt.correct .mark::after { content: "\2713"; }
-  .quiz-opt.incorrect { border-color: rgba(208, 59, 59, 0.55); background: rgba(208, 59, 59, 0.10); color: var(--text-primary); }
-  .quiz-opt.incorrect .mark { background: var(--status-critical); border-color: var(--status-critical); color: #2c0505; }
-  .quiz-opt.incorrect .mark::after { content: "\2717"; }
-  .quiz-opt:disabled { cursor: default; }
+      /* ---- quiz ---- */
+      .quiz-q {
+        color: var(--text-primary);
+        font-weight: 600;
+        margin: 0 0 0.9rem;
+      }
+      .quiz-options {
+        list-style: none;
+        margin: 0 0 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+      }
+      .quiz-opt {
+        width: 100%;
+        text-align: left;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 0.6rem 0.8rem;
+        color: var(--text-secondary);
+        font-size: 0.92rem;
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+      }
+      .quiz-opt:hover:not(:disabled) {
+        border-color: var(--text-muted);
+        color: var(--text-primary);
+      }
+      .quiz-opt .mark {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 1.5px solid var(--text-muted);
+        flex: none;
+        font-size: 0.68rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: transparent;
+      }
+      .quiz-opt.correct {
+        border-color: rgba(12, 163, 12, 0.55);
+        background: rgba(12, 163, 12, 0.1);
+        color: var(--text-primary);
+      }
+      .quiz-opt.correct .mark {
+        background: var(--status-good);
+        border-color: var(--status-good);
+        color: #06280a;
+        content: none;
+      }
+      .quiz-opt.correct .mark::after {
+        content: "\2713";
+      }
+      .quiz-opt.incorrect {
+        border-color: rgba(208, 59, 59, 0.55);
+        background: rgba(208, 59, 59, 0.1);
+        color: var(--text-primary);
+      }
+      .quiz-opt.incorrect .mark {
+        background: var(--status-critical);
+        border-color: var(--status-critical);
+        color: #2c0505;
+      }
+      .quiz-opt.incorrect .mark::after {
+        content: "\2717";
+      }
+      .quiz-opt:disabled {
+        cursor: default;
+      }
 
-  .quiz-feedback {
-    margin-top: 1rem;
-    padding: 0.85rem 1rem;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    font-size: 0.88rem;
-    display: none;
-  }
-  .quiz-feedback.show { display: block; }
-  .quiz-feedback .verdict { font-weight: 700; margin: 0 0 0.35rem; }
-  .quiz-feedback.right .verdict { color: var(--status-good); }
-  .quiz-feedback.wrong .verdict { color: var(--status-critical); }
-  .review-hint {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    margin-top: 0.7rem;
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 0.28rem 0.7rem;
-  }
-  .review-hint strong { color: var(--text-primary); }
+      .quiz-feedback {
+        margin-top: 1rem;
+        padding: 0.85rem 1rem;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--surface-2);
+        font-size: 0.88rem;
+        display: none;
+      }
+      .quiz-feedback.show {
+        display: block;
+      }
+      .quiz-feedback .verdict {
+        font-weight: 700;
+        margin: 0 0 0.35rem;
+      }
+      .quiz-feedback.right .verdict {
+        color: var(--status-good);
+      }
+      .quiz-feedback.wrong .verdict {
+        color: var(--status-critical);
+      }
+      .review-hint {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        margin-top: 0.7rem;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 0.28rem 0.7rem;
+      }
+      .review-hint strong {
+        color: var(--text-primary);
+      }
 
-  /* ---- sources ---- */
-  .source-list { display: flex; flex-direction: column; gap: 0.7rem; }
-  .source-card {
-    display: flex;
-    gap: 0.9rem;
-    align-items: flex-start;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.9rem 1.05rem;
-  }
-  .source-type {
-    flex: none;
-    width: 64px;
-    font-size: 0.68rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-muted);
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    padding: 0.2rem 0;
-    text-align: center;
-  }
-  .source-type.article { color: var(--series-1); border-color: rgba(57, 135, 229, 0.4); }
-  .source-type.video   { color: var(--series-2); border-color: rgba(217, 89, 38, 0.4); }
-  .source-type.notes   { color: var(--status-good); border-color: rgba(12, 163, 12, 0.4); }
-  .source-body .title { color: var(--text-primary); font-weight: 600; margin: 0 0 0.15rem; }
-  .source-body .meta { font-size: 0.78rem; color: var(--text-muted); margin: 0 0 0.35rem; }
-  .source-body .note { font-size: 0.85rem; margin: 0; }
-  .source-card:target, .source-card.flash { background: rgba(57, 135, 229, 0.10); border-color: rgba(57, 135, 229, 0.4); }
+      /* ---- sources ---- */
+      .source-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+      }
+      .source-card {
+        display: flex;
+        gap: 0.9rem;
+        align-items: flex-start;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 0.9rem 1.05rem;
+      }
+      .source-type {
+        flex: none;
+        width: 64px;
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 0.2rem 0;
+        text-align: center;
+      }
+      .source-type.article {
+        color: var(--series-1);
+        border-color: rgba(57, 135, 229, 0.4);
+      }
+      .source-type.video {
+        color: var(--series-2);
+        border-color: rgba(217, 89, 38, 0.4);
+      }
+      .source-type.notes {
+        color: var(--status-good);
+        border-color: rgba(12, 163, 12, 0.4);
+      }
+      .source-body .title {
+        color: var(--text-primary);
+        font-weight: 600;
+        margin: 0 0 0.15rem;
+      }
+      .source-body .meta {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        margin: 0 0 0.35rem;
+      }
+      .source-body .note {
+        font-size: 0.85rem;
+        margin: 0;
+      }
+      .source-card:target,
+      .source-card.flash {
+        background: rgba(57, 135, 229, 0.1);
+        border-color: rgba(57, 135, 229, 0.4);
+      }
 
-  footer.page-end {
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 0.78rem;
-    margin-top: 3rem;
-  }
+      footer.page-end {
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 0.78rem;
+        margin-top: 3rem;
+      }
 
-  @media (prefers-reduced-motion: reduce) {
-    .cell, .progress-fill { transition-duration: 1ms !important; }
-    .cell.path { animation: none !important; }
-  }
+      @media (prefers-reduced-motion: reduce) {
+        .cell,
+        .progress-fill {
+          transition-duration: 1ms !important;
+        }
+        .cell.path {
+          animation: none !important;
+        }
+      }
 
-  @media (max-width: 480px) {
-    .fgh-name { width: 48px; }
-    .source-type { width: 54px; }
-  }
-</style>
-</head>
-<body>
-<div class="col">
-
-  <span class="eyebrow"><span class="dot"></span>Compiled by Scufris from 3 items in your library</span>
-  <h1>A* Pathfinding for Grid Games</h1>
-  <p class="subtitle">How your units find the shortest route around walls - and how to know when they can't.</p>
-
-  <div class="progress" role="group" aria-label="Course progress">
-    <div class="progress-head">
-      <span id="progress-label">0 of 5 sections done</span>
-      <span>scroll or interact to make progress</span>
-    </div>
-    <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
-    <ol class="progress-steps" id="progress-steps">
-      <li data-section="hook">Hook</li>
-      <li data-section="ladder">Ladder</li>
-      <li data-section="sandbox">Sandbox</li>
-      <li data-section="check">Check</li>
-      <li data-section="sources">Sources</li>
-    </ol>
-  </div>
-
-  <!-- ================= 1. HOOK ================= -->
-  <section id="hook">
-    <p class="kicker">Hook</p>
-    <p>
-      A unit needs to get from one corner of the map to the other, and there is a
-      wall in the way. It could just walk toward the goal and see what happens -
-      that works until it slams into the wall and has to figure out the rest by
-      trial and error. A* instead scores every step by two numbers at once: how
-      far it has already walked, and a quick estimate of how far it has left. That
-      one idea is the difference between a unit that fumbles around obstacles and
-      one that goes straight to the best route <span class="cite">[<a href="#src-1" data-cite="1">1</a>]</span>.
-    </p>
-    <div class="card">
-      <div class="board-wrap">
-        <div class="board" id="hook-board" style="--board-w: 380px;" aria-hidden="true"></div>
-        <div class="legend" aria-hidden="true">
-          <span class="item"><span class="swatch" style="background:var(--series-1)"></span>Start</span>
-          <span class="item"><span class="swatch" style="background:var(--series-2)"></span>Goal</span>
-          <span class="item"><span class="swatch" style="background:var(--baseline)"></span>Wall</span>
-          <span class="item"><span class="swatch" style="background:var(--status-good)"></span>Path found</span>
-        </div>
-        <div class="btn-row">
-          <button class="btn" id="hook-run">Watch it find a path</button>
-        </div>
-        <p class="stat-line" id="hook-status">Click the button - the wall only has one way through.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- ================= 2. LADDER ================= -->
-  <section id="ladder">
-    <p class="kicker">Ladder</p>
-    <h2>How A* gets there</h2>
-    <p>Three ideas, stacked. Each one fixes what broke in the last.</p>
-
-    <article class="rung" id="rung-1">
-      <h3><span class="rung-num">1</span>Chasing the goal is not enough</h3>
-      <p>
-        The simplest search, <strong>greedy best-first</strong>, always expands
-        whichever open cell looks closest to the goal by straight-line distance,
-        and never looks at how far it has already walked. In open ground that is
-        fine. Below, the only gap in the wall is at the top, but the goal is at
-        the bottom-right - so "closer to goal" pulls greedy straight down first.
-        It has to walk the wrong way, hit the wall, and crawl all the way back up
-        before it even finds the door
-        <span class="cite">[<a href="#src-2" data-cite="2">2</a>]</span>. It is just as fast as A* here -
-        it explores almost as few cells - it just commits to the wrong route and
-        never reconsiders.
+      @media (max-width: 480px) {
+        .fgh-name {
+          width: 48px;
+        }
+        .source-type {
+          width: 54px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="col">
+      <span class="eyebrow"
+        ><span class="dot"></span>Compiled by Scufris from 3 items in your
+        library</span
+      >
+      <h1>A* Pathfinding for Grid Games</h1>
+      <p class="subtitle">
+        How your units find the shortest route around walls - and how to know
+        when they can't.
       </p>
-      <div class="rung-visual">
-        <div class="mini-pair">
-          <div class="mini-board-block">
-            <div class="board" id="mini-greedy" style="--board-w:260px;" aria-hidden="true"></div>
-            <span class="label">Greedy best-first - <strong id="mini-greedy-len">-</strong> steps</span>
-          </div>
-          <div class="mini-board-block">
-            <div class="board" id="mini-astar" style="--board-w:260px;" aria-hidden="true"></div>
-            <span class="label">A* - <strong id="mini-astar-len">-</strong> steps</span>
-          </div>
-        </div>
-        <div class="legend" style="margin-top:0.8rem;" aria-hidden="true">
-          <span class="item"><span class="swatch" style="background:var(--baseline)"></span>Wall</span>
-          <span class="item"><span class="swatch" style="background:var(--status-critical)"></span>Dead-end detour</span>
-          <span class="item"><span class="swatch" style="background:rgba(57,135,229,0.30)"></span>Also explored</span>
-          <span class="item"><span class="swatch" style="background:var(--status-good)"></span>Path used</span>
-        </div>
-      </div>
-    </article>
 
-    <article class="rung" id="rung-2">
-      <h3><span class="rung-num">2</span>Remembering the walk so far: g(n)</h3>
-      <p>
-        Dijkstra's algorithm fixes the dead-end problem by tracking
-        <code>g(n)</code>, the exact cost of the path from the start to a cell,
-        and always expanding the cheapest one found so far. That guarantees the
-        shortest path <span class="cite">[<a href="#src-1" data-cite="1">1</a>]</span>, but with nothing
-        pointing it toward the goal it spreads out evenly in every direction,
-        like ripples from a stone, even into cells that plainly lead away from
-        the target.
-      </p>
-      <div class="rung-visual">
-        <div class="rings-row">
-          <div class="board" id="cost-rings" style="--board-w:180px;" aria-hidden="true"></div>
-          <div class="ramp-strip" id="ramp-strip" aria-hidden="true"></div>
-          <div class="ramp-caption" aria-hidden="true"><span>g = 0 (start)</span><span>g = 4</span></div>
-          <span class="label">Cells explored, colored by <strong>g(n)</strong> - cost from start, ignoring the goal entirely</span>
+      <div class="progress" role="group" aria-label="Course progress">
+        <div class="progress-head">
+          <span id="progress-label">0 of 5 sections done</span>
+          <span>scroll or interact to make progress</span>
         </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <ol class="progress-steps" id="progress-steps">
+          <li data-section="hook">Hook</li>
+          <li data-section="ladder">Ladder</li>
+          <li data-section="sandbox">Sandbox</li>
+          <li data-section="check">Check</li>
+          <li data-section="sources">Sources</li>
+        </ol>
       </div>
-    </article>
 
-    <article class="rung" id="rung-3">
-      <h3><span class="rung-num">3</span>f(n) = g(n) + h(n): the best of both</h3>
-      <p>
-        A* scores every candidate cell with <code>f(n) = g(n) + h(n)</code>: cost
-        already paid, plus an estimate of the cost still owed, and always expands
-        the lowest total next. As long as <code>h(n)</code> never overestimates
-        the true remaining distance - Manhattan distance is a safe choice on a
-        grid where a unit only moves up, down, left, or right
-        <span class="cite">[<a href="#src-1" data-cite="1">1</a>][<a href="#src-3" data-cite="3">3</a>]</span> - the
-        first time A* reaches the goal, that path is provably the shortest one
-        <span class="cite">[<a href="#src-1" data-cite="1">1</a>]</span>.
-      </p>
-      <div class="rung-visual">
-        <div class="fgh-rows" id="fgh-rows"></div>
-        <p class="stat-line" style="margin-top:0.7rem;">
-          Cell <strong>P</strong> looks closer by heuristic alone (lower h) - greedy would pick it.
-          A* adds up the full cost and picks <strong>Q</strong> instead.
+      <!-- ================= 1. HOOK ================= -->
+      <section id="hook">
+        <p class="kicker">Hook</p>
+        <p>
+          A unit needs to get from one corner of the map to the other, and there
+          is a wall in the way. It could just walk toward the goal and see what
+          happens - that works until it slams into the wall and has to figure
+          out the rest by trial and error. A* instead scores every step by two
+          numbers at once: how far it has already walked, and a quick estimate
+          of how far it has left. That one idea is the difference between a unit
+          that fumbles around obstacles and one that goes straight to the best
+          route
+          <span class="cite">[<a href="#src-1" data-cite="1">1</a>]</span>.
         </p>
-        <div class="legend" style="margin-top:0.5rem;" aria-hidden="true">
-          <span class="item"><span class="swatch" style="background:var(--series-1)"></span>g(n) - cost so far</span>
-          <span class="item"><span class="swatch" style="background:var(--series-2)"></span>h(n) - estimate to goal</span>
+        <div class="card">
+          <div class="board-wrap">
+            <div
+              class="board"
+              id="hook-board"
+              style="--board-w: 380px"
+              aria-hidden="true"
+            ></div>
+            <div class="legend" aria-hidden="true">
+              <span class="item"
+                ><span class="swatch" style="background: var(--series-1)"></span
+                >Start</span
+              >
+              <span class="item"
+                ><span class="swatch" style="background: var(--series-2)"></span
+                >Goal</span
+              >
+              <span class="item"
+                ><span class="swatch" style="background: var(--baseline)"></span
+                >Wall</span
+              >
+              <span class="item"
+                ><span
+                  class="swatch"
+                  style="background: var(--status-good)"
+                ></span
+                >Path found</span
+              >
+            </div>
+            <div class="btn-row">
+              <button class="btn" id="hook-run">Watch it find a path</button>
+            </div>
+            <p class="stat-line" id="hook-status">
+              Click the button - the wall only has one way through.
+            </p>
+          </div>
         </div>
-      </div>
-    </article>
-  </section>
+      </section>
 
-  <!-- ================= 3. SANDBOX ================= -->
-  <section id="sandbox">
-    <p class="kicker">Sandbox</p>
-    <h2>Try it: build a maze, run A*</h2>
-    <p>
-      This is a live search, not a recording - the same ~50 lines of A* run
-      right here in the page. Click any cell that is not the start or the goal
-      to raise or knock down a wall, then run the search. Cells A* visits while
-      searching light up pale blue; the final path glows green. Wall the goal in
-      completely and it will say so honestly instead of guessing
-      <span class="cite">[<a href="#src-3" data-cite="3">3</a>]</span>.
-    </p>
-    <div class="card">
-      <div class="board-wrap">
-        <div class="board interactive" id="sandbox-board" role="group" aria-label="8 by 8 pathfinding grid, click cells to toggle walls"></div>
-        <div class="legend">
-          <span class="item"><span class="swatch" style="background:var(--series-1)"></span>Start</span>
-          <span class="item"><span class="swatch" style="background:var(--series-2)"></span>Goal</span>
-          <span class="item"><span class="swatch" style="background:var(--baseline)"></span>Wall (click to toggle)</span>
-          <span class="item"><span class="swatch" style="background:rgba(57,135,229,0.30)"></span>Visited</span>
-          <span class="item"><span class="swatch" style="background:var(--status-good)"></span>Path</span>
-        </div>
-        <div class="btn-row">
-          <button class="btn" id="sandbox-run">Run A*</button>
-          <button class="btn-ghost" id="sandbox-reset">Reset maze</button>
-        </div>
-        <p class="stat-line" id="sandbox-stats">Visited: -- cells &middot; Path: -- steps</p>
-        <p class="sandbox-hint">Manhattan-distance heuristic, four-directional movement, cost 1 per step.</p>
-      </div>
-    </div>
-  </section>
+      <!-- ================= 2. LADDER ================= -->
+      <section id="ladder">
+        <p class="kicker">Ladder</p>
+        <h2>How A* gets there</h2>
+        <p>Three ideas, stacked. Each one fixes what broke in the last.</p>
 
-  <!-- ================= 4. CHECK ================= -->
-  <section id="check">
-    <p class="kicker">Check</p>
-    <h2>Quick check</h2>
-    <div class="card">
-      <p class="quiz-q">
-        Suppose you accidentally implement A* with <code>g(n)</code> hard-coded to
-        0, so only <code>h(n)</code> ever affects which cell gets expanded next.
-        What happens?
-      </p>
-      <ul class="quiz-options" id="quiz-options">
-        <li><button class="quiz-opt" data-correct="false"><span class="mark"></span>It becomes Dijkstra's algorithm - slower, but still shortest-path.</button></li>
-        <li><button class="quiz-opt" data-correct="true"><span class="mark"></span>It becomes greedy best-first search - fast, but no longer guaranteed shortest.</button></li>
-        <li><button class="quiz-opt" data-correct="false"><span class="mark"></span>It becomes breadth-first search and stops finding a path at all.</button></li>
-        <li><button class="quiz-opt" data-correct="false"><span class="mark"></span>Nothing changes - g(n) does not affect which cell is chosen.</button></li>
-      </ul>
-      <div class="quiz-feedback" id="quiz-feedback">
-        <p class="verdict" id="quiz-verdict"></p>
-        <p id="quiz-explain">
-          Zeroing out g(n) leaves f(n) equal to h(n), which is exactly greedy
-          best-first from step 1 of the ladder - it still moves toward the goal,
-          but it can no longer tell a cheap route from an expensive one, so it
-          walks into the same dead ends
-          <span class="cite">[<a href="#src-1" data-cite="1">1</a>][<a href="#src-2" data-cite="2">2</a>]</span>.
+        <article class="rung" id="rung-1">
+          <h3><span class="rung-num">1</span>Chasing the goal is not enough</h3>
+          <p>
+            The simplest search, <strong>greedy best-first</strong>, always
+            expands whichever open cell looks closest to the goal by
+            straight-line distance, and never looks at how far it has already
+            walked. In open ground that is fine. Below, the only gap in the wall
+            is at the top, but the goal is at the bottom-right - so "closer to
+            goal" pulls greedy straight down first. It has to walk the wrong
+            way, hit the wall, and crawl all the way back up before it even
+            finds the door
+            <span class="cite">[<a href="#src-2" data-cite="2">2</a>]</span>. It
+            is just as fast as A* here - it explores almost as few cells - it
+            just commits to the wrong route and never reconsiders.
+          </p>
+          <div class="rung-visual">
+            <div class="mini-pair">
+              <div class="mini-board-block">
+                <div
+                  class="board"
+                  id="mini-greedy"
+                  style="--board-w: 260px"
+                  aria-hidden="true"
+                ></div>
+                <span class="label"
+                  >Greedy best-first -
+                  <strong id="mini-greedy-len">-</strong> steps</span
+                >
+              </div>
+              <div class="mini-board-block">
+                <div
+                  class="board"
+                  id="mini-astar"
+                  style="--board-w: 260px"
+                  aria-hidden="true"
+                ></div>
+                <span class="label"
+                  >A* - <strong id="mini-astar-len">-</strong> steps</span
+                >
+              </div>
+            </div>
+            <div class="legend" style="margin-top: 0.8rem" aria-hidden="true">
+              <span class="item"
+                ><span class="swatch" style="background: var(--baseline)"></span
+                >Wall</span
+              >
+              <span class="item"
+                ><span
+                  class="swatch"
+                  style="background: var(--status-critical)"
+                ></span
+                >Dead-end detour</span
+              >
+              <span class="item"
+                ><span
+                  class="swatch"
+                  style="background: rgba(57, 135, 229, 0.3)"
+                ></span
+                >Also explored</span
+              >
+              <span class="item"
+                ><span
+                  class="swatch"
+                  style="background: var(--status-good)"
+                ></span
+                >Path used</span
+              >
+            </div>
+          </div>
+        </article>
+
+        <article class="rung" id="rung-2">
+          <h3>
+            <span class="rung-num">2</span>Remembering the walk so far: g(n)
+          </h3>
+          <p>
+            Dijkstra's algorithm fixes the dead-end problem by tracking
+            <code>g(n)</code>, the exact cost of the path from the start to a
+            cell, and always expanding the cheapest one found so far. That
+            guarantees the shortest path
+            <span class="cite">[<a href="#src-1" data-cite="1">1</a>]</span>,
+            but with nothing pointing it toward the goal it spreads out evenly
+            in every direction, like ripples from a stone, even into cells that
+            plainly lead away from the target.
+          </p>
+          <div class="rung-visual">
+            <div class="rings-row">
+              <div
+                class="board"
+                id="cost-rings"
+                style="--board-w: 180px"
+                aria-hidden="true"
+              ></div>
+              <div class="ramp-strip" id="ramp-strip" aria-hidden="true"></div>
+              <div class="ramp-caption" aria-hidden="true">
+                <span>g = 0 (start)</span><span>g = 4</span>
+              </div>
+              <span class="label"
+                >Cells explored, colored by <strong>g(n)</strong> - cost from
+                start, ignoring the goal entirely</span
+              >
+            </div>
+          </div>
+        </article>
+
+        <article class="rung" id="rung-3">
+          <h3>
+            <span class="rung-num">3</span>f(n) = g(n) + h(n): the best of both
+          </h3>
+          <p>
+            A* scores every candidate cell with <code>f(n) = g(n) + h(n)</code>:
+            cost already paid, plus an estimate of the cost still owed, and
+            always expands the lowest total next. As long as
+            <code>h(n)</code> never overestimates the true remaining distance -
+            Manhattan distance is a safe choice on a grid where a unit only
+            moves up, down, left, or right
+            <span class="cite"
+              >[<a href="#src-1" data-cite="1">1</a>][<a
+                href="#src-3"
+                data-cite="3"
+                >3</a
+              >]</span
+            >
+            - the first time A* reaches the goal, that path is provably the
+            shortest one
+            <span class="cite">[<a href="#src-1" data-cite="1">1</a>]</span>.
+          </p>
+          <div class="rung-visual">
+            <div class="fgh-rows" id="fgh-rows"></div>
+            <p class="stat-line" style="margin-top: 0.7rem">
+              Cell <strong>P</strong> looks closer by heuristic alone (lower h)
+              - greedy would pick it. A* adds up the full cost and picks
+              <strong>Q</strong> instead.
+            </p>
+            <div class="legend" style="margin-top: 0.5rem" aria-hidden="true">
+              <span class="item"
+                ><span class="swatch" style="background: var(--series-1)"></span
+                >g(n) - cost so far</span
+              >
+              <span class="item"
+                ><span class="swatch" style="background: var(--series-2)"></span
+                >h(n) - estimate to goal</span
+              >
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ================= 3. SANDBOX ================= -->
+      <section id="sandbox">
+        <p class="kicker">Sandbox</p>
+        <h2>Try it: build a maze, run A*</h2>
+        <p>
+          This is a live search, not a recording - the same ~50 lines of A* run
+          right here in the page. Click any cell that is not the start or the
+          goal to raise or knock down a wall, then run the search. Cells A*
+          visits while searching light up pale blue; the final path glows green.
+          Wall the goal in completely and it will say so honestly instead of
+          guessing
+          <span class="cite">[<a href="#src-3" data-cite="3">3</a>]</span>.
         </p>
-        <span class="review-hint">Next review: <strong>3 days</strong></span>
-      </div>
+        <div class="card">
+          <div class="board-wrap">
+            <div
+              class="board interactive"
+              id="sandbox-board"
+              role="group"
+              aria-label="8 by 8 pathfinding grid, click cells to toggle walls"
+            ></div>
+            <div class="legend">
+              <span class="item"
+                ><span class="swatch" style="background: var(--series-1)"></span
+                >Start</span
+              >
+              <span class="item"
+                ><span class="swatch" style="background: var(--series-2)"></span
+                >Goal</span
+              >
+              <span class="item"
+                ><span class="swatch" style="background: var(--baseline)"></span
+                >Wall (click to toggle)</span
+              >
+              <span class="item"
+                ><span
+                  class="swatch"
+                  style="background: rgba(57, 135, 229, 0.3)"
+                ></span
+                >Visited</span
+              >
+              <span class="item"
+                ><span
+                  class="swatch"
+                  style="background: var(--status-good)"
+                ></span
+                >Path</span
+              >
+            </div>
+            <div class="btn-row">
+              <button class="btn" id="sandbox-run">Run A*</button>
+              <button class="btn-ghost" id="sandbox-reset">Reset maze</button>
+            </div>
+            <p class="stat-line" id="sandbox-stats">
+              Visited: -- cells &middot; Path: -- steps
+            </p>
+            <p class="sandbox-hint">
+              Manhattan-distance heuristic, four-directional movement, cost 1
+              per step.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 4. CHECK ================= -->
+      <section id="check">
+        <p class="kicker">Check</p>
+        <h2>Quick check</h2>
+        <div class="card">
+          <p class="quiz-q">
+            Suppose you accidentally implement A* with
+            <code>g(n)</code> hard-coded to 0, so only <code>h(n)</code> ever
+            affects which cell gets expanded next. What happens?
+          </p>
+          <ul class="quiz-options" id="quiz-options">
+            <li>
+              <button class="quiz-opt" data-correct="false">
+                <span class="mark"></span>It becomes Dijkstra's algorithm -
+                slower, but still shortest-path.
+              </button>
+            </li>
+            <li>
+              <button class="quiz-opt" data-correct="true">
+                <span class="mark"></span>It becomes greedy best-first search -
+                fast, but no longer guaranteed shortest.
+              </button>
+            </li>
+            <li>
+              <button class="quiz-opt" data-correct="false">
+                <span class="mark"></span>It becomes breadth-first search and
+                stops finding a path at all.
+              </button>
+            </li>
+            <li>
+              <button class="quiz-opt" data-correct="false">
+                <span class="mark"></span>Nothing changes - g(n) does not affect
+                which cell is chosen.
+              </button>
+            </li>
+          </ul>
+          <div class="quiz-feedback" id="quiz-feedback">
+            <p class="verdict" id="quiz-verdict"></p>
+            <p id="quiz-explain">
+              Zeroing out g(n) leaves f(n) equal to h(n), which is exactly
+              greedy best-first from step 1 of the ladder - it still moves
+              toward the goal, but it can no longer tell a cheap route from an
+              expensive one, so it walks into the same dead ends
+              <span class="cite"
+                >[<a href="#src-1" data-cite="1">1</a>][<a
+                  href="#src-2"
+                  data-cite="2"
+                  >2</a
+                >]</span
+              >.
+            </p>
+            <span class="review-hint"
+              >Next review: <strong>3 days</strong></span
+            >
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 5. SOURCES ================= -->
+      <section id="sources">
+        <p class="kicker">Sources</p>
+        <h2>From your library</h2>
+        <p>
+          Every claim on this page traces back to one of these three captures.
+        </p>
+        <div class="source-list">
+          <div class="source-card" id="src-1">
+            <span class="source-type article">Article</span>
+            <div class="source-body">
+              <p class="title">
+                Introduction to A* (Amit Patel, Red Blob Games)
+              </p>
+              <p class="meta">Captured 2026-07-02</p>
+              <p class="note">
+                Ground-truth walkthrough of g, h, f and why an admissible
+                heuristic guarantees A* finds the shortest path.
+              </p>
+            </div>
+          </div>
+          <div class="source-card" id="src-2">
+            <span class="source-type video">Video</span>
+            <div class="source-body">
+              <p class="title">A* Search Algorithm - Computerphile</p>
+              <p class="meta">Captured 2026-07-19</p>
+              <p class="note">
+                Side-by-side visualization of Dijkstra, greedy best-first, and
+                A* on the same grid - source for the dead-end comparison above.
+              </p>
+            </div>
+          </div>
+          <div class="source-card" id="src-3">
+            <span class="source-type notes">Notes</span>
+            <div class="source-body">
+              <p class="title">nova-protocol: enemy pathing spike</p>
+              <p class="meta">Captured 2026-08-10</p>
+              <p class="note">
+                Own scratch notes from switching enemy movement to a
+                4-directional grid: Euclidean heuristic overestimated cost and
+                broke optimality, Manhattan fixed it. Also the "goal walled in
+                by scenery" edge case.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer class="page-end">
+        Design concept only - static mockup, no data leaves this page.
+      </footer>
     </div>
-  </section>
 
-  <!-- ================= 5. SOURCES ================= -->
-  <section id="sources">
-    <p class="kicker">Sources</p>
-    <h2>From your library</h2>
-    <p>Every claim on this page traces back to one of these three captures.</p>
-    <div class="source-list">
-      <div class="source-card" id="src-1">
-        <span class="source-type article">Article</span>
-        <div class="source-body">
-          <p class="title">Introduction to A* (Amit Patel, Red Blob Games)</p>
-          <p class="meta">Captured 2026-07-02</p>
-          <p class="note">Ground-truth walkthrough of g, h, f and why an admissible heuristic guarantees A* finds the shortest path.</p>
-        </div>
-      </div>
-      <div class="source-card" id="src-2">
-        <span class="source-type video">Video</span>
-        <div class="source-body">
-          <p class="title">A* Search Algorithm - Computerphile</p>
-          <p class="meta">Captured 2026-07-19</p>
-          <p class="note">Side-by-side visualization of Dijkstra, greedy best-first, and A* on the same grid - source for the dead-end comparison above.</p>
-        </div>
-      </div>
-      <div class="source-card" id="src-3">
-        <span class="source-type notes">Notes</span>
-        <div class="source-body">
-          <p class="title">nova-protocol: enemy pathing spike</p>
-          <p class="meta">Captured 2026-08-10</p>
-          <p class="note">Own scratch notes from switching enemy movement to a 4-directional grid: Euclidean heuristic overestimated cost and broke optimality, Manhattan fixed it. Also the "goal walled in by scenery" edge case.</p>
-        </div>
-      </div>
-    </div>
-  </section>
+    <script>
+      (function () {
+        "use strict";
 
-  <footer class="page-end">Design concept only - static mockup, no data leaves this page.</footer>
-</div>
+        var reduceMotion =
+          window.matchMedia &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-<script>
-(function () {
-  "use strict";
-
-  var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  /* ---------------------------------------------------------------
+        /* ---------------------------------------------------------------
      A* over a rectangular grid. ~45 lines. Open set is a Map keyed
      by cell index so a cell is never queued twice; tie-break prefers
      higher g (i.e. lower h) so paths read as straight lines.
   --------------------------------------------------------------- */
-  function astar(walls, start, goal, width, height) {
-    var key = function (r, c) { return r * width + c; };
-    var heuristic = function (r, c) { return Math.abs(r - goal.r) + Math.abs(c - goal.c); };
-    var startKey = key(start.r, start.c);
-    var goalKey = key(goal.r, goal.c);
+        function astar(walls, start, goal, width, height) {
+          var key = function (r, c) {
+            return r * width + c;
+          };
+          var heuristic = function (r, c) {
+            return Math.abs(r - goal.r) + Math.abs(c - goal.c);
+          };
+          var startKey = key(start.r, start.c);
+          var goalKey = key(goal.r, goal.c);
 
-    var open = new Map();
-    open.set(startKey, { g: 0, f: heuristic(start.r, start.c) });
-    var cameFrom = new Map();
-    var closed = new Set();
-    var visitedOrder = [];
+          var open = new Map();
+          open.set(startKey, { g: 0, f: heuristic(start.r, start.c) });
+          var cameFrom = new Map();
+          var closed = new Set();
+          var visitedOrder = [];
 
-    while (open.size) {
-      var curKey = null, cur = null;
-      open.forEach(function (s, k) {
-        if (!cur || s.f < cur.f || (s.f === cur.f && s.g > cur.g)) { cur = s; curKey = k; }
-      });
-      open.delete(curKey);
-      if (closed.has(curKey)) continue;
-      closed.add(curKey);
-      visitedOrder.push(curKey);
+          while (open.size) {
+            var curKey = null,
+              cur = null;
+            open.forEach(function (s, k) {
+              if (!cur || s.f < cur.f || (s.f === cur.f && s.g > cur.g)) {
+                cur = s;
+                curKey = k;
+              }
+            });
+            open.delete(curKey);
+            if (closed.has(curKey)) continue;
+            closed.add(curKey);
+            visitedOrder.push(curKey);
 
-      if (curKey === goalKey) {
-        var path = [curKey], walk = curKey;
-        while (cameFrom.has(walk)) { walk = cameFrom.get(walk); path.push(walk); }
-        path.reverse();
-        return { visitedOrder: visitedOrder, path: path, found: true };
-      }
+            if (curKey === goalKey) {
+              var path = [curKey],
+                walk = curKey;
+              while (cameFrom.has(walk)) {
+                walk = cameFrom.get(walk);
+                path.push(walk);
+              }
+              path.reverse();
+              return { visitedOrder: visitedOrder, path: path, found: true };
+            }
 
-      var r = Math.floor(curKey / width), c = curKey % width;
-      var deltas = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-      for (var i = 0; i < deltas.length; i++) {
-        var nr = r + deltas[i][0], nc = c + deltas[i][1];
-        if (nr < 0 || nc < 0 || nr >= height || nc >= width) continue;
-        var nk = key(nr, nc);
-        if (walls.has(nk) || closed.has(nk)) continue;
-        var ng = cur.g + 1;
-        var existing = open.get(nk);
-        if (!existing || ng < existing.g) {
-          cameFrom.set(nk, curKey);
-          open.set(nk, { g: ng, f: ng + heuristic(nr, nc) });
+            var r = Math.floor(curKey / width),
+              c = curKey % width;
+            var deltas = [
+              [-1, 0],
+              [1, 0],
+              [0, -1],
+              [0, 1],
+            ];
+            for (var i = 0; i < deltas.length; i++) {
+              var nr = r + deltas[i][0],
+                nc = c + deltas[i][1];
+              if (nr < 0 || nc < 0 || nr >= height || nc >= width) continue;
+              var nk = key(nr, nc);
+              if (walls.has(nk) || closed.has(nk)) continue;
+              var ng = cur.g + 1;
+              var existing = open.get(nk);
+              if (!existing || ng < existing.g) {
+                cameFrom.set(nk, curKey);
+                open.set(nk, { g: ng, f: ng + heuristic(nr, nc) });
+              }
+            }
+          }
+          return { visitedOrder: visitedOrder, path: [], found: false };
         }
-      }
-    }
-    return { visitedOrder: visitedOrder, path: [], found: false };
-  }
 
-  /* Same shape, but scores by h(n) alone - used only for the step-1
+        /* Same shape, but scores by h(n) alone - used only for the step-1
      "what greedy does wrong" illustration, never for the real search. */
-  function greedyBestFirst(walls, start, goal, width, height) {
-    var key = function (r, c) { return r * width + c; };
-    var heuristic = function (r, c) { return Math.abs(r - goal.r) + Math.abs(c - goal.c); };
-    var startKey = key(start.r, start.c);
-    var goalKey = key(goal.r, goal.c);
+        function greedyBestFirst(walls, start, goal, width, height) {
+          var key = function (r, c) {
+            return r * width + c;
+          };
+          var heuristic = function (r, c) {
+            return Math.abs(r - goal.r) + Math.abs(c - goal.c);
+          };
+          var startKey = key(start.r, start.c);
+          var goalKey = key(goal.r, goal.c);
 
-    var open = new Map();
-    open.set(startKey, heuristic(start.r, start.c));
-    var cameFrom = new Map();
-    var closed = new Set();
-    var visitedOrder = [];
+          var open = new Map();
+          open.set(startKey, heuristic(start.r, start.c));
+          var cameFrom = new Map();
+          var closed = new Set();
+          var visitedOrder = [];
 
-    while (open.size) {
-      var curKey = null, bestH = Infinity;
-      open.forEach(function (h, k) { if (h < bestH) { bestH = h; curKey = k; } });
-      open.delete(curKey);
-      if (closed.has(curKey)) continue;
-      closed.add(curKey);
-      visitedOrder.push(curKey);
+          while (open.size) {
+            var curKey = null,
+              bestH = Infinity;
+            open.forEach(function (h, k) {
+              if (h < bestH) {
+                bestH = h;
+                curKey = k;
+              }
+            });
+            open.delete(curKey);
+            if (closed.has(curKey)) continue;
+            closed.add(curKey);
+            visitedOrder.push(curKey);
 
-      if (curKey === goalKey) {
-        var path = [curKey], walk = curKey;
-        while (cameFrom.has(walk)) { walk = cameFrom.get(walk); path.push(walk); }
-        path.reverse();
-        return { visitedOrder: visitedOrder, path: path, found: true };
-      }
+            if (curKey === goalKey) {
+              var path = [curKey],
+                walk = curKey;
+              while (cameFrom.has(walk)) {
+                walk = cameFrom.get(walk);
+                path.push(walk);
+              }
+              path.reverse();
+              return { visitedOrder: visitedOrder, path: path, found: true };
+            }
 
-      var r = Math.floor(curKey / width), c = curKey % width;
-      var deltas = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-      for (var i = 0; i < deltas.length; i++) {
-        var nr = r + deltas[i][0], nc = c + deltas[i][1];
-        if (nr < 0 || nc < 0 || nr >= height || nc >= width) continue;
-        var nk = key(nr, nc);
-        if (walls.has(nk) || closed.has(nk) || open.has(nk)) continue;
-        cameFrom.set(nk, curKey);
-        open.set(nk, heuristic(nr, nc));
-      }
-    }
-    return { visitedOrder: visitedOrder, path: [], found: false };
-  }
-
-  /* ---------------- board rendering helpers ---------------- */
-  function buildBoard(el, width, height, interactive) {
-    el.style.setProperty("--cols", width);
-    el.classList.toggle("interactive", !!interactive);
-    el.innerHTML = "";
-    var cells = [];
-    for (var i = 0; i < width * height; i++) {
-      var cell = document.createElement(interactive ? "button" : "div");
-      if (interactive) cell.type = "button";
-      cell.className = "cell";
-      el.appendChild(cell);
-      cells.push(cell);
-    }
-    return cells;
-  }
-
-  function paintBase(cells, walls, start, goal, width) {
-    cells.forEach(function (cell, k) {
-      cell.className = "cell";
-      cell.textContent = "";
-      if (k === start.r * width + start.c) { cell.classList.add("start"); cell.textContent = "S"; }
-      else if (k === goal.r * width + goal.c) { cell.classList.add("goal"); cell.textContent = "G"; }
-      else if (walls.has(k)) { cell.classList.add("wall"); }
-    });
-  }
-
-  /* ---------------- progress indicator ---------------- */
-  var sectionOrder = ["hook", "ladder", "sandbox", "check", "sources"];
-  var done = new Set();
-  var progressLabel = document.getElementById("progress-label");
-  var progressFill = document.getElementById("progress-fill");
-  function markDone(id) {
-    if (done.has(id)) return;
-    done.add(id);
-    var li = document.querySelector('.progress-steps li[data-section="' + id + '"]');
-    if (li) li.classList.add("done");
-    progressLabel.textContent = done.size + " of " + sectionOrder.length + " sections done";
-    progressFill.style.width = (done.size / sectionOrder.length * 100) + "%";
-  }
-  if ("IntersectionObserver" in window) {
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (entry) {
-        if (entry.isIntersecting) markDone(entry.target.id);
-      });
-    }, { threshold: 0.55 });
-    ["ladder", "sources"].forEach(function (id) {
-      var el = document.getElementById(id);
-      if (el) io.observe(el);
-    });
-  }
-
-  /* ---------------- citation jump highlight ---------------- */
-  document.querySelectorAll(".cite a").forEach(function (a) {
-    a.addEventListener("click", function () {
-      var target = document.getElementById(a.getAttribute("href").slice(1));
-      if (!target) return;
-      target.classList.add("flash");
-      setTimeout(function () { target.classList.remove("flash"); }, 900);
-    });
-  });
-
-  /* ================= HOOK ================= */
-  (function hook() {
-    var W = 8, H = 8;
-    var start = { r: 0, c: 0 }, goal = { r: 7, c: 7 };
-    var walls = new Set();
-    for (var row = 0; row <= 6; row++) walls.add(row * W + 4);
-
-    var boardEl = document.getElementById("hook-board");
-    var cells = buildBoard(boardEl, W, H, false);
-    paintBase(cells, walls, start, goal, W);
-
-    var result = astar(walls, start, goal, W, H);
-    var runBtn = document.getElementById("hook-run");
-    var status = document.getElementById("hook-status");
-    var playing = false;
-
-    runBtn.addEventListener("click", function () {
-      markDone("hook");
-      if (playing) return;
-      playing = true;
-      runBtn.disabled = true;
-      paintBase(cells, walls, start, goal, W);
-      status.textContent = "Searching...";
-      var steps = result.path;
-      var delay = reduceMotion ? 0 : 150;
-      var i = 1; // step 0 is the start cell, already painted
-      function tick() {
-        if (i >= steps.length) {
-          status.innerHTML = "Found it in <strong>" + (steps.length - 1) + "</strong> steps.";
-          runBtn.disabled = false;
-          playing = false;
-          return;
+            var r = Math.floor(curKey / width),
+              c = curKey % width;
+            var deltas = [
+              [-1, 0],
+              [1, 0],
+              [0, -1],
+              [0, 1],
+            ];
+            for (var i = 0; i < deltas.length; i++) {
+              var nr = r + deltas[i][0],
+                nc = c + deltas[i][1];
+              if (nr < 0 || nc < 0 || nr >= height || nc >= width) continue;
+              var nk = key(nr, nc);
+              if (walls.has(nk) || closed.has(nk) || open.has(nk)) continue;
+              cameFrom.set(nk, curKey);
+              open.set(nk, heuristic(nr, nc));
+            }
+          }
+          return { visitedOrder: visitedOrder, path: [], found: false };
         }
-        var k = steps[i];
-        cells[k].classList.add("path");
-        i++;
-        setTimeout(tick, delay);
-      }
-      setTimeout(tick, delay);
-    });
-  })();
 
-  /* ================= LADDER: rung 1, greedy vs A* ================= */
-  (function ladderRung1() {
-    var W = 8, H = 8;
-    var start = { r: 0, c: 0 }, goal = { r: 7, c: 7 };
-    var walls = new Set();
-    // A wall spanning the whole board with its only gap at the far top
-    // row - the one direction pure "closer to goal" heuristics never
-    // want to try first, since the goal is at the bottom-right.
-    for (var row = 1; row < H; row++) walls.add(row * W + 3);
-
-    var startKey = start.r * W + start.c, goalKey = goal.r * W + goal.c;
-
-    // Colors every cell the search touched: cells on the final path go
-    // green, everything else explored-but-unused gets the "wasted work"
-    // color - red for greedy, blue for A* (its normal, bounded search).
-    // The headline number is path length: on this maze both algorithms
-    // explore a similar number of cells, but greedy's committed route
-    // is twice as long, because it dives down before ever trying up.
-    function renderMini(elId, result, unusedClass) {
-      var el = document.getElementById(elId);
-      var cells = buildBoard(el, W, H, false);
-      paintBase(cells, walls, start, goal, W);
-      var onPath = new Set(result.path);
-      result.visitedOrder.forEach(function (k) {
-        if (k === startKey || k === goalKey || onPath.has(k)) return;
-        cells[k].classList.add(unusedClass);
-      });
-      result.path.forEach(function (k) {
-        if (k === startKey || k === goalKey) return;
-        cells[k].classList.add("path");
-      });
-      return result.path.length ? result.path.length - 1 : "no path";
-    }
-
-    var greedyResult = greedyBestFirst(walls, start, goal, W, H);
-    var astarResult = astar(walls, start, goal, W, H);
-
-    document.getElementById("mini-greedy-len").textContent = renderMini("mini-greedy", greedyResult, "path-bad");
-    document.getElementById("mini-astar-len").textContent = renderMini("mini-astar", astarResult, "visited");
-  })();
-
-  /* ================= LADDER: rung 2, cost rings ================= */
-  (function ladderRung2() {
-    var W = 5, H = 5;
-    var center = { r: 2, c: 2 };
-    var steps = [
-      { bg: "#cde2fb", fg: "#0b0b0b" },
-      { bg: "#86b6ef", fg: "#0b0b0b" },
-      { bg: "#3987e5", fg: "#ffffff" },
-      { bg: "#1c5cab", fg: "#ffffff" },
-      { bg: "#0d366b", fg: "#ffffff" }
-    ];
-    var el = document.getElementById("cost-rings");
-    el.style.setProperty("--cols", W);
-    el.innerHTML = "";
-    for (var r = 0; r < H; r++) {
-      for (var c = 0; c < W; c++) {
-        var g = Math.abs(r - center.r) + Math.abs(c - center.c);
-        var step = steps[Math.min(g, steps.length - 1)];
-        var div = document.createElement("div");
-        div.className = "cell";
-        div.style.background = step.bg;
-        div.style.color = step.fg;
-        div.style.border = "1px solid rgba(0,0,0,0.15)";
-        div.textContent = (r === center.r && c === center.c) ? "S" : g;
-        el.appendChild(div);
-      }
-    }
-    var strip = document.getElementById("ramp-strip");
-    steps.forEach(function (step) {
-      var span = document.createElement("span");
-      span.style.background = step.bg;
-      strip.appendChild(span);
-    });
-  })();
-
-  /* ================= LADDER: rung 3, f = g + h bars ================= */
-  (function ladderRung3() {
-    var rows = document.getElementById("fgh-rows");
-    var candidates = [
-      { name: "P", g: 4, h: 1 },
-      { name: "Q", g: 1, h: 3 },
-      { name: "R", g: 2, h: 4 }
-    ];
-    var maxF = Math.max.apply(null, candidates.map(function (d) { return d.g + d.h; }));
-    var minF = Math.min.apply(null, candidates.map(function (d) { return d.g + d.h; }));
-    var scale = 100 / maxF;
-
-    candidates.forEach(function (d) {
-      var f = d.g + d.h;
-      var row = document.createElement("div");
-      row.className = "fgh-row" + (f === minF ? " chosen" : "");
-      row.innerHTML =
-        '<span class="fgh-name">Cell <strong>' + d.name + "</strong></span>" +
-        '<span class="fgh-bar">' +
-          '<span class="fgh-seg g" style="flex:' + d.g + '"></span>' +
-          '<span class="fgh-seg h" style="flex:' + d.h + '"></span>' +
-        "</span>" +
-        '<span class="fgh-total">f=<strong>' + f + "</strong></span>";
-      rows.appendChild(row);
-    });
-  })();
-
-  /* ================= SANDBOX ================= */
-  (function sandbox() {
-    var W = 8, H = 8;
-    var start = { r: 0, c: 0 }, goal = { r: 7, c: 7 };
-    var defaultWalls = [0, 1, 2, 5, 6, 7].map(function (row) { return row * W + 3; });
-    var walls = new Set(defaultWalls);
-
-    var boardEl = document.getElementById("sandbox-board");
-    var cells = buildBoard(boardEl, W, H, true);
-    var runBtn = document.getElementById("sandbox-run");
-    var resetBtn = document.getElementById("sandbox-reset");
-    var stats = document.getElementById("sandbox-stats");
-    var running = false;
-
-    function redraw() { paintBase(cells, walls, start, goal, W); }
-    function label(k) {
-      var r = Math.floor(k / W), c = k % W;
-      if (k === start.r * W + start.c) return "start";
-      if (k === goal.r * W + goal.c) return "goal";
-      return "row " + (r + 1) + " column " + (c + 1) + (walls.has(k) ? ", wall" : ", empty");
-    }
-    function refreshLabels() {
-      cells.forEach(function (cell, k) { cell.setAttribute("aria-label", label(k)); });
-    }
-
-    boardEl.addEventListener("click", function (e) {
-      if (running) return;
-      var k = cells.indexOf(e.target.closest(".cell"));
-      if (k < 0) return;
-      var sKey = start.r * W + start.c, gKey = goal.r * W + goal.c;
-      if (k === sKey || k === gKey) return;
-      if (walls.has(k)) walls.delete(k); else walls.add(k);
-      redraw();
-      refreshLabels();
-      stats.textContent = "Visited: -- cells · Path: -- steps";
-      stats.classList.remove("warn");
-    });
-
-    resetBtn.addEventListener("click", function () {
-      if (running) return;
-      walls = new Set(defaultWalls);
-      redraw();
-      refreshLabels();
-      stats.textContent = "Visited: -- cells · Path: -- steps";
-      stats.classList.remove("warn");
-    });
-
-    runBtn.addEventListener("click", function () {
-      if (running) return;
-      running = true;
-      runBtn.disabled = true;
-      resetBtn.disabled = true;
-      redraw();
-      var result = astar(walls, start, goal, W, H);
-      var visitDelay = reduceMotion ? 0 : 14;
-      var pathDelay = reduceMotion ? 0 : 90;
-      var vi = 0;
-
-      function revealVisited() {
-        if (vi >= result.visitedOrder.length) { revealPath(); return; }
-        var k = result.visitedOrder[vi];
-        var sKey = start.r * W + start.c, gKey = goal.r * W + goal.c;
-        if (k !== sKey && k !== gKey) cells[k].classList.add("visited");
-        vi++;
-        setTimeout(revealVisited, visitDelay);
-      }
-
-      var pi = 0;
-      function revealPath() {
-        if (!result.found) {
-          stats.innerHTML = "Visited <strong>" + result.visitedOrder.length + "</strong> cells · no path exists - the goal is sealed off";
-          stats.classList.add("warn");
-          finish();
-          return;
+        /* ---------------- board rendering helpers ---------------- */
+        function buildBoard(el, width, height, interactive) {
+          el.style.setProperty("--cols", width);
+          el.classList.toggle("interactive", !!interactive);
+          el.innerHTML = "";
+          var cells = [];
+          for (var i = 0; i < width * height; i++) {
+            var cell = document.createElement(interactive ? "button" : "div");
+            if (interactive) cell.type = "button";
+            cell.className = "cell";
+            el.appendChild(cell);
+            cells.push(cell);
+          }
+          return cells;
         }
-        if (pi >= result.path.length) {
-          stats.innerHTML = "Visited <strong>" + result.visitedOrder.length + "</strong> cells · path <strong>" + (result.path.length - 1) + "</strong> steps";
-          finish();
-          return;
+
+        function paintBase(cells, walls, start, goal, width) {
+          cells.forEach(function (cell, k) {
+            cell.className = "cell";
+            cell.textContent = "";
+            if (k === start.r * width + start.c) {
+              cell.classList.add("start");
+              cell.textContent = "S";
+            } else if (k === goal.r * width + goal.c) {
+              cell.classList.add("goal");
+              cell.textContent = "G";
+            } else if (walls.has(k)) {
+              cell.classList.add("wall");
+            }
+          });
         }
-        var k = result.path[pi];
-        cells[k].classList.add("path");
-        pi++;
-        setTimeout(revealPath, pathDelay);
-      }
 
-      function finish() {
-        running = false;
-        runBtn.disabled = false;
-        resetBtn.disabled = false;
-        markDone("sandbox");
-      }
+        /* ---------------- progress indicator ---------------- */
+        var sectionOrder = ["hook", "ladder", "sandbox", "check", "sources"];
+        var done = new Set();
+        var progressLabel = document.getElementById("progress-label");
+        var progressFill = document.getElementById("progress-fill");
+        function markDone(id) {
+          if (done.has(id)) return;
+          done.add(id);
+          var li = document.querySelector(
+            '.progress-steps li[data-section="' + id + '"]',
+          );
+          if (li) li.classList.add("done");
+          progressLabel.textContent =
+            done.size + " of " + sectionOrder.length + " sections done";
+          progressFill.style.width =
+            (done.size / sectionOrder.length) * 100 + "%";
+        }
+        if ("IntersectionObserver" in window) {
+          var io = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (entry) {
+                if (entry.isIntersecting) markDone(entry.target.id);
+              });
+            },
+            { threshold: 0.55 },
+          );
+          ["ladder", "sources"].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) io.observe(el);
+          });
+        }
 
-      revealVisited();
-    });
-
-    redraw();
-    refreshLabels();
-  })();
-
-  /* ================= QUIZ ================= */
-  (function quiz() {
-    var options = Array.prototype.slice.call(document.querySelectorAll(".quiz-opt"));
-    var feedback = document.getElementById("quiz-feedback");
-    var verdict = document.getElementById("quiz-verdict");
-    var answered = false;
-
-    options.forEach(function (opt) {
-      opt.addEventListener("click", function () {
-        if (answered) return;
-        answered = true;
-        var isCorrect = opt.getAttribute("data-correct") === "true";
-        options.forEach(function (o) {
-          o.disabled = true;
-          if (o.getAttribute("data-correct") === "true") o.classList.add("correct");
-          else if (o === opt) o.classList.add("incorrect");
+        /* ---------------- citation jump highlight ---------------- */
+        document.querySelectorAll(".cite a").forEach(function (a) {
+          a.addEventListener("click", function () {
+            var target = document.getElementById(
+              a.getAttribute("href").slice(1),
+            );
+            if (!target) return;
+            target.classList.add("flash");
+            setTimeout(function () {
+              target.classList.remove("flash");
+            }, 900);
+          });
         });
-        feedback.classList.add("show", isCorrect ? "right" : "wrong");
-        verdict.textContent = isCorrect ? "Correct." : "Not quite.";
-        markDone("check");
-      });
-    });
-  })();
-})();
-</script>
-</body>
+
+        /* ================= HOOK ================= */
+        (function hook() {
+          var W = 8,
+            H = 8;
+          var start = { r: 0, c: 0 },
+            goal = { r: 7, c: 7 };
+          var walls = new Set();
+          for (var row = 0; row <= 6; row++) walls.add(row * W + 4);
+
+          var boardEl = document.getElementById("hook-board");
+          var cells = buildBoard(boardEl, W, H, false);
+          paintBase(cells, walls, start, goal, W);
+
+          var result = astar(walls, start, goal, W, H);
+          var runBtn = document.getElementById("hook-run");
+          var status = document.getElementById("hook-status");
+          var playing = false;
+
+          runBtn.addEventListener("click", function () {
+            markDone("hook");
+            if (playing) return;
+            playing = true;
+            runBtn.disabled = true;
+            paintBase(cells, walls, start, goal, W);
+            status.textContent = "Searching...";
+            var steps = result.path;
+            var delay = reduceMotion ? 0 : 150;
+            var i = 1; // step 0 is the start cell, already painted
+            function tick() {
+              if (i >= steps.length) {
+                status.innerHTML =
+                  "Found it in <strong>" +
+                  (steps.length - 1) +
+                  "</strong> steps.";
+                runBtn.disabled = false;
+                playing = false;
+                return;
+              }
+              var k = steps[i];
+              cells[k].classList.add("path");
+              i++;
+              setTimeout(tick, delay);
+            }
+            setTimeout(tick, delay);
+          });
+        })();
+
+        /* ================= LADDER: rung 1, greedy vs A* ================= */
+        (function ladderRung1() {
+          var W = 8,
+            H = 8;
+          var start = { r: 0, c: 0 },
+            goal = { r: 7, c: 7 };
+          var walls = new Set();
+          // A wall spanning the whole board with its only gap at the far top
+          // row - the one direction pure "closer to goal" heuristics never
+          // want to try first, since the goal is at the bottom-right.
+          for (var row = 1; row < H; row++) walls.add(row * W + 3);
+
+          var startKey = start.r * W + start.c,
+            goalKey = goal.r * W + goal.c;
+
+          // Colors every cell the search touched: cells on the final path go
+          // green, everything else explored-but-unused gets the "wasted work"
+          // color - red for greedy, blue for A* (its normal, bounded search).
+          // The headline number is path length: on this maze both algorithms
+          // explore a similar number of cells, but greedy's committed route
+          // is twice as long, because it dives down before ever trying up.
+          function renderMini(elId, result, unusedClass) {
+            var el = document.getElementById(elId);
+            var cells = buildBoard(el, W, H, false);
+            paintBase(cells, walls, start, goal, W);
+            var onPath = new Set(result.path);
+            result.visitedOrder.forEach(function (k) {
+              if (k === startKey || k === goalKey || onPath.has(k)) return;
+              cells[k].classList.add(unusedClass);
+            });
+            result.path.forEach(function (k) {
+              if (k === startKey || k === goalKey) return;
+              cells[k].classList.add("path");
+            });
+            return result.path.length ? result.path.length - 1 : "no path";
+          }
+
+          var greedyResult = greedyBestFirst(walls, start, goal, W, H);
+          var astarResult = astar(walls, start, goal, W, H);
+
+          document.getElementById("mini-greedy-len").textContent = renderMini(
+            "mini-greedy",
+            greedyResult,
+            "path-bad",
+          );
+          document.getElementById("mini-astar-len").textContent = renderMini(
+            "mini-astar",
+            astarResult,
+            "visited",
+          );
+        })();
+
+        /* ================= LADDER: rung 2, cost rings ================= */
+        (function ladderRung2() {
+          var W = 5,
+            H = 5;
+          var center = { r: 2, c: 2 };
+          var steps = [
+            { bg: "#cde2fb", fg: "#0b0b0b" },
+            { bg: "#86b6ef", fg: "#0b0b0b" },
+            { bg: "#3987e5", fg: "#ffffff" },
+            { bg: "#1c5cab", fg: "#ffffff" },
+            { bg: "#0d366b", fg: "#ffffff" },
+          ];
+          var el = document.getElementById("cost-rings");
+          el.style.setProperty("--cols", W);
+          el.innerHTML = "";
+          for (var r = 0; r < H; r++) {
+            for (var c = 0; c < W; c++) {
+              var g = Math.abs(r - center.r) + Math.abs(c - center.c);
+              var step = steps[Math.min(g, steps.length - 1)];
+              var div = document.createElement("div");
+              div.className = "cell";
+              div.style.background = step.bg;
+              div.style.color = step.fg;
+              div.style.border = "1px solid rgba(0,0,0,0.15)";
+              div.textContent = r === center.r && c === center.c ? "S" : g;
+              el.appendChild(div);
+            }
+          }
+          var strip = document.getElementById("ramp-strip");
+          steps.forEach(function (step) {
+            var span = document.createElement("span");
+            span.style.background = step.bg;
+            strip.appendChild(span);
+          });
+        })();
+
+        /* ================= LADDER: rung 3, f = g + h bars ================= */
+        (function ladderRung3() {
+          var rows = document.getElementById("fgh-rows");
+          var candidates = [
+            { name: "P", g: 4, h: 1 },
+            { name: "Q", g: 1, h: 3 },
+            { name: "R", g: 2, h: 4 },
+          ];
+          var maxF = Math.max.apply(
+            null,
+            candidates.map(function (d) {
+              return d.g + d.h;
+            }),
+          );
+          var minF = Math.min.apply(
+            null,
+            candidates.map(function (d) {
+              return d.g + d.h;
+            }),
+          );
+          var scale = 100 / maxF;
+
+          candidates.forEach(function (d) {
+            var f = d.g + d.h;
+            var row = document.createElement("div");
+            row.className = "fgh-row" + (f === minF ? " chosen" : "");
+            row.innerHTML =
+              '<span class="fgh-name">Cell <strong>' +
+              d.name +
+              "</strong></span>" +
+              '<span class="fgh-bar">' +
+              '<span class="fgh-seg g" style="flex:' +
+              d.g +
+              '"></span>' +
+              '<span class="fgh-seg h" style="flex:' +
+              d.h +
+              '"></span>' +
+              "</span>" +
+              '<span class="fgh-total">f=<strong>' +
+              f +
+              "</strong></span>";
+            rows.appendChild(row);
+          });
+        })();
+
+        /* ================= SANDBOX ================= */
+        (function sandbox() {
+          var W = 8,
+            H = 8;
+          var start = { r: 0, c: 0 },
+            goal = { r: 7, c: 7 };
+          var defaultWalls = [0, 1, 2, 5, 6, 7].map(function (row) {
+            return row * W + 3;
+          });
+          var walls = new Set(defaultWalls);
+
+          var boardEl = document.getElementById("sandbox-board");
+          var cells = buildBoard(boardEl, W, H, true);
+          var runBtn = document.getElementById("sandbox-run");
+          var resetBtn = document.getElementById("sandbox-reset");
+          var stats = document.getElementById("sandbox-stats");
+          var running = false;
+
+          function redraw() {
+            paintBase(cells, walls, start, goal, W);
+          }
+          function label(k) {
+            var r = Math.floor(k / W),
+              c = k % W;
+            if (k === start.r * W + start.c) return "start";
+            if (k === goal.r * W + goal.c) return "goal";
+            return (
+              "row " +
+              (r + 1) +
+              " column " +
+              (c + 1) +
+              (walls.has(k) ? ", wall" : ", empty")
+            );
+          }
+          function refreshLabels() {
+            cells.forEach(function (cell, k) {
+              cell.setAttribute("aria-label", label(k));
+            });
+          }
+
+          boardEl.addEventListener("click", function (e) {
+            if (running) return;
+            var k = cells.indexOf(e.target.closest(".cell"));
+            if (k < 0) return;
+            var sKey = start.r * W + start.c,
+              gKey = goal.r * W + goal.c;
+            if (k === sKey || k === gKey) return;
+            if (walls.has(k)) walls.delete(k);
+            else walls.add(k);
+            redraw();
+            refreshLabels();
+            stats.textContent = "Visited: -- cells · Path: -- steps";
+            stats.classList.remove("warn");
+          });
+
+          resetBtn.addEventListener("click", function () {
+            if (running) return;
+            walls = new Set(defaultWalls);
+            redraw();
+            refreshLabels();
+            stats.textContent = "Visited: -- cells · Path: -- steps";
+            stats.classList.remove("warn");
+          });
+
+          runBtn.addEventListener("click", function () {
+            if (running) return;
+            running = true;
+            runBtn.disabled = true;
+            resetBtn.disabled = true;
+            redraw();
+            var result = astar(walls, start, goal, W, H);
+            var visitDelay = reduceMotion ? 0 : 14;
+            var pathDelay = reduceMotion ? 0 : 90;
+            var vi = 0;
+
+            function revealVisited() {
+              if (vi >= result.visitedOrder.length) {
+                revealPath();
+                return;
+              }
+              var k = result.visitedOrder[vi];
+              var sKey = start.r * W + start.c,
+                gKey = goal.r * W + goal.c;
+              if (k !== sKey && k !== gKey) cells[k].classList.add("visited");
+              vi++;
+              setTimeout(revealVisited, visitDelay);
+            }
+
+            var pi = 0;
+            function revealPath() {
+              if (!result.found) {
+                stats.innerHTML =
+                  "Visited <strong>" +
+                  result.visitedOrder.length +
+                  "</strong> cells · no path exists - the goal is sealed off";
+                stats.classList.add("warn");
+                finish();
+                return;
+              }
+              if (pi >= result.path.length) {
+                stats.innerHTML =
+                  "Visited <strong>" +
+                  result.visitedOrder.length +
+                  "</strong> cells · path <strong>" +
+                  (result.path.length - 1) +
+                  "</strong> steps";
+                finish();
+                return;
+              }
+              var k = result.path[pi];
+              cells[k].classList.add("path");
+              pi++;
+              setTimeout(revealPath, pathDelay);
+            }
+
+            function finish() {
+              running = false;
+              runBtn.disabled = false;
+              resetBtn.disabled = false;
+              markDone("sandbox");
+            }
+
+            revealVisited();
+          });
+
+          redraw();
+          refreshLabels();
+        })();
+
+        /* ================= QUIZ ================= */
+        (function quiz() {
+          var options = Array.prototype.slice.call(
+            document.querySelectorAll(".quiz-opt"),
+          );
+          var feedback = document.getElementById("quiz-feedback");
+          var verdict = document.getElementById("quiz-verdict");
+          var answered = false;
+
+          options.forEach(function (opt) {
+            opt.addEventListener("click", function () {
+              if (answered) return;
+              answered = true;
+              var isCorrect = opt.getAttribute("data-correct") === "true";
+              options.forEach(function (o) {
+                o.disabled = true;
+                if (o.getAttribute("data-correct") === "true")
+                  o.classList.add("correct");
+                else if (o === opt) o.classList.add("incorrect");
+              });
+              feedback.classList.add("show", isCorrect ? "right" : "wrong");
+              verdict.textContent = isCorrect ? "Correct." : "Not quite.";
+              markDone("check");
+            });
+          });
+        })();
+      })();
+    </script>
+  </body>
 </html>

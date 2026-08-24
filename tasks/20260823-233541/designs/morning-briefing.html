@@ -1,583 +1,812 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Scufris - Morning Briefing</title>
-<style>
-  :root {
-    color-scheme: dark;
-    --page:        #0d0d0d;
-    --surface-1:   #1a1a19;
-    --surface-2:   #202020;
-    --surface-3:   #26261f14; /* unused placeholder guard */
-    --text-primary:   #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted:     #898781;
-    --hairline:    rgba(255,255,255,0.10);
-    --hairline-strong: rgba(255,255,255,0.16);
-    --accent:      #3987e5;   /* categorical slot 1, dark step */
-    --accent-wash-15: rgba(57,135,229,0.15);
-    --accent-wash-10: rgba(57,135,229,0.10);
-    --accent-wash-08: rgba(57,135,229,0.08);
-    --good:        #0ca30c;
-    --good-wash:   rgba(12,163,12,0.12);
-  }
+  <head>
+    <meta charset="UTF-8" />
+    <title>Scufris - Morning Briefing</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --page: #0d0d0d;
+        --surface-1: #1a1a19;
+        --surface-2: #202020;
+        --surface-3: #26261f14; /* unused placeholder guard */
+        --text-primary: #ffffff;
+        --text-secondary: #c3c2b7;
+        --text-muted: #898781;
+        --hairline: rgba(255, 255, 255, 0.1);
+        --hairline-strong: rgba(255, 255, 255, 0.16);
+        --accent: #3987e5; /* categorical slot 1, dark step */
+        --accent-wash-15: rgba(57, 135, 229, 0.15);
+        --accent-wash-10: rgba(57, 135, 229, 0.1);
+        --accent-wash-08: rgba(57, 135, 229, 0.08);
+        --good: #0ca30c;
+        --good-wash: rgba(12, 163, 12, 0.12);
+      }
 
-  * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
 
-  html, body {
-    margin: 0;
-    padding: 0;
-    background: var(--page);
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-    -webkit-font-smoothing: antialiased;
-  }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--page);
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
 
-  body {
-    padding: 40px 20px;
-    display: flex;
-    justify-content: center;
-  }
+      body {
+        padding: 40px 20px;
+        display: flex;
+        justify-content: center;
+      }
 
-  .widget {
-    width: 900px;
-    max-width: 100%;
-    background: var(--surface-1);
-    border: 1px solid var(--hairline);
-    border-radius: 14px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.35);
-    overflow: hidden;
-  }
+      .widget {
+        width: 900px;
+        max-width: 100%;
+        background: var(--surface-1);
+        border: 1px solid var(--hairline);
+        border-radius: 14px;
+        box-shadow:
+          0 20px 60px rgba(0, 0, 0, 0.55),
+          0 2px 8px rgba(0, 0, 0, 0.35);
+        overflow: hidden;
+      }
 
-  /* ---------- title bar ---------- */
-  .titlebar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 24px;
-    border-bottom: 1px solid var(--hairline);
-    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
-  }
-  .titlebar-left { display: flex; align-items: center; gap: 10px; }
-  .dots { display: flex; gap: 6px; }
-  .dots span {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: var(--hairline-strong);
-  }
-  .app-name {
-    font-size: 12px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    font-weight: 600;
-  }
-  .titlebar-right {
-    display: flex; align-items: center; gap: 10px;
-    font-size: 12px; color: var(--text-muted);
-  }
-  .status-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--text-muted);
-    display: inline-block;
-  }
+      /* ---------- title bar ---------- */
+      .titlebar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 24px;
+        border-bottom: 1px solid var(--hairline);
+        background: linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.02),
+          transparent
+        );
+      }
+      .titlebar-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .dots {
+        display: flex;
+        gap: 6px;
+      }
+      .dots span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--hairline-strong);
+      }
+      .app-name {
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        font-weight: 600;
+      }
+      .titlebar-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+      .status-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--text-muted);
+        display: inline-block;
+      }
 
-  /* ---------- transcript ---------- */
-  .transcript {
-    padding: 20px 24px 18px 24px;
-    border-bottom: 1px solid var(--hairline);
-    display: flex;
-    gap: 14px;
-    align-items: flex-start;
-  }
-  .waveform {
-    display: flex;
-    align-items: flex-end;
-    gap: 2px;
-    height: 18px;
-    margin-top: 4px;
-    flex: none;
-  }
-  .waveform span {
-    width: 3px;
-    background: var(--text-muted);
-    border-radius: 2px;
-    display: block;
-  }
-  .transcript-body { min-width: 0; }
-  .transcript-eyebrow {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-muted);
-    margin: 0 0 4px 0;
-  }
-  .transcript-eyebrow b { color: var(--text-secondary); font-weight: 600; }
-  .transcript-quote {
-    margin: 0;
-    font-size: 16.5px;
-    line-height: 1.5;
-    color: var(--text-primary);
-  }
+      /* ---------- transcript ---------- */
+      .transcript {
+        padding: 20px 24px 18px 24px;
+        border-bottom: 1px solid var(--hairline);
+        display: flex;
+        gap: 14px;
+        align-items: flex-start;
+      }
+      .waveform {
+        display: flex;
+        align-items: flex-end;
+        gap: 2px;
+        height: 18px;
+        margin-top: 4px;
+        flex: none;
+      }
+      .waveform span {
+        width: 3px;
+        background: var(--text-muted);
+        border-radius: 2px;
+        display: block;
+      }
+      .transcript-body {
+        min-width: 0;
+      }
+      .transcript-eyebrow {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        margin: 0 0 4px 0;
+      }
+      .transcript-eyebrow b {
+        color: var(--text-secondary);
+        font-weight: 600;
+      }
+      .transcript-quote {
+        margin: 0;
+        font-size: 16.5px;
+        line-height: 1.5;
+        color: var(--text-primary);
+      }
 
-  /* ---------- generic section ---------- */
-  .section {
-    padding: 20px 24px;
-    border-bottom: 1px solid var(--hairline);
-  }
-  .section:last-child { border-bottom: none; }
-  .section-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    margin-bottom: 12px;
-  }
-  .eyebrow {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--text-muted);
-    font-weight: 600;
-  }
-  .eyebrow-count {
-    font-size: 12px;
-    color: var(--text-secondary);
-  }
+      /* ---------- generic section ---------- */
+      .section {
+        padding: 20px 24px;
+        border-bottom: 1px solid var(--hairline);
+      }
+      .section:last-child {
+        border-bottom: none;
+      }
+      .section-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+      .eyebrow {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--text-muted);
+        font-weight: 600;
+      }
+      .eyebrow-count {
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
 
-  /* ---------- today tasks ---------- */
-  .task-list { display: flex; flex-direction: column; gap: 2px; }
-  .task {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 6px;
-    border-radius: 8px;
-    cursor: pointer;
-  }
-  .task:hover { background: rgba(255,255,255,0.03); }
-  .task input { position: absolute; opacity: 0; width: 0; height: 0; }
-  .box {
-    flex: none;
-    width: 18px; height: 18px;
-    border-radius: 5px;
-    border: 1.5px solid var(--hairline-strong);
-    position: relative;
-  }
-  .task input:checked ~ .box {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-  .task input:checked ~ .box::after {
-    content: "";
-    position: absolute;
-    left: 5px; top: 1.5px;
-    width: 5px; height: 9px;
-    border: solid #ffffff;
-    border-width: 0 2px 2px 0;
-    transform: rotate(45deg);
-  }
-  .task-txt {
-    flex: 1;
-    font-size: 14.5px;
-    color: var(--text-primary);
-  }
-  .task input:checked ~ .task-txt {
-    color: var(--text-muted);
-    text-decoration: line-through;
-    text-decoration-color: var(--hairline-strong);
-  }
-  .task-meta {
-    flex: none;
-    font-size: 12px;
-    color: var(--text-muted);
-  }
+      /* ---------- today tasks ---------- */
+      .task-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .task {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 6px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .task:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .task input {
+        position: absolute;
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .box {
+        flex: none;
+        width: 18px;
+        height: 18px;
+        border-radius: 5px;
+        border: 1.5px solid var(--hairline-strong);
+        position: relative;
+      }
+      .task input:checked ~ .box {
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .task input:checked ~ .box::after {
+        content: "";
+        position: absolute;
+        left: 5px;
+        top: 1.5px;
+        width: 5px;
+        height: 9px;
+        border: solid #ffffff;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+      .task-txt {
+        flex: 1;
+        font-size: 14.5px;
+        color: var(--text-primary);
+      }
+      .task input:checked ~ .task-txt {
+        color: var(--text-muted);
+        text-decoration: line-through;
+        text-decoration-color: var(--hairline-strong);
+      }
+      .task-meta {
+        flex: none;
+        font-size: 12px;
+        color: var(--text-muted);
+      }
 
-  /* ---------- habits ---------- */
-  .habit-row { display: flex; gap: 10px; }
-  .habit {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
-    border: 1px solid var(--hairline);
-    border-radius: 10px;
-    background: rgba(255,255,255,0.015);
-  }
-  .habit.is-done { border-color: rgba(12,163,12,0.35); background: var(--good-wash); }
-  .habit-mark {
-    flex: none;
-    width: 20px; height: 20px;
-    border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    border: 1.5px solid var(--hairline-strong);
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-  .habit.is-done .habit-mark {
-    border-color: var(--good);
-    color: var(--good);
-    background: rgba(12,163,12,0.15);
-  }
-  .habit-name { font-size: 13.5px; color: var(--text-primary); font-weight: 500; }
-  .habit-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 1px; }
+      /* ---------- habits ---------- */
+      .habit-row {
+        display: flex;
+        gap: 10px;
+      }
+      .habit {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+        border: 1px solid var(--hairline);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.015);
+      }
+      .habit.is-done {
+        border-color: rgba(12, 163, 12, 0.35);
+        background: var(--good-wash);
+      }
+      .habit-mark {
+        flex: none;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1.5px solid var(--hairline-strong);
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+      .habit.is-done .habit-mark {
+        border-color: var(--good);
+        color: var(--good);
+        background: rgba(12, 163, 12, 0.15);
+      }
+      .habit-name {
+        font-size: 13.5px;
+        color: var(--text-primary);
+        font-weight: 500;
+      }
+      .habit-sub {
+        font-size: 11.5px;
+        color: var(--text-muted);
+        margin-top: 1px;
+      }
 
-  /* ---------- upcoming ---------- */
-  .upcoming-groups { display: flex; flex-direction: column; gap: 14px; }
-  .upcoming-group { display: flex; gap: 16px; }
-  .upcoming-date {
-    flex: none;
-    width: 108px;
-    padding-top: 1px;
-  }
-  .upcoming-date .d {
-    font-size: 13px;
-    color: var(--text-secondary);
-    font-weight: 600;
-  }
-  .upcoming-date .w {
-    font-size: 11px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .upcoming-items {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .upcoming-item {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    font-size: 13.5px;
-    color: var(--text-primary);
-  }
-  .upcoming-item .tag {
-    flex: none;
-    font-size: 11.5px;
-    color: var(--text-muted);
-    white-space: nowrap;
-  }
+      /* ---------- upcoming ---------- */
+      .upcoming-groups {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .upcoming-group {
+        display: flex;
+        gap: 16px;
+      }
+      .upcoming-date {
+        flex: none;
+        width: 108px;
+        padding-top: 1px;
+      }
+      .upcoming-date .d {
+        font-size: 13px;
+        color: var(--text-secondary);
+        font-weight: 600;
+      }
+      .upcoming-date .w {
+        font-size: 11px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .upcoming-items {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .upcoming-item {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 13.5px;
+        color: var(--text-primary);
+      }
+      .upcoming-item .tag {
+        flex: none;
+        font-size: 11.5px;
+        color: var(--text-muted);
+        white-space: nowrap;
+      }
 
-  /* ---------- body: weight + macros ---------- */
-  .body-panel { display: flex; gap: 28px; }
-  .weight-block { flex: none; width: 300px; }
-  .weight-value-row { display: flex; align-items: baseline; gap: 8px; }
-  .weight-value {
-    font-size: 30px;
-    font-weight: 600;
-    color: var(--text-primary);
-    letter-spacing: -0.01em;
-  }
-  .weight-unit { font-size: 13px; color: var(--text-muted); }
-  .weight-trend {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    margin-top: 6px;
-    font-size: 12.5px;
-    color: var(--text-secondary);
-  }
-  .weight-trend .chip {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--good);
-    background: var(--good-wash);
-    padding: 2px 7px;
-    border-radius: 20px;
-  }
-  .spark-wrap { margin-top: 10px; }
-  .macros-block { flex: 1; display: flex; flex-direction: column; gap: 12px; justify-content: center; }
-  .macros-title { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
-  .meter { display: flex; flex-direction: column; gap: 5px; }
-  .meter-row { display: flex; justify-content: space-between; font-size: 12.5px; }
-  .meter-label { color: var(--text-secondary); }
-  .meter-value { color: var(--text-secondary); }
-  .meter-value b { color: var(--text-primary); font-weight: 600; }
-  .meter-track {
-    height: 6px;
-    border-radius: 4px;
-    background: var(--accent-wash-15);
-    overflow: hidden;
-  }
-  .meter-fill {
-    height: 100%;
-    background: var(--accent);
-    border-radius: 4px;
-  }
+      /* ---------- body: weight + macros ---------- */
+      .body-panel {
+        display: flex;
+        gap: 28px;
+      }
+      .weight-block {
+        flex: none;
+        width: 300px;
+      }
+      .weight-value-row {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .weight-value {
+        font-size: 30px;
+        font-weight: 600;
+        color: var(--text-primary);
+        letter-spacing: -0.01em;
+      }
+      .weight-unit {
+        font-size: 13px;
+        color: var(--text-muted);
+      }
+      .weight-trend {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        margin-top: 6px;
+        font-size: 12.5px;
+        color: var(--text-secondary);
+      }
+      .weight-trend .chip {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--good);
+        background: var(--good-wash);
+        padding: 2px 7px;
+        border-radius: 20px;
+      }
+      .spark-wrap {
+        margin-top: 10px;
+      }
+      .macros-block {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        justify-content: center;
+      }
+      .macros-title {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-bottom: 2px;
+      }
+      .meter {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .meter-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12.5px;
+      }
+      .meter-label {
+        color: var(--text-secondary);
+      }
+      .meter-value {
+        color: var(--text-secondary);
+      }
+      .meter-value b {
+        color: var(--text-primary);
+        font-weight: 600;
+      }
+      .meter-track {
+        height: 6px;
+        border-radius: 4px;
+        background: var(--accent-wash-15);
+        overflow: hidden;
+      }
+      .meter-fill {
+        height: 100%;
+        background: var(--accent);
+        border-radius: 4px;
+      }
 
-  /* ---------- scufris found ---------- */
-  .found-card {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 16px 18px;
-    border: 1px solid var(--hairline);
-    border-radius: 10px;
-    background: var(--accent-wash-08);
-  }
-  .found-tag {
-    font-size: 10.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--accent);
-    font-weight: 700;
-  }
-  .found-title { font-size: 14.5px; color: var(--text-primary); font-weight: 600; }
-  .found-source { font-size: 12px; color: var(--text-muted); margin-top: -4px; }
-  .found-why {
-    font-size: 12.5px;
-    color: var(--text-secondary);
-    line-height: 1.5;
-    border-left: 2px solid var(--hairline-strong);
-    padding-left: 10px;
-  }
-  .found-why b { color: var(--text-secondary); font-weight: 600; }
-  .found-actions { display: flex; gap: 8px; margin-top: 2px; }
-  .found-actions button {
-    font: inherit;
-    font-size: 12.5px;
-    font-weight: 600;
-    padding: 7px 14px;
-    border-radius: 20px;
-    border: 1px solid var(--hairline-strong);
-    background: transparent;
-    color: var(--text-secondary);
-    cursor: pointer;
-  }
-  .found-actions button.primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #ffffff;
-  }
-  .found-actions button:hover { border-color: var(--text-secondary); }
-  .found-actions button.primary:hover { border-color: var(--accent); opacity: 0.9; }
-  .found-actions button.mute { color: var(--text-muted); }
-</style>
-</head>
-<body>
-<div class="widget">
-
-  <div class="titlebar">
-    <div class="titlebar-left">
-      <span class="dots"><span></span><span></span><span></span></span>
-      <span class="app-name">Scufris - Morning Briefing</span>
-    </div>
-    <div class="titlebar-right">
-      <span>Mon, Aug 24 2026 - 09:00</span>
-      <span class="status-dot" aria-hidden="true"></span>
-      <span>voice idle</span>
-    </div>
-  </div>
-
-  <div class="transcript">
-    <div class="waveform" aria-hidden="true">
-      <span style="height:6px"></span>
-      <span style="height:14px"></span>
-      <span style="height:9px"></span>
-      <span style="height:18px"></span>
-      <span style="height:8px"></span>
-      <span style="height:12px"></span>
-      <span style="height:5px"></span>
-    </div>
-    <div class="transcript-body">
-      <p class="transcript-eyebrow"><b>Scufris said</b> - 09:00</p>
-      <p class="transcript-quote">"Morning. Three things today, dentist tomorrow at two, and weight's holding steady at 70.8 kilos."</p>
-    </div>
-  </div>
-
-  <div class="section" id="today-tasks">
-    <div class="section-head">
-      <span class="eyebrow">Today</span>
-      <span class="eyebrow-count" id="task-count">1 of 4 done</span>
-    </div>
-    <div class="task-list">
-      <label class="task">
-        <input type="checkbox" checked>
-        <span class="box"></span>
-        <span class="task-txt">Log weight</span>
-        <span class="task-meta">auto - 07:02</span>
-      </label>
-      <label class="task">
-        <input type="checkbox">
-        <span class="box"></span>
-        <span class="task-txt">Review nix.dotfiles flake-bump PR</span>
-        <span class="task-meta">~20 min</span>
-      </label>
-      <label class="task">
-        <input type="checkbox">
-        <span class="box"></span>
-        <span class="task-txt">Reply to Denis - HUD daemon control channel</span>
-        <span class="task-meta">~15 min</span>
-      </label>
-      <label class="task">
-        <input type="checkbox">
-        <span class="box"></span>
-        <span class="task-txt">Pack gym bag for evening session</span>
-        <span class="task-meta">~5 min</span>
-      </label>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-head">
-      <span class="eyebrow">Habits</span>
-    </div>
-    <div class="habit-row">
-      <div class="habit is-done">
-        <span class="habit-mark">&#10003;</span>
-        <div>
-          <div class="habit-name">Learn</div>
-          <div class="habit-sub">13-day streak - done, ch.4 read</div>
+      /* ---------- scufris found ---------- */
+      .found-card {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 16px 18px;
+        border: 1px solid var(--hairline);
+        border-radius: 10px;
+        background: var(--accent-wash-08);
+      }
+      .found-tag {
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .found-title {
+        font-size: 14.5px;
+        color: var(--text-primary);
+        font-weight: 600;
+      }
+      .found-source {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: -4px;
+      }
+      .found-why {
+        font-size: 12.5px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+        border-left: 2px solid var(--hairline-strong);
+        padding-left: 10px;
+      }
+      .found-why b {
+        color: var(--text-secondary);
+        font-weight: 600;
+      }
+      .found-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 2px;
+      }
+      .found-actions button {
+        font: inherit;
+        font-size: 12.5px;
+        font-weight: 600;
+        padding: 7px 14px;
+        border-radius: 20px;
+        border: 1px solid var(--hairline-strong);
+        background: transparent;
+        color: var(--text-secondary);
+        cursor: pointer;
+      }
+      .found-actions button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #ffffff;
+      }
+      .found-actions button:hover {
+        border-color: var(--text-secondary);
+      }
+      .found-actions button.primary:hover {
+        border-color: var(--accent);
+        opacity: 0.9;
+      }
+      .found-actions button.mute {
+        color: var(--text-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="widget">
+      <div class="titlebar">
+        <div class="titlebar-left">
+          <span class="dots"><span></span><span></span><span></span></span>
+          <span class="app-name">Scufris - Morning Briefing</span>
+        </div>
+        <div class="titlebar-right">
+          <span>Mon, Aug 24 2026 - 09:00</span>
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>voice idle</span>
         </div>
       </div>
-      <div class="habit">
-        <span class="habit-mark">4</span>
-        <div>
-          <div class="habit-name">Gym</div>
-          <div class="habit-sub">4-day streak - pending, evening</div>
-        </div>
-      </div>
-      <div class="habit">
-        <span class="habit-mark">9</span>
-        <div>
-          <div class="habit-name">Track Macros</div>
-          <div class="habit-sub">9-day streak - pending, log at dinner</div>
-        </div>
-      </div>
-    </div>
-  </div>
 
-  <div class="section">
-    <div class="section-head">
-      <span class="eyebrow">Upcoming</span>
-    </div>
-    <div class="upcoming-groups">
-      <div class="upcoming-group">
-        <div class="upcoming-date"><div class="d">Aug 25</div><div class="w">Tue</div></div>
-        <div class="upcoming-items">
-          <div class="upcoming-item"><span>Dentist checkup</span><span class="tag">14:00</span></div>
+      <div class="transcript">
+        <div class="waveform" aria-hidden="true">
+          <span style="height: 6px"></span>
+          <span style="height: 14px"></span>
+          <span style="height: 9px"></span>
+          <span style="height: 18px"></span>
+          <span style="height: 8px"></span>
+          <span style="height: 12px"></span>
+          <span style="height: 5px"></span>
+        </div>
+        <div class="transcript-body">
+          <p class="transcript-eyebrow"><b>Scufris said</b> - 09:00</p>
+          <p class="transcript-quote">
+            "Morning. Three things today, dentist tomorrow at two, and weight's
+            holding steady at 70.8 kilos."
+          </p>
         </div>
       </div>
-      <div class="upcoming-group">
-        <div class="upcoming-date"><div class="d">Aug 27</div><div class="w">Thu</div></div>
-        <div class="upcoming-items">
-          <div class="upcoming-item"><span>Renew car insurance</span><span class="tag">due Aug 30</span></div>
-        </div>
-      </div>
-      <div class="upcoming-group">
-        <div class="upcoming-date"><div class="d">Aug 28</div><div class="w">Fri</div></div>
-        <div class="upcoming-items">
-          <div class="upcoming-item"><span>nix.dotfiles flake bump - final review</span><span class="tag">before merge</span></div>
-        </div>
-      </div>
-      <div class="upcoming-group">
-        <div class="upcoming-date"><div class="d">Aug 31</div><div class="w">Mon</div></div>
-        <div class="upcoming-items">
-          <div class="upcoming-item"><span>Pay rent</span><span class="tag">month end</span></div>
-        </div>
-      </div>
-      <div class="upcoming-group">
-        <div class="upcoming-date"><div class="d">Sep 01</div><div class="w">Tue</div></div>
-        <div class="upcoming-items">
-          <div class="upcoming-item"><span>Team sync - present Scufris roadmap draft</span><span class="tag">10:00</span></div>
-        </div>
-      </div>
-    </div>
-  </div>
 
-  <div class="section">
-    <div class="section-head">
-      <span class="eyebrow">Body</span>
-      <span class="eyebrow-count">30-day trend</span>
-    </div>
-    <div class="body-panel">
-      <div class="weight-block">
-        <div class="weight-value-row">
-          <span class="weight-value">70.8</span>
-          <span class="weight-unit">kg</span>
+      <div class="section" id="today-tasks">
+        <div class="section-head">
+          <span class="eyebrow">Today</span>
+          <span class="eyebrow-count" id="task-count">1 of 4 done</span>
         </div>
-        <div class="weight-trend">
-          <span class="chip">-0.9 kg</span>
-          <span>over 30 days - steady pace</span>
-        </div>
-        <div class="spark-wrap">
-          <svg width="100%" height="120" viewBox="0 0 620 120" role="img" aria-label="Weight trend, 30 days, from 71.7 to 70.8 kilograms, gently declining">
-            <defs>
-              <linearGradient id="sparkFade" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#3987e5" stop-opacity="0.14"/>
-                <stop offset="100%" stop-color="#3987e5" stop-opacity="0"/>
-              </linearGradient>
-            </defs>
-            <!-- area wash under the accent (last 7 days) segment only, kept subtle -->
-            <polygon points="440.6,83.1 459.5,67.7 478.4,83.1 497.3,98.5 516.2,98.5 535.1,75.4 554.0,90.8 554.0,120 440.6,120"
-                     fill="url(#sparkFade)"/>
-            <!-- first 24 days: de-emphasis line -->
-            <polyline points="6.0,21.5 24.9,36.9 43.8,29.2 62.7,36.9 81.6,21.5 100.5,29.2 119.4,21.5 138.3,52.3 157.2,44.6 176.1,52.3 195.0,52.3 213.9,44.6 232.8,60.0 251.7,60.0 270.6,52.3 289.4,52.3 308.3,67.7 327.2,60.0 346.1,52.3 365.0,83.1 383.9,60.0 402.8,67.7 421.7,75.4 440.6,83.1"
-                      fill="none" stroke="#5a5952" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <!-- last 7 days: current-period accent -->
-            <polyline points="440.6,83.1 459.5,67.7 478.4,83.1 497.3,98.5 516.2,98.5 535.1,75.4 554.0,90.8"
-                      fill="none" stroke="#3987e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <!-- end marker with surface ring -->
-            <circle cx="554.0" cy="90.8" r="5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
-            <text x="566" y="94.5" font-size="12.5" font-weight="600" fill="#ffffff">70.8 kg</text>
-            <text x="6" y="14" font-size="10.5" fill="#898781">71.7</text>
-          </svg>
+        <div class="task-list">
+          <label class="task">
+            <input type="checkbox" checked />
+            <span class="box"></span>
+            <span class="task-txt">Log weight</span>
+            <span class="task-meta">auto - 07:02</span>
+          </label>
+          <label class="task">
+            <input type="checkbox" />
+            <span class="box"></span>
+            <span class="task-txt">Review nix.dotfiles flake-bump PR</span>
+            <span class="task-meta">~20 min</span>
+          </label>
+          <label class="task">
+            <input type="checkbox" />
+            <span class="box"></span>
+            <span class="task-txt"
+              >Reply to Denis - HUD daemon control channel</span
+            >
+            <span class="task-meta">~15 min</span>
+          </label>
+          <label class="task">
+            <input type="checkbox" />
+            <span class="box"></span>
+            <span class="task-txt">Pack gym bag for evening session</span>
+            <span class="task-meta">~5 min</span>
+          </label>
         </div>
       </div>
-      <div class="macros-block">
-        <div class="macros-title">Yesterday's macros vs target</div>
-        <div class="meter">
-          <div class="meter-row"><span class="meter-label">Protein</span><span class="meter-value"><b>142</b> / 150 g</span></div>
-          <div class="meter-track"><div class="meter-fill" style="width:95%"></div></div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="eyebrow">Habits</span>
         </div>
-        <div class="meter">
-          <div class="meter-row"><span class="meter-label">Carbs</span><span class="meter-value"><b>205</b> / 220 g</span></div>
-          <div class="meter-track"><div class="meter-fill" style="width:93%"></div></div>
+        <div class="habit-row">
+          <div class="habit is-done">
+            <span class="habit-mark">&#10003;</span>
+            <div>
+              <div class="habit-name">Learn</div>
+              <div class="habit-sub">13-day streak - done, ch.4 read</div>
+            </div>
+          </div>
+          <div class="habit">
+            <span class="habit-mark">4</span>
+            <div>
+              <div class="habit-name">Gym</div>
+              <div class="habit-sub">4-day streak - pending, evening</div>
+            </div>
+          </div>
+          <div class="habit">
+            <span class="habit-mark">9</span>
+            <div>
+              <div class="habit-name">Track Macros</div>
+              <div class="habit-sub">9-day streak - pending, log at dinner</div>
+            </div>
+          </div>
         </div>
-        <div class="meter">
-          <div class="meter-row"><span class="meter-label">Fat</span><span class="meter-value"><b>61</b> / 70 g</span></div>
-          <div class="meter-track"><div class="meter-fill" style="width:87%"></div></div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="eyebrow">Upcoming</span>
+        </div>
+        <div class="upcoming-groups">
+          <div class="upcoming-group">
+            <div class="upcoming-date">
+              <div class="d">Aug 25</div>
+              <div class="w">Tue</div>
+            </div>
+            <div class="upcoming-items">
+              <div class="upcoming-item">
+                <span>Dentist checkup</span><span class="tag">14:00</span>
+              </div>
+            </div>
+          </div>
+          <div class="upcoming-group">
+            <div class="upcoming-date">
+              <div class="d">Aug 27</div>
+              <div class="w">Thu</div>
+            </div>
+            <div class="upcoming-items">
+              <div class="upcoming-item">
+                <span>Renew car insurance</span
+                ><span class="tag">due Aug 30</span>
+              </div>
+            </div>
+          </div>
+          <div class="upcoming-group">
+            <div class="upcoming-date">
+              <div class="d">Aug 28</div>
+              <div class="w">Fri</div>
+            </div>
+            <div class="upcoming-items">
+              <div class="upcoming-item">
+                <span>nix.dotfiles flake bump - final review</span
+                ><span class="tag">before merge</span>
+              </div>
+            </div>
+          </div>
+          <div class="upcoming-group">
+            <div class="upcoming-date">
+              <div class="d">Aug 31</div>
+              <div class="w">Mon</div>
+            </div>
+            <div class="upcoming-items">
+              <div class="upcoming-item">
+                <span>Pay rent</span><span class="tag">month end</span>
+              </div>
+            </div>
+          </div>
+          <div class="upcoming-group">
+            <div class="upcoming-date">
+              <div class="d">Sep 01</div>
+              <div class="w">Tue</div>
+            </div>
+            <div class="upcoming-items">
+              <div class="upcoming-item">
+                <span>Team sync - present Scufris roadmap draft</span
+                ><span class="tag">10:00</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="eyebrow">Body</span>
+          <span class="eyebrow-count">30-day trend</span>
+        </div>
+        <div class="body-panel">
+          <div class="weight-block">
+            <div class="weight-value-row">
+              <span class="weight-value">70.8</span>
+              <span class="weight-unit">kg</span>
+            </div>
+            <div class="weight-trend">
+              <span class="chip">-0.9 kg</span>
+              <span>over 30 days - steady pace</span>
+            </div>
+            <div class="spark-wrap">
+              <svg
+                width="100%"
+                height="120"
+                viewBox="0 0 620 120"
+                role="img"
+                aria-label="Weight trend, 30 days, from 71.7 to 70.8 kilograms, gently declining"
+              >
+                <defs>
+                  <linearGradient id="sparkFade" x1="0" y1="0" x2="0" y2="1">
+                    <stop
+                      offset="0%"
+                      stop-color="#3987e5"
+                      stop-opacity="0.14"
+                    />
+                    <stop offset="100%" stop-color="#3987e5" stop-opacity="0" />
+                  </linearGradient>
+                </defs>
+                <!-- area wash under the accent (last 7 days) segment only, kept subtle -->
+                <polygon
+                  points="440.6,83.1 459.5,67.7 478.4,83.1 497.3,98.5 516.2,98.5 535.1,75.4 554.0,90.8 554.0,120 440.6,120"
+                  fill="url(#sparkFade)"
+                />
+                <!-- first 24 days: de-emphasis line -->
+                <polyline
+                  points="6.0,21.5 24.9,36.9 43.8,29.2 62.7,36.9 81.6,21.5 100.5,29.2 119.4,21.5 138.3,52.3 157.2,44.6 176.1,52.3 195.0,52.3 213.9,44.6 232.8,60.0 251.7,60.0 270.6,52.3 289.4,52.3 308.3,67.7 327.2,60.0 346.1,52.3 365.0,83.1 383.9,60.0 402.8,67.7 421.7,75.4 440.6,83.1"
+                  fill="none"
+                  stroke="#5a5952"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <!-- last 7 days: current-period accent -->
+                <polyline
+                  points="440.6,83.1 459.5,67.7 478.4,83.1 497.3,98.5 516.2,98.5 535.1,75.4 554.0,90.8"
+                  fill="none"
+                  stroke="#3987e5"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <!-- end marker with surface ring -->
+                <circle
+                  cx="554.0"
+                  cy="90.8"
+                  r="5"
+                  fill="#3987e5"
+                  stroke="#1a1a19"
+                  stroke-width="2"
+                />
+                <text
+                  x="566"
+                  y="94.5"
+                  font-size="12.5"
+                  font-weight="600"
+                  fill="#ffffff"
+                >
+                  70.8 kg
+                </text>
+                <text x="6" y="14" font-size="10.5" fill="#898781">71.7</text>
+              </svg>
+            </div>
+          </div>
+          <div class="macros-block">
+            <div class="macros-title">Yesterday's macros vs target</div>
+            <div class="meter">
+              <div class="meter-row">
+                <span class="meter-label">Protein</span
+                ><span class="meter-value"><b>142</b> / 150 g</span>
+              </div>
+              <div class="meter-track">
+                <div class="meter-fill" style="width: 95%"></div>
+              </div>
+            </div>
+            <div class="meter">
+              <div class="meter-row">
+                <span class="meter-label">Carbs</span
+                ><span class="meter-value"><b>205</b> / 220 g</span>
+              </div>
+              <div class="meter-track">
+                <div class="meter-fill" style="width: 93%"></div>
+              </div>
+            </div>
+            <div class="meter">
+              <div class="meter-row">
+                <span class="meter-label">Fat</span
+                ><span class="meter-value"><b>61</b> / 70 g</span>
+              </div>
+              <div class="meter-track">
+                <div class="meter-fill" style="width: 87%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <span class="eyebrow">Scufris found</span>
+        </div>
+        <div class="found-card">
+          <span class="found-tag">Proactive - not yet opened</span>
+          <div>
+            <div class="found-title">
+              "Deload Weeks: When and Why They Matter"
+            </div>
+            <div class="found-source">
+              saved to library - r/naturalbodybuilding, captured Aug 19
+            </div>
+          </div>
+          <div class="found-why">
+            <b>Why this:</b> your Gym streak has reset twice this month, both
+            times around week four - this piece matches that pattern.
+          </div>
+          <div class="found-actions">
+            <button type="button" class="primary">Show</button>
+            <button type="button">Later</button>
+            <button type="button" class="mute">Mute: gym recovery</button>
+          </div>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="section">
-    <div class="section-head">
-      <span class="eyebrow">Scufris found</span>
-    </div>
-    <div class="found-card">
-      <span class="found-tag">Proactive - not yet opened</span>
-      <div>
-        <div class="found-title">"Deload Weeks: When and Why They Matter"</div>
-        <div class="found-source">saved to library - r/naturalbodybuilding, captured Aug 19</div>
-      </div>
-      <div class="found-why"><b>Why this:</b> your Gym streak has reset twice this month, both times around week four - this piece matches that pattern.</div>
-      <div class="found-actions">
-        <button type="button" class="primary">Show</button>
-        <button type="button">Later</button>
-        <button type="button" class="mute">Mute: gym recovery</button>
-      </div>
-    </div>
-  </div>
-
-</div>
-
-<script>
-  (function () {
-    var container = document.getElementById('today-tasks');
-    var boxes = container.querySelectorAll('input[type="checkbox"]');
-    var counter = document.getElementById('task-count');
-    function update() {
-      var done = 0;
-      boxes.forEach(function (b) { if (b.checked) done++; });
-      counter.textContent = done + ' of ' + boxes.length + ' done';
-    }
-    boxes.forEach(function (b) { b.addEventListener('change', update); });
-  })();
-</script>
-
-</body>
+    <script>
+      (function () {
+        var container = document.getElementById("today-tasks");
+        var boxes = container.querySelectorAll('input[type="checkbox"]');
+        var counter = document.getElementById("task-count");
+        function update() {
+          var done = 0;
+          boxes.forEach(function (b) {
+            if (b.checked) done++;
+          });
+          counter.textContent = done + " of " + boxes.length + " done";
+        }
+        boxes.forEach(function (b) {
+          b.addEventListener("change", update);
+        });
+      })();
+    </script>
+  </body>
 </html>

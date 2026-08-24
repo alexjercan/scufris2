@@ -62,11 +62,11 @@ Register `scufris_today_show`, `_task`, `_habit`, `_weight`, `_macros`,
 Two tools, mirroring the observation/mutation split:
 
 - `scufris_den_read` - union query schema: `{domain: today, query:
-  show|upcoming|weight_history|macros_day|notes|habits, date?, days?}`.
+show|upcoming|weight_history|macros_day|notes|habits, date?, days?}`.
   Read-only, always safe, no acknowledgment gate.
 - `scufris_den_write` - union mutation schema: `{domain: today, action:
-  task_add|task_done|habit_toggle|weight_set|macros_add|note_add|...,
-  date?, payload}`. Revision conflicts surface as tool errors that
+task_add|task_done|habit_toggle|weight_set|macros_add|note_add|...,
+date?, payload}`. Revision conflicts surface as tool errors that
   instruct a re-read; destructive actions (rm) require explicit user
   confirmation in conversation.
 
@@ -129,14 +129,14 @@ In the today mold: stdlib-only Python, JSON everywhere, atomic writes,
 revision checks, never fetches the network.
 
 - Write surface (narrow, deterministic): `den add <path...> --url
-  --title --topics --modality` (moves or copies local files into
+--title --topics --modality` (moves or copies local files into
   blobs/, computes hashes, writes manifest with status inbox),
   `den set <id> --status --topics` (triage: keep, discard, retag),
   `den note <id>` (append curation note).
 - Read surface (rich): `den list --status --topic --json`, `den show
-  <id> --json`, `den path <id> [--file]`, `den search <text> --json`
+<id> --json`, `den path <id> [--file]`, `den search <text> --json`
   (v1: rg under the hood; v2: FTS5 in a derived SQLite file), `den
-  verify [--json]`, later `den index --rebuild`.
+verify [--json]`, later `den index --rebuild`.
 
 Curation is first-class: capture lands in `inbox` status and a triage
 moment (conversation or viewer widget) moves items to `kept`, because

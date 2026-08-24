@@ -31,7 +31,7 @@ spoken sentence plus at most one relevant surface.
 - Alex (HUD, Enter-to-send): "add a task for Saturday: playtest the
   new build with sound off."
 - Scufris: `scufris_den_write {action: task_add, date: 2026-08-29,
-  payload: "Playtest the new build with sound off"}`.
+payload: "Playtest the new build with sound off"}`.
 - Spoken: "Added to Saturday." Optionally `today.tasks` for that date
   opens as visual confirmation when the mutation was ambiguous.
 - Failure: revision conflict (file edited in Neovim meanwhile) - the
@@ -125,7 +125,7 @@ spoken sentence plus at most one relevant surface.
 
 ## 10. Course from the library (future pillar)
 
-- Alex: "build me a short course on A* from what we have."
+- Alex: "build me a short course on A\* from what we have."
 - Scufris compiles kept items tagged pathfinding into an interactive
   HTML page (designs/course-concept.html is the concept): hook, ladder
   of abstraction, sandbox, one check, citations back to den ids.

@@ -82,7 +82,7 @@ Grounded in the dashboardd source. Split by content type:
 - Saved and extracted content (articles, notes, images): a generic
   viewer widget following the pattern `widgets/tatr-tasks` already
   ships - a typed artifact reference as input, `markdown|html|text|
-  image` content rendered through `DOMPurify.sanitize()` with a strict
+image` content rendered through `DOMPurify.sanitize()` with a strict
   forbid-list. No dashboardd core changes; Scufris drives it through
   the existing typed open/update/focus/close flow.
 - Live pages, full-fidelity snapshots, PDFs: the real browser plus i3
@@ -90,7 +90,7 @@ Grounded in the dashboardd source. Split by content type:
   work.
 - Structurally blocked today: iframes and external URLs inside
   dashboardd. The global CSP sets `frame-src 'none'` and `object-src
-  'none'`, and `WebviewUrl::External` is unused. A generic URL window
+'none'`, and `WebviewUrl::External` is unused. A generic URL window
   or a standalone wry viewer stays a later option with known Tauri
   rough edges (tauri#8476, tauri#12740).
 

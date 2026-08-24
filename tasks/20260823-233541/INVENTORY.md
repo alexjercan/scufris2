@@ -131,7 +131,7 @@ Obsidian-style vault, private Git repo, 8.1 MB.
 - `Daily/`: 1,140 files, 2023-04-15 through today, named
   `YYYY-MM-DD-Weekday.md`. H1 date title, then H3 sections Tasks
   (checkboxes), Habits (checkboxes), Macros (CSV `what,protein,carbs,
-  fat`), Weight (`NN.N kg`), Notes (timestamped `#### HH:MM - topic`
+fat`), Weight (`NN.N kg`), Notes (timestamped `#### HH:MM - topic`
   entries with prose).
 - `Notes/`: annual goal pages (2023-2026), `flow.md` design doc,
   `Videos/` with nine saved video notes.
@@ -151,7 +151,7 @@ v2.0.3, `pi` (lukasl-dev/pi.nix), with `follows` wiring for shared
 inputs.
 
 - `today`: overlay provides `pkgs.today`; `DEN_PATH=/home/alex/
-  personal/the-den` set in `home/modules/scripts/default.nix`; the
+personal/the-den` set in `home/modules/scripts/default.nix`; the
   today widget is wired into both dashboardd hosts' `widgetPackages`
   (`home/modules/dashboardd/default.nix`).
 - `dashboardd`: Home Manager module, server on port 8000 (opened to
@@ -168,7 +168,7 @@ inputs.
 - Update ritual (manual, no automation): edit tag in `flake.nix`,
   `nix flake update <input>`, `nix flake check`, then
   `sudo nixos-rebuild switch --flake .#nixos` or `home-manager switch
-  --flake .#alex`. This is the deployment gate.
+--flake .#alex`. This is the deployment gate.
 - `nova-protocol` is not packaged here.
 
 ## HUD companion (task `20260822-132001`, open, priority 100)

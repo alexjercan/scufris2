@@ -261,7 +261,7 @@ Fusion, optionally cross-encoder reranked) is the production answer when an
 application must serve arbitrary users with arbitrary vocabulary against a
 corpus the system doesn't get to assume familiarity with. A one-person
 library assistant is a different regime: the person asking the question
-often *is* the person who wrote or captured the material, so their
+often _is_ the person who wrote or captured the material, so their
 vocabulary drift from the original text is bounded, not adversarial.
 
 The clearest counter-signal to "just add embeddings" comes from the
@@ -389,7 +389,7 @@ its own. Add a thin `library search <query>` subcommand to the library CLI
 now, backed by `rg --json` under the hood, so Scufris and widgets get a
 stable JSON contract from day one even though the implementation underneath
 it can change without breaking callers. This satisfies "derived and
-rebuildable" trivially — the filesystem *is* the index.
+rebuildable" trivially — the filesystem _is_ the index.
 
 **v1.1, first real index (ship as soon as the `rg` implementation starts
 feeling slow or unranked, likely low hundreds of items):** swap the

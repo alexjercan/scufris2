@@ -219,7 +219,7 @@ pruned from "every frame" to "every changed frame," typically 1-5% of raw
 frames for a talking-head-plus-slides video), then ask a small VLM per
 candidate frame "does this frame contain readable text/a diagram worth
 keeping, or is it a transition/blank/face-only frame" to drop noise frames
-before persisting them. Running a VLM over *every* raw frame is the wrong
+before persisting them. Running a VLM over _every_ raw frame is the wrong
 order of operations - one benchmark found 10 minutes of video at 1 fps
 (600 candidate frames) took 20-30 minutes on an RTX 4070 with LLaVA 1.6 7B
 at roughly 1s/frame
@@ -235,7 +235,7 @@ this host's GPU backend) and `llama-cpp`/`llama-cpp-vulkan` (10121)
 top-level. Neither ships model weights (GGUF vision models are fetched
 separately, same pattern as the Piper voice model in `nix/voice.nix`:
 `pkgs.fetchurl` + pinned hash). No LLaVA/MiniCPM-V/Qwen2-VL/BakLLaVA/
-Moondream *packages* exist in nixpkgs (searched individually, no hits) -
+Moondream _packages_ exist in nixpkgs (searched individually, no hits) -
 expected, since these are model weights, not software; they load through
 `ollama pull` or a `llama-cpp` GGUF path, which breaks Nix's normal
 build-time hash pinning unless the weight file itself is fetched via
@@ -411,23 +411,23 @@ whisper-server should not be tied up mid-conversation by a batch job.
 
 ### 4.3 NixOS packaging summary
 
-| Tool | nixpkgs status | Attribute | Notes |
-|---|---|---|---|
-| whisper.cpp / whisper-server | packaged, already deployed | `whisper-cpp-vulkan` | reuse existing service |
-| ffmpeg (scene filters) | packaged | `ffmpeg-full` (or plain `ffmpeg`) | already used by `pi-voice-stt` for capture |
-| PySceneDetect | packaged | `python3XXPackages.scenedetect` | no top-level `pyscenedetect` attr |
-| faster-whisper | packaged | `python3XXPackages.faster-whisper`, `wyoming-faster-whisper` | optional, skip for v1 |
-| WhisperX | packaged | `whisperx` (top-level) | quality upgrade path, not v1 |
-| yt-dlp | packaged | `yt-dlp` (top-level) | video capture front door |
-| poppler-utils / pdftotext | packaged | `poppler-utils`, `python3XXPackages.pdftotext` | digital-text PDFs |
-| tesseract | packaged | `tesseract` (5.5.2) | OCR engine |
-| ocrmypdf | packaged | `ocrmypdf` (17.8.1) | searchable-PDF wrapper around tesseract |
-| docling | packaged | `docling` (top-level, 2.69.1) | primary PDF/image-to-Markdown path |
-| marker (datalab-to/marker) | **not packaged** | n/a | `marker` attr is an unrelated GTK app; would need poetry2nix/uv2nix vendoring |
-| ollama | packaged | `ollama`, `ollama-vulkan` | for local VLM frame filtering, deferred |
-| llama-cpp | packaged | `llama-cpp`, `llama-cpp-vulkan` | alternative VLM host |
-| LLaVA/MiniCPM-V/Qwen2-VL weights | not applicable | n/a | model weights, fetch via `pkgs.fetchurl` like Piper's `.onnx`, same pattern as `nix/voice.nix` |
-| mpv | packaged | `mpv` | for any human "watch the source" fallback, not part of the pipeline itself |
+| Tool                             | nixpkgs status             | Attribute                                                    | Notes                                                                                          |
+| -------------------------------- | -------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| whisper.cpp / whisper-server     | packaged, already deployed | `whisper-cpp-vulkan`                                         | reuse existing service                                                                         |
+| ffmpeg (scene filters)           | packaged                   | `ffmpeg-full` (or plain `ffmpeg`)                            | already used by `pi-voice-stt` for capture                                                     |
+| PySceneDetect                    | packaged                   | `python3XXPackages.scenedetect`                              | no top-level `pyscenedetect` attr                                                              |
+| faster-whisper                   | packaged                   | `python3XXPackages.faster-whisper`, `wyoming-faster-whisper` | optional, skip for v1                                                                          |
+| WhisperX                         | packaged                   | `whisperx` (top-level)                                       | quality upgrade path, not v1                                                                   |
+| yt-dlp                           | packaged                   | `yt-dlp` (top-level)                                         | video capture front door                                                                       |
+| poppler-utils / pdftotext        | packaged                   | `poppler-utils`, `python3XXPackages.pdftotext`               | digital-text PDFs                                                                              |
+| tesseract                        | packaged                   | `tesseract` (5.5.2)                                          | OCR engine                                                                                     |
+| ocrmypdf                         | packaged                   | `ocrmypdf` (17.8.1)                                          | searchable-PDF wrapper around tesseract                                                        |
+| docling                          | packaged                   | `docling` (top-level, 2.69.1)                                | primary PDF/image-to-Markdown path                                                             |
+| marker (datalab-to/marker)       | **not packaged**           | n/a                                                          | `marker` attr is an unrelated GTK app; would need poetry2nix/uv2nix vendoring                  |
+| ollama                           | packaged                   | `ollama`, `ollama-vulkan`                                    | for local VLM frame filtering, deferred                                                        |
+| llama-cpp                        | packaged                   | `llama-cpp`, `llama-cpp-vulkan`                              | alternative VLM host                                                                           |
+| LLaVA/MiniCPM-V/Qwen2-VL weights | not applicable             | n/a                                                          | model weights, fetch via `pkgs.fetchurl` like Piper's `.onnx`, same pattern as `nix/voice.nix` |
+| mpv                              | packaged                   | `mpv`                                                        | for any human "watch the source" fallback, not part of the pipeline itself                     |
 
 All `nix search nixpkgs <name>` lookups above were run live against the
 current nixpkgs channel on this host (2026-08-24) and are reproducible with

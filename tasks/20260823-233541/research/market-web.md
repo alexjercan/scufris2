@@ -84,7 +84,7 @@ operations February 2023.
   privacy-focused. For local-first tools, the license and community structure
   is itself a durability feature independent of the founding company's
   survival.
-- Sources: [Patent troll kills Mycroft AI voice assistant](https://home-assistant-guide.com/news/2023/02/16/patent-troll-kills-mycroft-ai-voice-assistant/), [From Mycroft and Ansible to OpenVoiceOS](https://medium.com/@goldyfruit/from-mycroft-and-ansible-to-openvoiceos-making-open-voice-assistants-boring-066caae846d4), [Wikipedia: Mycroft (software)](https://en.wikipedia.org/wiki/Mycroft_(software))
+- Sources: [Patent troll kills Mycroft AI voice assistant](https://home-assistant-guide.com/news/2023/02/16/patent-troll-kills-mycroft-ai-voice-assistant/), [From Mycroft and Ansible to OpenVoiceOS](https://medium.com/@goldyfruit/from-mycroft-and-ansible-to-openvoiceos-making-open-voice-assistants-boring-066caae846d4), [Wikipedia: Mycroft (software)](<https://en.wikipedia.org/wiki/Mycroft_(software)>)
 
 **Omnivore shutdown.** Open-source read-it-later app, acquired by ElevenLabs
 November 1 2024, shut down November 15 -- two weeks' notice to export data.

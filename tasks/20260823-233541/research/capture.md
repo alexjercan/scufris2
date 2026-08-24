@@ -37,6 +37,7 @@ apps that bundle fetch+store+serve and therefore violate the split.
 
 **Single-file HTML** (monolith/SingleFile/obelisk style: one `.html` with
 CSS/JS/images/fonts inlined as data URIs).
+
 - Pro: trivially portable, one file per manifest entry, opens in any browser
   or a dashboardd webview with no server needed, human-inspectable.
 - Pro: matches the-den's "plain files, git-ignored blobs" model with zero
@@ -50,11 +51,12 @@ CSS/JS/images/fonts inlined as data URIs).
 
 **WARC** (Web ARChive, the actual preservation standard; wget `--warc-file`,
 browsertrix-crawler, grab-site, ArchiveBox all produce it).
+
 - Pro: the real archival format — records full HTTP request/response,
   supports multi-resource captures, replayable with pywb/ReplayWeb.page,
   auditable provenance (headers, timestamps, digests) built in.
 - Con: needs a WARC replay tool (pywb, or the browser-based
-  ReplayWeb.page/WACZ viewer) to actually *view* a snapshot — dashboardd
+  ReplayWeb.page/WACZ viewer) to actually _view_ a snapshot — dashboardd
   would need a webview widget that can host a replay player, not just serve
   a static file. That's real extra infrastructure for a "collect resources"
   use case that mostly wants to re-read an article later.
@@ -68,7 +70,8 @@ browsertrix-crawler, grab-site, ArchiveBox all produce it).
 
 **Extracted Markdown/text** (readability-cli, trafilatura, percollate,
 pandoc's HTML-to-Markdown).
-- Pro: this is what a manifest actually wants to *index and show*: clean
+
+- Pro: this is what a manifest actually wants to _index and show_: clean
   text, real metadata fields (title, author, date, site), small, diffable,
   greppable, embeds trivially into a lexical or embedding index later. It's
   also what a "course builder" pipeline (vision pillar) wants as raw
@@ -95,6 +98,7 @@ deliberately out of scope for the first increment.
 ### Full-page single-file HTML capture (fetch-side)
 
 **monolith** — <https://github.com/Y2Z/monolith>
+
 - What it does: bundles a URL or piped-in HTML into one self-contained HTML5
   file, inlining CSS/JS/images/fonts as data URIs. Rust, single static
   binary, no runtime deps beyond libssl.
@@ -119,6 +123,7 @@ deliberately out of scope for the first increment.
 <https://github.com/gildas-lormeau/SingleFile> (WebExtension, the reference
 implementation) and <https://github.com/gildas-lormeau/single-file-cli> (CLI
 wrapper).
+
 - What it does: same single-file-HTML goal as monolith, but drives a real
   headless Chrome/Chromium via CDP (through Deno), so it captures
   JS-rendered content and generally produces the most faithful snapshot of
@@ -141,6 +146,7 @@ wrapper).
   sites with dynamic galleries). Costs a Chromium dependency.
 
 **obelisk** — <https://github.com/go-shiori/obelisk>
+
 - What it does: Go equivalent of monolith; built as shiori's archiving
   engine. Inlines JS/CSS directly (not always base64) for smaller files,
   disables external requests via CSP by default, concurrent asset fetch
@@ -159,13 +165,14 @@ wrapper).
 ### Readable-text / Markdown extraction (either side)
 
 **trafilatura** — <https://github.com/adbar/trafilatura>
+
 - What it does: state-of-the-art boilerplate removal and main-content +
   metadata extraction from HTML. Python package and CLI.
 - Output formats: `txt` (default), `csv`, `json`, `markdown`, `html`, `xml`,
   `xmltei` (`--output-format` or shorthand flags `--markdown`/`--json`/...).
 - Metadata: with `--with-metadata`, extracts a structured record with
   fields `title, author, url, hostname, description, sitename, date,
-  categories, tags, fingerprint, id, license, image, pagetype` (from the
+categories, tags, fingerprint, id, license, image, pagetype` (from the
   `Document` class, `trafilatura/settings.py` in the source tree) — this
   maps almost one-to-one onto the manifest fields NOTES.md wants (source
   URL, capture date, topics via categories/tags). `--only-with-metadata`
@@ -187,9 +194,10 @@ wrapper).
 **readability-cli** — <https://gitlab.com/gardenappl/readability-cli>
 (binary name `readable`, npm package `readability-cli`, nixpkgs
 `readability-cli`)
+
 - What it does: wraps Mozilla's actual Readability library (the same code
   Firefox Reader View uses) via Node.js or Deno. `SOURCE` can be a URL, a
-  file, or `-` for stdin — so it *can* fetch on its own, but works equally
+  file, or `-` for stdin — so it _can_ fetch on its own, but works equally
   well purely on a local file (`readable index.html`).
 - Output: HTML article body by default; `-p title,excerpt,byline,...`
   prints individual properties; `-j/--json` dumps all known properties
@@ -207,6 +215,7 @@ wrapper).
   metadata (no explicit date/tags field) than trafilatura.
 
 **percollate** — <https://github.com/danburzo/percollate>
+
 - What it does: fetches URLs (via Puppeteer/headless Chrome, prefers AMP)
   and bundles one or more pages into PDF, EPUB, HTML, or Markdown, with
   cover page and table-of-contents generation.
@@ -224,8 +233,9 @@ wrapper).
   first increment.
 
 **pandoc** — <https://pandoc.org>, <https://github.com/jgm/pandoc>
+
 - What it does: universal document converter. Relevant here: `pandoc -f
-  html -t markdown` for HTML-to-Markdown, `--extract-media DIR` to pull
+html -t markdown` for HTML-to-Markdown, `--extract-media DIR` to pull
   embedded/linked images out into files during conversion, `-M` to inject
   metadata as YAML frontmatter (does not auto-extract HTML metadata itself
   — that has to come from trafilatura/readability-cli output or manual
@@ -246,6 +256,7 @@ wrapper).
 
 **wget** (`--warc-file`) — already in nixpkgs (`wget` 1.25.0), also
 `wget2` 2.2.1 (successor, fewer WARC options currently).
+
 - Supports `--warc-file`, `--warc-header`, `--warc-cdx`, `--warc-dedup`,
   `--no-warc-compression`, SHA1 digests — genuine WARC output with zero
   extra packaging since wget is already a base NixOS tool. No JS
@@ -255,6 +266,7 @@ wrapper).
   the stated use cases.
 
 **browsertrix-crawler** — <https://github.com/webrecorder/browsertrix-crawler>
+
 - Docker-first, Puppeteer/Brave-driven high-fidelity crawler producing
   WARC and WACZ. Handles JS-heavy sites and multi-page crawls well; the
   closest thing to "Archive.org quality" capture.
@@ -279,12 +291,13 @@ Maintenance is stale (last push 2025-05-23) and not in nixpkgs. Skip.
 ### Full self-hosted archiving apps (rejected for this split, noted for completeness)
 
 **ArchiveBox** — <https://github.com/ArchiveBox/ArchiveBox>
+
 - What it does: the closest thing to an all-in-one answer — per URL it
   runs wget (mirror + WARC), a headless Chrome for screenshot/PDF/DOM
   dump, SingleFile, readability/Mercury extraction, yt-dlp for media, and
   git-clones for repo URLs, indexing everything in a SQLite index plus
   per-snapshot `index.json`/`index.html`.
-- Why it's a poor fit here: it *is* fetch+store+index bundled together,
+- Why it's a poor fit here: it _is_ fetch+store+index bundled together,
   which is exactly the coupling NOTES.md's division of labor rejects
   ("Scufris fetches ... CLI never fetches from the network"). It also
   wants to own its own SQLite index as canonical, conflicting with the
@@ -299,6 +312,7 @@ Maintenance is stale (last push 2025-05-23) and not in nixpkgs. Skip.
   extractor list is a good checklist, just not its architecture.
 
 **shiori** — <https://github.com/go-shiori/shiori>
+
 - Go bookmark manager, CLI or web-app modes, SQLite/Postgres/MySQL
   backend, uses obelisk internally to snapshot pages. Actively maintained
   (pushed 2026-07-10, 11.6k stars) and in nixpkgs (`shiori` 1.8.0).
@@ -321,6 +335,7 @@ client for it, irrelevant here.
 ### Media (video/audio/galleries) — fetch-side
 
 **yt-dlp** — <https://github.com/yt-dlp/yt-dlp>
+
 - What it does: downloads video/audio from thousands of sites (YouTube
   plus a generic extractor for many others). Directly relevant to the
   "video becomes transcript + keyframes" multimodal ingestion idea in
@@ -345,6 +360,7 @@ client for it, irrelevant here.
   running local Whisper for higher-quality transcripts.
 
 **gallery-dl** — <https://github.com/mikf/gallery-dl>
+
 - What it does: downloads image galleries/collections from many sites
   (Twitter/X, Reddit, Pixiv, Instagram, DeviantArt, ArtStation-adjacent
   sites relevant to "art for inspiration" use case) with a huge
@@ -367,27 +383,27 @@ client for it, irrelevant here.
 
 ## nixpkgs availability summary
 
-| Tool | nixpkgs attribute | Version (checked 2026-08-24) | Notes |
-|---|---|---|---|
-| monolith | `monolith` | 2.10.1 | yes |
-| single-file-cli | `single-file-cli` | 1.1.49 | yes, needs Chromium at runtime |
-| readability-cli | `readability-cli` | 2.4.5-unstable-2026-01-07 | yes |
-| trafilatura | `python313Packages.trafilatura` | 2.1.0 | yes |
-| percollate | `percollate` | 4.3.0 | yes, needs Chromium (Puppeteer) |
-| pandoc | `pandoc` | 3.7.0.2 | yes (top-level, not fuzzy-search-ranked) |
-| yt-dlp | `python313Packages.yt-dlp` | 2026.07.04 | yes |
-| gallery-dl | `gallery-dl` | 1.32.6 | yes |
-| wget | `wget` | 1.25.0 | yes, has native `--warc-file` |
-| wget2 | `wget2` | 2.2.1 | yes |
-| warcio | `python313Packages.warcio` | 1.7.5 | yes (WARC read/write lib, if ever needed) |
-| shiori | `shiori` | 1.8.0 | yes, wrong shape (see above) |
-| linkding | `linkding` | 1.45.0 | yes, wrong shape |
-| wallabag | `wallabag` | 2.6.14 | yes, wrong shape |
-| ArchiveBox | none | - | not packaged; wrong shape anyway |
-| obelisk | none (top-level) | - | not packaged standalone |
-| browsertrix-crawler | none | - | not packaged; Docker-first |
-| pywb | none | - | not packaged |
-| grab-site | none | - | not packaged; stale upstream |
+| Tool                | nixpkgs attribute               | Version (checked 2026-08-24) | Notes                                     |
+| ------------------- | ------------------------------- | ---------------------------- | ----------------------------------------- |
+| monolith            | `monolith`                      | 2.10.1                       | yes                                       |
+| single-file-cli     | `single-file-cli`               | 1.1.49                       | yes, needs Chromium at runtime            |
+| readability-cli     | `readability-cli`               | 2.4.5-unstable-2026-01-07    | yes                                       |
+| trafilatura         | `python313Packages.trafilatura` | 2.1.0                        | yes                                       |
+| percollate          | `percollate`                    | 4.3.0                        | yes, needs Chromium (Puppeteer)           |
+| pandoc              | `pandoc`                        | 3.7.0.2                      | yes (top-level, not fuzzy-search-ranked)  |
+| yt-dlp              | `python313Packages.yt-dlp`      | 2026.07.04                   | yes                                       |
+| gallery-dl          | `gallery-dl`                    | 1.32.6                       | yes                                       |
+| wget                | `wget`                          | 1.25.0                       | yes, has native `--warc-file`             |
+| wget2               | `wget2`                         | 2.2.1                        | yes                                       |
+| warcio              | `python313Packages.warcio`      | 1.7.5                        | yes (WARC read/write lib, if ever needed) |
+| shiori              | `shiori`                        | 1.8.0                        | yes, wrong shape (see above)              |
+| linkding            | `linkding`                      | 1.45.0                       | yes, wrong shape                          |
+| wallabag            | `wallabag`                      | 2.6.14                       | yes, wrong shape                          |
+| ArchiveBox          | none                            | -                            | not packaged; wrong shape anyway          |
+| obelisk             | none (top-level)                | -                            | not packaged standalone                   |
+| browsertrix-crawler | none                            | -                            | not packaged; Docker-first                |
+| pywb                | none                            | -                            | not packaged                              |
+| grab-site           | none                            | -                            | not packaged; stale upstream              |
 
 ## Shortlist for the first library increment
 
@@ -395,12 +411,13 @@ Keep the increment to tools that are (a) already in nixpkgs, (b) genuinely
 single-purpose, and (c) respect the fetch/persist split.
 
 **Fetch-side, invoked by Scufris or a thin helper it shells out to:**
+
 - `monolith` for the default "snapshot this page" case (static pages,
   articles, docs) — no headless-browser dependency, cheapest to pin.
 - `single-file-cli` as the fallback when a page needs JS rendering
   (accept the Chromium dependency only when this path is actually used).
 - `yt-dlp` for video/audio references, with `--write-info-json
-  --write-auto-subs` as the default flags — this both captures the blob
+--write-auto-subs` as the default flags — this both captures the blob
   and gives the library CLI ready-made manifest fields plus a first-pass
   transcript.
 - `gallery-dl` for image/gallery references, with `--write-metadata`.
@@ -408,11 +425,12 @@ single-purpose, and (c) respect the fetch/persist split.
 **Format-side, run either by Scufris before handoff or as an optional
 enrichment step inside the library CLI itself (still purely local, no
 network):**
+
 - `trafilatura --input-dir ... --json --with-metadata --markdown` to turn a
   saved HTML snapshot into clean Markdown plus a metadata JSON sidecar.
   This is the single highest-leverage tool in the whole survey: its
   `Document` fields (`title, author, url, hostname, date, categories, tags,
-  license, ...`) map almost directly onto the manifest schema NOTES.md
+license, ...`) map almost directly onto the manifest schema NOTES.md
   wants, and it explicitly supports operating on already-downloaded files,
   so it never breaks the "CLI never fetches" rule even if invoked from
   inside the library CLI.
@@ -421,6 +439,7 @@ network):**
   the course-builder vision pillar later).
 
 **Explicitly deferred, not in the first increment:**
+
 - WARC/replay tooling (`wget --warc-file`, browsertrix-crawler, pywb) —
   right tool only if forensic/full-site fidelity becomes a real
   requirement; adds a replay-player dependency to the widget path that

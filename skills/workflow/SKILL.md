@@ -86,12 +86,13 @@ Project preferences can select optional phases. They never run automatically.
   enforced built-in model-tool read allowlist. This is not an OS filesystem
   sandbox. Inspect the returned isolation and trusted-boundary diagnostics;
   Claude managed hook/plugin policy remains part of the trusted host boundary.
-- Call `scufris_job_quick_review` when project guidance selects the custom
-  section-based Quick Review page. It generates an exact-revision walkthrough
-  with explanations, non-blocking section comments, an overall review comment,
-  approval, and explained change requests.
+- Call `scufris_job_quick_review` after the independent reviewer approves when
+  project guidance selects Quick Review. It starts a separate read-only Pi RPC
+  agent with the standalone npm extension, so foreground Scufris stays
+  responsive while the agent writes the walkthrough and answers page questions.
+  Pass the model and thinking values from the `quick-review` preference entry;
+  never reuse them for the independent reviewer.
 - Call `scufris_job_plannotator_review` when project guidance selects a
-  Plannotator since-base code review. Plannotator and Quick Review are separate
-  tools and neither substitutes for the other.
+  Plannotator since-base code review.
 - Call `scufris_job_land` only after the selected workflow has supplied the
   required approval. Landing is never implied by `done`.

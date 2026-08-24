@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { readFileSync, watch, type FSWatcher } from "node:fs";
+import { watch, type FSWatcher } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import {
@@ -14,13 +14,10 @@ import {
 } from "../shared/acknowledgment.ts";
 import { runPrivateHelper, toolResult } from "../shared/runtime.ts";
 import {
-  initialWalkthroughState,
-  parseWalkthrough,
-  saveWalkthroughState,
-  startWalkthroughServer,
-  type ReviewComment,
-  type WalkthroughState,
-} from "./walkthrough.ts";
+  startQuickReviewAgent,
+  type QuickReviewAgent,
+  type QuickReviewCompletion,
+} from "./quick-review-agent.ts";
 
 const jobsHelperPath = fileURLToPath(
   new URL("../../../tools/jobs/scufris-jobs", import.meta.url),
@@ -382,25 +379,17 @@ interface OwnedJob extends SpawnResult {
   context_fingerprint?: string;
   summary: string;
   window_alive: boolean;
-  quick_review?: { close(): Promise<void>; revision: string };
+  quick_review?: QuickReviewAgent;
   status_watcher?: FSWatcher;
 }
 
-interface QuickReviewBuild {
+interface QuickReviewTarget {
   job_id: string;
   cwd: string;
   default_branch: string;
   base_revision: string;
   revision: string;
-  artifact: string;
-  state: string;
-  model: string;
-  thinking: string;
-}
-
-interface QuickReviewSnapshot {
-  base_revision: string;
-  revision: string;
+  state_dir: string;
 }
 
 interface EventResult {
@@ -497,6 +486,25 @@ Filesystem notifications will deliver later worker events.
 
 Owned Scufris logical jobs:
 ${index}`;
+}
+
+function quickReviewFeedback(event: QuickReviewCompletion): string {
+  return `Quick Review requested changes: ${JSON.stringify({ explanation: event.overallComment, comments: event.comments })}`;
+}
+
+function quickReviewSummary(event: QuickReviewCompletion): string {
+  const encoded = JSON.stringify({
+    outcome: event.outcome,
+    revision: event.revision,
+    base_revision: event.baseRevision,
+    overall_comment: event.overallComment,
+    comments: event.comments,
+    artifact: event.artifact,
+    state: event.state,
+  });
+  const maximum = 24 * 1024;
+  if (Buffer.byteLength(encoded, "utf8") <= maximum) return encoded;
+  return `${Buffer.from(encoded).subarray(0, maximum).toString("utf8")}...[Quick Review result truncated; inspect the artifact path]`;
 }
 
 export default function workflowOrchestration(pi: ExtensionAPI): void {
@@ -955,19 +963,12 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       name: QUICK_REVIEW_TOOL,
       label: "Open Quick Review",
       description:
-        "Generate and open the custom Scufris Quick Review walkthrough for one owned Sprout job. This is separate from Plannotator and never lands automatically.",
+        "Start a separate read-only Pi RPC agent with the standalone Quick Review extension for one owned Sprout job. The agent stays available for page questions and never lands automatically.",
       executionMode: "sequential",
       parameters: Type.Object(
         {
           job_id: Type.String({ pattern: "^[a-f0-9]{12}$" }),
-          model: Type.Optional(
-            Type.String({
-              description:
-                "Pi model used to generate and explain the walkthrough.",
-              minLength: 1,
-              maxLength: 200,
-            }),
-          ),
+          model: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
           thinking: Type.Optional(
             StringEnum([
               "off",
@@ -976,168 +977,93 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
               "medium",
               "high",
               "xhigh",
+              "max",
             ] as const),
           ),
         },
         { additionalProperties: false },
       ),
-      async execute(_id, params, signal, _update, ctx) {
+      async execute(_id, params, signal) {
         const job = jobs.get(params.job_id);
         if (!job) throw new Error("job is not owned by this Scufris session");
         if (job.quick_review)
           throw new Error("Quick Review is already open for this job");
-
-        const built = await runHelper<QuickReviewBuild>(
-          "quick-review-build",
+        const target = await runHelper<QuickReviewTarget>(
+          "quick-review-target",
+          { job_id: job.job_id },
+          signal,
+        );
+        const agent = await startQuickReviewAgent(
           {
-            job_id: job.job_id,
+            repository: target.cwd,
+            base_revision: target.base_revision,
+            revision: target.revision,
             model: params.model ?? "openai-codex/gpt-5.6-sol",
             thinking: params.thinking ?? "medium",
+            state_dir: target.state_dir,
           },
-          signal,
-          920_000,
+          { signal },
         );
-        const document = parseWalkthrough(readFileSync(built.artifact, "utf8"));
-        if (
-          document.baseRevision !== built.base_revision ||
-          document.revision !== built.revision
-        )
-          throw new Error("Quick Review artifact revisions do not match");
-        const state: WalkthroughState = initialWalkthroughState(document);
-        saveWalkthroughState(built.state, state);
-        const contexts = new Map<string, string>();
-        for (const section of document.sections) {
-          const result = await runHelper<{ content: string }>(
-            "quick-review-context",
-            {
-              job_id: job.job_id,
-              base_revision: built.base_revision,
-              revision: built.revision,
-              file: section.file,
-            },
-            signal,
-          );
-          contexts.set(section.id, result.content);
-        }
-
-        const verify = async () => {
-          const snapshot = await runHelper<QuickReviewSnapshot>(
-            "quick-review-snapshot",
-            { job_id: job.job_id },
-          );
-          if (
-            snapshot.base_revision !== built.base_revision ||
-            snapshot.revision !== built.revision
-          )
-            throw new Error("Quick Review revision changed");
-        };
-        const finish = async (
-          milestone: string,
-          detail: Record<string, unknown>,
-          invalidate: boolean,
-          nextState: "working" | "done" = "done",
-        ) => {
-          const active = job.quick_review;
-          job.quick_review = undefined;
-          if (active) void active.close().catch(() => undefined);
-          if (invalidate)
-            await runHelper("invalidate-quick-review", {
-              job_id: job.job_id,
-            });
-          job.state = nextState;
-          job.summary = milestone;
-          pi.sendMessage(
-            {
-              customType: "scufris-job-event",
-              content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ${nextState}: ${milestone}. Inspect the Quick Review result and decide what follows from the project preferences. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
-              display: true,
-              details: {
+        job.quick_review = agent;
+        void agent.completion
+          .then(async (event) => {
+            if (job.quick_review !== agent) return;
+            job.quick_review = undefined;
+            await agent.close();
+            if (shuttingDown) return;
+            let milestone = "quick-review-approved";
+            let nextState: "done" | "working" = "done";
+            if (event.outcome === "changes-requested") {
+              const restarted = await runHelper<{
+                generation: number;
+                status_file: string;
+              }>("send", {
                 job_id: job.job_id,
-                context_id: job.context_id,
-                quick_review: detail,
-              },
-            },
-            { deliverAs: "followUp", triggerTurn: true },
-          );
-        };
-        const server = await startWalkthroughServer(document, state, {
-          verify,
-          persist: (next) => saveWalkthroughState(built.state, next),
-          context: (section) =>
-            contexts.get(section.id) ?? "Context unavailable.",
-          explain: async (section, question) => {
-            const answer = await runHelper<{ answer: string }>(
-              "quick-review-question",
+                message: quickReviewFeedback(event),
+              });
+              applySteerResult(job, { ...restarted, restarted: true }, () =>
+                watchJob(job),
+              );
+              milestone = "quick-review-feedback-submitted";
+              nextState = "working";
+            } else {
+              job.state = "done";
+              job.summary = milestone;
+            }
+            pi.sendMessage(
               {
-                job_id: job.job_id,
-                revision: built.revision,
-                section,
-                question,
-                model: built.model,
-                thinking: built.thinking,
+                customType: "scufris-job-event",
+                content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ${nextState}: ${milestone}. Inspect this standalone Quick Review result and decide what follows from the project preferences: ${quickReviewSummary(event)}. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
+                display: true,
+                details: {
+                  job_id: job.job_id,
+                  context_id: job.context_id,
+                  quick_review: event,
+                },
               },
-              undefined,
-              200_000,
+              { deliverAs: "followUp", triggerTurn: true },
             );
-            return answer.answer;
-          },
-          requestChanges: async (feedback) => {
-            await verify();
-            const restarted = await runHelper<{
-              generation: number;
-              status_file: string;
-            }>("send", {
-              job_id: job.job_id,
-              message: feedback,
-            });
-            applySteerResult(job, { ...restarted, restarted: true }, () =>
-              watchJob(job),
+          })
+          .catch(async (error) => {
+            if (job.quick_review !== agent) return;
+            job.quick_review = undefined;
+            await agent.close();
+            if (shuttingDown) return;
+            deliverRuntimeFailure(
+              pi,
+              extensionContext!,
+              job,
+              error instanceof Error ? error.message : String(error),
+              wakeMode,
             );
-            await finish(
-              "quick-review-feedback-submitted",
-              { feedback, generation: restarted.generation },
-              true,
-              "working",
-            );
-          },
-          fullDiff: async () => {
-            await verify();
-            pi.events.emit("plannotator:request", {
-              requestId: `quick-review-full-diff-${job.job_id}-${randomBytes(6).toString("hex")}`,
-              action: "code-review",
-              payload: {
-                cwd: built.cwd,
-                defaultBranch: built.default_branch,
-                diffType: "since-base",
-              },
-              respond: () => undefined,
-            });
-          },
-          approved: async (
-            comments: ReviewComment[],
-            overallComment: string,
-          ) => {
-            await verify();
-            await finish(
-              "quick-review-approved",
-              { comments, overallComment, revision: built.revision },
-              false,
-            );
-          },
-        });
-        job.quick_review = { close: server.close, revision: built.revision };
-        server.open();
-        if (ctx.hasUI)
-          ctx.ui.notify(
-            `Quick Review for job ${job.job_id}: ${server.url}`,
-            "info",
-          );
+          });
         acknowledgmentGate.markSuccessfulAction(QUICK_REVIEW_TOOL);
         return toolResult({
           job_id: job.job_id,
           state: "quick-review-opened",
-          revision: built.revision,
-          sections: document.sections.length,
+          revision: target.revision,
+          agent: "pi-rpc",
+          extension: "npm:@alexjercan/quick-review@0.1.1",
         });
       },
     }),

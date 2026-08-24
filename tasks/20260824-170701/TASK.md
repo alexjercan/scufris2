@@ -44,4 +44,4 @@ review adapter.
   entries and reserve `mode = "rpc"` for Quick Review.
 - `nix flake check -L`: passed all 26 checks after staging only new files for
   flake source visibility, then resetting the index.
-- `git diff --check` passed in Scufris and Nova Protocol.
+- `git diff --check` passed in Scufris, Quick Review, and Nova Protocol.

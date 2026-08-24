@@ -50,20 +50,16 @@ scripts/scufris-jobs all --archived --json
 
 ## Quick Review
 
-When project preferences select Quick Review, Scufris generates an
-exact-revision walkthrough of the implementation and opens a local review page
-in the browser. The page shows one section per change with its diff and a
-review prompt. For each section you can:
+When project preferences select Quick Review, Scufris starts a separate Pi RPC
+agent after independent review passes. The agent loads the standalone Quick
+Review npm extension, writes an exact-revision walkthrough, opens its browser
+page, and answers page questions. Foreground Scufris remains available while
+the review is open.
 
-- Mark it viewed, or reopen it.
-- Ask the reviewer model a question about the exact code.
-- Load exact-revision file context.
-- Add a non-blocking comment.
-
-Terminal actions end the review: approve the exact revision, optionally with
-comments, or request changes with an explanation. A change request steers the
-worker and invalidates the walkthrough. The page refuses to act when the
-reviewed revision changed underneath it.
+Approval returns to Scufris as the final landing gate. A request for changes
+restarts the implementation job with the review feedback. The separate agent
+is closed when the review completes, the workflow stops, or the Scufris session
+shuts down.
 
 ## Dashboard widgets
 

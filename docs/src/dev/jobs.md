@@ -62,6 +62,11 @@ Use a Sprout workspace for project implementation.
 """
 ```
 
+Review workflows use separate `independent-review` and `quick-review` entries.
+Their keywords set `order = "first"` and `order = "second"` respectively. The
+Quick Review entry sets `harness = "pi"` and `mode = "rpc"`; those adapter
+values do not apply to the independent reviewer.
+
 The rendered context includes the file's SHA-256 fingerprint. Preferences are
 advisory: a missing or malformed file degrades to inference, never an error.
 When a preference declares `harness`, its optional `model` and `thinking`
@@ -152,17 +157,12 @@ after a terminal event in the same generation, or any unparseable line, is
 surfaced as `invalid` and converted into a trusted failure. Reads batch at
 1 MiB and report `more` until drained.
 
-## Quick Review
+## Quick Review target
 
-`quick-review-build` snapshots a clean committed Sprout workspace (base branch
-revision and HEAD must differ), produces a bounded since-base patch, and runs
-a read-only Pi generator with only the `submit_walkthrough` tool. The
-generator writes a validated exact-revision walkthrough artifact; revisions
-are rechecked after generation and before every later action.
-`quick-review-context` serves exact-revision file content,
-`quick-review-question` answers one bounded question with a read-only model
-run, and `invalidate-quick-review` removes the artifact after a change
-request. The page itself is described in [Messaging](messaging.md).
+`quick-review-target` accepts only an owned Sprout job with a clean committed
+change. It returns the exact base and implementation revisions, repository, and
+private state directory used to start the standalone review agent. The agent,
+not the jobs helper, owns walkthrough generation and page questions.
 
 ## Land, stop, and archive
 

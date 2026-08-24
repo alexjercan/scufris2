@@ -33,23 +33,20 @@ Orchestration tools:
 - `scufris_job_send`: append one guidance line and restart the job in a new
   generation.
 - `scufris_job_stop`: stop and archive one owned workflow graph from its root.
-- `scufris_job_quick_review`: build and serve the custom walkthrough review.
+- `scufris_job_quick_review`: start a separate Pi RPC agent with the pinned
+  standalone npm extension for an exact committed Sprout range.
 - `scufris_job_plannotator_review`: open a Plannotator since-base review.
 - `scufris_job_land`: guarded Sprout landing after user approval.
 
 The module also registers `/wake`, blocks foreground `sleep` and `wait` bash
 commands, and enforces the acknowledgment gate described in
-[Messaging](messaging.md).
+[Messaging](messaging.md). `quick-review-agent.ts` owns the bounded subprocess
+protocol and exact shutdown of the separate review agent.
 
 `worker-report.ts` is the only extension a Pi worker loads. It registers
 `scufris_report`, which forwards the event, summary, and Markdown report to
 the jobs helper with the worker's report capability. `blocked` and `done`
 results terminate the worker's turn.
-
-`walkthrough.ts` parses and validates walkthrough artifacts, owns the review
-state machine, and bridges the Quick Review page subprocess.
-`walkthrough-reviewer.ts` registers the `submit_walkthrough` tool used by the
-bounded generator run.
 
 ## voice
 

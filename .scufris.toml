@@ -21,13 +21,20 @@ helpers over extension complexity. Follow repository AGENTS.md instructions and
 existing conventions.
 """
 
-[preferences.review]
-keywords = { review = "independent-then-quick-review", order = "independent-first" }
+[preferences.independent-review]
+keywords = { review = "independent-review", order = "first", harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
 guidance = """
-Run an independent read-only reviewer against the implementation job first.
-Resolve its findings before opening the custom Quick Review for user approval.
-Quick Review and Plannotator remain separate; this workflow selects Quick
-Review after independent review.
+Repeat the implementation -> independent read-only review cycle, resolving its
+findings each round, until the reviewer approves.
+"""
+
+[preferences.quick-review]
+keywords = { review = "quick-review", order = "second", harness = "pi", mode = "rpc", model = "openai-codex/gpt-5.6-sol", thinking = "medium", extension = "npm:@alexjercan/quick-review@0.1.1" }
+guidance = """
+After independent review approves, start the standalone Quick Review extension
+in its separate Pi RPC agent once as the final user approval gate. Keep
+foreground Scufris responsive while that agent writes the walkthrough and
+answers page questions. Do not use these Pi RPC settings for independent review.
 """
 
 [preferences.verification]

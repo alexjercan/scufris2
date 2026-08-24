@@ -24,15 +24,6 @@ npm run dev:voice   # requires the repository development shell
 system Pi runs, sets the orchestrator role and default project roots, and
 passes the working-tree extensions and skills.
 
-Preview the Quick Review page without a real job:
-
-```bash
-python3 tools/quick-review/preview.py
-```
-
-The preview serves the production page against a deterministic in-process
-bridge fixture and validates every response with the production validator.
-
 ## Checks
 
 Run the cheapest relevant check first: `npm run check` for TypeScript
@@ -59,14 +50,14 @@ configurations, closure separation, the real Piper fixture, and this manual.
 Test ownership:
 
 - `tests/*.test.ts`: extension behavior in Node with the Pi APIs stubbed:
-  orchestration, walkthrough parsing and state, response shaping, speech,
+  orchestration, response shaping, speech,
   Calm, identity, and repository structure.
 - `tests/test_scufris_jobs.py`: the jobs helper and inspection CLI. Lifecycle
   tests create real tmux sessions on the default server, relocated per test
   fixture with `TMUX_TMPDIR` into an isolated server directory, and prove
   unrelated sessions survive.
-- `tests/test_quick_review.py` and `tests/test_quick_review_preview.py`: the
-  review page server, bridge validation, and preview harness.
+- `tests/test_quick_review_agent.py`: the strict RPC adapter, pinned npm
+  extension invocation, resource isolation, and completion relay.
 - `tests/test_scufris_dashboard.py` and
   `tests/test_scufris_artifacts_prune.py`: the dashboard adapter and sidecar
   pruning.

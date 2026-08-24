@@ -1982,77 +1982,30 @@ with (directory / 'status').open('a') as stream:
             capture_output=True,
         )
 
-        snapshot = self.call("quick-review-snapshot", {"job_id": job_id})["result"]
-        walkthrough = f"""# Fixture Quick Review
-
-Review the exact fixture change.
-
-:::walkthrough
-status: ready
-revision: {snapshot["revision"]}
-baseRevision: {snapshot["base_revision"]}
-files: 1
-added: 1
-removed: 0
-:::
-
-:::change
-id: result-file
-importance: important
-file: RESULT.md
-lines: 1
-:::
-
-The implementation adds the requested result.
-
-```diff
-+replacement works
-```
-
-:::review
-Confirm that the result content is correct.
-:::
-"""
-        report_path = directory / "report.md"
-        report_path.unlink()
-        report_path.symlink_to(directory / "status")
-        rejected_report = self.call(
-            "quick-review-build",
-            {
-                "job_id": job_id,
-                "model": "openai-codex/gpt-5.6-sol",
-                "thinking": "medium",
-            },
-            check=False,
-        )
-        self.assertFalse(rejected_report["ok"])
-        self.assertIn("report.md", rejected_report["error"])
-        report_path.unlink()
-        report_path.write_text("")
-        report_path.chmod(0o600)
-
-        self.env["SCUFRIS_FAKE_QUICK_REVIEW_OUTPUT"] = json.dumps(
-            {
-                "revision": snapshot["revision"],
-                "markdown": walkthrough,
-                "sectionCount": 1,
-            }
-        )
-        try:
-            quick_review = self.call(
-                "quick-review-build",
-                {
-                    "job_id": job_id,
-                    "model": "openai-codex/gpt-5.6-sol",
-                    "thinking": "medium",
-                },
-            )["result"]
-        finally:
-            self.env.pop("SCUFRIS_FAKE_QUICK_REVIEW_OUTPUT", None)
-        self.assertEqual(quick_review["revision"], snapshot["revision"])
+        quick_target = self.call("quick-review-target", {"job_id": job_id})["result"]
+        self.assertEqual(quick_target["cwd"], str(worktree))
         self.assertEqual(
-            Path(quick_review["artifact"]).read_text(),
-            walkthrough,
+            quick_target["base_revision"],
+            subprocess.run(
+                ["git", "rev-parse", "refs/heads/master"],
+                cwd=worktree,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip(),
+        )
+        self.assertEqual(
+            quick_target["revision"],
+            subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=worktree,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip(),
+        )
+        self.assertEqual(
+            quick_target["state_dir"], str(directory / "quick-review-agent")
         )
 
         review_context = self.call("context", {"project": "projects/nova-protocol"})[

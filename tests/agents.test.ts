@@ -98,7 +98,7 @@ test("delegated workers use one dedicated reporting tool and state set", () => {
   assert.equal(workerReportTerminatesTurn("done"), true);
 });
 
-test("Quick Review and Plannotator remain separate tools", () => {
+test("standalone Quick Review and Plannotator remain separate tools", () => {
   assert.equal(QUICK_REVIEW_TOOL, "scufris_job_quick_review");
   assert.equal(PLANNOTATOR_REVIEW_TOOL, "scufris_job_plannotator_review");
   assert.notEqual(QUICK_REVIEW_TOOL, PLANNOTATOR_REVIEW_TOOL);
@@ -111,7 +111,7 @@ test("done closes execution while its durable logical job remains steerable", ()
   assert.equal(TERMINAL_OWNERSHIP_STATES.has("landed"), true);
 });
 
-test("generation restarts restore status watching including Quick Review corrections", () => {
+test("generation restarts restore status watching", () => {
   const job = {
     state: "done",
     summary: "old generation complete",

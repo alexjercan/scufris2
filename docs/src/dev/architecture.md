@@ -8,7 +8,8 @@ Repository ownership follows the runtime architecture:
   `dashboard/`, and the small independent `calm.ts`. Extensions own lifecycle
   events, native tools, session state, and notifications.
 - `tools/` contains deterministic executables called by extensions:
-  `jobs/scufris-jobs`, `jobs/scufris-report`, `quick-review/quick_review.py`,
+  `jobs/scufris-jobs`, `jobs/scufris-report`,
+  `quick-review-agent/scufris-quick-review-agent`,
   `dashboard/scufris-dashboard`, and `voice/scufris-speak`.
 - `scripts/` contains commands called directly by people:
   `scufris-jobs` (inspection CLI), `scufris-artifacts-prune`, and the
@@ -31,6 +32,9 @@ One codebase serves two roles selected by `SCUFRIS_ROLE`:
 - `worker`: a delegated job execution. The jobs helper sets this when it
   launches a harness inside a tmux pane. Pi workers load only the
   `worker-report.ts` extension, which registers the `scufris_report` tool.
+- A standalone Quick Review is not a worker. A private adapter starts one Pi RPC
+  child with only the pinned npm extension and read-only built-in tools, then
+  relays its terminal outcome to the orchestrator.
 
 Before the harness starts, the launch wrapper removes `SCUFRIS_ROLE`, the
 speech and Calm variables, the Piper paths, the report capability, and the
@@ -66,7 +70,9 @@ shape with text on stdin and exit codes instead of JSON.
 - Job artifacts are opened by descriptor with `O_NOFOLLOW`, must be regular
   files, and every read is bounded. Symlinked paths fail closed.
 - Repository content, worker reports, and review handoffs are treated as
-  untrusted data in prompts, never as instructions.
+  untrusted data in prompts, never as instructions. The pinned Quick Review npm
+  extension is trusted code with the full permissions of its separate Pi
+  process.
 - Independent reviewers receive an enforced harness-specific built-in tool
   allowlist. Pi gets only read tools plus authenticated reporting. Claude gets
   only Read, Glob, and Grep; the trusted wrapper records its final response.
@@ -83,6 +89,8 @@ shape with text on stdin and exit codes instead of JSON.
   `jobs/_archive/` instead of deleting them.
 - `<session>.jsonl.scufris/` sidecars beside each Pi session hold private
   response detail artifacts.
+- Each active job can hold `quick-review-agent/`, the private artifact and
+  completion root for its standalone review.
 - `$XDG_STATE_HOME/scufris/dev-sessions/` holds resumable development
   sessions; the popup uses its configured session directory.
 

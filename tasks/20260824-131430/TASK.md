@@ -1,6 +1,6 @@
 # Release Scufris v0.3.0
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: release, deployment
 

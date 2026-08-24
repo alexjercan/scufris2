@@ -29,8 +29,8 @@ once after restart.
 only a notification; `blocked`, `done`, and `failed` trigger turns. In `all`,
 `working` events also trigger turns. Runtime failures always notify and wake.
 
-Quick Review completion, Plannotator review results, and `/detail` feedback
-use the same follow-up message channel, bounded and JSON-encoded, each ending
+Standalone Quick Review completion, Plannotator results, and `/detail`
+feedback use the same follow-up message channel, bounded and JSON-encoded, each ending
 with the instruction to answer with one short final response.
 
 ## The acknowledgment gate
@@ -38,7 +38,7 @@ with the instruction to answer with one short final response.
 Meaningful workflow actions are serialized against everything else:
 
 - `scufris_job_spawn`, `scufris_job_send`, `scufris_job_stop`,
-  `scufris_job_land`, and both review-opening tools must each be the only
+  `scufris_job_land`, and `scufris_job_plannotator_review` must each be the only
   tool in their tool batch, as must `scufris_final_response`.
 - After a successful action, the only permitted follow-up is one
   `scufris_final_response` call. Every other tool is blocked with an
@@ -72,28 +72,16 @@ Artifacts are created only when the tool executes, never during message
 validation, so blocked or rejected batches leave no artifact. Speech plays
 only the validated paragraph of the current settled run.
 
-## Quick Review bridge
+## Standalone Quick Review agent
 
-Quick Review runs as a local Python page server
-(`tools/quick-review/quick_review.py`) connected to the extension over a
-JSON-lines stdio bridge:
+`scufris_job_quick_review` starts a separate Pi process in RPC mode. That
+process disables discovered extensions, skills, templates, themes, and context
+files; it loads only `npm:@alexjercan/quick-review@0.1.1` and read-only built-in
+tools. The foreground tool returns after RPC accepts `/quick-review`, so Scufris
+never waits for walkthrough generation or page questions.
 
-- The extension sends one `init` line with the parsed walkthrough document
-  and state. The page replies `ready` with a loopback URL guarded by a random
-  path token, then the extension activates the browser.
-- Each page action becomes one bridged request. The extension verifies the
-  exact base and implementation revisions before and around every action,
-  applies the state machine in `walkthrough.ts`, persists state, and answers
-  with the updated state.
-- Section actions: mark viewed, reopen, explain (the section's review
-  prompt), ask (a free question), exact-revision context, and non-blocking
-  comments. Terminal actions: approve (requires every section viewed and no
-  blocking requests) and request changes (requires an explanation).
-- Approval and change requests re-verify revisions, then finish through the
-  normal event channel: approval publishes a `quick-review-approved` result;
-  a change request steers the job, invalidates the walkthrough, and restores
-  the status watcher.
-
-All bridge lines are strictly validated and bounded on both sides. The page
-serializes actions, refuses concurrent terminal actions, and shuts down when
-the extension closes the review.
+The private adapter relays only `ready` and the validated
+`quick-review-outcome` custom message. Approval wakes foreground Scufris with a
+bounded summary. Requested changes are first sent to the implementation job in
+a new generation, then wake Scufris. Workflow stop and session shutdown signal
+only the exact recorded adapter process, which in turn stops its exact Pi child.

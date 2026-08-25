@@ -3,4 +3,5 @@ docs/book/
 desktop/scufris-desktop/gen/
 desktop/scufris-desktop/ui/dist/
 flake.lock
+desktop/scufris-desktop/ui/orb-engine.js
 tasks/20260822-132001/scufris-hud.html

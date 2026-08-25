@@ -4,6 +4,8 @@ fn main() {
     println!("cargo:rerun-if-changed=ui/pill.ts");
     println!("cargo:rerun-if-changed=ui/pill.css");
     println!("cargo:rerun-if-changed=ui/index.html");
+    println!("cargo:rerun-if-changed=ui/orb-engine.js");
+    println!("cargo:rerun-if-changed=ui/orb-engine.d.ts");
     println!("cargo:rerun-if-changed=ui/tsconfig.json");
     build_frontend();
     tauri_build::build();
@@ -17,7 +19,7 @@ fn build_frontend() {
     let status = tsc(&ui.join("tsconfig.json"))
         .expect("tsc is required to build the pill frontend and was not found");
     assert!(status.success(), "tsc failed on ui/pill.ts");
-    for file in ["index.html", "pill.css"] {
+    for file in ["index.html", "pill.css", "orb-engine.js"] {
         fs::copy(ui.join(file), ui.join("dist").join(file))
             .unwrap_or_else(|error| panic!("could not copy ui/{file} into ui/dist: {error}"));
     }

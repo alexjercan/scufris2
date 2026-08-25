@@ -54,3 +54,44 @@ Design document: `tasks/20260825-222037/orb-study.html` - the working
 demo with the real engine inline, the gruber painter, and the state
 mapping. Published copy:
 https://claude.ai/code/artifact/0c723f03-fc1e-48ad-8d10-59f4ba06c855
+
+## Verification evidence (2026-08-25)
+
+Implemented in `desktop/scufris-desktop/`: vendored
+`ui/orb-engine.js`, hand-written `ui/orb-engine.d.ts`, a 30px canvas
+in `ui/index.html`, the painter and state mapping in `ui/pill.ts`,
+the dead disc rules removed from `ui/pill.css`, the new files added
+to `build.rs` and `ui/tsconfig.json`, and the engine added to
+`.prettierignore`.
+
+- Vendored file is byte-identical. `diff` of `ui/orb-engine.js`
+  below its 24-line license header against lines 1-545 of
+  `thinking-orbs@0.3.1` `dist/engine.es.js`: no difference. Only the
+  final `export { ... }` is replaced by the `window.OrbEngine`
+  wrapper, exactly as in the study. `node --check` passes.
+- Prettier never rewrites it. `npx prettier --stdin-filepath x.js`
+  on its contents differs from the file, so the ignore entry is what
+  keeps it stable; `npm run format:check` passes repo-wide.
+- `tsc -p ui/tsconfig.json` (the invocation `build.rs` makes) passes
+  under `strict` and `noUncheckedIndexedAccess`.
+- `cargo build -p scufris-desktop` inside `nix develop` succeeds
+  (8.6s). `ui/dist/orb-engine.js` is copied byte-identical.
+- Headless smoke run of the compiled `ui/dist/pill.js` against a stub
+  DOM, driving every `data-state` through the real presentation
+  listener: each state paints its mapped mode (idle/review/error and
+  the wisteria states 120 arcs from `ring`, listening/speaking 42 from
+  `wave`, transcribing 208 from `ribbon`, sent 30 from `rubik`,
+  working 39 from `orbits`, uncertain 18 from `morph`, disconnected 9
+  from `web` plus a stroked packet edge), each in its own `--acc` mix.
+  Backing store is 60x60 at devicePixelRatio 2.
+- RAF discipline in the same run: one pending callback while visible,
+  zero after `visibilitychange` to hidden, one again on visible. With
+  `prefers-reduced-motion`, zero callbacks are ever scheduled and one
+  static frame is painted per state change.
+- `npm run check` reports 48 test failures; the same 48 fail on clean
+  `master` with the change stashed, so they are pre-existing and
+  unrelated.
+
+Still open: the visual per-state check on a live desktop is Alex's.
+Nothing above proves the orb reads well at 30px, that the accent mix
+carries in the panel, or that the `--lv` scale still feels right.

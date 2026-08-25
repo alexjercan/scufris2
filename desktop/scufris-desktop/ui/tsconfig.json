@@ -8,5 +8,5 @@
     "target": "ES2022",
     "types": []
   },
-  "include": ["pill.ts"]
+  "include": ["orb-engine.d.ts", "pill.ts"]
 }

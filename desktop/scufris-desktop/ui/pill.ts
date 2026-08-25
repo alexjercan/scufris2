@@ -5,7 +5,9 @@
 // The look is the reviewed HUD design (tasks/20260822-132001/scufris-hud.html):
 // a sprung glow and a Canvas 2D wave ride the 60 ms mic level while listening,
 // breathe at idle, and four soft earcons mark the boundaries the eye can miss.
-// rAF runs only in audio-reactive states.
+// The orb is the vendored thinking-orbs engine (orb-engine.js) repainted in
+// gruber ink. One rAF loop drives glow, wave and orb; it stops under reduced
+// motion and while the window is hidden.
 //
 // Compiled by tsc from build.rs into ui/dist; the window loads the output.
 
@@ -94,6 +96,7 @@ const transcript = element<HTMLInputElement>("transcript");
 const detail = element<HTMLElement>("detail");
 const timer = element<HTMLElement>("timer");
 const wave = element<HTMLCanvasElement>("wave");
+const orb = element<HTMLCanvasElement>("orb");
 
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -231,7 +234,6 @@ const BASELINE: Record<string, number> = {
   disconnected: 0.1,
 };
 
-const REACTIVE = new Set(["listening", "speaking"]);
 const WAVE_STATES = new Set(["listening", "transcribing", "speaking"]);
 const WAVE_WIDTH = 64;
 const WAVE_HEIGHT = 26;
@@ -278,7 +280,119 @@ function applyLevel(level: number): void {
   if (WAVE_STATES.has(currentState())) drawWave(level);
 }
 
-function frame(): void {
+// ---------- orb ----------
+
+// The dotted thought orb, drawn by the vendored thinking-orbs engine
+// (orb-engine.js). The engine returns a finished frame per instant; this
+// painter turns its ink value into a panel-to-accent mix, so one accent
+// carries the whole depth range instead of the engine's grayscale.
+type Rgb = [number, number, number];
+
+const ORB_SIZE = 30;
+// The 20px preset is the tuned inline design, drawn here at 30px.
+const ORB_PRESET = 20;
+const PANEL: Rgb = [16, 16, 16];
+const QUARTZ: Rgb = [149, 169, 159];
+// The frozen instant reduced motion renders, in engine seconds.
+const STILL = 2.35;
+
+interface OrbLook {
+  state: OrbEngineState;
+  /** Multiplier over the preset's own speed. */
+  speed: number;
+}
+
+// Pill state to engine verb. No accents here: pill.css owns those.
+const ORB_LOOKS: Record<string, OrbLook> = {
+  listening: { state: "listening", speed: 1 },
+  transcribing: { state: "composing", speed: 1 },
+  review: { state: "breathing", speed: 1 },
+  sent: { state: "solving", speed: 1 },
+  working: { state: "working", speed: 1 },
+  speaking: { state: "listening", speed: 1 },
+  uncertain: { state: "shaping", speed: 1 },
+  error: { state: "breathing", speed: 0.35 },
+  disconnected: { state: "connecting", speed: 1 },
+};
+
+// idle, retained and attention: a resting ring in whatever accent they carry.
+const RESTING: OrbLook = { state: "breathing", speed: 1 };
+
+const engine = window.OrbEngine;
+const orbContext = orb.getContext("2d");
+if (orbContext !== null) {
+  // Capped at 2: past that the extra arc fills buy nothing at 30px.
+  const scale = Math.min(window.devicePixelRatio || 1, 2);
+  orb.width = ORB_SIZE * scale;
+  orb.height = ORB_SIZE * scale;
+  orbContext.scale(scale, scale);
+}
+
+let orbLook = RESTING;
+let orbPreset = engine.resolvePreset(RESTING.state, ORB_PRESET);
+let orbAccent: Rgb = QUARTZ;
+
+function mix(from: Rgb, to: Rgb, f: number, alpha: number): string {
+  const r = Math.round(from[0] + (to[0] - from[0]) * f);
+  const g = Math.round(from[1] + (to[1] - from[1]) * f);
+  const b = Math.round(from[2] + (to[2] - from[2]) * f);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function ink(white: number): number {
+  return 1 - Math.min(1, Math.max(0, white));
+}
+
+// pill.css stays the single source of accent truth: --acc computes to the
+// state's hex token, which the wave takes as a string and the orb as a triple.
+function parseAccent(value: string): Rgb | null {
+  const digits = /^#([0-9a-f]{6})$/i.exec(value)?.[1];
+  if (digits === undefined) return null;
+  const packed = Number.parseInt(digits, 16);
+  return [(packed >> 16) & 255, (packed >> 8) & 255, packed & 255];
+}
+
+function drawOrb(seconds: number): void {
+  if (orbContext === null) return;
+  const t = seconds * orbPreset.speed * orbLook.speed;
+  const instant = engine.MODE_FRAMES[orbPreset.mode](
+    ORB_SIZE,
+    t,
+    orbPreset.opts,
+  );
+  orbContext.clearRect(0, 0, ORB_SIZE, ORB_SIZE);
+  // Lines first, so the nodes sit on top of their edges.
+  for (const line of instant.lines) {
+    orbContext.strokeStyle = mix(
+      PANEL,
+      orbAccent,
+      ink(line.white),
+      line.a ?? 1,
+    );
+    orbContext.lineWidth = line.w;
+    orbContext.beginPath();
+    orbContext.moveTo(line.x1, line.y1);
+    orbContext.lineTo(line.x2, line.y2);
+    orbContext.stroke();
+  }
+  for (const dot of instant.dots) {
+    orbContext.fillStyle = mix(PANEL, orbAccent, ink(dot.white), dot.a ?? 1);
+    orbContext.beginPath();
+    orbContext.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
+    orbContext.fill();
+  }
+}
+
+// ---------- the frame loop ----------
+
+// One loop for the whole pill: the level spring, the wave and the orb. WebKit
+// throttles a hidden page to a crawl, so a hidden pill stops the loop outright
+// instead of trusting rAF to keep time.
+function looping(): boolean {
+  return !reducedMotion.matches && !document.hidden;
+}
+
+function frame(now: number): void {
   phase += 1 / 60;
   if (currentState() === "speaking") {
     levelTarget =
@@ -286,29 +400,35 @@ function frame(): void {
   }
   levelShown += (levelTarget - levelShown) * 0.25;
   applyLevel(levelShown);
+  drawOrb(now / 1000);
   frameId = requestAnimationFrame(frame);
 }
 
-// Starts or stops the frame loop for one state. Non-reactive states settle to
-// their baseline once and cost nothing per frame; reduced motion never loops
-// and gets its crossfade from the CSS transitions instead.
+// Settles one state: its baseline level, its accent, its orb verb, and whether
+// the loop runs at all. A still pill paints one frame per state change and
+// costs nothing after it; the crossfades come from the CSS transitions.
 function retune(next: string): void {
   levelTarget = BASELINE[next] ?? 0.15;
-  waveColor =
-    getComputedStyle(pill).getPropertyValue("--acc").trim() || "#95a99f";
-  if (reducedMotion.matches || !REACTIVE.has(next)) {
-    if (frameId !== null) {
-      cancelAnimationFrame(frameId);
-      frameId = null;
-    }
-    levelShown = levelTarget;
-    applyLevel(levelShown);
+  const accent = getComputedStyle(pill).getPropertyValue("--acc").trim();
+  waveColor = accent || "#95a99f";
+  orbAccent = parseAccent(accent) ?? QUARTZ;
+  orbLook = ORB_LOOKS[next] ?? RESTING;
+  orbPreset = engine.resolvePreset(orbLook.state, ORB_PRESET);
+  if (looping()) {
+    if (frameId === null) frameId = requestAnimationFrame(frame);
     return;
   }
-  if (frameId === null) frameId = requestAnimationFrame(frame);
+  if (frameId !== null) {
+    cancelAnimationFrame(frameId);
+    frameId = null;
+  }
+  levelShown = levelTarget;
+  applyLevel(levelShown);
+  drawOrb(STILL);
 }
 
 reducedMotion.addEventListener?.("change", () => retune(currentState()));
+document.addEventListener("visibilitychange", () => retune(currentState()));
 
 // ---------- rendering ----------
 
@@ -360,7 +480,7 @@ void listen("scufris://tick", (event) => {
   timer.textContent = formatDuration(tick.seconds);
   if (currentState() !== "listening") return;
   levelTarget = 0.12 + Math.min(tick.level, 1) * 0.88;
-  if (reducedMotion.matches) {
+  if (frameId === null) {
     // No spring without the loop: the tick itself is the crossfade.
     levelShown = levelTarget;
     applyLevel(levelShown);

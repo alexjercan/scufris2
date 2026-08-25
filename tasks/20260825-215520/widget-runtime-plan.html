@@ -1,0 +1,1262 @@
+<title>Widget Runtime Buildout</title>
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap"
+/>
+<style>
+  :root {
+    --bg: #181818;
+    --bg1: #1c1c1c;
+    --bg2: #282828;
+    --bg3: #453d41;
+    --bg4: #52494e;
+    --fg: #e4e4ef;
+    --fg1: #f4f4ff;
+    --yellow: #ffdd33;
+    --brown: #cc8c3c;
+    --quartz: #95a99f;
+    --niagara: #96a6c8;
+    --wisteria: #9e95c7;
+    --green: #73c936;
+    --red: #f43841;
+    --mono:
+      "Iosevka", "Iosevka Term", "JetBrains Mono", ui-monospace, monospace;
+  }
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 14.5px;
+    line-height: 1.65;
+  }
+  .wrap {
+    max-width: 1060px;
+    margin: 0 auto;
+    padding: 0 28px 90px;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    color: var(--fg1);
+  }
+  code {
+    color: var(--brown);
+    font-size: 0.92em;
+  }
+  a {
+    color: var(--niagara);
+  }
+  p {
+    max-width: 72ch;
+  }
+  ul {
+    max-width: 76ch;
+    list-style: none;
+  }
+  ul li {
+    padding-left: 18px;
+    position: relative;
+    margin-bottom: 6px;
+  }
+  ul li::before {
+    content: ">";
+    position: absolute;
+    left: 0;
+    color: var(--bg4);
+  }
+  ul li b,
+  p b {
+    color: var(--fg1);
+    font-weight: 700;
+  }
+  ol {
+    max-width: 76ch;
+    margin-left: 22px;
+  }
+  ol li {
+    margin-bottom: 6px;
+  }
+  ol li::marker {
+    color: var(--quartz);
+  }
+
+  .mast {
+    padding: 64px 0 36px;
+    border-bottom: 1px solid var(--bg2);
+  }
+  .mast .kicker {
+    font-size: 12px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--quartz);
+    margin-bottom: 14px;
+  }
+  .mast h1 {
+    font-size: 34px;
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+  }
+  .mast .sub {
+    margin-top: 14px;
+    color: var(--fg);
+    max-width: 76ch;
+  }
+  .mast .sub em {
+    color: var(--wisteria);
+    font-style: normal;
+  }
+
+  section {
+    padding: 52px 0 10px;
+  }
+  .shead {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 26px;
+    align-items: baseline;
+  }
+  .snum {
+    color: var(--bg4);
+    font-weight: 800;
+    font-size: 15px;
+  }
+  .shead h2 {
+    font-size: 21px;
+  }
+  .srule {
+    flex: 1;
+    border-bottom: 1px solid var(--bg2);
+  }
+  .stag {
+    font-size: 11.5px;
+    color: var(--quartz);
+    white-space: nowrap;
+  }
+
+  .cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 26px;
+    margin: 22px 0;
+    align-items: start;
+  }
+  @media (max-width: 820px) {
+    .cols {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  pre.code {
+    background: #101010;
+    border: 1px solid var(--bg2);
+    padding: 16px 18px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    overflow-x: auto;
+    margin: 18px 0;
+    color: var(--fg);
+  }
+  pre.code .cm {
+    color: var(--bg4);
+  }
+  pre.code .k {
+    color: var(--niagara);
+  }
+  pre.code .s {
+    color: var(--green);
+  }
+  pre.code .t {
+    color: var(--yellow);
+  }
+
+  .panel {
+    background: var(--bg1);
+    border: 1px solid var(--bg2);
+    padding: 20px 22px;
+    margin: 22px 0;
+  }
+  .panel h3 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--quartz);
+    margin-bottom: 12px;
+  }
+  .hint {
+    border-left: 3px solid var(--wisteria);
+    background: var(--bg1);
+    padding: 12px 16px;
+    margin: 18px 0;
+    max-width: 80ch;
+    font-size: 13.5px;
+  }
+  .hint b {
+    color: var(--fg1);
+  }
+  .open {
+    border-left-color: var(--yellow);
+  }
+  .open .tag {
+    color: var(--yellow);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  figure {
+    margin: 26px 0;
+  }
+  figure svg {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+  figcaption {
+    font-size: 12px;
+    color: var(--quartz);
+    margin-top: 10px;
+    max-width: 80ch;
+  }
+
+  .tblwrap {
+    overflow-x: auto;
+    margin: 22px 0;
+  }
+  table {
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 640px;
+  }
+  th {
+    text-align: left;
+    color: var(--quartz);
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--bg3);
+  }
+  td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--bg2);
+    vertical-align: top;
+  }
+  td:first-child {
+    white-space: nowrap;
+    color: var(--fg1);
+  }
+
+  .chip {
+    display: inline-block;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0 7px;
+    border: 1px solid;
+    margin-right: 6px;
+    white-space: nowrap;
+  }
+  .chip.add {
+    color: var(--green);
+    border-color: var(--green);
+  }
+  .chip.del {
+    color: var(--red);
+    border-color: var(--red);
+  }
+  .chip.edit {
+    color: var(--niagara);
+    border-color: var(--niagara);
+  }
+</style>
+
+<div class="wrap">
+  <header class="mast">
+    <div class="kicker">
+      scufris2 // task 20260825-215520 // implementation plan
+    </div>
+    <h1>Widget Runtime Buildout</h1>
+    <p class="sub">
+      The reviewed design (<em>Scufris Widgets</em>, task 20260825-194822, all
+      seven decisions in) meets the code as it stands. This page is the plan
+      between them: the data structures both sides gain, the one genuinely new
+      mechanism, the file-by-file change map including the complete dashboardd
+      removal, and the order the commits land in.
+    </p>
+  </header>
+
+  <!-- ============================================================ 01 -->
+  <section id="p01">
+    <div class="shead">
+      <span class="snum">01</span>
+      <h2>Where the code stands</h2>
+      <span class="srule"></span><span class="stag">mapped 2026-08-25</span>
+    </div>
+    <p>
+      The companion is a one-window app. The only window is the pill
+      (<code>pill.rs</code>, label <code>"pill"</code>), the only IPC is four
+      global <code>emit</code> events plus six invoke commands - no
+      <code>tauri::ipc::Channel</code> anywhere - and the whole binary runs on
+      <code>std::thread</code>: no tokio, no async runtime. Protocol v1
+      (<code>scufris-control/src/lib.rs</code>) speaks three companion messages
+      and six daemon messages over one Unix socket line protocol, with shared
+      fixtures in <code>desktop/control-protocol-v1.json</code> that both test
+      suites read. Every daemon-to-companion message today is an answer or a
+      broadcast - <code>ControlServer</code> has no targeted request path, and
+      the companion never writes in response to a daemon message.
+    </p>
+    <figure>
+      <svg
+        viewBox="0 0 940 268"
+        role="img"
+        aria-label="Current architecture: the Pi daemon and the companion speak protocol v1 over a Unix socket, answers and broadcasts only, one pill window; a separate dashboardd chain of extension, Python helper, and external service hangs off the daemon and leaves in increment 1"
+      >
+        <defs>
+          <marker
+            id="pa"
+            viewBox="0 0 8 8"
+            refX="7"
+            refY="4"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto"
+          >
+            <path d="M0 0 L8 4 L0 8 z" fill="#96a6c8" />
+          </marker>
+          <marker
+            id="pr"
+            viewBox="0 0 8 8"
+            refX="7"
+            refY="4"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto"
+          >
+            <path d="M0 0 L8 4 L0 8 z" fill="#f43841" />
+          </marker>
+        </defs>
+        <g font-family="monospace" font-size="12">
+          <rect
+            x="30"
+            y="40"
+            width="220"
+            height="60"
+            fill="#101010"
+            stroke="#9e95c7"
+          />
+          <text x="140" y="64" fill="#f4f4ff" text-anchor="middle">
+            Pi daemon
+          </text>
+          <text
+            x="140"
+            y="84"
+            fill="#95a99f"
+            text-anchor="middle"
+            font-size="10.5"
+          >
+            ControlServer, server.ts
+          </text>
+          <rect
+            x="430"
+            y="40"
+            width="220"
+            height="60"
+            fill="#101010"
+            stroke="#96a6c8"
+          />
+          <text x="540" y="64" fill="#f4f4ff" text-anchor="middle">
+            companion
+          </text>
+          <text
+            x="540"
+            y="84"
+            fill="#95a99f"
+            text-anchor="middle"
+            font-size="10.5"
+          >
+            one window: the pill
+          </text>
+          <line
+            x1="250"
+            y1="70"
+            x2="424"
+            y2="70"
+            stroke="#96a6c8"
+            marker-end="url(#pa)"
+          />
+          <text
+            x="337"
+            y="62"
+            fill="#96a6c8"
+            font-size="10.5"
+            text-anchor="middle"
+          >
+            v1: answers + broadcasts only
+          </text>
+          <rect
+            x="30"
+            y="170"
+            width="180"
+            height="54"
+            fill="#101010"
+            stroke="#f43841"
+            opacity="0.75"
+          />
+          <text x="120" y="192" fill="#e4e4ef" text-anchor="middle">
+            dashboard ext
+          </text>
+          <text
+            x="120"
+            y="210"
+            fill="#95a99f"
+            text-anchor="middle"
+            font-size="10.5"
+          >
+            694 lines, 1 Hz poll
+          </text>
+          <rect
+            x="290"
+            y="170"
+            width="180"
+            height="54"
+            fill="#101010"
+            stroke="#f43841"
+            opacity="0.75"
+          />
+          <text x="380" y="192" fill="#e4e4ef" text-anchor="middle">
+            helper
+          </text>
+          <text
+            x="380"
+            y="210"
+            fill="#95a99f"
+            text-anchor="middle"
+            font-size="10.5"
+          >
+            scufris-dashboard, 235
+          </text>
+          <rect
+            x="550"
+            y="170"
+            width="180"
+            height="54"
+            fill="#101010"
+            stroke="#f43841"
+            opacity="0.75"
+          />
+          <text x="640" y="192" fill="#e4e4ef" text-anchor="middle">
+            dashboardd
+          </text>
+          <text
+            x="640"
+            y="210"
+            fill="#95a99f"
+            text-anchor="middle"
+            font-size="10.5"
+          >
+            external, own flake input
+          </text>
+          <line
+            x1="210"
+            y1="197"
+            x2="284"
+            y2="197"
+            stroke="#f43841"
+            opacity="0.75"
+            marker-end="url(#pr)"
+          />
+          <line
+            x1="470"
+            y1="197"
+            x2="544"
+            y2="197"
+            stroke="#f43841"
+            opacity="0.75"
+            marker-end="url(#pr)"
+          />
+          <text x="770" y="200" fill="#f43841" font-size="11">
+            leaves in increment 1
+          </text>
+        </g>
+      </svg>
+      <figcaption>
+        Today: the socket carries answers and broadcasts; widgets run through a
+        separate three-process chain with two nested timeouts, all of which is
+        deleted.
+      </figcaption>
+    </figure>
+    <div class="hint">
+      <b>The thread model is a plan constraint.</b> dashboardd supervised
+      backends with a tokio select loop; this companion has no async runtime and
+      an established idiom instead (the <code>Executor</code> trait, a thread
+      per concern, mutexed state). Backend supervision is planned as reader
+      threads plus one mutexed table - matching the codebase, not the donor.
+    </div>
+  </section>
+
+  <!-- ============================================================ 02 -->
+  <section id="p02">
+    <div class="shead">
+      <span class="snum">02</span>
+      <h2>Target shape</h2>
+      <span class="srule"></span
+      ><span class="stag">one new module each side</span>
+    </div>
+    <p>
+      One new module on each side of the socket. The extension gains
+      <code>extensions/scufris/widgets/</code>: four tools typed from the pushed
+      catalog, a pending map for correlated commands, and the
+      <code>scufris-widget-event</code> follow-up Calm already hides. The
+      companion gains <code>src/widgets/</code> beside the pill's modules, with
+      the pill's ports-and-adapters split: a pure runtime that owns surfaces,
+      slots, and (later) aging, driven through ports so it unit-tests without a
+      desktop. Widget traffic never touches the pill's <code>Event</code> state
+      machine.
+    </p>
+    <figure>
+      <svg
+        viewBox="0 0 940 300"
+        role="img"
+        aria-label="Target architecture: the Pi daemon sends correlated v2 widget commands to the companion's widgets module, which answers with events and the catalog; the module feeds shell windows over one ordered Channel each and supervises backend processes whose stdout lines fan out and whose stdin takes actions"
+      >
+        <defs>
+          <marker
+            id="ta"
+            viewBox="0 0 8 8"
+            refX="7"
+            refY="4"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto"
+          >
+            <path d="M0 0 L8 4 L0 8 z" fill="#9e95c7" />
+          </marker>
+          <marker
+            id="tb"
+            viewBox="0 0 8 8"
+            refX="7"
+            refY="4"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto"
+          >
+            <path d="M0 0 L8 4 L0 8 z" fill="#96a6c8" />
+          </marker>
+          <marker
+            id="tc"
+            viewBox="0 0 8 8"
+            refX="7"
+            refY="4"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto"
+          >
+            <path d="M0 0 L8 4 L0 8 z" fill="#73c936" />
+          </marker>
+          <marker
+            id="td"
+            viewBox="0 0 8 8"
+            refX="7"
+            refY="4"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto"
+          >
+            <path d="M0 0 L8 4 L0 8 z" fill="#52494e" />
+          </marker>
+        </defs>
+        <g font-family="monospace" font-size="12">
+          <rect
+            x="20"
+            y="112"
+            width="210"
+            height="64"
+            fill="#101010"
+            stroke="#9e95c7"
+          />
+          <text x="125" y="138" fill="#f4f4ff" text-anchor="middle">
+            Pi daemon
+          </text>
+          <text
+            x="125"
+            y="158"
+            fill="#95a99f"
+            text-anchor="middle"
+            font-size="10.5"
+          >
+            widgets tools + pending map
+          </text>
+          <rect
+            x="330"
+            y="112"
+            width="210"
+            height="64"
+            fill="#101010"
+            stroke="#96a6c8"
+          />
+          <text x="435" y="138" fill="#f4f4ff" text-anchor="middle">
+            widgets module
+          </text>
+          <text
+            x="435"
+            y="158"
+            fill="#95a99f"
+            text-anchor="middle"
+            font-size="10.5"
+          >
+            runtime + pool + backends
+          </text>
+          <rect
+            x="680"
+            y="30"
+            width="230"
+            height="60"
+            fill="#101010"
+            stroke="#33302e"
+          />
+          <text x="795" y="54" fill="#e4e4ef" text-anchor="middle">
+            shell windows
+          </text>
+          <text
+            x="795"
+            y="74"
+            fill="#95a99f"
+            text-anchor="middle"
+            font-size="10.5"
+          >
+            widget-N, warm pool of 2
+          </text>
+          <rect
+            x="680"
+            y="210"
+            width="230"
+            height="60"
+            fill="#101010"
+            stroke="#33302e"
+          />
+          <text x="795" y="234" fill="#e4e4ef" text-anchor="middle">
+            backend processes
+          </text>
+          <text
+            x="795"
+            y="254"
+            fill="#95a99f"
+            text-anchor="middle"
+            font-size="10.5"
+          >
+            one per (id, spawn data)
+          </text>
+          <line
+            x1="230"
+            y1="130"
+            x2="324"
+            y2="130"
+            stroke="#9e95c7"
+            marker-end="url(#ta)"
+          />
+          <text
+            x="277"
+            y="122"
+            fill="#9e95c7"
+            font-size="10.5"
+            text-anchor="middle"
+          >
+            v2 commands, correlated
+          </text>
+          <line
+            x1="324"
+            y1="160"
+            x2="230"
+            y2="160"
+            stroke="#96a6c8"
+            marker-end="url(#tb)"
+          />
+          <text
+            x="277"
+            y="178"
+            fill="#96a6c8"
+            font-size="10.5"
+            text-anchor="middle"
+          >
+            answers, events, catalog
+          </text>
+          <line
+            x1="540"
+            y1="122"
+            x2="674"
+            y2="66"
+            stroke="#96a6c8"
+            marker-end="url(#tb)"
+          />
+          <text x="596" y="76" fill="#96a6c8" font-size="10.5">
+            Channel, ordered, coalesced
+          </text>
+          <line
+            x1="674"
+            y1="88"
+            x2="540"
+            y2="140"
+            stroke="#52494e"
+            marker-end="url(#td)"
+          />
+          <text x="586" y="122" fill="#52494e" font-size="10.5">
+            ticks, actions
+          </text>
+          <line
+            x1="674"
+            y1="228"
+            x2="540"
+            y2="164"
+            stroke="#73c936"
+            marker-end="url(#tc)"
+          />
+          <text x="576" y="212" fill="#73c936" font-size="10.5">
+            stdout: one line = one update
+          </text>
+          <line
+            x1="540"
+            y1="176"
+            x2="674"
+            y2="250"
+            stroke="#52494e"
+            marker-end="url(#td)"
+          />
+          <text x="556" y="248" fill="#52494e" font-size="10.5">
+            stdin: one line = one action
+          </text>
+        </g>
+      </svg>
+      <figcaption>
+        Target: correlated commands over the existing socket, one ordered
+        Channel per shell window, refcounted backend processes with fan-out
+        stdout and shared stdin.
+      </figcaption>
+    </figure>
+    <div class="panel">
+      <h3>New surfaces, by directory</h3>
+      <ul>
+        <li>
+          <code>desktop/scufris-desktop/src/widgets/</code> - runtime (pure),
+          catalog, pool, windows adapter, backends (increment 2), wire glue.
+        </li>
+        <li>
+          <code>desktop/scufris-desktop/shell/</code> - the shell page: chrome,
+          <code>--sw-*</code> tokens, Channel client, module loader. Own tsc
+          project; built into <code>ui/dist/</code> beside the pill.
+        </li>
+        <li>
+          <code>desktop/widgets/&lt;id&gt;/</code> - in-repo widgets (<code
+            >widget.toml</code
+          >
+          + strict-TS <code>widget.ts</code>);
+          <code>desktop/backends/&lt;id&gt;</code> - backend scripts (increment
+          2).
+        </li>
+        <li>
+          <code>extensions/scufris/widgets/index.ts</code> - tools, pending map,
+          follow-up events; <code>skills/widgets/SKILL.md</code> - the
+          model-facing spawn policy replacing <code>skills/dashboard</code>.
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============================================================ 03 -->
+  <section id="p03">
+    <div class="shead">
+      <span class="snum">03</span>
+      <h2>Protocol v2 and the correlation machinery</h2>
+      <span class="srule"></span><span class="stag">the one new mechanism</span>
+    </div>
+    <p>
+      The version bumps 1 to 2 in both mirrors
+      (<code>scufris-control/src/lib.rs:22</code>,
+      <code>desktop/protocol.ts:4</code>); a v1 peer is refused at hello, by
+      decision. <code>desktop/control-protocol-v2.json</code> lands first -
+      canonical, tolerated, and rejected lines for both sides - and both suites
+      point at it; the v1 fixture file leaves with the bump, since no
+      implementation speaks v1 afterwards. Ids and the 64 KiB line cap carry
+      over; widget and surface ids validate like submission ids, and
+      <code>data</code> payloads cap at 8 KiB to stay under the Channel-friendly
+      size.
+    </p>
+    <pre
+      class="code"
+    ><span class="cm"># daemon -> companion: the first daemon-originated commands, correlated by "id"</span>
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_open"</span>,   <span class="k">"id"</span>:<span class="s">"w-1"</span>, <span class="k">"widget"</span>:<span class="s">"note"</span>, <span class="k">"posture"</span>:<span class="s">"exhibit"</span>, <span class="k">"data"</span>:{}}
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_update"</span>, <span class="k">"id"</span>:<span class="s">"w-2"</span>, <span class="k">"surface"</span>:<span class="s">"widget-3"</span>, <span class="k">"data"</span>:{}}
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_close"</span>,  <span class="k">"id"</span>:<span class="s">"w-3"</span>, <span class="k">"surface"</span>:<span class="s">"widget-3"</span>}
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_clear"</span>,  <span class="k">"id"</span>:<span class="s">"w-4"</span>}
+
+<span class="cm"># companion -> daemon: answers echo the id; events and the catalog are unsolicited</span>
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_opened"</span>, <span class="k">"id"</span>:<span class="s">"w-1"</span>, <span class="k">"surface"</span>:<span class="s">"widget-3"</span>}
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_failed"</span>, <span class="k">"id"</span>:<span class="s">"w-1"</span>, <span class="k">"code"</span>:<span class="s">"widget_not_found"</span>, <span class="k">"detail"</span>:<span class="s">"..."</span>}
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_event"</span>, <span class="k">"surface"</span>:<span class="s">"widget-3"</span>, <span class="k">"event"</span>:<span class="s">"closed"</span>}
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"catalog"</span>, <span class="k">"widgets"</span>:[{<span class="k">"id"</span>:<span class="s">"note"</span>, <span class="k">"name"</span>:<span class="s">"Note"</span>, <span class="k">"description"</span>:<span class="s">"..."</span>}]}</pre>
+    <div class="cols">
+      <div>
+        <p>
+          <b>Extension side.</b> <code>ControlServer</code> today only
+          broadcasts (<code>server.ts:567</code>) or answers inline. It gains
+          <code>request(body): Promise&lt;Answer&gt;</code> - a targeted write
+          to the connected companion, a
+          <code>Map&lt;correlationId, Pending&gt;</code>, a per-request timeout,
+          and rejection of every pending request when the companion disconnects.
+          Tool calls await it; a timeout or <code>widget_failed</code> becomes
+          the tool's error result.
+        </p>
+      </div>
+      <div>
+        <p>
+          <b>Companion side.</b> <code>daemon.rs</code> maps the four new
+          <code>DaemonBody</code> variants to a new
+          <code>DaemonEvent::Widget(cmd)</code> arm, routed to the widgets
+          module - a sibling of <code>App::observe</code>, never the pill's
+          <code>Event</code> enum. Answers write back through the link's
+          existing writer (the <code>submit()</code> path already proves the
+          shared writer handle); the catalog is sent once, right after hello is
+          welcomed.
+        </p>
+      </div>
+    </div>
+    <div class="hint">
+      <b>This is the plan's center of gravity.</b> Both explorer sweeps and the
+      design research agree: the windows are known recipes, but a correlated,
+      targeted request/response path exists in neither direction of the stack
+      today. It lands as its own commit with fixture-driven tests on both sides
+      before any window code.
+    </div>
+  </section>
+
+  <!-- ============================================================ 04 -->
+  <section id="p04">
+    <div class="shead">
+      <span class="snum">04</span>
+      <h2>Data structures</h2>
+      <span class="srule"></span
+      ><span class="stag">both sides of the socket, and the shell</span>
+    </div>
+    <p>
+      The companion's core is a pure runtime in the style of
+      <code>state.rs</code>: commands in, actions out, no I/O, every rule
+      unit-tested without a desktop session. Slot names come from the design
+      page's choreography demo verbatim.
+    </p>
+    <pre
+      class="code"
+    ><span class="cm">// src/widgets/runtime.rs - pure; the host drives ports, the runtime decides</span>
+<span class="t">struct</span> Runtime {
+  surfaces: BTreeMap&lt;SurfaceId, Surface&gt;,
+  shelf: VecDeque&lt;SurfaceId&gt;,            <span class="cm">// newest first, cap 3, oldest unpinned retires</span>
+  edges: BTreeMap&lt;EdgeSlot, SurfaceId&gt;,  <span class="cm">// instruments</span>
+  hidden_with_pill: <span class="t">bool</span>,                <span class="cm">// Q6: the scratchpad hide (increment 2)</span>
+}
+
+<span class="t">struct</span> Surface {
+  id: SurfaceId,             <span class="cm">// "widget-3"; doubles as the window label</span>
+  widget: WidgetId,
+  posture: Posture,          <span class="cm">// Exhibit | Instrument</span>
+  slot: Slot,
+  owned: <span class="t">bool</span>,               <span class="cm">// Q7: any drag ending off the shelf sets it</span>
+  life: Life,                <span class="cm">// Live | Dim { since } | Pinned (clocks in increment 2)</span>
+  backend: Option&lt;BackendKey&gt;,
+}
+
+<span class="t">enum</span> Slot { Shelf(<span class="t">u8</span>), Edge(EdgeSlot), Stage, Standing { x: <span class="t">i32</span>, y: <span class="t">i32</span> } }
+<span class="t">enum</span> EdgeSlot { TopLeft, TopRight, MidLeft, MidRight }   <span class="cm">// tl tr ml mr, as in the demo</span>
+
+<span class="cm">// in:  Cmd::{Open, Update, Close, Clear} from the daemon; ticks and drags from the shell</span>
+<span class="cm">// out: Act::{Adopt, Show, Move, Update, Life, Retire, Answer(ClientBody)} against the ports</span></pre>
+    <div class="cols">
+      <div>
+        <pre
+          class="code"
+        ><span class="cm">// src/widgets/catalog.rs - startup discovery</span>
+<span class="t">struct</span> Manifest {          <span class="cm">// widget.toml, serde + toml crate (new dep)</span>
+  id: String,              <span class="cm">// must equal the directory name</span>
+  name: String,
+  description: String,
+  width: <span class="t">u32</span>,
+  height: <span class="t">u32</span>,
+  backend: Option&lt;String&gt;,
+}
+<span class="t">struct</span> Catalog { widgets: BTreeMap&lt;WidgetId, Widget&gt; }
+<span class="cm">// duplicate id across roots = startup failure, no shadowing</span>
+
+<span class="cm">// src/widgets/pool.rs - warm shells</span>
+<span class="t">struct</span> Pool { idle: Vec&lt;Shell&gt;, target: <span class="t">usize</span> <span class="cm">/* 2 */</span>, next: <span class="t">u32</span> }
+<span class="t">struct</span> Shell { label: String, channel: Channel&lt;ShellMsg&gt; }
+<span class="cm">// adopt = become + size hints + position + show_passive; refill async</span></pre>
+      </div>
+      <div>
+        <pre
+          class="code"
+        ><span class="cm">// src/widgets/backends.rs - increment 2, std::thread, no tokio</span>
+<span class="t">type</span> BackendKey = (String, String);
+<span class="cm">// (backend id, spawn JSON with sorted keys)</span>
+
+<span class="t">struct</span> Backends { running: Mutex&lt;HashMap&lt;BackendKey, Backend&gt;&gt; }
+<span class="t">struct</span> Backend {
+  pid: <span class="t">u32</span>,                  <span class="cm">// own process group, recorded;</span>
+                             <span class="cm">// SIGTERM group, SIGKILL after 3 s</span>
+  refs: BTreeSet&lt;SurfaceId&gt;, <span class="cm">// last close kills the process</span>
+  stdin: ChildStdin,         <span class="cm">// one JSON line per ctx.send action</span>
+  reader: JoinHandle&lt;()&gt;,    <span class="cm">// stdout lines -> coalescer</span>
+  seen: Instant,             <span class="cm">// stale at 3x expected cadence</span>
+}
+<span class="cm">// coalescer: latest-wins per surface, flushed at 250 ms -</span>
+<span class="cm">// never a raw tick stream to a webview</span></pre>
+      </div>
+    </div>
+    <pre
+      class="code"
+    ><span class="cm">// shell/shell.ts - the per-window Channel contract and the four invoke commands</span>
+<span class="t">type</span> ShellMsg =
+  | { kind: <span class="s">"become"</span>; surface: <span class="t">string</span>; widget: <span class="t">string</span>; name: <span class="t">string</span>; data: <span class="t">unknown</span> }
+  | { kind: <span class="s">"update"</span>; data: <span class="t">unknown</span> }
+  | { kind: <span class="s">"life"</span>; state: <span class="s">"live"</span> | <span class="s">"dim"</span> | <span class="s">"stale"</span> | <span class="s">"dead"</span> | <span class="s">"pinned"</span> }
+  | { kind: <span class="s">"retire"</span> };  <span class="cm">// unmount, wipe, return to the pool</span>
+
+<span class="cm">// shell -> Rust, all scoped by window label:</span>
+<span class="cm">//   widget_shell_ready(channel)          hands Rust this window's Channel</span>
+<span class="cm">//   widget_tick(kind: "close" | "pin")   the two chrome ticks</span>
+<span class="cm">//   widget_hover(over: boolean)          freezes aging clocks (increment 2)</span>
+<span class="cm">//   widget_send(action: unknown)         ctx.send -> backend stdin (increment 3)</span>
+
+<span class="cm">// the widget module contract, unchanged from the design page:</span>
+<span class="cm">//   mount(root, ctx: { spawn: unknown; send(action: unknown): void })</span>
+<span class="cm">//     -> { update(data: unknown): void; destroy(): void }</span></pre>
+    <pre
+      class="code"
+    ><span class="cm">// extensions/scufris/widgets/index.ts - daemon side</span>
+<span class="t">interface</span> Pending { resolve(answer: Answer): <span class="t">void</span>; timer: NodeJS.Timeout }
+<span class="cm">// pending: Map&lt;string, Pending&gt; keyed by correlation id "w-N"</span>
+<span class="cm">// surfaces: Map&lt;surfaceId, { widget, posture }&gt; from answers + events</span>
+<span class="cm">// catalog message -> late-registers the four tools (the pattern the</span>
+<span class="cm">//   dashboard extension proved on session_start), widget ids as a union</span>
+<span class="cm">// widget_event -> pi.sendMessage({ customType: "scufris-widget-event", ... },</span>
+<span class="cm">//   { deliverAs: "followUp", triggerTurn: false })  // calm.ts:15 already hides it</span></pre>
+    <div class="panel">
+      <h3>The four tools (increment 1)</h3>
+      <ul>
+        <li>
+          <code>scufris_widget_open</code> - widget id union from the catalog,
+          posture, data. Returns the surface id.
+        </li>
+        <li>
+          <code>scufris_widget_update</code> - surface, data. Citing is
+          updating: an update with unchanged data revives (increment 2 makes
+          that matter).
+        </li>
+        <li><code>scufris_widget_close</code> - surface.</li>
+        <li>
+          <code>scufris_widget_clear</code> - the panic verb; closes the
+          runtime's exhibits, leaves user-owned widgets standing.
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============================================================ 05 -->
+  <section id="p05">
+    <div class="shead">
+      <span class="snum">05</span>
+      <h2>Windows, serving, and the two config gates</h2>
+      <span class="srule"></span
+      ><span class="stag">the pill's recipes, generalized</span>
+    </div>
+    <ul>
+      <li>
+        <b>The window recipe is the pill's</b> (<code>pill.rs:59-71</code>): min
+        == max size hints (i3 floats it, GTK honors the size), no decorations,
+        always-on-top, skip taskbar, opaque, built <code>visible(false)</code>.
+        Two deltas: <code>focused(false)</code> with
+        <code>focusable(true)</code> so i3 never focuses at map yet the window
+        stays clickable, and never calling <code>set_focus()</code> on a widget.
+        Showing is the <code>show_passive()</code> idiom; per-widget
+        <code>WM_CLASS</code> instances (<code>scufris-widget-cpu</code>) let
+        Alex write i3 rules.
+      </li>
+      <li>
+        <b>Slot geometry is pure math</b> in the
+        <code>bottom_center()</code> style: one unit-tested function per anchor
+        family (shelf above the pill, four edges, center stage), clamped to the
+        monitor. Position after show; i3 places floating windows first.
+      </li>
+      <li>
+        <b>Serving:</b> the shell page ships in <code>ui/dist/</code>
+        (build.rs compiles the second tsc project and copies
+        <code>shell.html</code>, <code>shell.css</code>, <code>shell.js</code>,
+        <code>tokens.css</code>); windows open
+        <code>WebviewUrl::App("shell.html")</code>. Widget modules compile at
+        build time into <code>ui/dist/widgets/&lt;id&gt;/widget.js</code> and
+        are served by a <code>scufris-widget://</code> URI scheme that answers
+        only the requesting window's current widget - dashboardd's one clever
+        trick, kept.
+      </li>
+      <li>
+        <b>Gate one:</b> <code>capabilities/default.json</code> scopes
+        permissions to <code>["pill"]</code>; it gains a
+        <code>widget-*</code> label glob. <b>Gate two:</b> the CSP in
+        <code>tauri.conf.json</code> whitelists <code>scufris-widget:</code> in
+        <code>script-src</code>. Both are startup-silent failures if forgotten,
+        so both get a check.
+      </li>
+      <li>
+        <b>New crate dependency:</b> <code>toml</code> (serde feature) for the
+        manifest. Everything else is already in the tree.
+      </li>
+    </ul>
+  </section>
+
+  <!-- ============================================================ 06 -->
+  <section id="p06">
+    <div class="shead">
+      <span class="snum">06</span>
+      <h2>The change map</h2>
+      <span class="srule"></span
+      ><span class="stag">dashboardd leaves whole</span>
+    </div>
+    <div class="tblwrap">
+      <table>
+        <tr>
+          <th>Area</th>
+          <th>Change</th>
+        </tr>
+        <tr>
+          <td>protocol</td>
+          <td>
+            <span class="chip add">add</span>
+            <code>desktop/control-protocol-v2.json</code> (fixtures first)
+            <br /><span class="chip edit">edit</span>
+            <code>scufris-control/src/lib.rs</code> (version, 8 new body
+            variants, bounds, tests),
+            <code>extensions/scufris/desktop/protocol.ts</code> +
+            <code>server.ts</code> (version, codecs, <code>request()</code>),
+            <code>src/daemon.rs</code> (Widget events, answer writes)
+            <br /><span class="chip del">del</span>
+            <code>desktop/control-protocol-v1.json</code> (with the bump)
+          </td>
+        </tr>
+        <tr>
+          <td>companion</td>
+          <td>
+            <span class="chip add">add</span> <code>src/widgets/</code>
+            (runtime, catalog, pool, windows, wire; backends in increment 2),
+            <code>shell/</code> (page, tokens, tsconfig),
+            <code>desktop/widgets/note/</code>
+            <br /><span class="chip edit">edit</span>
+            <code>main.rs</code> (module wiring, commands),
+            <code>build.rs</code> (second tsc project, widget walk),
+            <code>capabilities/default.json</code>,
+            <code>tauri.conf.json</code> (CSP + the 0.3.0 version drift, fixed
+            in passing), <code>Cargo.toml</code> (+ <code>toml</code>)
+          </td>
+        </tr>
+        <tr>
+          <td>extension</td>
+          <td>
+            <span class="chip add">add</span>
+            <code>extensions/scufris/widgets/index.ts</code>,
+            <code>skills/widgets/SKILL.md</code>
+            <br /><span class="chip del">del</span>
+            <code>extensions/scufris/dashboard/</code> (694),
+            <code>tools/dashboard/</code> (235),
+            <code>skills/dashboard/</code> (21),
+            <code>tests/test_scufris_dashboard.py</code> (205) <br /><span
+              class="chip edit"
+              >edit</span
+            >
+            <code>workflow/identity.ts:4</code> in lockstep with
+            <code>tests/identity.test.ts:10</code>;
+            <code>calm.ts:15</code> stays - the new runtime reuses
+            <code>scufris-widget-event</code>
+          </td>
+        </tr>
+        <tr>
+          <td>manifest + scripts</td>
+          <td>
+            <span class="chip edit">edit</span>
+            <code>package.json:23</code> (pi.extensions swap),
+            <code>scripts/scufris-dev:64,69</code>,
+            <code>tests/structure.test.ts:26,47</code>,
+            <code>tests/dev_helper.test.ts:143,156</code>
+          </td>
+        </tr>
+        <tr>
+          <td>nix</td>
+          <td>
+            <span class="chip del">del</span> the dashboardd input
+            (<code>flake.nix:18-21,92</code>) and the
+            <code>programs.scufris.dashboard</code> option group (<code
+              >home-manager.nix:79-92</code
+            >
+            - breaking, CHANGELOG entry) <br /><span class="chip edit"
+              >edit</span
+            >
+            <code>nix/scufris.nix:17,19,22,42</code>,
+            <code>nix/launcher.nix:5,6,27-32,46</code> (+ the new
+            <code>--extension</code>/<code>--skill</code> pair),
+            <code>nix/home-manager.nix:37,38</code>, checks
+            <code>launcher.nix:39-42,84-87</code>,
+            <code>resources.nix:20,32,37</code>, <code>homes.nix:28</code>,
+            <code>desktop.nix</code> (widget assets live in the desktop
+            derivation; the closure-disjointness check stands); regenerate
+            <code>flake.lock</code> (drops crane / rust-flake / rust-overlay,
+            ~120 lines)
+          </td>
+        </tr>
+        <tr>
+          <td>docs</td>
+          <td>
+            <span class="chip add">add</span>
+            <code>docs/src/dev/widgets.md</code> after the desktop chapter in
+            SUMMARY.md <br /><span class="chip edit">edit</span> the sweep:
+            <code>overview.md:5,15,23,34,43-44</code>,
+            <code>dev/architecture.md:8,16,20,36,64-65</code>,
+            <code>dev/extensions.md:3-6,83,87-104</code>,
+            <code>dev/desktop.md:7-9</code> (the Tauri rationale paragraph),
+            <code>dev/operation.md:83-84</code>,
+            <code>dev/maintenance.md:161-163</code>,
+            <code>guide/installation.md:72-75</code>,
+            <code>guide/using.md:64-69</code>, <code>README.md:3</code>,
+            <code>AGENTS.md:8</code>
+          </td>
+        </tr>
+      </table>
+    </div>
+    <p>
+      The full file:line inventory sits in this task's
+      <code>RESEARCH.md</code>. Historical documents under
+      <code>tasks/</code> keep their dashboardd mentions (append-only records);
+      the acceptance grep is scoped to non-<code>tasks/</code>
+      paths.
+    </p>
+  </section>
+
+  <!-- ============================================================ 07 -->
+  <section id="p07">
+    <div class="shead">
+      <span class="snum">07</span>
+      <h2>Landing order</h2>
+      <span class="srule"></span
+      ><span class="stag">increment 1 in five commits</span>
+    </div>
+    <ol>
+      <li>
+        <b>Remove dashboardd.</b> Independent of everything else, the largest
+        diff, and every suite stays green: the deletes, the edit chain, the nix
+        ripples, the lock regen, the docs sweep. Proof: scoped grep finds no
+        dashboardd; <code>npm run check</code>, python unittest,
+        <code>nix flake check</code> all pass.
+      </li>
+      <li>
+        <b>Protocol v2, fixtures first.</b> The v2 fixture file, both codecs,
+        version bump, v1 fixture removed. Proof: both suites read the same
+        fixtures and round-trip canonical lines byte-identically.
+      </li>
+      <li>
+        <b>Correlation machinery.</b> <code>ControlServer.request()</code>
+        with pending map and timeouts; the companion's
+        <code>DaemonEvent::Widget</code> routing and answer writes. Proof:
+        socket tests drive open/opened and open/failed end to end with a fake
+        peer on each side.
+      </li>
+      <li>
+        <b>The runtime and the windows.</b> Pure runtime with slot and shelf
+        rules unit-tested; catalog discovery; the pool; the shell page and
+        tokens; the note widget; both config gates. Proof: a staged
+        <code>widget_open</code> maps a warm shell beside the pill without
+        stealing focus (manual, on the live desktop).
+      </li>
+      <li>
+        <b>The extension.</b> The widgets module, four tools from the pushed
+        catalog, follow-up events, the widgets skill, launcher wiring. Proof:
+        "show a note" lands an exhibit mid-speech; the increment 1 acceptance
+        line is met.
+      </li>
+    </ol>
+    <div class="panel">
+      <h3>Then, unchanged from the design</h3>
+      <ul>
+        <li>
+          <b>Increment 2 - live and aging:</b> backends and supervision, the
+          shared <code>system</code> backend with the cpu widget, the full
+          exhibit lifecycle with frozen clocks, sticky exhibits with pin
+          promoting to the current workspace, hide-with-pill.
+        </li>
+        <li>
+          <b>Increment 3 - instruments:</b> tray submenu + the voice verb, timer
+          and tasks widgets, <code>ctx.send</code> stdin actions,
+          <code>SCUFRIS_WIDGET_PATH</code> external roots.
+        </li>
+        <li>
+          <b>Increment 4 - the session HUD</b> as a widget on this runtime (task
+          20260825-153801), center stage and the displacement choreography.
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============================================================ 08 -->
+  <section id="p08">
+    <div class="shead">
+      <span class="snum">08</span>
+      <h2>Risks and two open details</h2>
+      <span class="srule"></span
+      ><span class="stag">flagged now, decided cheap</span>
+    </div>
+    <ul>
+      <li>
+        <b>Breaking module interface.</b> Removing
+        <code>programs.scufris.dashboard.*</code> fails evaluation for any
+        consumer setting it. Deliberate, but it needs the CHANGELOG entry and a
+        release note.
+      </li>
+      <li>
+        <b>Silent config gates.</b> A missing capability glob or CSP entry fails
+        at runtime, not at build. Both get asserted in tests (the capability
+        file is JSON; the CSP string is in <code>tauri.conf.json</code>).
+      </li>
+      <li>
+        <b>WebKit throttles hidden pages.</b> Pooled shells and hidden widgets
+        must act on Channel messages, never on rAF ticking - the same rule the
+        orb work just encoded in the pill.
+      </li>
+      <li>
+        <b>Test environment:</b> the socket suite needs
+        <code>TMPDIR=/tmp</code> under nested nix-shells (108-byte socket path
+        cap) - this explains the 48 "failures" seen on a clean master.
+      </li>
+    </ul>
+    <div class="hint open">
+      <span class="tag">open detail - the turn boundary</span>
+      The aging trigger is "a turn completed and neither opened nor updated this
+      exhibit". Proposed reading, no new protocol message: the companion marks a
+      turn boundary when the broadcast assistant state leaves working/speaking
+      for idle, and the runtime compares each exhibit's last-touched turn. If
+      that inference proves noisy, v2 gains an explicit turn message - a
+      one-variant addition. Lands with increment 2.
+    </div>
+    <div class="hint open">
+      <span class="tag">open detail - what "hiding the pill" means</span>
+      The pill hides itself after every interaction; that must not hide the
+      scratchpad. Proposed reading: only the deliberate gesture counts - Escape
+      (the <code>dismissed</code> flag in <code>state.rs</code> is set by
+      nothing else) hides runtime-owned widgets, the next activation brings them
+      back; the automatic posture-off leaves widgets alone. Lands with increment
+      2; worth a nod from Alex before then.
+    </div>
+  </section>
+</div>

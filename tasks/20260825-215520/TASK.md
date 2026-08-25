@@ -1,8 +1,19 @@
 # Widget runtime: implementation
 
-- STATUS: OPEN
+- STATUS: IN_PROGRESS
 - PRIORITY: 85
 - TAGS: widgets, desktop
+
+## Plan (2026-08-25)
+
+Implementation plan: `widget-runtime-plan.html` in this directory -
+data structures for both sides of the socket and the shell, protocol
+v2 with the correlation machinery, the file-by-file change map with
+the complete dashboardd removal, increment 1 as five commits, and two
+open details flagged for Alex (the turn-boundary inference and what
+"hiding the pill" means). Raw code inventory in `RESEARCH.md`.
+Published copy:
+https://claude.ai/code/artifact/891f3c61-93fd-4b2f-9863-b8b4b4b667a5
 
 ## Goal
 

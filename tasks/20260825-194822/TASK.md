@@ -1,6 +1,6 @@
 # Scufris widget runtime: research and design
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 85
 - TAGS: widgets, desktop, design, research
 
@@ -49,3 +49,14 @@ Supersedes `tasks/20260825-153804` (dashboardd embed). Exhibit and
 instrument lifecycle decisions from `tasks/20260822-132001/RESEARCH.md`
 (design review) carry over as product behavior; the hosting story is
 redesigned from scratch.
+
+## Closed (2026-08-25)
+
+Verification met. RESEARCH.md holds the four research reports and every
+design decision. Alex reviewed the design page over eleven comment
+threads: three revision rounds (shared backends, tick separation, the
+choreography demo with ownership options) and all seven section 10
+questions decided - Q1 shelf as designed, Q2 aging trigger as read, Q3
+stdin actions now via `ctx.send`, Q4 voice verb summoning, Q5 note text
+only, Q6 the scratchpad workspace model, Q7 drag ownership option A.
+Implementation continues in `tasks/20260825-215520`.

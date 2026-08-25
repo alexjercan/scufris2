@@ -39,11 +39,15 @@ not stop the backend, and a companion crash does not stop the conversation.
 - The accelerator again while recording stops, transcribes, and opens an
   editable review state. `Enter` sends the reviewed transcript; `Escape`
   discards it.
+- The pill is a resident HUD. The first activation brings it up and it then
+  stays on screen, resting between interactions and showing what the
+  assistant is doing - idle, working, speaking, attention, disconnected.
+  `Escape` is the only thing that puts it away, and the next activation is
+  what brings it back. Nothing the assistant does ever raises a dismissed
+  pill or takes a resting one down.
 - Cancellation restores focus to the previous window. Submission restores it
-  at the handoff, and the pill stays up without the keyboard to show the turn
-  it started - working, then speaking - until the assistant settles back to
-  idle. It watches only turns it started: a message typed in the chat never
-  raises it, and a disconnect or a new activation ends the watch.
+  at the handoff, and the pill stays up without the keyboard while the turn
+  runs - sent, working, speaking - then settles back to resting.
 
 If the microphone cannot start, or an open capture stream fails, the pill drops
 the recording indicator and states why. If transcription fails, nothing is
@@ -118,12 +122,12 @@ that lands in the same gap still closes the pill it finished with.
 
 Where the pill belongs has three answers, not two. **Focused** holds the
 keyboard for the phases the person types into. **Passive** is up without the
-keyboard: the handoff and the watched turn after it, where the pill reports
-working and speaking while the keys go to the person's own window. **Off** is
-down. The passive posture is why the keyboard comes back at the handoff
-instead of at the answer, and it is scoped by engagement: the companion marks
-the turn its own submission started and stops watching when the assistant
-settles, the link drops, or a new activation begins.
+keyboard: the handoff, the turn after it, and every rest between
+interactions, where the pill reports the assistant while the keys go to the
+person's own window. **Off** is down, and only the person puts it there. The
+passive posture is why the keyboard comes back at the handoff instead of at
+the answer. Visibility itself is the person's: Escape dismisses the pill,
+activation brings it home, and nothing the assistant does changes either.
 
 Where the pill belongs and what it renders are one decision, not two. What the
 pill renders is only an indicator while the pill is up, so two orders would let

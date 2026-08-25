@@ -63,3 +63,22 @@ Findings and fixes, committed as "Fix the pill playtest findings":
 
 Remaining: playtest round 2 per VERIFICATION.md "Left for live
 playtesting".
+
+## Playtest round 2 (2026-08-25)
+
+- The window mapped at 560x200: GTK sizes a non-resizable window to the
+  webview's natural 200 px and clamps hints up to it. Fixed by leaving
+  the window resizable and pinning min == max inner-size hints;
+  verified live at 560x64+680+944 (commit "Pin the pill window to
+  560x64 with min-max hints").
+- The pill still left the screen at idle. Alex: keep it visible; only a
+  user Esc closes it. The pill is now a resident HUD: Phase::Hidden
+  renamed Phase::Resting, a dismissed flag owns visibility (activation
+  clears it, Escape sets it, nothing else touches it), the resting pill
+  shows idle/working/speaking/attention/disconnected, disconnects are
+  shown rather than hidden, and Enter on an error rests while Escape
+  dismisses.
+
+Remaining: playtest round 3 - residency (pill stays after the turn,
+Esc dismisses, Super+D brings it home), plus the round-2 leftovers
+(audible cues with journal lines, flush window).

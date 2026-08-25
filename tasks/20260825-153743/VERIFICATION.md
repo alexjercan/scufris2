@@ -65,28 +65,37 @@ on disk as designed.
   breathing); the glow and wave still show the tick level, drawn directly on
   each 60 ms tick without the spring.
 
-## The pill watches the turn it started
+## The pill is a resident HUD
 
-The playtest journal showed `phase sent -> hidden` landing milliseconds after
-`assistant idle -> working`: the pill closed exactly when it had something to
-say. The runtime now has three postures. Focused holds the keyboard for the
-interactive phases; Passive is up without the keyboard, for the handoff and
-the watched turn after it; Off is down. Submission marks the companion
-engaged, and a hidden phase stays Passive while the assistant is working or
-speaking on an engaged turn. Idle, a disconnect, or a new activation ends
-the watch.
+Round 3, from the second playtest: the pill still left the screen when the
+assistant went idle, and Alex wants visibility to be theirs alone - "it
+should be a user action Esc to close it". So the watch became residency.
+`Phase::Hidden` is now `Phase::Resting` (the journal line that read
+`phase sent -> hidden` was describing a visible pill), and a `dismissed`
+flag owns visibility: the first activation clears it, `Escape` sets it, and
+nothing else touches it. The resting pill sits passive showing the resting
+presentation - idle, working, speaking, attention, disconnected - which the
+tray already computed; the acknowledgment path now settles to resting
+instead of closing, and `Enter` on an error acknowledges it (rests) while
+`Escape` dismisses. A disconnect is shown, not hidden. Dismissing a resting
+passive pill takes `Super+D` then `Escape`, since a passive pill holds no
+keys.
 
-State machine tests:
-`the_pill_watches_the_turn_it_started_until_the_assistant_settles`,
-`a_turn_the_pill_never_started_never_raises_it`,
-`a_watched_turn_ends_with_a_disconnect_or_a_new_activation`. Runtime tests
-updated: the handoff restores focus without hiding
+Tests: `the_pill_rests_on_screen_through_and_after_a_turn`,
+`assistant_activity_never_raises_a_dismissed_pill`,
+`only_the_persons_escape_dismisses_the_resting_pill`; the acknowledgment
+tests now expect no hide and an `idle` presentation on a pill still up.
+
+The postures came out of round 2 and stand unchanged underneath: Focused
+holds the keyboard for the interactive phases, Passive is up without it, Off
+is down. The handoff restores focus without hiding
 (`an_accepted_transcript_is_persisted_before_it_is_submitted` expects
-`["show", "restore"]` after submit and the hide only at the idle
-acknowledgment), `lower` restores focus only from a pill that holds it, and
-`falls_short` treats a passive pill holding the keyboard as wrong, so the
-repair chain gives the keys back. Mic safety is unchanged: Passive requires
-the window to be seen, and recording still requires the pill up.
+`["show", "restore"]` after submit), `lower` restores focus only from a pill
+that holds it, and `falls_short` treats a passive pill holding the keyboard
+as wrong, so the repair chain gives the keys back. Mic safety is unchanged:
+Passive requires the window to be seen, and recording still requires the
+pill up. Round 2's engagement scoping (watch the turn, leave at idle) is
+gone; residency replaced it.
 
 ## Earcons
 

@@ -21,8 +21,9 @@ pub const UNCERTAIN_CHOICES: &str = "Ctrl+C to copy, Escape to discard, Enter to
 /// What the companion is doing with the microphone and the transcript.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Phase {
-    /// The pill is closed.
-    Hidden,
+    /// No interaction is running. The pill rests on screen showing what the
+    /// assistant is doing, unless the person has dismissed it.
+    Resting,
     /// The microphone is recording.
     Listening,
     /// Recording stopped and local transcription is running.
@@ -76,7 +77,7 @@ impl Phase {
     /// Short stable name for logs. The transcript itself never appears in it.
     pub fn name(&self) -> &'static str {
         match self {
-            Phase::Hidden => "hidden",
+            Phase::Resting => "resting",
             Phase::Listening => "listening",
             Phase::Transcribing { .. } => "transcribing",
             Phase::Reviewing { .. } => "reviewing",
@@ -243,11 +244,11 @@ pub struct Companion {
     connected: bool,
     prefix: String,
     submissions: u64,
-    /// True while a turn this pill started is still the desktop's business:
-    /// set at the submission handoff, cleared when the assistant settles back
-    /// to idle. It is what lets the pill linger through working and speaking
-    /// without ever popping up for a turn typed somewhere else.
-    engaged: bool,
+    /// True while the person has the pill closed. The pill is a resident HUD:
+    /// once an activation brings it up it stays up, resting between
+    /// interactions, and only the person's own Escape puts it away. Nothing
+    /// the assistant does ever takes the pill down or brings it back.
+    dismissed: bool,
     /// Why the pill window is unusable, when the host could not put it where a
     /// phase needed it.
     ///
@@ -265,13 +266,13 @@ impl Companion {
     /// acknowledged and would then suppress a genuinely new submission.
     pub fn new(prefix: impl Into<String>) -> Self {
         Self {
-            phase: Phase::Hidden,
+            phase: Phase::Resting,
             assistant: AssistantState::Idle,
             assistant_detail: String::new(),
             connected: false,
             prefix: prefix.into(),
             submissions: 0,
-            engaged: false,
+            dismissed: true,
             blind: None,
         }
     }
@@ -320,20 +321,20 @@ impl Companion {
     /// A transcript handed off for submission gives the keyboard back at once:
     /// the words are the daemon's now, and waiting for an acknowledgment would
     /// hold the keyboard in an always-on-top pill for as long as the backend
-    /// takes. The window itself stays, passively, and keeps reporting the turn
-    /// it started - sent, working, speaking, attention - until the assistant
-    /// settles back to idle. A turn that started anywhere else never raises
-    /// it.
+    /// takes. The window itself stays, passively, and goes on reporting what
+    /// the assistant does - sent, working, speaking, then resting - because
+    /// the pill is a resident HUD: only the person's Escape puts it away, and
+    /// only their activation brings it back.
     pub fn posture(&self) -> Posture {
         if self.blind.is_some() {
             return Posture::Off;
         }
         match &self.phase {
-            Phase::Hidden => {
-                if self.engaged && self.connected && self.assistant != AssistantState::Idle {
-                    Posture::Passive
-                } else {
+            Phase::Resting => {
+                if self.dismissed {
                     Posture::Off
+                } else {
+                    Posture::Passive
                 }
             }
             Phase::Sent { .. } => Posture::Passive,
@@ -368,7 +369,7 @@ impl Companion {
             Phase::Transcribing { .. } => vec![Action::CancelTranscription],
             _ => Vec::new(),
         };
-        self.phase = Phase::Hidden;
+        self.phase = Phase::Resting;
         self.blind = Some(reason);
         actions
     }
@@ -381,7 +382,7 @@ impl Companion {
 
     /// Reports a durable-storage failure that has no transcript behind it.
     pub fn report_store_failure(&mut self, reason: String) {
-        if !matches!(self.phase, Phase::Hidden) {
+        if !matches!(self.phase, Phase::Resting) {
             return;
         }
         self.phase = Phase::Failed { reason };
@@ -392,7 +393,7 @@ impl Companion {
     /// The recovered identifier is kept, so resending cannot duplicate a
     /// request the daemon already accepted.
     pub fn restore(&mut self, pending: Pending) {
-        if !matches!(self.phase, Phase::Hidden) {
+        if !matches!(self.phase, Phase::Resting) {
             return;
         }
         self.phase = Phase::Retained {
@@ -413,9 +414,6 @@ impl Companion {
         if !connected {
             self.assistant = AssistantState::Idle;
             self.assistant_detail.clear();
-            // Whatever the turn was doing is unknowable now, so the pill has
-            // nothing left to report about it.
-            self.engaged = false;
         }
     }
 
@@ -426,11 +424,6 @@ impl Companion {
 
     /// Records the assistant state the daemon reported.
     pub fn set_assistant(&mut self, state: AssistantState, detail: String) {
-        if state == AssistantState::Idle {
-            // The turn is over, whatever it was: an idle assistant is the end
-            // of anything the pill was watching.
-            self.engaged = false;
-        }
         self.assistant = state;
         self.assistant_detail = detail;
     }
@@ -439,18 +432,18 @@ impl Companion {
     pub fn apply(&mut self, event: Event) -> Vec<Action> {
         // The runtime stopped trying the window when it could not open one.
         // The person asking for the pill again is what tries it again: nothing
-        // else here knows whether the display has come back. A new activation
-        // also ends whatever turn the pill was still watching.
+        // else here knows whether the display has come back. An activation is
+        // also the one thing that brings a dismissed pill home to the screen.
         if matches!(event, Event::Activate) {
             self.blind = None;
-            self.engaged = false;
+            self.dismissed = false;
         }
         self.transition(event)
     }
 
     fn transition(&mut self, event: Event) -> Vec<Action> {
         match (&self.phase, event) {
-            (Phase::Hidden, Event::Activate) => {
+            (Phase::Resting, Event::Activate) => {
                 self.phase = Phase::Listening;
                 vec![Action::StartRecording]
             }
@@ -584,14 +577,17 @@ impl Companion {
                 let id = id.clone();
                 self.close(vec![Action::DiscardPending { id }])
             }
-            (Phase::Failed { .. }, Event::Escape | Event::Enter { .. }) => self.close(Vec::new()),
-            // The pill has already closed by the time this arrives, so it is
-            // reopened: silently keeping discarded words would be worse.
-            (Phase::Hidden, Event::DiscardFailed(reason)) => self.report_failure(reason),
+            // Escape dismisses the pill; Enter only acknowledges the failure
+            // and lets the pill rest on screen.
+            (Phase::Failed { .. }, Event::Escape) => self.close(Vec::new()),
+            (Phase::Failed { .. }, Event::Enter { .. }) => self.settle(Vec::new()),
+            // The interaction has already ended by the time this arrives, so
+            // it is reported: silently keeping discarded words would be worse.
+            (Phase::Resting, Event::DiscardFailed(reason)) => self.report_failure(reason),
             (
                 Phase::Sent { id, .. } | Phase::Retained { id, .. },
                 Event::Acknowledged(acknowledged),
-            ) if *id == acknowledged => self.close(vec![Action::ClearPending]),
+            ) if *id == acknowledged => self.settle(vec![Action::ClearPending]),
             (
                 Phase::Sent {
                     transcript,
@@ -691,9 +687,6 @@ impl Companion {
     }
 
     fn submit(&mut self, transcript: String, id: String, force: bool) -> Vec<Action> {
-        // From here the pill watches the turn it started until the assistant
-        // settles.
-        self.engaged = true;
         self.phase = Phase::Sent {
             transcript: transcript.clone(),
             id: id.clone(),
@@ -713,8 +706,18 @@ impl Companion {
         }]
     }
 
+    /// Puts the pill away on the person's say-so. This is the only road off
+    /// the screen: everything the machine finishes on its own settles into
+    /// resting instead.
     fn close(&mut self, actions: Vec<Action>) -> Vec<Action> {
-        self.phase = Phase::Hidden;
+        self.phase = Phase::Resting;
+        self.dismissed = true;
+        actions
+    }
+
+    /// Ends an interaction without touching where the pill lives.
+    fn settle(&mut self, actions: Vec<Action>) -> Vec<Action> {
+        self.phase = Phase::Resting;
         actions
     }
 
@@ -732,7 +735,7 @@ impl Companion {
             };
         }
         match &self.phase {
-            Phase::Hidden => Presentation {
+            Phase::Resting => Presentation {
                 state: self.resting_state(),
                 text: String::new(),
                 detail: self.resting_detail(),
@@ -839,7 +842,7 @@ mod tests {
 
     #[test]
     fn phase_names_are_stable_and_free_of_transcripts() {
-        assert_eq!(Phase::Hidden.name(), "hidden");
+        assert_eq!(Phase::Resting.name(), "resting");
         assert_eq!(Phase::Listening.name(), "listening");
         assert_eq!(
             Phase::Reviewing {
@@ -851,7 +854,7 @@ mod tests {
             "reviewing"
         );
         let mut companion = Companion::new("pill");
-        assert_eq!(companion.phase_name(), "hidden");
+        assert_eq!(companion.phase_name(), "resting");
         companion.set_connected(true);
         companion.apply(Event::Activate);
         assert_eq!(companion.phase_name(), "listening");
@@ -868,19 +871,18 @@ mod tests {
         companion
     }
 
-    /// A companion whose submission was just acknowledged: phase hidden,
-    /// engagement still standing.
+    /// A companion whose submission was just acknowledged: resting, up.
     fn handed_off() -> Companion {
         let mut companion = opened();
         companion.apply(Event::Enter { text: None });
         companion.apply(Event::Transcribed("open the tasks widget".into()));
         companion.apply(Event::Acknowledged("pill-1".into()));
-        assert_eq!(companion.phase(), &Phase::Hidden);
+        assert_eq!(companion.phase(), &Phase::Resting);
         companion
     }
 
     #[test]
-    fn the_pill_watches_the_turn_it_started_until_the_assistant_settles() {
+    fn the_pill_rests_on_screen_through_and_after_a_turn() {
         let mut companion = handed_off();
         // The daemon picks the turn up: the pill reports it, passively.
         companion.set_assistant(AssistantState::Working, String::new());
@@ -889,16 +891,19 @@ mod tests {
         companion.set_assistant(AssistantState::Speaking, String::new());
         assert_eq!(companion.posture(), Posture::Passive);
         assert_eq!(companion.presentation().state, "speaking");
-        // Idle ends the turn, and with it the watch.
+        // The pill is a resident HUD: an idle assistant is something to show,
+        // not a reason to leave.
         companion.set_assistant(AssistantState::Idle, String::new());
-        assert_eq!(companion.posture(), Posture::Off);
-        // A later turn started somewhere else never raises the pill.
+        assert_eq!(companion.posture(), Posture::Passive);
+        assert_eq!(companion.presentation().state, "idle");
+        // A turn started somewhere else is shown like any other.
         companion.set_assistant(AssistantState::Working, String::new());
-        assert_eq!(companion.posture(), Posture::Off);
+        assert_eq!(companion.posture(), Posture::Passive);
+        assert_eq!(companion.presentation().state, "working");
     }
 
     #[test]
-    fn a_turn_the_pill_never_started_never_raises_it() {
+    fn assistant_activity_never_raises_a_dismissed_pill() {
         let mut companion = Companion::new("pill");
         companion.set_connected(true);
         companion.set_assistant(AssistantState::Working, String::new());
@@ -908,29 +913,33 @@ mod tests {
     }
 
     #[test]
-    fn a_watched_turn_ends_with_a_disconnect_or_a_new_activation() {
+    fn only_the_persons_escape_dismisses_the_resting_pill() {
         let mut companion = handed_off();
         companion.set_assistant(AssistantState::Working, String::new());
         assert_eq!(companion.posture(), Posture::Passive);
-        // The socket closes: whatever the turn was doing is unknowable, so
-        // there is nothing left to report.
+        // The socket closing is something the resident pill reports, not a
+        // reason for it to leave.
         companion.set_connected(false);
-        assert_eq!(companion.posture(), Posture::Off);
+        assert_eq!(companion.posture(), Posture::Passive);
+        assert_eq!(companion.presentation().state, "disconnected");
         companion.set_connected(true);
         companion.set_assistant(AssistantState::Working, String::new());
-        assert_eq!(companion.posture(), Posture::Off);
+        assert_eq!(companion.posture(), Posture::Passive);
 
-        // A new activation replaces the watch with a new interaction.
-        let mut companion = handed_off();
-        companion.set_assistant(AssistantState::Working, String::new());
+        // Escape is the one road off the screen, and the next activation is
+        // the one road back.
         companion.apply(Event::Activate);
         assert_eq!(companion.posture(), Posture::Focused);
         companion.apply(Event::Escape);
+        assert_eq!(companion.posture(), Posture::Off);
+        companion.set_assistant(AssistantState::Speaking, String::new());
         assert_eq!(
             companion.posture(),
             Posture::Off,
-            "a discarded activation must not fall back to watching the old turn"
+            "a dismissed pill stays dismissed whatever the assistant does"
         );
+        companion.apply(Event::Activate);
+        assert_eq!(companion.posture(), Posture::Focused);
     }
 
     fn persist(id: &str, text: &str) -> Action {
@@ -996,7 +1005,7 @@ mod tests {
             companion.apply(Event::Acknowledged("pill-1".into())),
             vec![Action::ClearPending]
         );
-        assert_eq!(companion.phase(), &Phase::Hidden);
+        assert_eq!(companion.phase(), &Phase::Resting);
     }
 
     #[test]
@@ -1116,13 +1125,13 @@ mod tests {
         // Nothing gives it the keyboard while the submission is outstanding.
         assert_eq!(companion.apply(Event::Copy), Vec::new());
         assert_eq!(companion.posture(), Posture::Passive);
-        // The acknowledgment retires the durable copy, and with the assistant
-        // idle there is nothing left to watch.
+        // The acknowledgment retires the durable copy. The pill stays, at
+        // rest, until the person dismisses it.
         assert_eq!(
             companion.apply(Event::Acknowledged("pill-1".into())),
             vec![Action::ClearPending]
         );
-        assert_eq!(companion.posture(), Posture::Off);
+        assert_eq!(companion.posture(), Posture::Passive);
     }
 
     #[test]
@@ -1466,12 +1475,13 @@ mod tests {
         companion.apply(Event::Transcribed("open the tasks widget".into()));
         companion.apply(uncertain("pill-1", "no confirmation"));
         assert_eq!(companion.presentation().state, "uncertain");
-        // The daemon confirms after the companion gave up waiting.
+        // The daemon confirms after the companion gave up waiting. The
+        // transcript is retired; the pill settles back to resting on screen.
         assert_eq!(
             companion.apply(Event::Acknowledged("pill-1".into())),
             vec![Action::ClearPending]
         );
-        assert!(!companion.on_screen());
+        assert_eq!(companion.posture(), Posture::Passive);
         assert!(!companion.holds_unsent_transcript());
     }
 

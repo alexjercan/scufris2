@@ -1874,9 +1874,11 @@ mod tests {
         harness.executor.drain();
 
         // Retried, then left for the next start to recover and resend under the
-        // same identifier, which the daemon suppresses.
+        // same identifier, which the daemon suppresses. The resident pill
+        // stays up, at rest.
         assert_eq!(harness.store.clears.load(Ordering::Relaxed), 2);
-        assert_eq!(harness.surface.hidden.load(Ordering::Relaxed), 1);
+        assert_eq!(harness.surface.hidden.load(Ordering::Relaxed), 0);
+        assert!(harness.surface.on_screen());
         assert_eq!(harness.surface.last().state, "idle");
     }
 
@@ -1905,13 +1907,14 @@ mod tests {
         assert!(harness.surface.on_screen());
         assert!(!harness.surface.focused());
 
-        // The acknowledgment retires the durable copy, and with the assistant
-        // idle there is no turn left to watch, so the window goes too. Focus
-        // was already restored at the handoff and is not touched again.
+        // The acknowledgment retires the durable copy. The resident pill
+        // stays up, resting, and focus, already restored at the handoff, is
+        // not touched again.
         harness.app.handle(Event::Acknowledged("pill-1".into()));
         assert_eq!(*harness.store.pending.lock().unwrap(), None);
-        assert_eq!(harness.surface.window(), ["show", "restore", "hide"]);
-        assert!(!harness.surface.on_screen());
+        assert_eq!(harness.surface.window(), ["show", "restore"]);
+        assert!(harness.surface.on_screen());
+        assert_eq!(harness.surface.last().state, "idle");
         assert_eq!(harness.surface.restored.load(Ordering::Relaxed), 1);
     }
 
@@ -2597,9 +2600,10 @@ mod tests {
         harness.executor.drain();
         assert_eq!(harness.surface.last().state, "idle");
         assert_eq!(*harness.store.pending.lock().unwrap(), None);
-        // Hidden once: the handoff kept the pill up to watch the turn, so
-        // only the late acknowledgment takes it down.
-        assert_eq!(harness.surface.hidden.load(Ordering::Relaxed), 1);
+        // Never hidden: the resident pill settles back to resting instead of
+        // leaving the screen.
+        assert_eq!(harness.surface.hidden.load(Ordering::Relaxed), 0);
+        assert!(harness.surface.on_screen());
     }
 
     #[test]

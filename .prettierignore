@@ -1,5 +1,6 @@
 desktop/target/
 docs/book/
 desktop/scufris-desktop/gen/
+desktop/scufris-desktop/ui/dist/
 flake.lock
 tasks/20260822-132001/scufris-hud.html

@@ -18,7 +18,8 @@
     inherit version;
     src = source;
     cargoLock = {inherit lockFile;};
-    nativeBuildInputs = [pkgs.pkg-config pkgs.wrapGAppsHook3];
+    # typescript compiles the pill frontend from build.rs.
+    nativeBuildInputs = [pkgs.pkg-config pkgs.typescript pkgs.wrapGAppsHook3];
     buildInputs =
       tauriLibraries
       ++ [

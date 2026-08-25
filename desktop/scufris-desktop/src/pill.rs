@@ -17,7 +17,11 @@ pub const LABEL: &str = "pill";
 pub const WIDTH: f64 = 560.0;
 
 /// Pill height in logical pixels.
-pub const HEIGHT: f64 = 96.0;
+///
+/// The window is exactly the opaque panel. A window with margins around the
+/// panel needs per-pixel alpha, which bare X11 without a compositor cannot
+/// do: the alpha is discarded and the margins render as black.
+pub const HEIGHT: f64 = 64.0;
 
 /// Gap between the pill and the bottom edge of the screen, in logical pixels.
 pub const BOTTOM_MARGIN: f64 = 72.0;
@@ -43,12 +47,13 @@ pub fn ensure(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     if let Some(window) = app.get_webview_window(LABEL) {
         return Ok(window);
     }
+    // Opaque on purpose: the page fills the window with the panel, so nothing
+    // depends on compositing being available.
     WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html".into()))
         .title("Scufris")
         .inner_size(WIDTH, HEIGHT)
         .resizable(false)
         .decorations(false)
-        .transparent(true)
         .always_on_top(true)
         .skip_taskbar(true)
         .shadow(false)
@@ -57,10 +62,10 @@ pub fn ensure(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .build()
 }
 
-/// Answers whether the pill window is currently on screen.
-pub fn visible(app: &AppHandle) -> bool {
+/// Answers whether the pill window currently holds the keyboard.
+pub fn focused(app: &AppHandle) -> bool {
     app.get_webview_window(LABEL)
-        .and_then(|window| window.is_visible().ok())
+        .and_then(|window| window.is_focused().ok())
         .unwrap_or(false)
 }
 
@@ -129,6 +134,30 @@ pub fn show(app: &AppHandle) -> Result<Shown, String> {
             "the pill could not confirm that it has the keyboard: {error}"
         ))),
     }
+}
+
+/// Places the pill and shows it without touching the keyboard.
+///
+/// The passive pill only reports the turn it started, so being up is all it
+/// owes: placement or always-on-top falling short is worth a report, not a
+/// refusal, because nothing that rests on being seen rests on this posture.
+pub fn show_passive(app: &AppHandle) -> Result<(), String> {
+    let window = ensure(app).map_err(|error| format!("the pill window is missing: {error}"))?;
+    if let Err(error) = place(&window) {
+        tracing::warn!("the passive pill could not be placed: {error}");
+    }
+    window
+        .show()
+        .map_err(|error| format!("the pill could not be shown: {error}"))?;
+    match window.is_visible() {
+        Ok(true) => {}
+        Ok(false) => return Err("the pill did not come up".into()),
+        Err(error) => return Err(format!("the pill could not confirm that it is up: {error}")),
+    }
+    if let Err(error) = window.set_always_on_top(true) {
+        tracing::warn!("the passive pill could not be kept on top: {error}");
+    }
+    Ok(())
 }
 
 /// Hides the pill without destroying it, and confirms that it is down.

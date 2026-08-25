@@ -29,19 +29,17 @@
   padding: 0;
 }
 
+/* The window is exactly the panel: opaque edge to edge, because bare X11
+ * without a compositor discards per-pixel alpha and would paint any margin
+ * black. The glow therefore lives inside the border as an inset shadow. */
 html,
 body {
   height: 100%;
-  background: transparent;
+  background: #0d0d11;
   overflow: hidden;
   font-family: var(--mono);
   color: var(--fg);
   user-select: none;
-}
-
-body {
-  display: grid;
-  place-items: center;
 }
 
 .pill {
@@ -51,11 +49,14 @@ body {
   --glow: 149, 169, 159;
   --lv: 0.15;
   position: relative;
+  /* Stacking context, so the glow can sit above the panel background and
+   * below the content. */
+  z-index: 0;
   display: flex;
   align-items: center;
   gap: 12px;
-  width: calc(100% - 40px);
-  height: 60px;
+  width: 100%;
+  height: 100%;
   padding: 0 18px 0 13px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 38%),
@@ -66,16 +67,16 @@ body {
     ),
     linear-gradient(180deg, #15151a, #0d0d11);
   border: 1px solid #2e2c33;
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.5);
   transition: filter 0.25s ease;
 }
 
 .pill::before {
   content: "";
   position: absolute;
-  inset: -1px;
+  inset: 0;
   z-index: -1;
-  box-shadow: 0 0 16px 2px rgba(var(--glow), 0.55);
+  pointer-events: none;
+  box-shadow: inset 0 0 18px 3px rgba(var(--glow), 0.55);
   opacity: calc(0.1 + 0.5 * var(--lv));
   transition: opacity 0.12s linear;
   /* Idle personality: the glow never sits still. */
@@ -92,7 +93,7 @@ body {
   /* State-colored corner ticks, the same language as the HUD panels. */
   content: "";
   position: absolute;
-  inset: -1px;
+  inset: 0;
   pointer-events: none;
   background:
     linear-gradient(var(--acc), var(--acc)) left top / 9px 1px,

@@ -30,7 +30,7 @@ use crate::{
     config::RestartBudget,
     daemon::DaemonEvent,
     pending::{Pending, PendingStore},
-    state::{Action, Companion, Event},
+    state::{Action, Companion, Event, Posture},
     tray,
 };
 
@@ -123,6 +123,8 @@ pub enum Shown {
 pub trait Surface: Send + Sync {
     /// Records the active window, then shows and focuses the pill.
     fn show_pill(&self) -> Result<Shown, String>;
+    /// Shows the pill without touching the keyboard, and confirms it is up.
+    fn show_pill_passive(&self) -> Result<(), String>;
     /// Hides the pill, and confirms that it is down.
     fn hide_pill(&self) -> Result<(), String>;
     /// Gives focus back to the window the pill covered.
@@ -194,8 +196,8 @@ impl Executor for ThreadExecutor {
 /// what the pill renders is only an indicator while the pill is up.
 #[derive(Debug, Clone)]
 struct Surfaced {
-    /// Whether the pill window belongs on screen.
-    on_screen: bool,
+    /// Where the pill window belongs.
+    posture: Posture,
     /// What the pill renders.
     payload: PresentationPayload,
     /// Tray state name for the same moment.
@@ -582,10 +584,10 @@ impl App {
     /// the phase each event leaves rather than the one it started in.
     pub fn handle(self: &Arc<Self>, event: Event) {
         let (actions, decision) = self.decide(|companion| companion.apply(event));
-        if !decision.surfaced.on_screen {
-            // A phase that is leaving stays on the surfaces until its actions
-            // are done, so the pill the person is looking at is the one they
-            // finished with.
+        if decision.surfaced.posture != Posture::Focused {
+            // A phase that is leaving, or one the person only watches, stays
+            // on the surfaces until its actions are done, so the pill the
+            // person is looking at is the one they finished with.
             self.carry_out(actions, Some(decision));
             return;
         }
@@ -674,7 +676,7 @@ impl App {
         let presentation = companion.presentation();
         Decision {
             surfaced: Surfaced {
-                on_screen: companion.on_screen(),
+                posture: companion.posture(),
                 payload: PresentationPayload {
                     state: presentation.state,
                     text: presentation.text,
@@ -713,15 +715,15 @@ impl App {
     /// phase with nowhere to happen, while a surface that refused to render is
     /// one of two, and the other may well have taken it.
     fn put(self: &Arc<Self>, surfaced: &Surfaced) -> Result<(), String> {
-        let placed = if surfaced.on_screen {
-            self.raise()
-        } else {
-            self.lower()
+        let placed = match surfaced.posture {
+            Posture::Focused => self.raise(),
+            Posture::Passive => self.settle(),
+            Posture::Off => self.lower(),
         };
         // Both surfaces are told whatever the window did. When the pill cannot
         // be shown, the tray is the only one left that can say anything at all.
         self.draw(surfaced);
-        if !self.falls_short(surfaced.on_screen) {
+        if !self.falls_short(surfaced.posture) {
             // The window is where it belongs, so any chain still running has
             // nothing left to repair. Clearing it here as well as in the chain
             // means a chain whose thread was lost cannot block the next one.
@@ -815,12 +817,47 @@ impl App {
         }
     }
 
+    /// Keeps the pill on screen without the keyboard, and records only what
+    /// that achieved.
+    ///
+    /// This is the handoff posture: the desktop is the person's again while
+    /// the window stays to report the turn. A pill that still holds the
+    /// keyboard would swallow the keys the person types into their own
+    /// window, so holding it counts as falling short and is repaired.
+    fn settle(&self) -> Result<(), String> {
+        match self.screen() {
+            Screen::Seen | Screen::Doubtful => Ok(()),
+            Screen::Ready => match self.ports.surface.restore_focus() {
+                Ok(()) => {
+                    self.set_screen(Screen::Seen);
+                    Ok(())
+                }
+                // Still holding the keyboard, so still Ready: the repair
+                // chain asks again rather than recording a release that did
+                // not happen.
+                Err(reason) => Err(reason),
+            },
+            Screen::Off => match self.ports.surface.show_pill_passive() {
+                Ok(()) => {
+                    self.set_screen(Screen::Seen);
+                    Ok(())
+                }
+                Err(reason) => Err(reason),
+            },
+        }
+    }
+
     /// Takes the pill off screen, and records only what that achieved.
     fn lower(&self) -> Result<(), String> {
         if self.screen() == Screen::Off {
             return Ok(());
         }
-        if let Err(reason) = self.ports.surface.restore_focus() {
+        // Only a pill that holds the keyboard has focus to give back. A
+        // passive pill already returned it at the handoff, and asking again
+        // would put on record a restoration that never happened.
+        if self.screen() == Screen::Ready
+            && let Err(reason) = self.ports.surface.restore_focus()
+        {
             // The pill is going away either way. Only the window behind it is
             // worse off, and saying so is all there is to do about it.
             warn!("{reason}");
@@ -843,11 +880,12 @@ impl App {
     }
 
     /// Answers whether the window is not where the phase needs it.
-    fn falls_short(&self, on_screen: bool) -> bool {
-        if on_screen {
-            self.screen() != Screen::Ready
-        } else {
-            self.screen() != Screen::Off
+    fn falls_short(&self, posture: Posture) -> bool {
+        match posture {
+            Posture::Focused => self.screen() != Screen::Ready,
+            // A passive pill must be up and must not hold the keyboard.
+            Posture::Passive => !matches!(self.screen(), Screen::Seen | Screen::Doubtful),
+            Posture::Off => self.screen() != Screen::Off,
         }
     }
 
@@ -869,7 +907,7 @@ impl App {
             REPAIR_DELAY,
             Box::new(move || {
                 let decision = runtime.snapshot();
-                let wanted = decision.surfaced.on_screen;
+                let wanted = decision.surfaced.posture;
                 let again = Arc::clone(&runtime);
                 runtime.show(
                     decision,
@@ -1380,6 +1418,13 @@ mod tests {
             self.focused.store(true, Ordering::SeqCst);
             Ok(Shown::Ready)
         }
+        fn show_pill_passive(&self) -> Result<(), String> {
+            self.window.lock().unwrap().push("show-passive");
+            self.refuse_show.attempt()?;
+            self.on_screen.store(true, Ordering::SeqCst);
+            self.shown.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
         fn hide_pill(&self) -> Result<(), String> {
             self.window.lock().unwrap().push("hide");
             // The pill stays up when the hide fails, which is the whole reason
@@ -1853,15 +1898,20 @@ mod tests {
             *harness.backend.submissions.lock().unwrap(),
             vec![("pill-1".to_string(), "remember the milk".to_string())]
         );
-        // The desktop comes back with the handoff, not with the answer: an
-        // ordinary submission must not hold the keyboard for a whole turn. The
-        // window that had focus gets it back before the pill goes, so nothing
-        // is left focused on a window that is no longer there.
-        assert_eq!(harness.surface.window(), ["show", "restore", "hide"]);
-        assert!(!harness.surface.on_screen());
+        // The keyboard comes back with the handoff, not with the answer: an
+        // ordinary submission must not hold it for a whole turn. The window
+        // itself stays up, passive, to report the turn it started.
+        assert_eq!(harness.surface.window(), ["show", "restore"]);
+        assert!(harness.surface.on_screen());
+        assert!(!harness.surface.focused());
 
+        // The acknowledgment retires the durable copy, and with the assistant
+        // idle there is no turn left to watch, so the window goes too. Focus
+        // was already restored at the handoff and is not touched again.
         harness.app.handle(Event::Acknowledged("pill-1".into()));
         assert_eq!(*harness.store.pending.lock().unwrap(), None);
+        assert_eq!(harness.surface.window(), ["show", "restore", "hide"]);
+        assert!(!harness.surface.on_screen());
         assert_eq!(harness.surface.restored.load(Ordering::Relaxed), 1);
     }
 
@@ -2160,9 +2210,11 @@ mod tests {
             !harness.surface.on_screen(),
             "the always-on-top pill was left over the desktop"
         );
+        // Focus went back on the first attempt, before the hide failed, so
+        // the repair has only the hide left to do.
         assert_eq!(
             harness.surface.window(),
-            ["show", "restore", "hide", "restore", "hide"]
+            ["show", "restore", "hide", "hide"]
         );
     }
 
@@ -2545,9 +2597,9 @@ mod tests {
         harness.executor.drain();
         assert_eq!(harness.surface.last().state, "idle");
         assert_eq!(*harness.store.pending.lock().unwrap(), None);
-        // Hidden twice: once when the words were handed off, and once when
-        // the late acknowledgment retired the reopened pill.
-        assert_eq!(harness.surface.hidden.load(Ordering::Relaxed), 2);
+        // Hidden once: the handoff kept the pill up to watch the turn, so
+        // only the late acknowledgment takes it down.
+        assert_eq!(harness.surface.hidden.load(Ordering::Relaxed), 1);
     }
 
     #[test]

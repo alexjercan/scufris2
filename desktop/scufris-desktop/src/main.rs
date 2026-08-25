@@ -112,12 +112,18 @@ struct DesktopSurface {
 
 impl Surface for DesktopSurface {
     fn show_pill(&self) -> Result<Shown, String> {
-        // Only when the pill is not already up. Capturing again while it holds
-        // focus would record the pill itself as the window to go back to.
-        if !pill::visible(&self.handle) {
+        // Only when the pill does not already hold the keyboard. Capturing
+        // then would record the pill itself as the window to go back to. A
+        // pill that is up but passive is fine to capture over: the active
+        // window is the person's own, and that is where focus must return.
+        if !pill::focused(&self.handle) {
             self.focus.capture();
         }
         pill::show(&self.handle)
+    }
+
+    fn show_pill_passive(&self) -> Result<(), String> {
+        pill::show_passive(&self.handle)
     }
 
     fn hide_pill(&self) -> Result<(), String> {

@@ -4,8 +4,40 @@
 //
 // The look is the reviewed HUD design (tasks/20260822-132001/scufris-hud.html):
 // a sprung glow and a Canvas 2D wave ride the 60 ms mic level while listening,
-// breathe at idle, and four near-subliminal earcons mark the boundaries the
-// eye can miss. rAF runs only in audio-reactive states.
+// breathe at idle, and four soft earcons mark the boundaries the eye can miss.
+// rAF runs only in audio-reactive states.
+//
+// Compiled by tsc from build.rs into ui/dist; the window loads the output.
+
+interface TauriCore {
+  invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
+}
+
+interface TauriEventModule {
+  listen(
+    event: string,
+    handler: (event: { payload: unknown }) => void,
+  ): Promise<unknown>;
+}
+
+interface Window {
+  __TAURI__: { core: TauriCore; event: TauriEventModule };
+}
+
+// The payload shapes are owned by the Rust side (app.rs); the casts at the
+// listen boundaries are the one place the frontend takes them on trust.
+interface Presentation {
+  state: string;
+  detail: string;
+  text: string;
+  editable: boolean;
+  recording: boolean;
+}
+
+interface Tick {
+  seconds: number;
+  level: number;
+}
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -14,7 +46,7 @@ const { listen } = window.__TAURI__.event;
 // DEBUG under the `webview` target, so pill behaviour is readable from
 // journalctl and --foreground runs. Forwarding must never throw or reject,
 // or an uncaught rejection would forward itself forever.
-function forwardLog(level, message) {
+function forwardLog(level: string, message: string): void {
   try {
     invoke("pill_log", { level, message }).catch(() => {});
   } catch {
@@ -22,7 +54,7 @@ function forwardLog(level, message) {
   }
 }
 
-function logText(value) {
+function logText(value: unknown): string {
   if (typeof value === "string") return value;
   try {
     return JSON.stringify(value) ?? String(value);
@@ -31,9 +63,10 @@ function logText(value) {
   }
 }
 
-for (const level of ["debug", "log", "info", "warn", "error"]) {
+const LEVELS = ["debug", "log", "info", "warn", "error"] as const;
+for (const level of LEVELS) {
   const original = console[level].bind(console);
-  console[level] = (...args) => {
+  console[level] = (...args: unknown[]) => {
     original(...args);
     forwardLog(level, args.map(logText).join(" "));
   };
@@ -47,16 +80,28 @@ window.addEventListener("unhandledrejection", (event) => {
   forwardLog("error", `unhandled rejection: ${logText(event.reason)}`);
 });
 
-const pill = document.getElementById("pill");
-const label = document.getElementById("label");
-const transcript = document.getElementById("transcript");
-const detail = document.getElementById("detail");
-const timer = document.getElementById("timer");
-const wave = document.getElementById("wave");
+// The ids live in our own index.html, so a missing element is a build defect
+// worth failing loudly on, not a condition to soldier through.
+function element<T extends HTMLElement>(id: string): T {
+  const found = document.getElementById(id);
+  if (found === null) throw new Error(`the pill page is missing #${id}`);
+  return found as T;
+}
+
+const pill = element<HTMLElement>("pill");
+const label = element<HTMLElement>("label");
+const transcript = element<HTMLInputElement>("transcript");
+const detail = element<HTMLElement>("detail");
+const timer = element<HTMLElement>("timer");
+const wave = element<HTMLCanvasElement>("wave");
 
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 
-const LABELS = {
+function currentState(): string {
+  return pill.dataset["state"] ?? "idle";
+}
+
+const LABELS: Record<string, string> = {
   idle: "Scufris",
   listening: "Listening",
   transcribing: "Transcribing",
@@ -73,70 +118,96 @@ const LABELS = {
 
 // ---------- earcons ----------
 
+interface TonePart {
+  from: number;
+  to?: number;
+  dur: number;
+  gain: number;
+}
+
 // Four boundary cues, ever: mic open, mic close, attention, error. Nothing
 // for working or speaking. Retained and uncertain are attention-class: the
-// tray already presents them as "needs you". Near-subliminal by gain; the
+// tray already presents them as "needs you". Soft but audible by gain; the
 // tray menu mutes them.
-const CUES = {
-  open: [{ from: 520, to: 760, dur: 0.09, gain: 0.05 }],
-  close: [{ from: 760, to: 520, dur: 0.09, gain: 0.05 }],
+const CUES: Record<string, TonePart[]> = {
+  open: [{ from: 520, to: 760, dur: 0.09, gain: 0.14 }],
+  close: [{ from: 760, to: 520, dur: 0.09, gain: 0.14 }],
   chime: [
-    { from: 880, dur: 0.35, gain: 0.045 },
-    { from: 1318, dur: 0.28, gain: 0.02 },
+    { from: 880, dur: 0.35, gain: 0.12 },
+    { from: 1318, dur: 0.28, gain: 0.05 },
   ],
   error: [
-    { from: 165, dur: 0.18, gain: 0.06 },
-    { from: 110, dur: 0.18, gain: 0.03 },
+    { from: 165, dur: 0.18, gain: 0.16 },
+    { from: 110, dur: 0.18, gain: 0.08 },
   ],
 };
 
 let cuesEnabled = true;
-let audio = null;
+let audio: AudioContext | null = null;
+let warnedSuspended = false;
 
-function tone(parts) {
+function tone(name: string): void {
   if (!cuesEnabled) return;
+  const parts = CUES[name];
+  if (parts === undefined) return;
   try {
-    audio = audio ?? new AudioContext();
-    if (audio.state === "suspended") audio.resume().catch(() => {});
-    const now = audio.currentTime;
+    const context = audio ?? new AudioContext();
+    audio = context;
+    if (context.state === "suspended") {
+      void context
+        .resume()
+        .then(() => {
+          // An autoplay policy that keeps the context suspended makes every
+          // cue silent; say so once so journalctl explains the silence.
+          if (context.state === "suspended" && !warnedSuspended) {
+            warnedSuspended = true;
+            console.warn(
+              "cues are silenced: the audio context stays suspended",
+            );
+          }
+        })
+        .catch(() => {});
+    }
+    const now = context.currentTime;
     for (const part of parts) {
-      const osc = audio.createOscillator();
-      const gain = audio.createGain();
+      const osc = context.createOscillator();
+      const gain = context.createGain();
       osc.type = "sine";
       osc.frequency.setValueAtTime(part.from, now);
-      if (part.to) {
+      if (part.to !== undefined) {
         osc.frequency.exponentialRampToValueAtTime(part.to, now + part.dur);
       }
       gain.gain.setValueAtTime(0.0001, now);
       gain.gain.exponentialRampToValueAtTime(part.gain, now + 0.015);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + part.dur);
-      osc.connect(gain).connect(audio.destination);
+      osc.connect(gain).connect(context.destination);
       osc.start(now);
       osc.stop(now + part.dur + 0.05);
     }
+    console.debug(`cue ${name} (audio ${context.state})`);
   } catch {
     // No audio output is a silent pill, not a broken one.
   }
 }
 
-function boundaryCue(previous, next) {
-  if (next === "listening") return tone(CUES.open);
+function boundaryCue(previous: string, next: string): void {
+  if (next === "listening") return tone("open");
   // An error crossing swallows the mic-close cue: one boundary, one sound.
-  if (next === "error") return tone(CUES.error);
+  if (next === "error") return tone("error");
   if (next === "attention" || next === "retained" || next === "uncertain") {
-    return tone(CUES.chime);
+    return tone("chime");
   }
-  if (previous === "listening") return tone(CUES.close);
+  if (previous === "listening") return tone("close");
 }
 
 invoke("pill_cues")
   .then((enabled) => {
-    cuesEnabled = enabled;
+    cuesEnabled = enabled === true;
   })
   .catch(() => {});
 
-listen("scufris://cues", (event) => {
-  cuesEnabled = event.payload;
+void listen("scufris://cues", (event) => {
+  cuesEnabled = event.payload === true;
 });
 
 // ---------- glow and wave ----------
@@ -145,7 +216,7 @@ listen("scufris://cues", (event) => {
 // display += (target - display) * 0.25. The target is the 60 ms mic tick
 // while listening, a synthesized pulse while speaking (no TTS level exists
 // yet), and a per-state resting value otherwise.
-const BASELINE = {
+const BASELINE: Record<string, number> = {
   idle: 0.15,
   listening: 0.5,
   transcribing: 0.3,
@@ -167,20 +238,21 @@ const WAVE_HEIGHT = 26;
 const BARS = 14;
 
 const waveContext = wave.getContext("2d");
-{
+if (waveContext !== null) {
   const scale = window.devicePixelRatio || 1;
   wave.width = WAVE_WIDTH * scale;
   wave.height = WAVE_HEIGHT * scale;
   waveContext.setTransform(scale, 0, 0, scale, 0, 0);
 }
 
-let levelTarget = BASELINE.idle;
-let levelShown = BASELINE.idle;
+let levelTarget = BASELINE["idle"] ?? 0.15;
+let levelShown = levelTarget;
 let phase = 0;
-let frameId = null;
+let frameId: number | null = null;
 let waveColor = "#95a99f";
 
-function drawWave(level) {
+function drawWave(level: number): void {
+  if (waveContext === null) return;
   waveContext.clearRect(0, 0, WAVE_WIDTH, WAVE_HEIGHT);
   waveContext.fillStyle = waveColor;
   const barWidth = 2;
@@ -201,14 +273,14 @@ function drawWave(level) {
   }
 }
 
-function applyLevel(level) {
+function applyLevel(level: number): void {
   pill.style.setProperty("--lv", level.toFixed(3));
-  if (WAVE_STATES.has(pill.dataset.state)) drawWave(level);
+  if (WAVE_STATES.has(currentState())) drawWave(level);
 }
 
-function frame() {
+function frame(): void {
   phase += 1 / 60;
-  if (pill.dataset.state === "speaking") {
+  if (currentState() === "speaking") {
     levelTarget =
       0.4 + 0.2 * Math.sin(phase * 3.1) + 0.15 * Math.sin(phase * 7.3 + 1.2);
   }
@@ -220,11 +292,11 @@ function frame() {
 // Starts or stops the frame loop for one state. Non-reactive states settle to
 // their baseline once and cost nothing per frame; reduced motion never loops
 // and gets its crossfade from the CSS transitions instead.
-function retune(state) {
-  levelTarget = BASELINE[state] ?? 0.15;
+function retune(next: string): void {
+  levelTarget = BASELINE[next] ?? 0.15;
   waveColor =
     getComputedStyle(pill).getPropertyValue("--acc").trim() || "#95a99f";
-  if (reducedMotion.matches || !REACTIVE.has(state)) {
+  if (reducedMotion.matches || !REACTIVE.has(next)) {
     if (frameId !== null) {
       cancelAnimationFrame(frameId);
       frameId = null;
@@ -236,19 +308,19 @@ function retune(state) {
   if (frameId === null) frameId = requestAnimationFrame(frame);
 }
 
-reducedMotion.addEventListener?.("change", () => retune(pill.dataset.state));
+reducedMotion.addEventListener?.("change", () => retune(currentState()));
 
 // ---------- rendering ----------
 
-function formatDuration(seconds) {
+function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return `${minutes}:${String(rest).padStart(2, "0")}`;
 }
 
-function render(presentation) {
-  const previous = pill.dataset.state;
-  pill.dataset.state = presentation.state;
+function render(presentation: Presentation): void {
+  const previous = currentState();
+  pill.dataset["state"] = presentation.state;
   if (previous !== presentation.state) {
     boundaryCue(previous, presentation.state);
     retune(presentation.state);
@@ -273,18 +345,21 @@ function render(presentation) {
   }
 }
 
-listen("scufris://presentation", (event) => render(event.payload));
-
-listen("scufris://copy", (event) => {
-  // Copying is the safe choice offered for a transcript whose outcome nobody
-  // knows, so a clipboard that refuses must not look like anything happened.
-  navigator.clipboard?.writeText(event.payload).catch(() => {});
+void listen("scufris://presentation", (event) => {
+  render(event.payload as Presentation);
 });
 
-listen("scufris://tick", (event) => {
-  timer.textContent = formatDuration(event.payload.seconds);
-  if (pill.dataset.state !== "listening") return;
-  levelTarget = 0.12 + Math.min(event.payload.level, 1) * 0.88;
+void listen("scufris://copy", (event) => {
+  // Copying is the safe choice offered for a transcript whose outcome nobody
+  // knows, so a clipboard that refuses must not look like anything happened.
+  navigator.clipboard?.writeText(event.payload as string).catch(() => {});
+});
+
+void listen("scufris://tick", (event) => {
+  const tick = event.payload as Tick;
+  timer.textContent = formatDuration(tick.seconds);
+  if (currentState() !== "listening") return;
+  levelTarget = 0.12 + Math.min(tick.level, 1) * 0.88;
   if (reducedMotion.matches) {
     // No spring without the loop: the tick itself is the crossfade.
     levelShown = levelTarget;
@@ -295,14 +370,14 @@ listen("scufris://tick", (event) => {
 window.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
-    invoke("pill_submit", {
+    void invoke("pill_submit", {
       text: transcript.readOnly || transcript.hidden ? null : transcript.value,
     });
     return;
   }
   if (event.key === "Escape") {
     event.preventDefault();
-    invoke("pill_cancel");
+    void invoke("pill_cancel");
     return;
   }
   if (event.key === "c" && (event.ctrlKey || event.metaKey)) {
@@ -310,9 +385,9 @@ window.addEventListener("keydown", (event) => {
     // an ordinary copy.
     if (transcript.selectionStart !== transcript.selectionEnd) return;
     event.preventDefault();
-    invoke("pill_copy");
+    void invoke("pill_copy");
   }
 });
 
-retune(pill.dataset.state);
-invoke("pill_ready");
+retune(currentState());
+void invoke("pill_ready");

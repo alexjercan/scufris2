@@ -39,7 +39,11 @@ not stop the backend, and a companion crash does not stop the conversation.
 - The accelerator again while recording stops, transcribes, and opens an
   editable review state. `Enter` sends the reviewed transcript; `Escape`
   discards it.
-- Cancellation and submission restore focus to the previous window.
+- Cancellation restores focus to the previous window. Submission restores it
+  at the handoff, and the pill stays up without the keyboard to show the turn
+  it started - working, then speaking - until the assistant settles back to
+  idle. It watches only turns it started: a message typed in the chat never
+  raises it, and a disconnect or a new activation ends the watch.
 
 If the microphone cannot start, or an open capture stream fails, the pill drops
 the recording indicator and states why. If transcription fails, nothing is
@@ -76,18 +80,27 @@ every state survives grayscale.
 | error                 | red      | still orb, plain words                    |
 | disconnected          | gray     | desaturated, very slow orb                |
 
-The webview is CSS plus one small Canvas 2D waveform. WebGL is banned:
-WebKitGTK silently software-renders. The displayed level springs toward the
-60 ms Rust tick with `display += (target - display) * 0.25`, and the
-`requestAnimationFrame` loop runs only in audio-reactive states; every other
-state settles once and costs nothing per frame. `prefers-reduced-motion`
-replaces motion with color crossfades while the glow still tracks the level.
+The window is exactly the opaque panel, and the state glow is an inset
+shadow. Margins around the panel would need per-pixel alpha, which bare X11
+without a compositor discards - the margins render black. Opaque edge to edge
+works everywhere; a compositor would only be needed to move the glow outside.
+
+The webview is CSS plus one small Canvas 2D waveform, written in strict
+TypeScript (`ui/pill.ts`) and compiled by `build.rs` into `ui/dist`, the
+directory Tauri embeds. WebGL is banned: WebKitGTK silently
+software-renders. The displayed level springs toward the 60 ms Rust tick with
+`display += (target - display) * 0.25`, and the `requestAnimationFrame` loop
+runs only in audio-reactive states; every other state settles once and costs
+nothing per frame. `prefers-reduced-motion` replaces motion with color
+crossfades while the glow still tracks the level.
 
 Four earcons mark the boundaries the eye can miss: mic open (rising), mic
 close (falling), attention (one chime, also for a retained or uncertain
 transcript), error (one low tone). Nothing plays for working or speaking.
-They are near-subliminal Web Audio tones, enabled at every start, and the
-tray menu mutes them for the session.
+They are soft Web Audio tones, enabled at every start, and the tray menu
+mutes them for the session. Each cue logs at DEBUG under the `webview`
+target, and a cue the audio policy silences is said once at WARN, so a quiet
+pill is explainable from journalctl.
 
 ## The change that ran last owns the window
 
@@ -102,6 +115,15 @@ stamped with that change's place in the order the companion lock made them. A
 stamp older than one already recorded changes nothing, so an answer that needs
 the person cannot be closed by the handoff it overtook, and an acknowledgment
 that lands in the same gap still closes the pill it finished with.
+
+Where the pill belongs has three answers, not two. **Focused** holds the
+keyboard for the phases the person types into. **Passive** is up without the
+keyboard: the handoff and the watched turn after it, where the pill reports
+working and speaking while the keys go to the person's own window. **Off** is
+down. The passive posture is why the keyboard comes back at the handoff
+instead of at the answer, and it is scoped by engagement: the companion marks
+the turn its own submission started and stops watching when the assistant
+settles, the link drops, or a new activation begins.
 
 Where the pill belongs and what it renders are one decision, not two. What the
 pill renders is only an indicator while the pill is up, so two orders would let
@@ -165,9 +187,11 @@ happened. The person's next activation clears it.
 A window that came up wrong is a different thing, and the runtime repairs it
 itself. A pill that would not go down is over the desktop with focus already
 given back, so the keys the person presses reach their own window, not the pill;
-a pill that would not take the keyboard cannot be typed into. Both are asked
-again after a short delay, on the newest decision rather than the one that fell
-short, a bounded number of times, one chain at a time. A window manager that has
+a pill that would not take the keyboard cannot be typed into; a passive pill
+still holding the keyboard would swallow the keys the person is typing into
+their own window, so the repair hands them back. All are asked again after a
+short delay, on the newest decision rather than the one that fell short, a
+bounded number of times, one chain at a time. A window manager that has
 refused three times is refusing, and the next decision asks again anyway.
 
 ## An accepted transcript is never lost

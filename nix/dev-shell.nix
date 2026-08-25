@@ -14,6 +14,7 @@ in
           mdbook
           nodejs_22
           python3
+          typescript
           ruff
           shellcheck
           tmux

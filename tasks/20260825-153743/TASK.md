@@ -44,3 +44,22 @@ boundary earcons. The approved look is the design page recorded in
 
 References (MIT): kopiro/siriwave, SmoothUI Siri Orb, VoiceOrbs Edge
 Glow. Full synthesis: `tasks/20260822-132001/RESEARCH.md` section 1.
+
+## Playtest round 1 (2026-08-25)
+
+Findings and fixes, committed as "Fix the pill playtest findings":
+
+- Black margins around the panel: no compositor on bare i3/X11, so
+  per-pixel alpha is discarded. The window is now the opaque 560x64
+  panel and the glow is an inset shadow.
+- Cues fired but inaudible (whisper transcribed the mic-open cue as
+  "Ding"): gains raised to 0.05-0.16, each cue logged at DEBUG, one
+  WARN if the audio context stays suspended.
+- The pill hid at the handoff instead of showing working and speaking:
+  new Passive posture watches the turn the pill started until the
+  assistant settles, disconnects, or a new activation begins.
+- Frontend ported to strict TypeScript (`ui/pill.ts`), compiled by
+  build.rs into `ui/dist`.
+
+Remaining: playtest round 2 per VERIFICATION.md "Left for live
+playtesting".

@@ -106,5 +106,6 @@ The listening timer is useful (whisper caps a take at two minutes) but
 not structural - it could be one small line under the orb, surfacing
 only near the cap. The study page gained section 03 ("The pill is the
 orb") demonstrating it live with the 64px preset, the pop-in review
-box, and the small timer. Exploration only; no implementation decision
-yet.
+box, and the small timer. Alex approved the vision the same day;
+implementation is task `20260825-231826`, and the study page moved
+there with it (`tasks/20260825-231826/orb-study.html`).

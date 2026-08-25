@@ -32,8 +32,8 @@ not stop the backend, and a companion crash does not stop the conversation.
 - The activation accelerator, `Super+D` by default, opens the bottom-center
   pill, gives it keyboard focus, and starts recording immediately.
 - The pill rises into place from the bottom of the screen and shows a
-  level-driven orb in the recording accent, the state label, and the recording
-  duration. The tray keeps the red privacy ring.
+  level-driven orb in the recording accent, with the recording duration on one
+  dim line under it. The tray keeps the red privacy ring.
 - `Escape` while recording stops and discards the recording.
 - `Enter` while recording stops, transcribes, shows the sent text, and submits
   without another confirmation.
@@ -67,37 +67,54 @@ the socket, the window, the disk, and where deferred work runs - is a port on
 
 ## Pill design
 
-The pill is the square gruber HUD from the reviewed design page, kept at
-`tasks/20260822-132001/scufris-hud.html`. One rule set governs it: input
-states react to you, processing states animate themselves, and red belongs
-only to error and the mic ring. Motion pattern, not hue, separates states, so
-every state survives grayscale.
+The pill is the orb. The window is a small square around the dotted thought
+orb at the engine's tuned 64 pixel preset, and the orb's shape and accent are
+the whole state - no label, no transcript line, no waveform. The design is the
+Orb Study, section 03, kept at `tasks/20260825-231826/orb-study.html`. One rule
+set governs it: input states react to you, processing states animate
+themselves, and red belongs only to error and the mic ring. Motion pattern, not
+hue, separates states, so every state survives grayscale.
 
-| State                 | Color    | Motion                                    |
-| --------------------- | -------- | ----------------------------------------- |
-| listening             | yellow   | glow and wave ride the mic level, no text |
-| transcribing          | brown    | wave shrinks aside, slow orb              |
-| review                | quartz   | near-still, the caret is the live element |
-| working               | niagara  | label shimmer, fast orb                   |
-| speaking              | green    | reactive wave, same grammar as listening  |
-| attention             | wisteria | two pulses, then a slow loop              |
-| retained or uncertain | wisteria | attention-class: the words need you       |
-| error                 | red      | still orb, plain words                    |
-| disconnected          | gray     | desaturated, very slow orb                |
+| State                 | Color    | Orb                                        |
+| --------------------- | -------- | ------------------------------------------ |
+| listening             | yellow   | wave, breathing with the mic level         |
+| transcribing          | brown    | ribbon, composing                          |
+| review                | quartz   | ring, near-still; the box carries the text |
+| working               | niagara  | orbits, fast                               |
+| speaking              | green    | wave, same grammar as listening            |
+| attention             | wisteria | ring plus two pulses, then a slow loop     |
+| retained or uncertain | wisteria | attention-class: the words need you        |
+| error                 | red      | ring, slowed to a third                    |
+| disconnected          | gray     | web, desaturated                           |
 
-The window is exactly the opaque panel, and the state glow is an inset
-shadow. Margins around the panel would need per-pixel alpha, which bare X11
-without a compositor discards - the margins render black. Opaque edge to edge
-works everywhere; a compositor would only be needed to move the glow outside.
+Chrome exists only when there is something to act on. In review and in
+uncertain a second window rises above the orb with the transcript, a caret
+where the person's own caret is, and one line saying what the keys do. It is
+display-only and never focused: every key still belongs to the orb window, so
+the field the words come from lives there, invisible, and each edit is mirrored
+next door over `scufris://draft`. Everything else - the state name, the error
+reason, the notice on a retained transcript - is the tray's to say.
 
-The webview is CSS plus one small Canvas 2D waveform, written in strict
-TypeScript (`ui/pill.ts`) and compiled by `build.rs` into `ui/dist`, the
-directory Tauri embeds. WebGL is banned: WebKitGTK silently
+Both windows are exactly their opaque page. Margins around them would need
+per-pixel alpha, which bare X11 without a compositor discards - the margins
+render black. Painting the window in the same near-black the orb's far dots
+fade into is what makes the frame disappear on a dark desktop.
+
+The listening timer is one dim line under the orb, and its row is reserved in
+every state. Equal min and max size hints cannot be changed while a window is
+up without re-applying them, and a frame that resized under the orb would move
+the orb.
+
+The webview is CSS plus one small Canvas 2D orb, written in strict
+TypeScript (`ui/pill.ts` and `ui/review.ts`) and compiled by `build.rs` into
+`ui/dist`, the directory Tauri embeds. WebGL is banned: WebKitGTK silently
 software-renders. The displayed level springs toward the 60 ms Rust tick with
-`display += (target - display) * 0.25`, and the `requestAnimationFrame` loop
-runs only in audio-reactive states; every other state settles once and costs
-nothing per frame. `prefers-reduced-motion` replaces motion with color
-crossfades while the glow still tracks the level.
+`display += (target - display) * 0.25`, and one `requestAnimationFrame` loop
+drives both it and the orb. The loop stops outright while the window is hidden,
+because WebKit throttles a hidden page rather than pausing it.
+`prefers-reduced-motion` stops every animation on both windows and paints one
+still orb per state change, and the page reports the same preference to the
+host over `pill_ready` so the window arrives in place instead of rising.
 
 Four earcons mark the boundaries the eye can miss: mic open (rising), mic
 close (falling), attention (one chime, also for a retained or uncertain

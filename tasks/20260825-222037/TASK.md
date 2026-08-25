@@ -95,3 +95,16 @@ to `build.rs` and `ui/tsconfig.json`, and the engine added to
 Still open: the visual per-state check on a live desktop is Alex's.
 Nothing above proves the orb reads well at 30px, that the accent mix
 carries in the panel, or that the `--lv` scale still feels right.
+
+## Bare orb vision (2026-08-25)
+
+Alex sketched a further direction after the orb and the pill polish
+landed: the orb alone is the pill. No frame, no label; the state reads
+from the orb's shape and accent alone, and a review textbox
+materializes above the orb only when a transcript needs a decision.
+The listening timer is useful (whisper caps a take at two minutes) but
+not structural - it could be one small line under the orb, surfacing
+only near the cap. The study page gained section 03 ("The pill is the
+orb") demonstrating it live with the 64px preset, the pop-in review
+box, and the small timer. Exploration only; no implementation decision
+yet.

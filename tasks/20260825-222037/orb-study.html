@@ -181,6 +181,97 @@
     color: var(--quartz);
     max-width: 78ch;
   }
+  .stage {
+    position: relative;
+    background: #101010;
+    border: 1px solid #33302e;
+    height: 340px;
+    margin: 18px 0 10px;
+    overflow: hidden;
+  }
+  .stageorb {
+    position: absolute;
+    left: 50%;
+    bottom: 30px;
+    width: 64px;
+    height: 64px;
+    transform: translateX(-50%);
+  }
+  .stageorb canvas {
+    width: 64px;
+    height: 64px;
+    display: block;
+  }
+  .stageorb.pulse {
+    animation: micpulse 2.6s ease-in-out infinite;
+  }
+  @keyframes micpulse {
+    0%,
+    100% {
+      transform: translateX(-50%) scale(1);
+    }
+    50% {
+      transform: translateX(-50%) scale(1.07);
+    }
+  }
+  .stagetimer {
+    position: absolute;
+    left: 50%;
+    bottom: 8px;
+    transform: translateX(-50%);
+    font-size: 10.5px;
+    color: var(--bg4);
+    font-variant-numeric: tabular-nums;
+  }
+  .reviewbox {
+    position: absolute;
+    left: 50%;
+    bottom: 118px;
+    transform: translateX(-50%);
+    width: min(560px, 84%);
+    background: #101010;
+    border: 1px solid var(--quartz);
+    padding: 14px 18px 10px;
+    animation: boxpop 200ms ease-out;
+  }
+  @keyframes boxpop {
+    from {
+      opacity: 0;
+      transform: translateX(-50%) translateY(12px) scale(0.96);
+    }
+  }
+  .reviewbox .rtext {
+    font-size: 13.5px;
+    color: var(--fg1);
+  }
+  .reviewbox .caret {
+    display: inline-block;
+    width: 7px;
+    height: 14px;
+    margin-left: 4px;
+    vertical-align: -2px;
+    background: var(--yellow);
+    animation: blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+  .reviewbox .rhint {
+    margin-top: 8px;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--bg4);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stageorb.pulse,
+    .reviewbox,
+    .reviewbox .caret {
+      animation: none;
+    }
+  }
   .panel {
     background: var(--bg1);
     border: 1px solid #33302e;
@@ -287,6 +378,44 @@
   <section>
     <div class="shead">
       <span class="snum">03</span>
+      <h2>The pill is the orb</h2>
+      <span class="srule"></span>
+    </div>
+    <p>
+      Alex's sketch (2026-08-25): drop the frame and the label - the orb alone
+      is the pill, bottom-center, and <b>its shape is the state</b>. Chrome
+      exists only when there is something to act on: when a transcript comes
+      back, a textbox materializes above the orb for review and leaves with the
+      decision. The listening timer stays useful (whisper caps a take at two
+      minutes) but is not structural - here it is one small line under the orb,
+      and it could surface only near the cap. Click through:
+    </p>
+    <div class="statebar" id="visionbar"></div>
+    <div class="stage">
+      <div class="reviewbox" id="visionbox" hidden>
+        <div class="rtext">
+          add a calendar task for tomorrow - look at the widget plan with fresh
+          eyes<span class="caret"></span>
+        </div>
+        <div class="rhint" id="visionhint">enter sends - esc discards</div>
+      </div>
+      <div class="stageorb" id="visionorb">
+        <canvas id="visioncanvas" width="128" height="128"></canvas>
+      </div>
+      <div class="stagetimer" id="visiontimer" hidden>0:00</div>
+    </div>
+    <p class="mocknote">
+      In the companion this is the pill window shrunk to a small square around
+      the orb - the 64px preset, far richer than the 30px one - with the review
+      box as its own transient window above it, built from the same warm-shell
+      recipe the widget runtime needs anyway. The mic-level breathing stays on
+      the orb; sent, working, and speaking read purely from shape and accent.
+    </p>
+  </section>
+
+  <section>
+    <div class="shead">
+      <span class="snum">04</span>
       <h2>Why it fits</h2>
       <span class="srule"></span>
     </div>
@@ -1380,6 +1509,72 @@ SOFTWARE.
       buttons.push(b);
       bar.appendChild(b);
     });
+
+    // 03: the bare orb vision - the orb alone is the pill
+    var visionBox = document.getElementById("visionbox");
+    var visionHint = document.getElementById("visionhint");
+    var visionOrbWrap = document.getElementById("visionorb");
+    var visionTimer = document.getElementById("visiontimer");
+    var vorb = addOrb(
+      document.getElementById("visioncanvas"),
+      64,
+      E.resolvePreset("listening", 64),
+      ACC.yellow,
+    );
+    var vSeconds = 0;
+    var vInterval = null;
+    function fmtSeconds(s) {
+      return Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2);
+    }
+    function setVision(s) {
+      vorb.resolved = E.resolvePreset(s[1], 64);
+      vorb.accent = ACC[s[2]];
+      vorb.speedMul = s[4];
+      var listening = s[0] === "listening";
+      var boxy = s[0] === "review" || s[0] === "uncertain";
+      visionBox.hidden = !boxy;
+      if (boxy) {
+        visionHint.textContent =
+          s[0] === "uncertain"
+            ? "the daemon is unsure - enter again forces it"
+            : "enter sends - esc discards";
+      }
+      visionOrbWrap.className =
+        "stageorb" + (listening || s[0] === "speaking" ? " pulse" : "");
+      if (vInterval) {
+        clearInterval(vInterval);
+        vInterval = null;
+      }
+      visionTimer.hidden = !listening;
+      if (listening) {
+        vSeconds = reduced ? 7 : 0;
+        visionTimer.textContent = fmtSeconds(vSeconds);
+        if (!reduced) {
+          vInterval = setInterval(function () {
+            vSeconds = (vSeconds + 1) % 120;
+            visionTimer.textContent = fmtSeconds(vSeconds);
+          }, 1000);
+        }
+      }
+      if (reduced) drawOrb(vorb, performance.now());
+    }
+    var visionBar = document.getElementById("visionbar");
+    var visionButtons = [];
+    PILL_STATES.forEach(function (s, i) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = s[0];
+      b.setAttribute("aria-pressed", i === 0 ? "true" : "false");
+      b.addEventListener("click", function () {
+        setVision(s);
+        visionButtons.forEach(function (o) {
+          o.setAttribute("aria-pressed", o === b ? "true" : "false");
+        });
+      });
+      visionButtons.push(b);
+      visionBar.appendChild(b);
+    });
+    setVision(PILL_STATES[0]);
 
     function loop(now) {
       for (var i = 0; i < orbs.length; i++) drawOrb(orbs[i], now);

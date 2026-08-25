@@ -7,7 +7,7 @@ and this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are
 immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
-## [Unreleased]
+## [0.4.0] - 2026-08-25
 
 ### Added
 
@@ -80,7 +80,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/alexjercan/scufris2/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/alexjercan/scufris2/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/alexjercan/scufris2/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/alexjercan/scufris2/releases/tag/v0.1.0

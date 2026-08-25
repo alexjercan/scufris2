@@ -2,51 +2,26 @@
 // forwards the keys the accepted interaction defines. Every decision stays in
 // the Rust state machine, including whether a key sends anything at all.
 //
-// The look is the reviewed HUD design (tasks/20260822-132001/scufris-hud.html):
-// a sprung glow and a Canvas 2D wave ride the 60 ms mic level while listening,
-// breathe at idle, and four soft earcons mark the boundaries the eye can miss.
-// The orb is the vendored thinking-orbs engine (orb-engine.js) repainted in
-// gruber ink. One rAF loop drives glow, wave and orb; it stops under reduced
-// motion and while the window is hidden.
+// The look is the Orb Study's bare orb (tasks/20260825-231826/orb-study.html,
+// section 03): the window is a small square around the vendored thinking-orbs
+// engine at its 64px preset, repainted in gruber ink, and the orb's shape and
+// accent are the whole state. The only other mark is the listening timer. One
+// rAF loop drives the mic level and the orb; it stops under reduced motion and
+// while the window is hidden. Four soft earcons mark the boundaries the eye
+// can miss.
+//
+// The words live here even though they are read next door: the keys belong to
+// this window, so the field the person types into does too, invisible, and
+// every edit is mirrored to the review window.
 //
 // Arriving is shared with the host: the window rises into place from below,
-// and the panel grows into the frame and squashes once as it lands. The host
-// cannot read prefers-reduced-motion, so this page reports it once.
+// and the orb pops open and squashes once as it lands. The host cannot read
+// prefers-reduced-motion, so this page reports it once.
 //
 // Compiled by tsc from build.rs into ui/dist; the window loads the output.
 
-interface TauriCore {
-  invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
-}
-
-interface TauriEventModule {
-  listen(
-    event: string,
-    handler: (event: { payload: unknown }) => void,
-  ): Promise<unknown>;
-}
-
-interface Window {
-  __TAURI__: { core: TauriCore; event: TauriEventModule };
-}
-
-// The payload shapes are owned by the Rust side (app.rs); the casts at the
-// listen boundaries are the one place the frontend takes them on trust.
-interface Presentation {
-  state: string;
-  detail: string;
-  text: string;
-  editable: boolean;
-  recording: boolean;
-}
-
-interface Tick {
-  seconds: number;
-  level: number;
-}
-
 const { invoke } = window.__TAURI__.core;
-const { listen } = window.__TAURI__.event;
+const { listen, emitTo } = window.__TAURI__.event;
 
 // Console output and uncaught failures are forwarded to the companion at
 // DEBUG under the `webview` target, so pill behaviour is readable from
@@ -95,11 +70,8 @@ function element<T extends HTMLElement>(id: string): T {
 }
 
 const pill = element<HTMLElement>("pill");
-const label = element<HTMLElement>("label");
 const transcript = element<HTMLInputElement>("transcript");
-const detail = element<HTMLElement>("detail");
 const timer = element<HTMLElement>("timer");
-const wave = element<HTMLCanvasElement>("wave");
 const orb = element<HTMLCanvasElement>("orb");
 
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
@@ -107,21 +79,6 @@ const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 function currentState(): string {
   return pill.dataset["state"] ?? "idle";
 }
-
-const LABELS: Record<string, string> = {
-  idle: "Scufris",
-  listening: "Listening",
-  transcribing: "Transcribing",
-  review: "Review and send",
-  sent: "Sent",
-  retained: "Not delivered",
-  uncertain: "Sent, outcome unknown",
-  error: "Nothing was sent",
-  working: "Working",
-  speaking: "Speaking",
-  attention: "Needs you",
-  disconnected: "Backend unavailable",
-};
 
 // ---------- earcons ----------
 
@@ -217,12 +174,13 @@ void listen("scufris://cues", (event) => {
   cuesEnabled = event.payload === true;
 });
 
-// ---------- glow and wave ----------
+// ---------- the mic level ----------
 
 // The displayed level springs toward the target each frame:
 // display += (target - display) * 0.25. The target is the 60 ms mic tick
 // while listening, a synthesized pulse while speaking (no TTS level exists
-// yet), and a per-state resting value otherwise.
+// yet), and a per-state resting value otherwise. The whole orb breathes with
+// it through --lv.
 const BASELINE: Record<string, number> = {
   idle: 0.15,
   listening: 0.5,
@@ -238,52 +196,13 @@ const BASELINE: Record<string, number> = {
   disconnected: 0.1,
 };
 
-const WAVE_STATES = new Set(["listening", "transcribing", "speaking"]);
-const WAVE_WIDTH = 76;
-const WAVE_HEIGHT = 30;
-// Two more bars than the smaller pill carried, so the wave keeps its density
-// rather than spreading out.
-const BARS = 16;
-
-const waveContext = wave.getContext("2d");
-if (waveContext !== null) {
-  const scale = window.devicePixelRatio || 1;
-  wave.width = WAVE_WIDTH * scale;
-  wave.height = WAVE_HEIGHT * scale;
-  waveContext.setTransform(scale, 0, 0, scale, 0, 0);
-}
-
 let levelTarget = BASELINE["idle"] ?? 0.15;
 let levelShown = levelTarget;
 let phase = 0;
 let frameId: number | null = null;
-let waveColor = "#95a99f";
-
-function drawWave(level: number): void {
-  if (waveContext === null) return;
-  waveContext.clearRect(0, 0, WAVE_WIDTH, WAVE_HEIGHT);
-  waveContext.fillStyle = waveColor;
-  const barWidth = 2;
-  const gap = (WAVE_WIDTH - BARS * barWidth) / (BARS - 1);
-  for (let i = 0; i < BARS; i += 1) {
-    const mid = 1 - Math.abs(i - (BARS - 1) / 2) / ((BARS - 1) / 2);
-    const wobble = 0.55 + 0.45 * Math.sin(i * 2.7 + phase * (6 + (i % 5)));
-    const height = Math.max(
-      2,
-      WAVE_HEIGHT * (0.1 + 0.9 * level) * (0.35 + 0.65 * mid) * wobble,
-    );
-    waveContext.fillRect(
-      i * (barWidth + gap),
-      (WAVE_HEIGHT - height) / 2,
-      barWidth,
-      height,
-    );
-  }
-}
 
 function applyLevel(level: number): void {
   pill.style.setProperty("--lv", level.toFixed(3));
-  if (WAVE_STATES.has(currentState())) drawWave(level);
 }
 
 // ---------- orb ----------
@@ -294,11 +213,9 @@ function applyLevel(level: number): void {
 // carries the whole depth range instead of the engine's grayscale.
 type Rgb = [number, number, number];
 
-const ORB_SIZE = 36;
-// The 20px preset is the tuned inline design, drawn here at 36px. Only 64 and
-// 20 are tuned, so the preset stays put while the drawn size grows with the
-// frame.
-const ORB_PRESET = 20;
+// The engine's larger tuned preset, drawn at its own size: far richer than the
+// 20px one, and the whole reason the bare orb is worth a window.
+const ORB_SIZE = 64;
 const PANEL: Rgb = [16, 16, 16];
 const QUARTZ: Rgb = [149, 169, 159];
 // The frozen instant reduced motion renders, in engine seconds.
@@ -337,7 +254,7 @@ if (orbContext !== null) {
 }
 
 let orbLook = RESTING;
-let orbPreset = engine.resolvePreset(RESTING.state, ORB_PRESET);
+let orbPreset = engine.resolvePreset(RESTING.state, ORB_SIZE);
 let orbAccent: Rgb = QUARTZ;
 
 function mix(from: Rgb, to: Rgb, f: number, alpha: number): string {
@@ -352,7 +269,7 @@ function ink(white: number): number {
 }
 
 // pill.css stays the single source of accent truth: --acc computes to the
-// state's hex token, which the wave takes as a string and the orb as a triple.
+// state's hex token, which the orb takes as a triple.
 function parseAccent(value: string): Rgb | null {
   const digits = /^#([0-9a-f]{6})$/i.exec(value)?.[1];
   if (digits === undefined) return null;
@@ -393,9 +310,9 @@ function drawOrb(seconds: number): void {
 
 // ---------- the frame loop ----------
 
-// One loop for the whole pill: the level spring, the wave and the orb. WebKit
-// throttles a hidden page to a crawl, so a hidden pill stops the loop outright
-// instead of trusting rAF to keep time.
+// One loop for the whole pill: the level spring and the orb. WebKit throttles
+// a hidden page to a crawl, so a hidden pill stops the loop outright instead
+// of trusting rAF to keep time.
 function looping(): boolean {
   return !reducedMotion.matches && !document.hidden;
 }
@@ -418,10 +335,9 @@ function frame(now: number): void {
 function retune(next: string): void {
   levelTarget = BASELINE[next] ?? 0.15;
   const accent = getComputedStyle(pill).getPropertyValue("--acc").trim();
-  waveColor = accent || "#95a99f";
   orbAccent = parseAccent(accent) ?? QUARTZ;
   orbLook = ORB_LOOKS[next] ?? RESTING;
-  orbPreset = engine.resolvePreset(orbLook.state, ORB_PRESET);
+  orbPreset = engine.resolvePreset(orbLook.state, ORB_SIZE);
   if (looping()) {
     if (frameId === null) frameId = requestAnimationFrame(frame);
     return;
@@ -441,9 +357,9 @@ document.addEventListener("visibilitychange", () => retune(currentState()));
 // ---------- entrance ----------
 
 // The host rises the window into its resting spot from below and tells the page
-// the moment it starts; this half grows the panel into the frame and squashes
-// it once as it lands. The window cannot be resized while it is up, so growing
-// is something only the page can do. The host runs its half only on a
+// the moment it starts; this half pops the orb open inside the frame and
+// squashes it once as it lands. The window cannot be resized while it is up, so
+// growing is something only the page can do. The host runs its half only on a
 // hidden-to-visible transition, so this never replays for a re-render.
 function arrive(): void {
   if (reducedMotion.matches) return;
@@ -460,6 +376,34 @@ pill.addEventListener("animationend", (event) => {
 
 void listen("scufris://entrance", () => arrive());
 
+// ---------- the mirrored draft ----------
+
+// The review window shows the words; this window holds them. Every edit and
+// every caret move is sent next door, so what the person reads there is what
+// Enter would send from here.
+const REVIEW_WINDOW = "review";
+let warnedMirror = false;
+
+function mirror(): void {
+  if (transcript.hidden || transcript.readOnly) return;
+  emitTo(REVIEW_WINDOW, "scufris://draft", {
+    text: transcript.value,
+    caret: transcript.selectionStart ?? transcript.value.length,
+  }).catch((error: unknown) => {
+    // Once only: a mirror that fails fails on every keystroke, and the words
+    // being unreadable is already reported by the host.
+    if (warnedMirror) return;
+    warnedMirror = true;
+    console.warn(`the transcript is not mirrored: ${logText(error)}`);
+  });
+}
+
+transcript.addEventListener("input", mirror);
+transcript.addEventListener("keyup", mirror);
+transcript.addEventListener("select", mirror);
+// Arrow keys, Home, and a click all move the caret without changing the text.
+document.addEventListener("selectionchange", mirror);
+
 // ---------- rendering ----------
 
 function formatDuration(seconds: number): string {
@@ -475,8 +419,6 @@ function render(presentation: Presentation): void {
     boundaryCue(previous, presentation.state);
     retune(presentation.state);
   }
-  label.textContent = LABELS[presentation.state] ?? "Scufris";
-  detail.textContent = presentation.detail;
   transcript.hidden = presentation.text === "" && !presentation.editable;
   transcript.readOnly = !presentation.editable;
   const editing = document.activeElement === transcript;
@@ -493,6 +435,7 @@ function render(presentation: Presentation): void {
   if (!presentation.recording) {
     timer.textContent = "";
   }
+  mirror();
 }
 
 void listen("scufris://presentation", (event) => {

@@ -1,19 +1,19 @@
-/* The square gruber HUD pill from the reviewed design page
- * (tasks/20260822-132001/scufris-hud.html). Color follows the state grammar:
- * yellow listening, brown transcribing, quartz review, niagara working,
- * green speaking, wisteria attention, red only for error and the mic ring.
- * Motion pattern, not hue, separates states, so everything survives
+/* The bare orb, from the Orb Study section 03 "The pill is the orb"
+ * (tasks/20260825-231826/orb-study.html). The window is a small square around
+ * the 64px orb and nothing else: no label, no transcript line, no wave, no
+ * frame. The orb's shape and accent carry the state on their own, and the only
+ * other mark is the listening timer, one dim line under it.
+ *
+ * Color follows the state grammar: yellow listening, brown transcribing,
+ * quartz review, niagara working, green speaking, wisteria attention, red only
+ * for error. Motion pattern, not hue, separates states, so everything survives
  * grayscale. */
 
 :root {
-  --bg2: #282828;
-  --bg3: #453d41;
   --bg4: #52494e;
-  --fg: #e4e4ef;
-  --fg1: #f4f4ff;
+  --quartz: #95a99f;
   --yellow: #ffdd33;
   --brown: #cc8c3c;
-  --quartz: #95a99f;
   --niagara: #96a6c8;
   --wisteria: #9e95c7;
   --green: #73c936;
@@ -29,79 +29,34 @@
   padding: 0;
 }
 
-/* The window is exactly the panel: opaque edge to edge, because bare X11
- * without a compositor discards per-pixel alpha and would paint any margin
- * black. The glow therefore lives inside the border as an inset shadow. */
+/* Exactly the panel the orb painter mixes from. Bare X11 without a compositor
+ * discards per-pixel alpha, so the window cannot be a transparent cut-out
+ * around the orb; what it can be is the same near-black the far dots fade
+ * into, which is what makes the frame disappear on a dark desktop. */
 html,
 body {
   height: 100%;
-  background: #0d0d11;
+  background: #101010;
   overflow: hidden;
   font-family: var(--mono);
-  color: var(--fg);
+  color: var(--quartz);
   user-select: none;
 }
 
 .pill {
-  /* --acc paints the state, --glow is its rgb triple for the halo, --lv is
-   * the sprung level the script writes every frame. */
+  /* --acc paints the state and --lv is the sprung mic level the script writes
+   * every frame. There is no glow and no border any more: the orb is the
+   * whole pill, so nothing may draw a box around it. */
   --acc: var(--quartz);
-  --glow: 149, 169, 159;
   --lv: 0.15;
   position: relative;
-  /* Stacking context, so the glow can sit above the panel background and
-   * below the content. */
-  z-index: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 14px;
   width: 100%;
   height: 100%;
-  padding: 0 22px 0 16px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 38%),
-    repeating-linear-gradient(
-      0deg,
-      rgba(255, 255, 255, 0.015) 0 1px,
-      transparent 1px 3px
-    ),
-    linear-gradient(180deg, #15151a, #0d0d11);
-  border: 1px solid #2e2c33;
+  padding: 8px 6px 4px;
   transition: filter 0.25s ease;
-}
-
-.pill::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  box-shadow: inset 0 0 22px 4px rgba(var(--glow), 0.55);
-  opacity: calc(0.1 + 0.5 * var(--lv));
-  transition: opacity 0.12s linear;
-  /* Idle personality: the glow never sits still. */
-  animation: breathe 4.4s ease-in-out infinite;
-}
-
-@keyframes breathe {
-  50% {
-    filter: brightness(1.45);
-  }
-}
-
-.pill::after {
-  /* State-colored corner ticks, the same language as the HUD panels. */
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(var(--acc), var(--acc)) left top / 11px 1px,
-    linear-gradient(var(--acc), var(--acc)) left top / 1px 11px,
-    linear-gradient(var(--acc), var(--acc)) right bottom / 11px 1px,
-    linear-gradient(var(--acc), var(--acc)) right bottom / 1px 11px;
-  background-repeat: no-repeat;
-  opacity: 0.9;
 }
 
 /* ---------- entrance ---------- */
@@ -110,26 +65,28 @@ body {
  * compositor discards alpha, and the size is pinned by equal min and max
  * hints. So arriving is split in two. The host rises the window into its
  * resting spot from below and carries a little past it; this is the other
- * half, the panel growing into the frame on the way up and squashing once as
- * it lands. The reduced-motion rule at the foot of this file stops this half,
- * and the page reports the same preference to the host over pill_ready so the
- * window stops travelling too. */
+ * half, the orb popping open inside the frame and squashing once as it lands.
+ * The origin is the orb's own center, so the pop happens where the eye is.
+ * The reduced-motion rule at the foot of this file stops this half, and the
+ * page reports the same preference to the host over pill_ready so the window
+ * stops travelling too. */
 .pill.arriving {
+  transform-origin: 50% 44%;
   animation: arrive 240ms cubic-bezier(0.22, 0.9, 0.32, 1) both;
 }
 
 @keyframes arrive {
   0% {
-    transform: scale(0.9, 0.86);
+    transform: scale(0.72);
   }
-  60% {
-    transform: scale(1.01, 1.04);
+  58% {
+    transform: scale(1.06);
   }
-  78% {
-    transform: scale(1.03, 0.95);
+  76% {
+    transform: scale(0.96);
   }
   100% {
-    transform: scale(1, 1);
+    transform: scale(1);
   }
 }
 
@@ -137,61 +94,26 @@ body {
 
 .pill[data-state="listening"] {
   --acc: var(--yellow);
-  --glow: 255, 221, 51;
 }
 .pill[data-state="transcribing"] {
   --acc: var(--brown);
-  --glow: 204, 140, 60;
-}
-.pill[data-state="transcribing"] .wave {
-  opacity: 0.55;
 }
 .pill[data-state="review"] {
   --acc: var(--quartz);
-  --glow: 149, 169, 159;
 }
 .pill[data-state="sent"] {
   --acc: var(--green);
-  --glow: 115, 201, 54;
 }
 .pill[data-state="working"] {
   --acc: var(--niagara);
-  --glow: 150, 166, 200;
-}
-.pill[data-state="working"] .label {
-  /* Gemini-style shimmer: self-animating, clearly busy, clearly not
-   * listening. */
-  color: transparent;
-  background: linear-gradient(
-    90deg,
-    var(--quartz) 0%,
-    var(--quartz) 30%,
-    var(--fg1) 47%,
-    #fff 50%,
-    var(--quartz) 62%
-  );
-  background-size: 220% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  animation: sweep 1.7s linear infinite;
-}
-@keyframes sweep {
-  from {
-    background-position: 120% 0;
-  }
-  to {
-    background-position: -120% 0;
-  }
 }
 .pill[data-state="speaking"] {
   --acc: var(--green);
-  --glow: 115, 201, 54;
 }
 .pill[data-state="attention"],
 .pill[data-state="retained"],
 .pill[data-state="uncertain"] {
   --acc: var(--wisteria);
-  --glow: 158, 149, 199;
 }
 .pill[data-state="attention"] .orb::after {
   content: "";
@@ -233,12 +155,10 @@ body {
 }
 .pill[data-state="error"] {
   --acc: var(--red);
-  --glow: 244, 56, 65;
   filter: saturate(0.85);
 }
 .pill[data-state="disconnected"] {
   --acc: var(--bg4);
-  --glow: 82, 73, 78;
   filter: saturate(0.4);
 }
 .pill[data-state="disconnected"] .orb canvas {
@@ -247,97 +167,65 @@ body {
 
 /* ---------- pieces ---------- */
 
+/* The dotted thought orb, at the engine's tuned 64px preset. pill.ts paints it
+ * from --acc every frame; the attribute size is replaced by the device pixel
+ * ratio, so the CSS box is what fixes the drawn size. The mic level breathes
+ * the whole orb, and the frame carries six pixels either side for the loudest
+ * of it. */
 .orb {
   position: relative;
   flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
+  width: 64px;
+  height: 64px;
   transform: scale(calc(0.82 + 0.3 * var(--lv)));
   transition: transform 0.1s linear;
 }
 
-/* The dotted thought orb. pill.ts paints it from --acc every frame; the
- * attribute size is replaced by the device pixel ratio, so the CSS box is
- * what fixes the drawn size at 36px. Recording reads from that accent and
- * from the label: there is no separate mic dot to disagree with them. */
 .orb canvas {
   display: block;
   width: 100%;
   height: 100%;
 }
 
-.wave {
+/* One dim line under the orb, and only while the microphone is open: whisper
+ * caps a take, so the number is useful, but it is not what the pill is for.
+ * The row is reserved in every state rather than appearing and disappearing,
+ * because a window pinned by equal min and max hints cannot grow into it and a
+ * frame that resized under the orb would move the orb. */
+.timer {
   flex: 0 0 auto;
-  width: 76px;
-  height: 30px;
-  display: none;
+  margin-top: 2px;
+  height: 14px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--bg4);
 }
 
-.pill[data-state="listening"] .wave,
-.pill[data-state="transcribing"] .wave,
-.pill[data-state="speaking"] .wave {
-  display: block;
-}
-
-.body {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.label {
-  font-size: 12px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--acc);
-  transition: color 0.18s ease;
-}
-
+/* Off the orb entirely, and still focusable: the keys are the orb window's,
+ * so the field that holds the words has to live in it. What the person types
+ * is mirrored into the review window, which is where they read it. */
 .transcript {
-  width: 100%;
-  margin-top: 3px;
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
   border: none;
-  border-bottom: 1px solid var(--bg3);
+  padding: 0;
   background: transparent;
-  color: var(--fg);
+  color: transparent;
   font: inherit;
-  font-size: 16px;
-  caret-color: var(--acc);
+  caret-color: transparent;
+  opacity: 0;
   outline: none;
   user-select: text;
 }
 
-.transcript[readonly] {
-  border-bottom-color: transparent;
-  color: var(--quartz);
-}
-
-.detail {
-  margin-top: 3px;
-  font-size: 13px;
-  color: var(--quartz);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.detail:empty {
-  display: none;
-}
-
-.timer {
-  flex: 0 0 auto;
-  font-variant-numeric: tabular-nums;
-  font-size: 15px;
-  color: var(--quartz);
-}
-
-.timer:empty {
-  display: none;
-}
-
-/* Reduced motion: crossfades instead of motion. The glow still tracks the
- * level through --lv; only the self-driven animation stops, the entrance
- * included, and the host is told the same so the window appears in place. */
+/* Reduced motion: no self-driven animation at all, the entrance included, and
+ * the host is told the same so the window appears in place. The orb still
+ * follows the mic level through --lv, which is a report and not a flourish. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -1,14 +1,15 @@
-//! The always-on-top bottom-center pill window.
+//! The always-on-top bottom-center orb window.
 //!
-//! The pill is deliberately small and undecorated: it must never cover the
-//! desktop the user keeps working in. Positioning is a pure calculation so the
-//! bottom-center placement is testable without a display.
+//! The pill is the orb: a small square frame with nothing in it but the dotted
+//! thought orb, whose shape and accent carry the whole state. It must never
+//! cover the desktop the user keeps working in. Positioning is a pure
+//! calculation so the bottom-center placement is testable without a display.
 //!
 //! Arriving is motion and nothing else. The window carries no alpha, so it
 //! cannot fade, and its size is pinned by equal min and max hints, so it cannot
 //! grow while it is up. What is left is where it is: the window rises into its
 //! resting spot from below, carries a little past it, and settles back, while
-//! the page grows the panel inside the frame and squashes it once as it lands.
+//! the page pops the orb inside the frame and squashes it once as it lands.
 
 use std::{
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
@@ -28,23 +29,30 @@ pub const LABEL: &str = "pill";
 /// Pill width in logical pixels.
 ///
 /// The window is exactly what `pill.css` lays out. The two cannot be adjusted
-/// apart: a frame narrower than the layout clips the pill, and a wider one
-/// leaves a black margin around it.
-pub const WIDTH: f64 = 640.0;
+/// apart: a frame narrower than the layout clips the orb, and a wider one
+/// leaves a black margin around it. Six pixels either side of the 64 pixel orb,
+/// which is what the mic-level scale needs at its loudest.
+pub const WIDTH: f64 = 76.0;
 
 /// Pill height in logical pixels.
 ///
 /// The window is exactly the opaque panel. A window with margins around the
 /// panel needs per-pixel alpha, which bare X11 without a compositor cannot
 /// do: the alpha is discarded and the margins render as black.
-pub const HEIGHT: f64 = 76.0;
+///
+/// Taller than it is wide by one line: the listening timer's row is reserved in
+/// every state rather than resized into, because equal min and max hints cannot
+/// be changed while the window is up without re-applying them, and a frame that
+/// resizes under the orb moves the orb.
+pub const HEIGHT: f64 = 92.0;
 
 /// Gap between the pill and the bottom edge of the screen, in logical pixels.
 pub const BOTTOM_MARGIN: f64 = 72.0;
 
 /// How far below its resting spot the pill starts an entrance, in logical
-/// pixels.
-const RISE: f64 = 56.0;
+/// pixels. About a third of the frame: the smaller the window, the shorter the
+/// travel that still reads as arriving rather than flying in.
+const RISE: f64 = 28.0;
 
 /// How many positions one entrance steps through.
 const RISE_STEPS: u32 = 13;
@@ -58,8 +66,8 @@ const RISE_STEP: Duration = Duration::from_millis(16);
 /// That recoil is what the eye reads as the pill landing rather than stopping.
 const RECOIL: f64 = 1.5;
 
-/// Event telling the page that the window has started rising, so the panel can
-/// grow and squash inside the frame while it travels.
+/// Event telling the page that the window has started rising, so the orb can
+/// pop and squash inside the frame while it travels.
 const ENTRANCE_EVENT: &str = "scufris://entrance";
 
 /// The newest entrance. A tween whose generation has moved on stops stepping:
@@ -210,10 +218,11 @@ fn arrange(window: &WebviewWindow) -> tauri::Result<Option<Rise>> {
 /// placement cancels it wherever it has got to.
 fn glide(window: &WebviewWindow, rise: Rise) {
     let generation = ENTRANCE.fetch_add(1, Ordering::SeqCst) + 1;
-    // The page grows the panel inside the frame while the frame travels. A
-    // page that misses this is a pill that only rises, which is still an
-    // arrival.
-    let _ = window.emit(ENTRANCE_EVENT, ());
+    // The page pops the orb inside the frame while the frame travels. A page
+    // that misses this is a pill that only rises, which is still an arrival.
+    // Addressed to this window: the review window pops in place and has no
+    // entrance to run from here.
+    let _ = window.emit_to(LABEL, ENTRANCE_EVENT, ());
     let window = window.clone();
     thread::spawn(move || {
         for step in 1..=RISE_STEPS {
@@ -358,12 +367,13 @@ mod tests {
 
     #[test]
     fn the_frame_is_the_size_the_page_lays_out() {
-        // pill.css lays the panel out at exactly these logical pixels, and the
-        // window cannot be resized once it is up. A frame and a layout that
-        // drift apart are a clipped pill or a black margin around it, so the
-        // numbers are pinned here rather than only derived from themselves.
-        assert_eq!(WIDTH, 640.0);
-        assert_eq!(HEIGHT, 76.0);
+        // pill.css lays the orb and its reserved timer row out at exactly these
+        // logical pixels, and the window cannot be resized once it is up. A
+        // frame and a layout that drift apart are a clipped orb or a black
+        // margin around it, so the numbers are pinned here rather than only
+        // derived from themselves.
+        assert_eq!(WIDTH, 76.0);
+        assert_eq!(HEIGHT, 92.0);
     }
 
     #[test]
@@ -401,11 +411,11 @@ mod tests {
 
     #[test]
     fn a_monitor_smaller_than_the_pill_never_places_it_off_screen() {
-        let position = bottom_center(0, 0, 320, 120, 1.0);
+        let position = bottom_center(0, 0, 60, 40, 1.0);
         assert_eq!(position.x, 0);
         assert_eq!(position.y, 0);
         assert_eq!(
-            bottom_center(40, 60, 320, 120, 1.0),
+            bottom_center(40, 60, 60, 40, 1.0),
             PhysicalPosition::new(40, 60)
         );
     }

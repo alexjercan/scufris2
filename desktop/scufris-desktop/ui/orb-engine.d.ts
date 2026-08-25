@@ -64,7 +64,7 @@ interface OrbEngine {
     OrbMode,
     (size: number, t: number, opts: OrbOpts) => OrbFrame
   >;
-  /** Only 64 and 20 are tuned; the pill draws the 20 preset at 36 px. */
+  /** Only 64 and 20 are tuned; the pill draws the 64 preset at its own size. */
   resolvePreset(state: OrbEngineState, size: 64 | 20): OrbResolved;
 }
 

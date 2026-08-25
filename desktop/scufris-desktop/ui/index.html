@@ -8,28 +8,21 @@
   <body>
     <main id="pill" class="pill" data-state="idle">
       <div class="orb">
-        <canvas id="orb" width="36" height="36" aria-hidden="true"></canvas>
-      </div>
-      <canvas
-        id="wave"
-        class="wave"
-        width="76"
-        height="30"
-        aria-hidden="true"
-      ></canvas>
-      <div class="body">
-        <p id="label" class="label">Scufris</p>
-        <input
-          id="transcript"
-          class="transcript"
-          type="text"
-          autocomplete="off"
-          spellcheck="false"
-          hidden
-        />
-        <p id="detail" class="detail"></p>
+        <canvas id="orb" width="64" height="64" aria-hidden="true"></canvas>
       </div>
       <p id="timer" class="timer"></p>
+      <!-- The transcript the person edits. It has no place on a bare orb, but
+           it is still what holds the words and the caret, so it stays here,
+           invisible and focusable, and the review window mirrors it. -->
+      <input
+        id="transcript"
+        class="transcript"
+        type="text"
+        autocomplete="off"
+        spellcheck="false"
+        aria-label="Transcript"
+        hidden
+      />
     </main>
     <script src="orb-engine.js"></script>
     <script src="pill.js"></script>

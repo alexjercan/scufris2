@@ -17,8 +17,10 @@ import {
   TERMINAL_OWNERSHIP_STATES,
   toolBatchAllowsAction,
   wakeModeFromEntries,
+  workerAttentionSignal,
   workerEventWakes,
 } from "../extensions/scufris/workflow/orchestration.ts";
+import { ATTENTION_STATE_EVENT } from "../extensions/scufris/shared/assistant-state.ts";
 import {
   WORKER_REPORT_EVENTS,
   WORKER_REPORT_TOOL,
@@ -217,6 +219,32 @@ test("wake mode restores the latest valid session entry", () => {
   );
 });
 
+test("worker attention signals name the job and clear on ordinary progress", () => {
+  const job = { job_id: "abcdef123456", project: "personal/scufris2" };
+  assert.deepEqual(
+    workerAttentionSignal(job as never, {
+      type: "blocked",
+      value: "needs mediation",
+    }),
+    {
+      state: "attention",
+      detail: "Job abcdef123456 is blocked: needs mediation",
+    },
+  );
+  assert.deepEqual(
+    workerAttentionSignal(job as never, { type: "failed", value: "crashed" }),
+    { state: "error", detail: "Job abcdef123456 failed: crashed" },
+  );
+  for (const type of ["working", "done"] as const)
+    assert.deepEqual(
+      workerAttentionSignal(job as never, { type, value: "x" }),
+      {
+        state: "clear",
+        detail: "",
+      },
+    );
+});
+
 test("orchestration delivers exact worker wakes and quiet progress by mode", () => {
   const job = {
     job_id: "abcdef123456",
@@ -232,7 +260,13 @@ test("orchestration delivers exact worker wakes and quiet progress by mode", () 
   for (const mode of ["minimal", "all"] as const) {
     const messages: Array<{ message: any; options: any }> = [];
     const notices: Array<{ message: string; type: string }> = [];
+    const signals: any[] = [];
     const pi = {
+      events: {
+        emit(event: string, value: any) {
+          if (event === ATTENTION_STATE_EVENT) signals.push(value);
+        },
+      },
       sendMessage(message: any, options: any) {
         messages.push({ message, options });
       },
@@ -277,6 +311,20 @@ test("orchestration delivers exact worker wakes and quiet progress by mode", () 
       assert.match(message.content, new RegExp(message.details.event));
       assert.match(message.content, /call scufris_final_response/);
     }
+    // Every mode reports the same tray state, because attention and failure do
+    // not depend on whether the event also wakes the foreground.
+    assert.deepEqual(signals, [
+      { state: "clear", detail: "" },
+      {
+        state: "attention",
+        detail: "Job abcdef123456 is blocked: needs mediation",
+      },
+      { state: "clear", detail: "" },
+      {
+        state: "error",
+        detail: "Job abcdef123456 failed: worker harness exited unexpectedly",
+      },
+    ]);
     assert.deepEqual(
       notices,
       mode === "minimal"

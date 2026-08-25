@@ -1,6 +1,6 @@
 # Add scufris-desktop: voice HUD pill, tray, and conversation shell
 
-- STATUS: OPEN
+- STATUS: IN_PROGRESS
 - PRIORITY: 100
 - TAGS: voice, desktop, hud, tray
 
@@ -106,8 +106,15 @@ serves it; only the popup role opens the socket.
   `{"v":1,"type":"ping"}`.
 - daemon -> companion: `{"v":1,"type":"welcome","session":"..."}`,
   `{"v":1,"type":"ack","id":"..."}`,
+  `{"v":1,"type":"uncertain","id":"...","detail":"..."}` (dispatched
+  once already, outcome unknown),
+  `{"v":1,"type":"refused","id":"...","detail":"..."}` (nothing left
+  the daemon, so the words are still the companion's to edit and
+  retry),
   `{"v":1,"type":"state","state":"idle|working|speaking|attention|error","detail":"..."}`,
   `{"v":1,"type":"pong"}`.
+- Every answer about a submission names it, and the companion applies
+  an answer only to the submission it names.
 - Listening and transcribing are companion-local states; the daemon
   never sees audio. Unknown message types are rejected, not ignored.
 - If Whisper fails, nothing is submitted. If the daemon is unreachable
@@ -164,3 +171,86 @@ serves it; only the popup role opens the socket.
 - scufris-desktop builds as its own flake package from the `desktop/`
   workspace and works with either a configured STT endpoint or the
   bundled whisper-server.
+
+## Implementation (v1)
+
+V1 is implemented. See `DECISIONS.md` for the choices taken while building it
+and `VERIFICATION.md` for what each verification item above is covered by.
+
+What landed:
+
+- `desktop/`: a cargo workspace with `scufris-control` (the control protocol)
+  and `scufris-desktop` (the Tauri pill and tray companion).
+- `extensions/scufris/desktop/`: the daemon half of the protocol, served by the
+  popup process only.
+- `extensions/scufris/shared/assistant-state.ts`: the assistant state model,
+  fed by signals from `voice/speech.ts` and `workflow/orchestration.ts`.
+- `nix/desktop.nix`, `nix/whisper.nix`, and Home Manager options for the
+  companion, the STT endpoint, and the bundled whisper-server.
+- `docs/src/dev/desktop.md` plus user-guide and installation sections.
+
+Twelve rounds of independent review found thirty-nine material failure-path
+defects. All are fixed, each with a test that fails without its fix:
+
+- An accepted transcript is on disk before anything is submitted, and storage
+  failures stop the submission instead of being logged.
+- Capture errors are scoped to the capture that raised them.
+- One transcript keeps one identifier, drawn from the operating system's
+  randomness, and a discard is final.
+- A spoken prompt is an ordinary prompt. It is submitted with
+  `sendUserMessage`, so it runs the same input handlers, the same pre-send
+  compaction check, and the same per-turn Scufris system prompt a typed prompt
+  runs, and it steers into a running turn the same way.
+- An acknowledgment means the session holds this exact submission. Pi announces
+  a prompt from inside the send that started it, so the asynchronous context -
+  not the source class, which is `extension` for every extension alike -
+  identifies this daemon's own prompt. A landing is credited only when that
+  announcement was the only prompt in flight and landed as the words the
+  companion submitted.
+- A credited landing is committed against the entry it accepted, by that entry's
+  own identifier, so reconciliation checks the prompt the commit names rather
+  than whatever sits beside it. A branch taken at a prompt, and a crash between
+  two appends, both leave records that adjacency would have believed.
+- The entry a commit names is the entry that landing became, not whatever
+  resembles it. Pi appends a prompt as a child of the leaf it holds while the
+  extensions see the event, so the commit is written against the prompt that
+  fills that place - and only while no other prompt has landed since, and only
+  while that place is still on the branch. A session that is replaced cancels
+  the commit outright.
+- A submission the daemon refused before anything left it is answered as
+  refused, naming that submission. Those words are still only the companion's,
+  so they stay editable and an ordinary Enter retries them, rather than
+  freezing behind the confirmation an uncertain outcome needs.
+- A session says accepted, uncertain, or unsent. A submission that was
+  dispatched and never committed may already have run, so nothing sends it
+  again on its own - not the landing timeout, not a reset, not a daemon
+  restart, not an ordinary Enter. The pill keeps and shows it, offers copy and
+  discard, and sends it only after telling the person what that could repeat.
+- A body the session does not hold under a known identifier is refused, whether
+  or not that identifier is still in the daemon's bounded remembered set.
+- Socket ownership is serialized by the kernel. The claim section is held under
+  an advisory exclusive lock on the lock file beside the socket, so it covers
+  every name that reaches that pathname and every process that shares the
+  filesystem, whatever network namespace it is in. It cannot be stale, needs no
+  lease, and leaves nothing to unlink. Every mutation of the socket pathname,
+  including the one shutdown performs, is carried out by the process holding
+  that lock, so a daemon whose lock is gone changes nothing.
+- Handing a transcript to the daemon gives the desktop back at once. The pill
+  reopens by itself if that submission is refused or its outcome turns out to
+  be unknown.
+- The change that ran last owns the window. A daemon answer can arrive while the
+  handoff that asked for it is still running, so where the pill belongs is read
+  from the phase each change leaves behind rather than from a list decided a
+  moment earlier. An answer that needs the person cannot be closed by the
+  handoff it overtook, and the pill cannot fall back to rendering a state that
+  has been left behind.
+- The transcript bound is 8 KiB of UTF-8 bytes on both sides, validated before
+  persisting and before sending, so non-ASCII text that is accepted can also be
+  recovered.
+
+Nothing here is claimed beyond what a listed test exercises; the remaining
+limits are stated in `VERIFICATION.md` and `docs/src/dev/desktop.md`.
+
+Still open before this task closes: the live playtesting listed at the end of
+`VERIFICATION.md`. It needs a real desktop session, microphone, speaker, and a
+running backend, which the implementation workspace does not have.

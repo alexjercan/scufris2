@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { SPEECH_STATE_EVENT } from "../extensions/scufris/shared/assistant-state.ts";
 import speech, {
   extractSpokenParagraph,
   lastSafeAssistantParagraph,
@@ -70,7 +71,13 @@ function harness(playback: FakePlayback, mode = "tui") {
   const commands = new Map<string, { handler: Handler }>();
   const entries: any[] = [];
   const notices: Array<{ message: string; type: string }> = [];
+  const speechSignals: boolean[] = [];
   const api = {
+    events: {
+      emit(event: string, value: any) {
+        if (event === SPEECH_STATE_EVENT) speechSignals.push(value.playing);
+      },
+    },
     on(event: string, handler: Handler) {
       const eventHandlers = handlers.get(event) ?? [];
       eventHandlers.push(handler);
@@ -107,6 +114,7 @@ function harness(playback: FakePlayback, mode = "tui") {
     entries,
     notices,
     commands,
+    speechSignals,
     async emit(event: string, value: unknown = {}) {
       let result: unknown;
       for (const handler of handlers.get(event) ?? []) {
@@ -318,6 +326,12 @@ test("ordinary and extension-triggered turns each speak only their settled respo
       "The ordinary response is settled and safe.",
       ...wakes.map((wake) => wake.response),
     ]);
+    // Every played paragraph raises and clears the speaking state the desktop
+    // tray shows, so no run leaves the companion stuck on "speaking".
+    assert.deepEqual(
+      app.speechSignals.slice(-2 * (wakes.length + 1)),
+      Array.from({ length: wakes.length + 1 }, () => [true, false]).flat(),
+    );
   } finally {
     if (originalRole === undefined) delete process.env.SCUFRIS_ROLE;
     else process.env.SCUFRIS_ROLE = originalRole;

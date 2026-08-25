@@ -6,9 +6,11 @@
   scufris,
 }: let
   fixtures = import ./fixtures.nix {inherit pkgs;};
-  args = {inherit inputs self pkgs scufris fixtures;};
+  homes = import ./homes.nix {inherit inputs self pkgs fixtures;};
+  args = {inherit inputs self pkgs scufris fixtures homes;};
 in
   import ./launcher.nix args
   // import ./resources.nix args
   // import ./home.nix args
   // import ./voice.nix args
+  // import ./desktop.nix args

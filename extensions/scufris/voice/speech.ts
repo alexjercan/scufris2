@@ -5,6 +5,10 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import {
+  SPEECH_STATE_EVENT,
+  type SpeechStateSignal,
+} from "../shared/assistant-state.ts";
 import { plainProseParagraph } from "./response.ts";
 
 const speechHelperPath = fileURLToPath(
@@ -295,8 +299,13 @@ export default function speech(
     } satisfies SpeechStateEntry);
   };
 
+  const announceSpeech = (playing: boolean) => {
+    pi.events.emit(SPEECH_STATE_EVENT, { playing } satisfies SpeechStateSignal);
+  };
+
   const cancelPlayback = async () => {
     playbackGeneration += 1;
+    announceSpeech(false);
     await playback.cancel();
   };
 
@@ -320,8 +329,15 @@ export default function speech(
   const play = (paragraph: string, context: ExtensionContext) => {
     const generation = ++playbackGeneration;
     const session = sessionGeneration;
+    const finish = () => {
+      if (generation === playbackGeneration && session === sessionGeneration) {
+        announceSpeech(false);
+      }
+    };
+    announceSpeech(true);
     void playback.play(paragraph).then(
       () => {
+        finish();
         if (
           generation === playbackGeneration &&
           session === sessionGeneration
@@ -329,7 +345,10 @@ export default function speech(
           missingResponseWarned = false;
         }
       },
-      (error) => notifyPlaybackError(error, context, generation, session),
+      (error) => {
+        finish();
+        notifyPlaybackError(error, context, generation, session);
+      },
     );
   };
 

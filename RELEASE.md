@@ -14,6 +14,7 @@ Use this process for a stable `vX.Y.Z` release.
    ruff check .
    ruff format --check .
    shellcheck scripts/scufris-dev
+   (cd desktop && cargo clippy --all-targets -- -D warnings && cargo test)
    nix fmt -- --check .
    nix flake check -L
    git diff --check

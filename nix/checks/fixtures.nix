@@ -19,6 +19,7 @@
     printf '%s\n' \
       "speech=''${SCUFRIS_SPEECH-}" \
       "calm=''${SCUFRIS_CALM-}" \
+      "daemon=''${SCUFRIS_DAEMON-}" \
       "model=''${SCUFRIS_PIPER_MODEL-}" \
       "config=''${SCUFRIS_PIPER_CONFIG-}" \
       "stt=''${PI_STT_CONFIG-}"

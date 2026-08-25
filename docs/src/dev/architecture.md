@@ -5,8 +5,11 @@
 Repository ownership follows the runtime architecture:
 
 - `extensions/scufris/` contains the Pi extensions: `workflow/`, `voice/`,
-  `dashboard/`, and the small independent `calm.ts`. Extensions own lifecycle
-  events, native tools, session state, and notifications.
+  `dashboard/`, `desktop/`, and the small independent `calm.ts`. Extensions own
+  lifecycle events, native tools, session state, and notifications.
+- `desktop/` is a cargo workspace holding `scufris-control`, the desktop control
+  protocol, and `scufris-desktop`, the Tauri voice pill and tray companion. It
+  ships as its own flake package. See [Desktop companion](desktop.md).
 - `tools/` contains deterministic executables called by extensions:
   `jobs/scufris-jobs`, `jobs/scufris-report`,
   `quick-review-agent/scufris-quick-review-agent`,
@@ -17,10 +20,10 @@ Repository ownership follows the runtime architecture:
 - `skills/` contains the distributed model-facing `workflow` and `dashboard`
   skills. Development-only skills live in `.agents/skills/`.
 - `nix/` contains one file per build concern: `resources.nix`, `launcher.nix`,
-  `popup.nix`, `voice.nix`, `dev-shell.nix`, `docs.nix`, and
-  `home-manager.nix`. `nix/scufris.nix` composes them into the component set
-  for one system, `nix/checks/` asserts that composition, and `flake.nix`
-  only selects the outputs.
+  `popup.nix`, `voice.nix`, `desktop.nix`, `whisper.nix`, `dev-shell.nix`,
+  `docs.nix`, and `home-manager.nix`. `nix/scufris.nix` composes them into the
+  component set for one system, `nix/checks/` asserts that composition, and
+  `flake.nix` only selects the outputs.
 
 Keep orchestration narrow. Extensions route and validate; deterministic
 process and filesystem work lives in the small owning helper scripts.
@@ -96,6 +99,8 @@ shape with text on stdin and exit codes instead of JSON.
   completion root for its standalone review.
 - `$XDG_STATE_HOME/scufris/dev-sessions/` holds resumable development
   sessions; the popup uses its configured session directory.
+- `$XDG_RUNTIME_DIR/scufris/daemon.sock` is the desktop control socket. Only the
+  popup process opens it, and only for the current user.
 
 ## Package composition
 
@@ -113,8 +118,13 @@ shell application that:
 3. Prefers a system `pi` from `PATH` and falls back to the pinned flake Pi.
 4. Passes `--extension` and `--skill` flags pointing into the resources.
 
-The Home Manager module renders the same launcher from its options and adds
-the optional popup service. The check groups under `nix/checks/` assert the
-exact rendered arguments (`launcher.nix`), the distributed files
-(`resources.nix`), the module interface (`home.nix`), and closure separation
-with a real Piper synthesis fixture (`voice.nix`).
+The Home Manager module renders the same launcher from its options and adds the
+optional popup, desktop companion, and bundled whisper-server services. The
+check groups under `nix/checks/` assert the exact rendered arguments
+(`launcher.nix`), the distributed files (`resources.nix`), the module interface
+(`home.nix`), closure separation with a real Piper synthesis fixture
+(`voice.nix`), and the resolved companion configuration (`desktop.nix`).
+
+`scufris-desktop` is built from the `desktop/` cargo workspace by
+`nix/desktop.nix` as a separate package output. It is absent from the default
+and voice launcher closures, which the desktop closure check enforces.

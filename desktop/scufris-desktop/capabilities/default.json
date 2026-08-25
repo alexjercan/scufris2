@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Pill window access to Scufris companion commands and events.",
+  "windows": ["pill"],
+  "permissions": ["core:default"]
+}

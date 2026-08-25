@@ -21,6 +21,8 @@ assert !voice || (piperPackage != null && piperModel != null && piperConfig != n
       "${resources}/share/scufris/extensions/scufris/voice/index.ts"
       "--extension"
       "${resources}/share/scufris/extensions/scufris/calm.ts"
+      "--extension"
+      "${resources}/share/scufris/extensions/scufris/desktop/index.ts"
     ]
     ++ pkgs.lib.optionals dashboard [
       "--extension"

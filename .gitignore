@@ -7,3 +7,5 @@ docs/book/
 .direnv/
 .env
 *.log
+desktop/target/
+desktop/scufris-desktop/gen/

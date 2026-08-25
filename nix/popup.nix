@@ -18,6 +18,7 @@ in
       install -d -m 0700 ${lib.escapeShellArg sessionDirectory}
       export SCUFRIS_SPEECH=1
       export SCUFRIS_CALM=1
+      export SCUFRIS_DAEMON=1
       export SCUFRIS_PIPER_MODEL=${lib.escapeShellArg (toString piperModel)}
       export SCUFRIS_PIPER_CONFIG=${lib.escapeShellArg (toString piperConfig)}
 

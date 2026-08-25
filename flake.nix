@@ -52,6 +52,7 @@
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             scufris-voice = scufris.voiceLauncher;
+            scufris-desktop = scufris.desktop;
           };
 
         apps =
@@ -67,6 +68,11 @@
               type = "app";
               program = "${scufris.voiceLauncher}/bin/scufris";
               meta.description = "Run voice-capable Scufris without enabling speech by default";
+            };
+            scufris-desktop = {
+              type = "app";
+              program = "${scufris.desktop}/bin/scufris-desktop";
+              meta.description = "Run the Scufris voice pill and tray companion";
             };
           };
 
@@ -84,6 +90,7 @@
             voiceResources = self.packages.${system}.voice-resources;
             piPackage = inputs.llm-agents.packages.${system}.pi;
             dashboardctlPackage = inputs.dashboardd.packages.${system}.dashboardd-desktop;
+            desktopPackage = self.packages.${system}.scufris-desktop;
           };
         };
       };

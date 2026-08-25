@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>Scufris</title>
+  <circle cx="32" cy="32" r="22" fill="#3b8be0" />
+  <circle cx="32" cy="32" r="28" fill="none" stroke="#f2f4f8" stroke-width="4" />
+</svg>

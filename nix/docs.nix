@@ -27,7 +27,8 @@
     != []
     && lib.all (lib.hasPrefix "programs.scufris") optionNames
     && builtins.hasAttr "programs.scufris.enable" optionDocs.optionsNix
-    && builtins.hasAttr "programs.scufris.voice.popup.enable" optionDocs.optionsNix;
+    && builtins.hasAttr "programs.scufris.voice.popup.enable" optionDocs.optionsNix
+    && builtins.hasAttr "programs.scufris.desktop.enable" optionDocs.optionsNix;
 in
   assert optionScopeIsExact;
     pkgs.stdenvNoCC.mkDerivation {

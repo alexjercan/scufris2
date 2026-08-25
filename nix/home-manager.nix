@@ -8,6 +8,25 @@
   system = pkgs.stdenv.hostPlatform.system;
   defaults = defaultsFor system;
   voiceRuntime = import ./voice.nix {inherit pkgs;};
+  whisperRuntime = import ./whisper.nix {inherit pkgs;};
+  desktopCfg = cfg.desktop;
+  whisperCfg = desktopCfg.stt.whisper;
+  bundledEndpoint = "http://${whisperCfg.host}:${toString whisperCfg.port}${whisperRuntime.inferencePath}";
+  resolvedEndpoint =
+    if desktopCfg.stt.endpoint != null
+    then desktopCfg.stt.endpoint
+    else bundledEndpoint;
+  # The companion may only restart the backend service this module owns, so the
+  # hook is generated here instead of accepting a command from the model or the
+  # environment.
+  backendRestart = pkgs.writeShellApplication {
+    name = "scufris-restart-backend";
+    runtimeInputs = [pkgs.systemd];
+    text = ''
+      exec systemctl --user restart ${lib.escapeShellArg "${cfg.voice.popup.serviceName}.service"}
+    '';
+    meta.mainProgram = "scufris-restart-backend";
+  };
   launcher = import ./launcher.nix {
     inherit pkgs;
     resources =
@@ -138,11 +157,115 @@ in {
         };
       };
     };
+
+    desktop = {
+      enable = lib.mkEnableOption "the scufris-desktop voice pill and tray companion";
+
+      package = lib.mkOption {
+        type = lib.types.package;
+        default = defaults.desktopPackage;
+        defaultText = lib.literalExpression "self.packages.\${system}.scufris-desktop";
+        description = "scufris-desktop companion package.";
+      };
+
+      hotkey = lib.mkOption {
+        type = lib.types.strMatching "[A-Za-z0-9+]+";
+        default = "Super+D";
+        description = "Accelerator that opens the pill and starts recording.";
+      };
+
+      chatCommand = lib.mkOption {
+        type = lib.types.nullOr lib.types.package;
+        default = null;
+        description = ''
+          Executable that opens the full popup chat from the tray. Scufris ships
+          no window manager, so the desktop session supplies this hook.
+        '';
+      };
+
+      stt = {
+        endpoint = lib.mkOption {
+          type = lib.types.nullOr (lib.types.strMatching "https?://.*");
+          default = null;
+          description = ''
+            whisper-server-compatible transcription endpoint. When null the
+            bundled loopback whisper-server provides one.
+          '';
+        };
+
+        whisper = {
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = desktopCfg.stt.endpoint == null;
+            defaultText = lib.literalExpression "programs.scufris.desktop.stt.endpoint == null";
+            description = "Run the bundled loopback whisper-server for the companion.";
+          };
+
+          package = lib.mkOption {
+            type = lib.types.package;
+            default = whisperRuntime.package;
+            defaultText = lib.literalExpression "pkgs.whisper-cpp";
+            description = "whisper.cpp package that provides whisper-server.";
+          };
+
+          model = lib.mkOption {
+            type = lib.types.package;
+            default = whisperRuntime.model;
+            defaultText = lib.literalExpression "the pinned ggml-base model";
+            description = "Pinned whisper.cpp GGML model.";
+          };
+
+          host = lib.mkOption {
+            type = lib.types.enum ["127.0.0.1"];
+            default = whisperRuntime.host;
+            description = "Loopback address for the bundled whisper-server.";
+          };
+
+          port = lib.mkOption {
+            type = lib.types.port;
+            default = whisperRuntime.port;
+            description = "Loopback port for the bundled whisper-server.";
+          };
+
+          serviceName = lib.mkOption {
+            type = lib.types.str;
+            default = "scufris-whisper";
+            readOnly = true;
+            description = "Stable systemd user service identity for the bundled whisper-server.";
+          };
+        };
+      };
+
+      endpoint = lib.mkOption {
+        type = lib.types.str;
+        readOnly = true;
+        description = "Transcription endpoint the companion actually uses.";
+      };
+
+      serviceName = lib.mkOption {
+        type = lib.types.str;
+        default = "scufris-desktop";
+        readOnly = true;
+        description = "Stable systemd user service identity for desktop consumers, without the unit suffix.";
+      };
+
+      restartCommand = lib.mkOption {
+        type = lib.types.package;
+        readOnly = true;
+        description = "Generated hook that restarts only the Scufris backend service this module owns.";
+      };
+    };
   };
 
   config = lib.mkMerge [
     {
-      programs.scufris.finalPackage = launcher;
+      programs.scufris = {
+        finalPackage = launcher;
+        desktop = {
+          endpoint = resolvedEndpoint;
+          restartCommand = backendRestart;
+        };
+      };
     }
     (lib.mkIf cfg.enable {
       assertions = [
@@ -180,6 +303,81 @@ in {
           Restart = "no";
           WorkingDirectory = "%h";
         };
+      };
+    })
+    (lib.mkIf (cfg.enable && desktopCfg.enable) {
+      assertions = [
+        (lib.hm.assertions.assertPlatform "programs.scufris.desktop" pkgs lib.platforms.linux)
+        {
+          assertion = cfg.voice.popup.enable;
+          message = "programs.scufris.desktop.enable requires programs.scufris.voice.popup.enable, because the popup Pi process serves the control socket";
+        }
+        {
+          assertion = !(desktopCfg.stt.endpoint != null && whisperCfg.enable);
+          message = "programs.scufris.desktop.stt.endpoint conflicts with programs.scufris.desktop.stt.whisper.enable";
+        }
+      ];
+
+      home.packages = [desktopCfg.package];
+
+      systemd.user.services.${desktopCfg.serviceName} = {
+        Unit = {
+          Description = "Scufris voice pill and tray companion";
+          PartOf = ["graphical-session.target"];
+          After = ["graphical-session.target"];
+        };
+        Service = {
+          Type = "simple";
+          ExecStart = lib.getExe desktopCfg.package;
+          Environment =
+            [
+              "SCUFRIS_STT_ENDPOINT=${resolvedEndpoint}"
+              "SCUFRIS_DESKTOP_HOTKEY=${desktopCfg.hotkey}"
+              "SCUFRIS_DESKTOP_RESTART_COMMAND=${lib.getExe backendRestart}"
+            ]
+            ++ lib.optional (desktopCfg.chatCommand != null)
+            "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe desktopCfg.chatCommand}";
+          # The companion must survive its own faults; a backend crash is
+          # reported in the tray instead of taking the companion down.
+          Restart = "on-failure";
+          RestartSec = 3;
+          # Holds the accepted transcript that has not been acknowledged, so a
+          # companion restart resumes with it instead of losing it.
+          StateDirectory = desktopCfg.serviceName;
+          WorkingDirectory = "%h";
+        };
+        Install.WantedBy = ["graphical-session.target"];
+      };
+    })
+    (lib.mkIf (cfg.enable && desktopCfg.enable && whisperCfg.enable) {
+      systemd.user.services.${whisperCfg.serviceName} = {
+        Unit = {
+          Description = "Bundled loopback whisper.cpp server for Scufris";
+          After = ["network.target"];
+        };
+        Service = {
+          Type = "simple";
+          ExecStart = lib.escapeShellArgs [
+            (lib.getExe' whisperCfg.package "whisper-server")
+            "--model"
+            (toString whisperCfg.model)
+            "--host"
+            whisperCfg.host
+            "--port"
+            (toString whisperCfg.port)
+            "--inference-path"
+            whisperRuntime.inferencePath
+            "--language"
+            "auto"
+          ];
+          Restart = "no";
+          RuntimeDirectory = whisperCfg.serviceName;
+          WorkingDirectory = "%t/${whisperCfg.serviceName}";
+          NoNewPrivileges = true;
+          PrivateTmp = true;
+          ProtectSystem = "strict";
+        };
+        Install.WantedBy = ["default.target"];
       };
     })
   ];

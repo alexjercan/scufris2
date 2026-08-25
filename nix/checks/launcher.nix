@@ -35,6 +35,8 @@ in
         --extension
         ${resources}/share/scufris/extensions/scufris/calm.ts
         --extension
+        ${resources}/share/scufris/extensions/scufris/desktop/index.ts
+        --extension
         ${resources}/share/scufris/extensions/scufris/dashboard/index.ts
         --skill
         ${resources}/share/scufris/skills/dashboard
@@ -77,6 +79,8 @@ in
         ${voiceResources}/share/scufris/extensions/scufris/voice/index.ts
         --extension
         ${voiceResources}/share/scufris/extensions/scufris/calm.ts
+        --extension
+        ${voiceResources}/share/scufris/extensions/scufris/desktop/index.ts
         --extension
         ${voiceResources}/share/scufris/extensions/scufris/dashboard/index.ts
         --skill

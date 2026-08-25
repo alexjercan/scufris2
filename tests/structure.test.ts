@@ -24,6 +24,7 @@ test("package loads only capability-owned Scufris extensions", async () => {
     "./extensions/scufris/voice/index.ts",
     "./extensions/scufris/calm.ts",
     "./extensions/scufris/dashboard/index.ts",
+    "./extensions/scufris/desktop/index.ts",
   ]);
 
   const files = await typeScriptFiles(join(root, "extensions", "scufris"));

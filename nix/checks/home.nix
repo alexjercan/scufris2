@@ -1,39 +1,14 @@
 # The Home Manager module activates, rejects an unsupported popup, and keeps a
 # stable read-only interface for desktop consumers.
 {
-  inputs,
-  self,
   pkgs,
   fixtures,
+  homes,
   ...
 }: let
   inherit (pkgs) lib;
-  inherit (fixtures) systemPi testTerminal;
-  mkHome = {
-    settings ? {},
-    modules ? [],
-  }:
-    inputs.home-manager.lib.homeManagerConfiguration {
-      inherit pkgs;
-      modules =
-        [
-          self.homeModules.default
-          {
-            home = {
-              username = "scufris-test";
-              homeDirectory = "/home/scufris-test";
-              stateVersion = "25.05";
-            };
-            programs.scufris = {
-              enable = true;
-              piPackage = systemPi;
-              dashboard.enable = false;
-            };
-          }
-          {programs.scufris = settings;}
-        ]
-        ++ modules;
-    };
+  inherit (fixtures) testTerminal;
+  inherit (homes) mkHome;
   normalHome = mkHome {};
   invalidPopupHome = mkHome {settings.voice.popup.enable = true;};
   invalidPopupEvaluation = builtins.tryEval (builtins.deepSeq invalidPopupHome.activationPackage true);
@@ -92,6 +67,7 @@ in
         cat > expected <<'EOF'
         speech=1
         calm=1
+        daemon=1
         model=${voiceConfig.programs.scufris.voice.piper.model}
         config=${voiceConfig.programs.scufris.voice.piper.config}
         stt=/trusted/pi-voice-stt.json

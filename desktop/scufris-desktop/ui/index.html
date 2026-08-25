@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Scufris</title>
+    <link rel="stylesheet" href="pill.css" />
+  </head>
+  <body>
+    <main id="pill" class="pill" data-state="idle">
+      <div class="orb">
+        <span class="record"></span><span class="wave"></span>
+      </div>
+      <div class="body">
+        <p id="label" class="label">Scufris</p>
+        <input
+          id="transcript"
+          class="transcript"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          hidden
+        />
+        <p id="detail" class="detail"></p>
+      </div>
+      <p id="timer" class="timer"></p>
+    </main>
+    <script src="pill.js"></script>
+  </body>
+</html>

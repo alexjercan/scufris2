@@ -11,6 +11,7 @@
 
 - [Architecture](dev/architecture.md)
 - [Extensions](dev/extensions.md)
+- [Desktop companion](dev/desktop.md)
 - [Jobs](dev/jobs.md)
 - [Messaging](dev/messaging.md)
 - [Tmux](dev/tmux.md)

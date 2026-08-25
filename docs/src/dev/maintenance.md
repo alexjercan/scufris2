@@ -24,6 +24,19 @@ npm run dev:voice   # requires the repository development shell
 system Pi runs, sets the orchestrator role and default project roots, and
 passes the working-tree extensions and skills.
 
+To exercise the desktop companion against a working-tree backend, run that
+backend in the popup's daemon role so it serves the control socket, then start
+the companion against the same runtime directory:
+
+```bash
+SCUFRIS_DAEMON=1 npm run dev          # the backend that answers the pill
+cargo run --manifest-path desktop/scufris-desktop/Cargo.toml   # the companion
+```
+
+The daemon role is what opens `$XDG_RUNTIME_DIR/scufris/daemon.sock`; without
+it the desktop extension loads and does nothing, and the companion reports the
+backend as unavailable. Both processes must see the same `XDG_RUNTIME_DIR`.
+
 ## Checks
 
 Run the cheapest relevant check first: `npm run check` for TypeScript

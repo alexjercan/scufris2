@@ -6,6 +6,7 @@
   pkgs,
   system,
 }: let
+  version = (builtins.fromJSON (builtins.readFile ../package.json)).version;
   voice = import ./voice.nix {inherit pkgs;};
   resources = import ./resources.nix {inherit pkgs;};
   voiceResources = import ./resources.nix {
@@ -25,6 +26,11 @@
     piperModel = voice.model;
     piperConfig = voice.config;
   };
+  desktop = import ./desktop.nix {
+    inherit pkgs version;
+    source = ../desktop;
+    lockFile = ../desktop/Cargo.lock;
+  };
   devShell = import ./dev-shell.nix {inherit pkgs voice;};
   docs = import ./docs.nix {inherit inputs self pkgs;};
 in {
@@ -36,6 +42,7 @@ in {
     dashboardctlPackage
     launcher
     voiceLauncher
+    desktop
     devShell
     docs
     ;

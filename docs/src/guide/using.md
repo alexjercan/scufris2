@@ -89,4 +89,40 @@ Explicit `/speech`, `/calm`, and `/wake` values are restored with the session.
 The ordinary voice-capable launcher stays silent until speech is enabled. The
 popup launcher starts with speech and Calm on and resumes its dedicated
 session. Enabled speech plays each safe settled response once, including
-automatic wake turns. Speech input is Pi configuration, not Scufris.
+automatic wake turns. Speech input inside the popup is Pi configuration, not
+Scufris.
+
+## The voice pill
+
+With the desktop companion installed, `Super+D` opens a small pill at the
+bottom of the screen and starts recording immediately. The desktop stays
+usable and visible around it.
+
+- `Enter` sends what you said. It transcribes, shows the sent text, and
+  submits without another confirmation.
+- `Super+D` again opens the transcript for editing instead. `Enter` sends the
+  edited text; `Escape` discards it.
+- `Escape` while recording discards the recording.
+
+Cancelling or sending gives focus back to the window you were using, and the
+pill closes as soon as the words are on their way. If transcription fails,
+nothing is sent and the pill says so. If Scufris refuses the transcript before
+it leaves the pill, the pill comes back with it and `Enter` tries again, so an
+accepted transcript is never lost.
+
+If the transcript leaves the pill and Scufris never confirms it, the pill comes
+back to say the outcome is unknown, and keeps the words. It does not send them again on its
+own, because the request may already have run and running it twice is not
+harmless. You choose: `Ctrl+C` copies the words, `Escape` discards them, and
+`Enter` tells you what sending again could repeat before a second `Enter` sends
+it anyway.
+
+Pill messages and their answers are part of the one conversation the popup
+shows. There is no second session.
+
+The tray icon carries the state: idle, recording, transcribing, working,
+speaking, needs you, and backend unavailable. Recording always shows the red
+privacy ring. Left-click opens the full chat. Right-click opens a menu that can
+start voice input, show what went wrong, restart an unavailable backend, and
+quit the companion. A backend crash leaves the tray running with an error
+state; a companion crash leaves the conversation running.

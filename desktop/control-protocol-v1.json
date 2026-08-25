@@ -1,0 +1,55 @@
+{
+  "comment": "Shared wire fixtures for desktop control protocol v1. The protocol is implemented once per side, so both suites read these exact lines: desktop/scufris-control/src/lib.rs and tests/desktop.test.ts.",
+  "canonical": {
+    "companion": [
+      "{\"v\":1,\"type\":\"hello\"}",
+      "{\"v\":1,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"open the tasks widget\"}",
+      "{\"v\":1,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"open the tasks widget\",\"force\":true}",
+      "{\"v\":1,\"type\":\"ping\"}"
+    ],
+    "daemon": [
+      "{\"v\":1,\"type\":\"welcome\",\"session\":\"popup-1\"}",
+      "{\"v\":1,\"type\":\"ack\",\"id\":\"pill-1\"}",
+      "{\"v\":1,\"type\":\"uncertain\",\"id\":\"pill-1\",\"detail\":\"the outcome is unknown\"}",
+      "{\"v\":1,\"type\":\"refused\",\"id\":\"pill-1\",\"detail\":\"the Scufris session is not ready\"}",
+      "{\"v\":1,\"type\":\"state\",\"state\":\"idle\",\"detail\":\"\"}",
+      "{\"v\":1,\"type\":\"state\",\"state\":\"working\",\"detail\":\"\"}",
+      "{\"v\":1,\"type\":\"state\",\"state\":\"speaking\",\"detail\":\"\"}",
+      "{\"v\":1,\"type\":\"state\",\"state\":\"attention\",\"detail\":\"job 1 is blocked\"}",
+      "{\"v\":1,\"type\":\"state\",\"state\":\"error\",\"detail\":\"the session is not ready\"}",
+      "{\"v\":1,\"type\":\"pong\"}"
+    ]
+  },
+  "tolerated": {
+    "companion": [
+      "{\"type\":\"ping\",\"v\":1}",
+      "{\"v\":1,\"type\":\"hello\",\"client\":\"scufris-desktop\"}"
+    ],
+    "daemon": [
+      "{\"v\":1,\"type\":\"state\",\"state\":\"idle\"}",
+      "{\"v\":1,\"type\":\"pong\",\"at\":\"later\"}",
+      "{\"v\":1,\"type\":\"refused\",\"id\":\"pill-1\"}"
+    ]
+  },
+  "rejected": {
+    "companion": [
+      "{\"v\":2,\"type\":\"hello\"}",
+      "{\"v\":0,\"type\":\"ping\"}",
+      "{\"type\":\"hello\"}",
+      "{\"v\":1,\"type\":\"mirror\",\"entries\":[]}",
+      "{\"v\":1,\"type\":\"welcome\",\"session\":\"popup-1\"}",
+      "{\"v\":1,\"type\":\"submit\",\"id\":\"pill 1\",\"text\":\"x\"}",
+      "{\"v\":1,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"   \"}",
+      "{\"v\":1,\"type\":\"submit\",\"id\":\"\",\"text\":\"x\"}",
+      "[]",
+      "not json"
+    ],
+    "daemon": [
+      "{\"v\":2,\"type\":\"pong\"}",
+      "{\"v\":1,\"type\":\"transcript\",\"text\":\"x\"}",
+      "{\"v\":1,\"type\":\"state\",\"state\":\"listening\",\"detail\":\"\"}",
+      "{\"v\":1,\"type\":\"hello\"}",
+      "{}"
+    ]
+  }
+}

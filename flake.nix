@@ -39,108 +39,52 @@
         ...
       }: let
         inherit (pkgs) lib;
-        mkResources = voice:
-          pkgs.runCommand "scufris-${lib.optionalString voice "voice-"}resources" {} ''
-            mkdir -p "$out/share/scufris"
-            cp -R ${./extensions} "$out/share/scufris/extensions"
-            cp -R ${./scripts} "$out/share/scufris/scripts"
-            cp -R ${./skills} "$out/share/scufris/skills"
-            cp -R ${./tools} "$out/share/scufris/tools"
-            chmod -R u+w "$out/share/scufris"
-            rm "$out/share/scufris/scripts/scufris-dev"
-            ${lib.optionalString (!voice) ''
-              rm "$out/share/scufris/extensions/scufris/voice/speech.ts"
-              rm -R "$out/share/scufris/tools/voice"
-            ''}
-          '';
-        resources = mkResources false;
-        voiceResources = mkResources true;
-        voice = import ./nix/voice.nix {inherit pkgs;};
-        docs = import ./nix/docs.nix {
-          inherit inputs self pkgs;
-        };
-        launcher = import ./nix/launcher.nix {
-          inherit pkgs resources;
-          piPackage = inputs.llm-agents.packages.${system}.pi;
-          dashboardctlPackage = inputs.dashboardd.packages.${system}.dashboardd-desktop;
-        };
-        voiceLauncher = import ./nix/launcher.nix {
-          inherit pkgs;
-          resources = voiceResources;
-          piPackage = inputs.llm-agents.packages.${system}.pi;
-          dashboardctlPackage = inputs.dashboardd.packages.${system}.dashboardd-desktop;
-          voice = true;
-          inherit (voice) piperPackage;
-          piperModel = voice.model;
-          piperConfig = voice.config;
-        };
-        devShell = pkgs.mkShell (
-          {
-            packages =
-              (with pkgs; [
-                bashInteractive
-                git
-                alejandra
-                mdbook
-                nodejs_22
-                python3
-                ruff
-                shellcheck
-                tmux
-              ])
-              ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [voice.piperPackage pkgs.pipewire];
-          }
-          // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-            SCUFRIS_DEV_VOICE = "1";
-            SCUFRIS_PIPER_MODEL = voice.model;
-            SCUFRIS_PIPER_CONFIG = voice.config;
-          }
-        );
+        scufris = import ./nix/scufris.nix {inherit inputs self pkgs system;};
       in {
         formatter = pkgs.alejandra;
 
         packages =
           {
-            default = launcher;
-            scufris = launcher;
-            inherit docs resources;
-            voice-resources = voiceResources;
+            default = scufris.launcher;
+            scufris = scufris.launcher;
+            inherit (scufris) docs resources;
+            voice-resources = scufris.voiceResources;
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-            scufris-voice = voiceLauncher;
+            scufris-voice = scufris.voiceLauncher;
           };
 
         apps =
           {
             default = {
               type = "app";
-              program = "${launcher}/bin/scufris";
+              program = "${scufris.launcher}/bin/scufris";
               meta.description = "Run Pi with Scufris";
             };
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             scufris-voice = {
               type = "app";
-              program = "${voiceLauncher}/bin/scufris";
+              program = "${scufris.voiceLauncher}/bin/scufris";
               meta.description = "Run voice-capable Scufris without enabling speech by default";
             };
           };
 
         checks =
-          import ./nix/checks.nix {
-            inherit inputs self pkgs system resources voiceResources launcher voiceLauncher voice devShell;
-          }
-          // {inherit docs;};
+          import ./nix/checks {inherit inputs self pkgs scufris;}
+          // {inherit (scufris) docs;};
 
-        devShells.default = devShell;
+        devShells.default = scufris.devShell;
       };
 
       flake = {
         homeModules.default = import ./nix/home-manager.nix {
-          resourcesFor = system: self.packages.${system}.resources;
-          voiceResourcesFor = system: self.packages.${system}.voice-resources;
-          piPackageFor = system: inputs.llm-agents.packages.${system}.pi;
-          dashboardctlPackageFor = system: inputs.dashboardd.packages.${system}.dashboardd-desktop;
+          defaultsFor = system: {
+            resources = self.packages.${system}.resources;
+            voiceResources = self.packages.${system}.voice-resources;
+            piPackage = inputs.llm-agents.packages.${system}.pi;
+            dashboardctlPackage = inputs.dashboardd.packages.${system}.dashboardd-desktop;
+          };
         };
       };
     };

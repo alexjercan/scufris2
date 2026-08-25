@@ -1,9 +1,4 @@
-{
-  resourcesFor,
-  voiceResourcesFor,
-  piPackageFor,
-  dashboardctlPackageFor,
-}: {
+{defaultsFor}: {
   config,
   lib,
   pkgs,
@@ -11,13 +6,14 @@
 }: let
   cfg = config.programs.scufris;
   system = pkgs.stdenv.hostPlatform.system;
+  defaults = defaultsFor system;
   voiceRuntime = import ./voice.nix {inherit pkgs;};
   launcher = import ./launcher.nix {
     inherit pkgs;
     resources =
       if cfg.voice.enable
-      then voiceResourcesFor system
-      else resourcesFor system;
+      then defaults.voiceResources
+      else defaults.resources;
     piPackage = cfg.piPackage;
     dashboardctlPackage = cfg.dashboard.dashboardctlPackage;
     dashboard = cfg.dashboard.enable;
@@ -44,7 +40,7 @@ in {
 
     piPackage = lib.mkOption {
       type = lib.types.package;
-      default = piPackageFor system;
+      default = defaults.piPackage;
       defaultText = lib.literalExpression "inputs.llm-agents.packages.${system}.pi";
       description = "Pi package used by the Scufris launcher.";
     };
@@ -70,7 +66,7 @@ in {
 
       dashboardctlPackage = lib.mkOption {
         type = lib.types.package;
-        default = dashboardctlPackageFor system;
+        default = defaults.dashboardctlPackage;
         defaultText = lib.literalExpression "inputs.dashboardd.packages.${system}.dashboardd-desktop";
         description = "Package that provides dashboardctl.";
       };

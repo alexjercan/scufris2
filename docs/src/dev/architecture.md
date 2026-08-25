@@ -16,8 +16,11 @@ Repository ownership follows the runtime architecture:
   development launcher `scufris-dev`.
 - `skills/` contains the distributed model-facing `workflow` and `dashboard`
   skills. Development-only skills live in `.agents/skills/`.
-- `nix/` contains the launcher, Home Manager module, popup, voice runtime,
-  docs, and check derivations composed by `flake.nix`.
+- `nix/` contains one file per build concern: `resources.nix`, `launcher.nix`,
+  `popup.nix`, `voice.nix`, `dev-shell.nix`, `docs.nix`, and
+  `home-manager.nix`. `nix/scufris.nix` composes them into the component set
+  for one system, `nix/checks/` asserts that composition, and `flake.nix`
+  only selects the outputs.
 
 Keep orchestration narrow. Extensions route and validate; deterministic
 process and filesystem work lives in the small owning helper scripts.
@@ -111,6 +114,7 @@ shell application that:
 4. Passes `--extension` and `--skill` flags pointing into the resources.
 
 The Home Manager module renders the same launcher from its options and adds
-the optional popup service. `nix/checks.nix` asserts the exact rendered
-arguments, closure separation, module interface, and a real Piper synthesis
-fixture.
+the optional popup service. The check groups under `nix/checks/` assert the
+exact rendered arguments (`launcher.nix`), the distributed files
+(`resources.nix`), the module interface (`home.nix`), and closure separation
+with a real Piper synthesis fixture (`voice.nix`).

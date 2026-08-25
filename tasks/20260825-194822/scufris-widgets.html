@@ -1,0 +1,1436 @@
+<title>Scufris Widgets</title>
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap"
+/>
+<style>
+  :root {
+    --bg: #181818;
+    --bg1: #1c1c1c;
+    --bg2: #282828;
+    --bg3: #453d41;
+    --bg4: #52494e;
+    --fg: #e4e4ef;
+    --fg1: #f4f4ff;
+    --yellow: #ffdd33;
+    --brown: #cc8c3c;
+    --quartz: #95a99f;
+    --niagara: #96a6c8;
+    --wisteria: #9e95c7;
+    --green: #73c936;
+    --red: #f43841;
+    --mono:
+      "Iosevka", "Iosevka Term", "JetBrains Mono", ui-monospace, monospace;
+  }
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 14.5px;
+    line-height: 1.65;
+  }
+  .wrap {
+    max-width: 1060px;
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    color: var(--fg1);
+  }
+  code {
+    color: var(--brown);
+    font-size: 0.92em;
+  }
+  a {
+    color: var(--niagara);
+  }
+  p {
+    max-width: 72ch;
+  }
+  ul {
+    max-width: 72ch;
+    list-style: none;
+  }
+  ul li {
+    padding-left: 18px;
+    position: relative;
+    margin-bottom: 6px;
+  }
+  ul li::before {
+    content: ">";
+    position: absolute;
+    left: 0;
+    color: var(--bg4);
+  }
+  ul li b,
+  p b {
+    color: var(--fg1);
+    font-weight: 700;
+  }
+
+  .mast {
+    padding: 64px 0 36px;
+    border-bottom: 1px solid var(--bg2);
+  }
+  .mast .kicker {
+    font-size: 12px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--quartz);
+    margin-bottom: 14px;
+  }
+  .mast h1 {
+    font-size: 34px;
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+  }
+  .mast .sub {
+    margin-top: 14px;
+    color: var(--fg);
+    max-width: 76ch;
+  }
+  .mast .sub em {
+    color: var(--wisteria);
+    font-style: normal;
+  }
+
+  section {
+    padding: 52px 0 10px;
+  }
+  .shead {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 26px;
+    align-items: baseline;
+  }
+  .snum {
+    color: var(--bg4);
+    font-weight: 800;
+    font-size: 15px;
+  }
+  .shead h2 {
+    font-size: 21px;
+  }
+  .srule {
+    flex: 1;
+    height: 1px;
+    background: var(--bg2);
+    align-self: center;
+  }
+  .stag {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--bg4);
+    white-space: nowrap;
+  }
+
+  .panel {
+    background: var(--bg1);
+    border: 1px solid #33302e;
+    position: relative;
+    padding: 22px;
+    margin: 18px 0;
+  }
+  .panel h3 {
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    color: var(--fg1);
+  }
+  .cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  @media (max-width: 820px) {
+    .cols {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  pre.code {
+    background: #101010;
+    border: 1px solid var(--bg2);
+    padding: 16px 18px;
+    margin: 14px 0;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: #c9c9d6;
+    overflow-x: auto;
+  }
+  pre.code .cm {
+    color: #6b6b76;
+  }
+  pre.code .k {
+    color: var(--yellow);
+  }
+  pre.code .s {
+    color: var(--green);
+  }
+  pre.code .t {
+    color: var(--niagara);
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+    margin: 14px 0;
+  }
+  th {
+    color: var(--quartz);
+    text-align: left;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  th,
+  td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--bg2);
+    vertical-align: top;
+  }
+  td:first-child {
+    white-space: nowrap;
+    color: var(--fg1);
+  }
+  .tblwrap {
+    overflow-x: auto;
+  }
+
+  figure {
+    margin: 22px 0;
+  }
+  figure svg {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    background: #101010;
+    border: 1px solid var(--bg2);
+  }
+  figcaption {
+    font-size: 12px;
+    color: var(--quartz);
+    margin-top: 8px;
+    max-width: 78ch;
+  }
+
+  /* widget window mockups */
+  .shelfrow {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    margin: 18px 0;
+  }
+  .wmock {
+    background: #101010;
+    border: 1px solid #33302e;
+    position: relative;
+    width: 250px;
+    min-height: 110px;
+    padding: 26px 14px 12px;
+    flex: 0 0 auto;
+  }
+  .wmock::before,
+  .wmock::after {
+    content: "";
+    position: absolute;
+    width: 7px;
+    height: 7px;
+    pointer-events: none;
+  }
+  .wmock::before {
+    top: -1px;
+    left: -1px;
+    border-top: 2px solid var(--acc, #95a99f);
+    border-left: 2px solid var(--acc, #95a99f);
+  }
+  .wmock::after {
+    bottom: -1px;
+    right: -1px;
+    border-bottom: 2px solid var(--acc, #95a99f);
+    border-right: 2px solid var(--acc, #95a99f);
+  }
+  .wtitle {
+    position: absolute;
+    top: 6px;
+    left: 12px;
+    font-size: 9.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--quartz);
+  }
+  .wticks {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    display: flex;
+    gap: 6px;
+  }
+  .wticks span {
+    font-size: 9px;
+    color: var(--quartz);
+    border: 1px solid var(--bg3);
+    padding: 0 4px;
+    line-height: 1.5;
+    cursor: default;
+  }
+  .wbadge {
+    position: absolute;
+    bottom: 6px;
+    right: 10px;
+    font-size: 8.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--acc, #95a99f);
+  }
+  .wmock .big {
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--fg1);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .wmock .mut {
+    font-size: 11px;
+    color: var(--quartz);
+  }
+  .wmock.dimmed {
+    opacity: 0.4;
+  }
+  .wmock.pinned {
+    border-color: var(--bg4);
+  }
+  .wmock .lines {
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: var(--fg);
+  }
+  .wmock .lines b {
+    color: var(--fg1);
+  }
+  .mocknote {
+    font-size: 12px;
+    color: var(--quartz);
+    max-width: 78ch;
+  }
+
+  .hint {
+    border-left: 2px solid var(--wisteria);
+    padding: 4px 0 4px 14px;
+    margin: 16px 0;
+    font-size: 13px;
+    max-width: 76ch;
+  }
+  .hint b {
+    color: var(--fg);
+    font-weight: 500;
+  }
+
+  .qlist {
+    counter-reset: q;
+  }
+  .qlist li {
+    padding-left: 34px;
+    margin-bottom: 12px;
+  }
+  .qlist li::before {
+    counter-increment: q;
+    content: "Q" counter(q);
+    color: var(--wisteria);
+    font-weight: 700;
+    font-size: 12px;
+    left: 0;
+    top: 2px;
+  }
+  footer {
+    padding: 44px 0 60px;
+    color: var(--bg4);
+    font-size: 12px;
+    border-top: 1px solid var(--bg2);
+    margin-top: 56px;
+  }
+</style>
+
+<div class="wrap">
+  <div class="mast">
+    <div class="kicker">design page // task 20260825-194822</div>
+    <h1>Scufris Widgets</h1>
+    <p class="sub">
+      The native widget runtime inside scufris-desktop. It replaces dashboardd
+      in this project completely: no dashboardd input, no dashboardctl, no
+      compatibility. dashboardd was the proof of concept and stays its own
+      project for linked browser dashboards. Here a widget does one thing:
+      <em>it shows something</em>. No links, no inputs, no dashboard.
+    </p>
+  </div>
+
+  <!-- ============================================================ 01 -->
+  <section id="s01">
+    <div class="shead">
+      <span class="snum">01</span>
+      <h2>The pill spawns these</h2>
+      <span class="srule"></span
+      ><span class="stag">context // one paragraph</span>
+    </div>
+    <p>
+      The pill is the mouth; widgets are the hands. Scufris says "CPU is at 90
+      percent" and a live CPU graph lands beside the pill while he talks. You
+      say "set a timer" and a countdown appears. The user summons a calendar and
+      it stays until closed. Everything below is about the widgets themselves;
+      the pill only ever calls the same spawn verbs the user does. i3 and rofi
+      still own application workflow: widgets show, they are not the desktop.
+    </p>
+
+    <figure>
+      <svg
+        viewBox="0 0 900 340"
+        role="img"
+        aria-label="A 1920x1080 screen with the i3 bar on top, the pill bottom-center, three exhibit windows in a shelf row above the pill, and one pinned instrument at the top right"
+      >
+        <rect
+          x="20"
+          y="16"
+          width="860"
+          height="300"
+          fill="none"
+          stroke="#52494e"
+        />
+        <rect
+          x="20"
+          y="16"
+          width="860"
+          height="18"
+          fill="#1c1c1c"
+          stroke="#282828"
+        />
+        <text
+          x="32"
+          y="29"
+          fill="#95a99f"
+          font-size="10"
+          font-family="monospace"
+        >
+          i3 bar - status top edge
+        </text>
+        <!-- pill -->
+        <rect
+          x="330"
+          y="272"
+          width="240"
+          height="26"
+          fill="#101010"
+          stroke="#95a99f"
+        />
+        <text
+          x="450"
+          y="289"
+          fill="#e4e4ef"
+          font-size="11"
+          text-anchor="middle"
+          font-family="monospace"
+        >
+          the pill 560x64
+        </text>
+        <!-- shelf -->
+        <rect
+          x="252"
+          y="196"
+          width="125"
+          height="60"
+          fill="#101010"
+          stroke="#96a6c8"
+        />
+        <text
+          x="314"
+          y="230"
+          fill="#96a6c8"
+          font-size="10"
+          text-anchor="middle"
+          font-family="monospace"
+        >
+          cpu
+        </text>
+        <rect
+          x="388"
+          y="196"
+          width="125"
+          height="60"
+          fill="#101010"
+          stroke="#95a99f"
+        />
+        <text
+          x="450"
+          y="230"
+          fill="#95a99f"
+          font-size="10"
+          text-anchor="middle"
+          font-family="monospace"
+        >
+          note
+        </text>
+        <rect
+          x="524"
+          y="196"
+          width="125"
+          height="60"
+          fill="#101010"
+          stroke="#73c936"
+        />
+        <text
+          x="586"
+          y="230"
+          fill="#73c936"
+          font-size="10"
+          text-anchor="middle"
+          font-family="monospace"
+        >
+          timer
+        </text>
+        <text
+          x="450"
+          y="182"
+          fill="#52494e"
+          font-size="10"
+          text-anchor="middle"
+          font-family="monospace"
+        >
+          the exhibit shelf - up to 3, newest at center
+        </text>
+        <line
+          x1="450"
+          y1="272"
+          x2="450"
+          y2="262"
+          stroke="#52494e"
+          marker-end="url(#arr)"
+        />
+        <!-- instrument -->
+        <rect
+          x="700"
+          y="52"
+          width="150"
+          height="86"
+          fill="#101010"
+          stroke="#52494e"
+        />
+        <text
+          x="775"
+          y="98"
+          fill="#e4e4ef"
+          font-size="10"
+          text-anchor="middle"
+          font-family="monospace"
+        >
+          calendar
+        </text>
+        <text
+          x="775"
+          y="150"
+          fill="#52494e"
+          font-size="10"
+          text-anchor="middle"
+          font-family="monospace"
+        >
+          instrument - user-placed
+        </text>
+        <defs>
+          <marker
+            id="arr"
+            markerWidth="8"
+            markerHeight="8"
+            refX="6"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 7 3, 0 6" fill="#52494e" />
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>
+        Voice feedback keeps the bottom edge. Exhibits form a shelf directly
+        above the pill, centered, newest slot nearest the center; a fourth
+        exhibit retires the oldest unpinned one. Instruments live wherever the
+        user drags them.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ============================================================ 02 -->
+  <section id="s02">
+    <div class="shead">
+      <span class="snum">02</span>
+      <h2>Anatomy of a widget</h2>
+      <span class="srule"></span
+      ><span class="stag">a couple hours, honestly</span>
+    </div>
+    <p>
+      A widget is a directory: one small manifest, one frontend module, and
+      optionally one backend executable. The manifest is declarative and stays
+      small; the view is real code. Every declarative widget DSL in the
+      prior-art sweep grew a logic escape hatch under pressure (eww wants
+      functions, Rainmeter grew Lua, Plasma's DataEngines died), so we do not
+      build one.
+    </p>
+
+    <div class="cols">
+      <div>
+        <pre
+          class="code"
+        ><span class="cm"># desktop/widgets/cpu/widget.toml</span>
+<span class="k">id</span> = <span class="s">"cpu"</span>
+<span class="k">name</span> = <span class="s">"CPU"</span>
+<span class="k">description</span> = <span class="s">"Live CPU load"</span>
+<span class="k">width</span> = <span class="s">280</span>
+<span class="k">height</span> = <span class="s">120</span>
+<span class="k">backend</span> = <span class="s">"backend.py"</span>  <span class="cm"># optional</span></pre>
+        <p class="mocknote">
+          No variants, no options, no ports. A widget that wants a second look
+          is a second widget; that is cheaper than variant machinery when a
+          widget costs a couple hours. Width and height are logical pixels; the
+          window is exactly this size, like the pill.
+        </p>
+      </div>
+      <div>
+        <pre
+          class="code"
+        ><span class="cm">// desktop/widgets/cpu/widget.ts (strict TS)</span>
+<span class="t">export function</span> mount(
+  root: HTMLElement,
+  ctx: { spawn: unknown },
+): View;
+
+<span class="t">interface</span> View {
+  update(data: unknown): <span class="t">void</span>;
+  destroy(): <span class="t">void</span>;
+}</pre>
+        <p class="mocknote">
+          The whole frontend contract. The shell page owns the window chrome and
+          the gruber tokens; the widget renders content into
+          <code>root</code> and repaints on <code>update</code>. Data comes from
+          the backend, from Scufris, or both - the widget cannot tell and does
+          not care.
+        </p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>The shell owns what widgets share</h3>
+      <ul>
+        <li>
+          <b>Tokens.</b> One host-injected stylesheet: gruber palette, spacing,
+          type scale as CSS variables. Widgets style against
+          <code>--sw-*</code> tokens, so one file rethemes the fleet (the
+          Rainmeter MeterStyle / Kirigami.Theme lesson).
+        </li>
+        <li>
+          <b>Chrome.</b> Corner ticks in the accent color, the uppercase title,
+          the pin tick and the close tick, the LIVE/DIM badge. Widgets never
+          draw chrome.
+        </li>
+        <li>
+          <b>Conduct.</b> Opaque square panel (no compositor, no alpha - the
+          pill already proved it), small canvases, 1-2 fps redraws. Exhibits are
+          non-interactive except their two ticks; instruments take clicks.
+        </li>
+      </ul>
+    </div>
+
+    <p>
+      Discovery: in-repo widgets live under
+      <code>desktop/widgets/&lt;id&gt;/</code> and are compiled into the package
+      (build.rs walks them the way it builds the pill frontend).
+      <code>SCUFRIS_WIDGET_PATH</code> adds external roots later - that is how
+      <code>today</code> ships its own widget from its own repo - with
+      dashboardd's two good discovery rules kept: directory name equals id,
+      duplicate id across roots is a startup failure.
+    </p>
+  </section>
+
+  <!-- ============================================================ 03 -->
+  <section id="s03">
+    <div class="shead">
+      <span class="snum">03</span>
+      <h2>Exhibits and instruments</h2>
+      <span class="srule"></span
+      ><span class="stag">two postures, one runtime</span>
+    </div>
+    <p>
+      A posture, not a kind. Scufris opens a widget as an <b>exhibit</b>: it
+      ages on topic relevance and leaves on its own. The user opens (or pins)
+      the same widget as an <b>instrument</b>: it stays until closed. Timers sit
+      in both camps. These rules were settled at the pill design review and
+      carry over unchanged.
+    </p>
+
+    <figure>
+      <svg
+        viewBox="0 0 900 260"
+        role="img"
+        aria-label="Exhibit lifecycle state machine: LIVE dims to DIM when an unrelated turn completes, DIM exits after a 60 second grace, citation or hover revives DIM to LIVE, pinning from either state makes an INSTRUMENT, and the close tick or clear verb exits instantly from anywhere"
+      >
+        <g font-family="monospace" font-size="12">
+          <rect
+            x="60"
+            y="90"
+            width="150"
+            height="52"
+            fill="#101010"
+            stroke="#73c936"
+          />
+          <text x="135" y="121" fill="#73c936" text-anchor="middle">LIVE</text>
+          <rect
+            x="380"
+            y="90"
+            width="150"
+            height="52"
+            fill="#101010"
+            stroke="#95a99f"
+            opacity=".55"
+          />
+          <text x="455" y="121" fill="#95a99f" text-anchor="middle">
+            DIM 40%
+          </text>
+          <rect
+            x="700"
+            y="90"
+            width="150"
+            height="52"
+            fill="#101010"
+            stroke="#52494e"
+          />
+          <text x="775" y="121" fill="#e4e4ef" text-anchor="middle">
+            CLOSED
+          </text>
+          <rect
+            x="380"
+            y="196"
+            width="150"
+            height="44"
+            fill="#101010"
+            stroke="#9e95c7"
+          />
+          <text x="455" y="223" fill="#9e95c7" text-anchor="middle">
+            INSTRUMENT
+          </text>
+          <line
+            x1="210"
+            y1="106"
+            x2="374"
+            y2="106"
+            stroke="#e4e4ef"
+            marker-end="url(#arr2)"
+          />
+          <text
+            x="292"
+            y="98"
+            fill="#95a99f"
+            font-size="10.5"
+            text-anchor="middle"
+          >
+            unrelated turn completes
+          </text>
+          <line
+            x1="530"
+            y1="106"
+            x2="694"
+            y2="106"
+            stroke="#e4e4ef"
+            marker-end="url(#arr2)"
+          />
+          <text
+            x="612"
+            y="98"
+            fill="#95a99f"
+            font-size="10.5"
+            text-anchor="middle"
+          >
+            60s grace, quick exit
+          </text>
+          <line
+            x1="374"
+            y1="128"
+            x2="216"
+            y2="128"
+            stroke="#73c936"
+            marker-end="url(#arr3)"
+          />
+          <text
+            x="295"
+            y="142"
+            fill="#73c936"
+            font-size="10.5"
+            text-anchor="middle"
+          >
+            cited or hovered
+          </text>
+          <line
+            x1="300"
+            y1="142"
+            x2="428"
+            y2="192"
+            stroke="#9e95c7"
+            marker-end="url(#arr4)"
+          />
+          <text x="330" y="180" fill="#9e95c7" font-size="10.5">pin tick</text>
+          <line
+            x1="595"
+            y1="222"
+            x2="740"
+            y2="146"
+            stroke="#52494e"
+            marker-end="url(#arr2)"
+          />
+          <text x="680" y="205" fill="#52494e" font-size="10.5">
+            user close
+          </text>
+          <text x="60" y="40" fill="#f43841" font-size="10.5">
+            instant from anywhere: close tick, or the "clear" verb
+          </text>
+          <text x="60" y="58" fill="#52494e" font-size="10.5">
+            all clocks freeze while: mic is hot / Scufris speaks / pointer is
+            over the exhibit
+          </text>
+        </g>
+        <defs>
+          <marker
+            id="arr2"
+            markerWidth="8"
+            markerHeight="8"
+            refX="6"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 7 3, 0 6" fill="#e4e4ef" />
+          </marker>
+          <marker
+            id="arr3"
+            markerWidth="8"
+            markerHeight="8"
+            refX="6"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 7 3, 0 6" fill="#73c936" />
+          </marker>
+          <marker
+            id="arr4"
+            markerWidth="8"
+            markerHeight="8"
+            refX="6"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 7 3, 0 6" fill="#9e95c7" />
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>
+        Nothing disappears straight from LIVE - dimming is the feedback, then
+        the exit can be quick. "Unrelated turn" is made concrete as: a turn
+        completed and neither opened nor updated this exhibit. The companion
+        owns every clock; it already knows the mic and speech state from the
+        pill.
+      </figcaption>
+    </figure>
+
+    <div class="tblwrap">
+      <table>
+        <tr>
+          <th></th>
+          <th>Exhibit</th>
+          <th>Instrument</th>
+        </tr>
+        <tr>
+          <td>Opened by</td>
+          <td>Scufris, mid-speech, through the spawn verbs</td>
+          <td>
+            The user (pin tick, tray, a summon verb), or Scufris on request
+          </td>
+        </tr>
+        <tr>
+          <td>Placement</td>
+          <td>The shelf above the pill, host-positioned</td>
+          <td>Initial spot near the shelf, then user-dragged, user-owned</td>
+        </tr>
+        <tr>
+          <td>Lifetime</td>
+          <td>Ages on topic relevance, exits on its own</td>
+          <td>Until the user closes it</td>
+        </tr>
+        <tr>
+          <td>Interaction</td>
+          <td>Pin tick and close tick only; never takes focus</td>
+          <td>Clickable; still never steals focus on spawn</td>
+        </tr>
+        <tr>
+          <td>Accent</td>
+          <td>
+            Niagara while live data flows, quartz at rest, wisteria for
+            attention
+          </td>
+          <td>Same grammar; pinned chrome drops to bg4</td>
+        </tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================================================ 04 -->
+  <section id="s04">
+    <div class="shead">
+      <span class="snum">04</span>
+      <h2>On screen</h2>
+      <span class="srule"></span><span class="stag">gruber HUD language</span>
+    </div>
+    <p>
+      Widget windows speak the pill's design language: square opaque panels on
+      near-black, corner ticks in the accent, uppercase micro-titles, tabular
+      numerals. The window recipe is the pill's, proven live: resizable window
+      with min == max size hints (the one combination GTK honors, and exactly
+      what makes i3 float it), <code>focused(false)</code> so mapping never
+      steals the keyboard mid-sentence, always-on-top, skip taskbar, position
+      set after show.
+    </p>
+
+    <div class="shelfrow">
+      <div class="wmock" style="--acc: var(--niagara)">
+        <span class="wtitle">CPU</span>
+        <span class="wticks"><span>pin</span><span>x</span></span>
+        <div class="big">91%</div>
+        <svg
+          viewBox="0 0 220 34"
+          style="width: 100%; height: 34px; background: none; border: none"
+          role="img"
+          aria-label="CPU load sparkline"
+        >
+          <polyline
+            points="0,30 20,28 40,29 60,24 80,26 100,18 120,20 140,12 160,8 180,10 200,4 220,6"
+            fill="none"
+            stroke="#96a6c8"
+            stroke-width="2"
+          />
+        </svg>
+        <span class="wbadge">live</span>
+      </div>
+      <div class="wmock" style="--acc: var(--quartz)">
+        <span class="wtitle">Note</span>
+        <span class="wticks"><span>pin</span><span>x</span></span>
+        <div class="lines">
+          <b>nix flake check</b> failed on<br />
+          <code>checks.desktop</code>: the launcher<br />
+          closure gained 2 paths.
+        </div>
+        <span class="wbadge">live</span>
+      </div>
+      <div class="wmock" style="--acc: var(--green); width: 190px">
+        <span class="wtitle">Timer - tea</span>
+        <span class="wticks"><span>pin</span><span>x</span></span>
+        <div class="big">04:37</div>
+        <div class="mut">of 05:00</div>
+        <span class="wbadge">live</span>
+      </div>
+      <div class="wmock dimmed" style="--acc: var(--quartz); width: 190px">
+        <span class="wtitle">CPU</span>
+        <span class="wticks"><span>pin</span><span>x</span></span>
+        <div class="big">34%</div>
+        <span class="wbadge">dim</span>
+      </div>
+    </div>
+    <p class="mocknote">
+      The v1 set, plus a dimmed exhibit riding out its grace window. The timer
+      flips to wisteria attention at zero and rings the existing attention
+      earcon; the note widget is the generic "show this" exhibit that needs no
+      backend at all.
+    </p>
+
+    <div class="hint">
+      <b>Defense in depth for focus:</b> windows carry a stable instance name
+      (or a <code>scufris-widget:</code> title prefix if the builder cannot set
+      WM_CLASS per window - verified in increment 1) so the user guide can ship
+      a <code>no_focus</code> rule. The primary mechanism is
+      <code>focused(false)</code>, which maps as input=False; i3 ignores
+      <code>no_focus</code> for the first window on a workspace, so the rule
+      alone is not enough.
+    </div>
+  </section>
+
+  <!-- ============================================================ 05 -->
+  <section id="s05">
+    <div class="shead">
+      <span class="snum">05</span>
+      <h2>Live data</h2>
+      <span class="srule"></span
+      ><span class="stag">backends // the deflisten contract</span>
+    </div>
+    <p>
+      Every widget may have a backend: one executable per open widget, owned
+      entirely by the companion. The wire contract is eww's
+      <code>deflisten</code>, the simplest one that survived a decade of ricing:
+      <b>one stdout line = one JSON update</b>. No envelope, no handshake, no
+      stdin protocol in v1.
+    </p>
+
+    <pre
+      class="code"
+    ><span class="cm"># desktop/widgets/cpu/backend.py - Python stdlib, the whole thing</span>
+<span class="cm"># argv[1] is the spawn data as JSON; stdout lines become update()</span>
+spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <span class="t">else</span> {}
+<span class="t">while</span> True:
+    print(json.dumps({<span class="s">"percent"</span>: read_proc_stat()}), flush=True)
+    time.sleep(1.0)</pre>
+
+    <div class="panel">
+      <h3>Supervision - the host never trusts a widget to clean up</h3>
+      <ul>
+        <li>
+          <b>Spawn</b> in its own process group with the PID recorded; stderr
+          goes to journald under a per-widget target, like the pill's webview
+          logs.
+        </li>
+        <li>
+          <b>Close</b> means SIGTERM to the group, SIGKILL after 3 seconds,
+          children reaped. Kill-on-window-close is unconditional - zombie
+          backends are the best-documented widget-runtime failure (four separate
+          eww issues).
+        </li>
+        <li>
+          <b>Pace</b> is coalesced in Rust: at most one push per widget per 250
+          ms, latest wins. A documented WebKitGTK case hit 9.5 GB from raw tick
+          streaming; we never stream ticks.
+        </li>
+        <li>
+          <b>Silence</b> past 3x the widget's expected cadence renders a
+          staleness marker on the badge; a dead backend shows a red accent and a
+          restart tick instead of freezing the last number in place.
+        </li>
+        <li>
+          <b>Panic verb:</b> "clear" (and a tray item) closes every exhibit and
+          kills every backend, provably.
+        </li>
+      </ul>
+    </div>
+
+    <figure>
+      <svg
+        viewBox="0 0 900 190"
+        role="img"
+        aria-label="Data flow: the Pi daemon sends widget verbs to the companion over the control socket; the companion supervises backend processes and pushes coalesced updates to each widget window over a per-window channel"
+      >
+        <g font-family="monospace" font-size="12">
+          <rect
+            x="30"
+            y="70"
+            width="170"
+            height="52"
+            fill="#101010"
+            stroke="#9e95c7"
+          />
+          <text x="115" y="92" fill="#f4f4ff" text-anchor="middle">
+            Pi daemon
+          </text>
+          <text
+            x="115"
+            y="110"
+            fill="#95a99f"
+            text-anchor="middle"
+            font-size="10.5"
+          >
+            scufris_widget_* tools
+          </text>
+          <rect
+            x="330"
+            y="70"
+            width="200"
+            height="52"
+            fill="#101010"
+            stroke="#96a6c8"
+          />
+          <text x="430" y="92" fill="#f4f4ff" text-anchor="middle">
+            companion
+          </text>
+          <text
+            x="430"
+            y="110"
+            fill="#95a99f"
+            text-anchor="middle"
+            font-size="10.5"
+          >
+            widgets module + pool
+          </text>
+          <rect
+            x="680"
+            y="24"
+            width="180"
+            height="44"
+            fill="#101010"
+            stroke="#33302e"
+          />
+          <text x="770" y="51" fill="#e4e4ef" text-anchor="middle">
+            widget window
+          </text>
+          <rect
+            x="680"
+            y="130"
+            width="180"
+            height="44"
+            fill="#101010"
+            stroke="#33302e"
+          />
+          <text x="770" y="157" fill="#e4e4ef" text-anchor="middle">
+            backend process
+          </text>
+          <line
+            x1="200"
+            y1="88"
+            x2="324"
+            y2="88"
+            stroke="#9e95c7"
+            marker-end="url(#arr5)"
+          />
+          <text
+            x="262"
+            y="80"
+            fill="#9e95c7"
+            font-size="10.5"
+            text-anchor="middle"
+          >
+            protocol v2, correlated
+          </text>
+          <line
+            x1="530"
+            y1="80"
+            x2="674"
+            y2="52"
+            stroke="#96a6c8"
+            marker-end="url(#arr6)"
+          />
+          <text
+            x="600"
+            y="52"
+            fill="#96a6c8"
+            font-size="10.5"
+            text-anchor="middle"
+          >
+            Channel, ordered
+          </text>
+          <line
+            x1="674"
+            y1="140"
+            x2="530"
+            y2="112"
+            stroke="#73c936"
+            marker-end="url(#arr7)"
+          />
+          <text
+            x="608"
+            y="140"
+            fill="#73c936"
+            font-size="10.5"
+            text-anchor="middle"
+          >
+            stdout JSON lines
+          </text>
+          <line
+            x1="530"
+            y1="104"
+            x2="674"
+            y2="146"
+            stroke="#52494e"
+            stroke-dasharray="4 3"
+            marker-end="url(#arr8)"
+          />
+          <text x="586" y="170" fill="#52494e" font-size="10.5">
+            spawn / SIGTERM
+          </text>
+        </g>
+        <defs>
+          <marker
+            id="arr5"
+            markerWidth="8"
+            markerHeight="8"
+            refX="6"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 7 3, 0 6" fill="#9e95c7" />
+          </marker>
+          <marker
+            id="arr6"
+            markerWidth="8"
+            markerHeight="8"
+            refX="6"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 7 3, 0 6" fill="#96a6c8" />
+          </marker>
+          <marker
+            id="arr7"
+            markerWidth="8"
+            markerHeight="8"
+            refX="6"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 7 3, 0 6" fill="#73c936" />
+          </marker>
+          <marker
+            id="arr8"
+            markerWidth="8"
+            markerHeight="8"
+            refX="6"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 7 3, 0 6" fill="#52494e" />
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>
+        Two data sources, one sink: Scufris pushes content through the daemon (a
+        note's text, a timer's duration), backends stream live values into the
+        same <code>update()</code>. The widget cannot tell them apart.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ============================================================ 06 -->
+  <section id="s06">
+    <div class="shead">
+      <span class="snum">06</span>
+      <h2>The agent's verbs</h2>
+      <span class="srule"></span><span class="stag">control protocol v2</span>
+    </div>
+    <p>
+      The companion already holds a live socket to the Pi daemon; widgets ride
+      it. This is the first daemon-originated <b>command</b> in the protocol -
+      every v1 daemon message is an answer or a broadcast - so v2 adds
+      correlation ids in that direction. The version bumps to 2 cleanly; a v1
+      peer is refused at hello. No compatibility, by decision.
+    </p>
+
+    <pre
+      class="code"
+    ><span class="cm"># daemon -> companion (commands, correlated by "id")</span>
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_open"</span>,  <span class="k">"id"</span>:<span class="s">"w-1"</span>, <span class="k">"widget"</span>:<span class="s">"cpu"</span>, <span class="k">"posture"</span>:<span class="s">"exhibit"</span>, <span class="k">"data"</span>:{}}
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_update"</span>, <span class="k">"id"</span>:<span class="s">"w-2"</span>, <span class="k">"surface"</span>:<span class="s">"widget-3"</span>, <span class="k">"data"</span>:{}}
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_close"</span>, <span class="k">"id"</span>:<span class="s">"w-3"</span>, <span class="k">"surface"</span>:<span class="s">"widget-3"</span>}
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_clear"</span>, <span class="k">"id"</span>:<span class="s">"w-4"</span>}
+
+<span class="cm"># companion -> daemon (answers echo the id; events are unsolicited)</span>
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_opened"</span>, <span class="k">"id"</span>:<span class="s">"w-1"</span>, <span class="k">"surface"</span>:<span class="s">"widget-3"</span>}
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_failed"</span>, <span class="k">"id"</span>:<span class="s">"w-1"</span>, <span class="k">"code"</span>:<span class="s">"widget_not_found"</span>, <span class="k">"detail"</span>:<span class="s">"..."</span>}
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"widget_event"</span>, <span class="k">"surface"</span>:<span class="s">"widget-3"</span>, <span class="k">"event"</span>:<span class="s">"closed"</span>}
+{<span class="k">"v"</span>:2, <span class="k">"type"</span>:<span class="s">"catalog"</span>, <span class="k">"widgets"</span>:[{<span class="k">"id"</span>:<span class="s">"cpu"</span>, <span class="k">"name"</span>:<span class="s">"CPU"</span>, <span class="k">"description"</span>:<span class="s">"..."</span>}]}</pre>
+
+    <ul>
+      <li>
+        <b>The companion owns discovery</b> and sends the catalog right after
+        welcome; the extension builds the typed
+        <code>scufris_widget_open</code> union from it, exactly the pattern the
+        dashboard extension proved, minus two process hops and one wire
+        protocol.
+      </li>
+      <li>
+        <b>Events replace polling.</b> The 1 Hz surface-diff poll dies; the
+        companion pushes <code>widget_event</code> (closed, pinned, crashed) the
+        moment it happens, and the extension turns it into the follow-up message
+        Calm already knows to hide.
+      </li>
+      <li>
+        <b>Citing is updating.</b> A <code>widget_update</code> - even with
+        unchanged data - marks the exhibit cited and revives it. No separate
+        cite verb.
+      </li>
+      <li>
+        <b>Fixtures first:</b>
+        <code>desktop/control-protocol-v2.json</code> lands beside v1, read by
+        both suites, before either side is implemented.
+      </li>
+    </ul>
+  </section>
+
+  <!-- ============================================================ 07 -->
+  <section id="s07">
+    <div class="shead">
+      <span class="snum">07</span>
+      <h2>Inside the companion</h2>
+      <span class="srule"></span
+      ><span class="stag">warm pool // measured numbers</span>
+    </div>
+    <div class="cols">
+      <div>
+        <p>
+          <b>A warm pool makes spawn instant.</b> A cold webview paints at
+          370-420 ms on Linux; an exhibit must land mid-sentence. So the
+          companion pre-creates two hidden shell windows at startup; they load
+          the shell page and idle. Spawning a widget is: send one Channel
+          message ("become cpu", spawn data), set the size hints, show, position
+          - a map plus one eval, well under 300 ms. The pool refills in the
+          background.
+        </p>
+        <p>
+          <b>One Channel per window.</b> Targeted at exactly one webview,
+          ordered by sequence numbers, cheap at our rates; payloads stay under 8
+          KiB. The shell imports the widget's module through a
+          <code>scufris-widget://</code> URI scheme that serves only that
+          window's bundle - dashboardd's one clever trick, kept.
+        </p>
+      </div>
+      <div>
+        <p>
+          <b>Cost, measured on this machine:</b> 10-20 MB PSS per widget window
+          (one WebKit web process each - fixed WebKitGTK policy), a shared
+          network process, so five live widgets cost roughly 75 MB. Per-view
+          processes buy crash isolation: a dying widget never touches the pill.
+        </p>
+        <p>
+          <b>Long-run guard:</b> day-scale memory growth is the documented
+          WebKitGTK failure mode, and widgets are stateless views - so any
+          widget whose web process passes a PSS budget is recycled through the
+          pool, invisibly. The pill's
+          <code>WEBKIT_DISABLE_DMABUF_RENDERER</code>
+          re-exec already covers every new window.
+        </p>
+      </div>
+    </div>
+    <div class="hint">
+      <b>Code shape:</b> a <code>widgets</code> module beside the pill's, with
+      the same ports-and-adapters split the pill has - the runtime holds no
+      window or process handle directly, so lifecycle, aging, and supervision
+      are all unit-testable without a desktop session. Widget traffic never
+      touches the pill's <code>Event</code> state machine. Two config gates from
+      the inventory: the capability file gains a <code>widget-*</code>
+      label glob, and the CSP whitelists the widget URI scheme.
+    </div>
+  </section>
+
+  <!-- ============================================================ 08 -->
+  <section id="s08">
+    <div class="shead">
+      <span class="snum">08</span>
+      <h2>What ships when</h2>
+      <span class="srule"></span
+      ><span class="stag">increments // dashboardd leaves in the first</span>
+    </div>
+    <div class="tblwrap">
+      <table>
+        <tr>
+          <th>Increment</th>
+          <th>Contents</th>
+          <th>Proof</th>
+        </tr>
+        <tr>
+          <td>1 - the runtime</td>
+          <td>
+            Protocol v2 + fixtures; widgets module, pool, shell page, chrome,
+            tokens; the <b>note</b> widget; new
+            <code>extensions/scufris/widgets</code> tools;
+            <b>dashboardd removed</b>: the flake input, both extension surfaces,
+            the helper, the skill, the docs - about 1,155 lines deleted plus the
+            nix edits, and the lock drops a whole Rust toolchain pin.
+          </td>
+          <td>
+            "Show a note" lands an exhibit beside the pill mid-speech without
+            stealing focus; grep finds no dashboardd anywhere.
+          </td>
+        </tr>
+        <tr>
+          <td>2 - live and aging</td>
+          <td>
+            Backend supervision (spawn, kill group, coalesce, staleness); the
+            <b>cpu</b> widget; the full exhibit lifecycle: dim, grace, revive,
+            pin, clear, frozen clocks.
+          </td>
+          <td>
+            "CPU is at 90 percent" spawns the live graph; it dims on topic
+            change, revives on citation, pins into an instrument; killing the
+            backend shows the red accent, never a frozen number.
+          </td>
+        </tr>
+        <tr>
+          <td>3 - instruments</td>
+          <td>
+            User summoning (tray + a summon path to decide in review); the
+            <b>timer</b> and a <b>tasks</b> widget;
+            <code>SCUFRIS_WIDGET_PATH</code> external roots for today's own
+            widget.
+          </td>
+          <td>
+            A summoned timer survives the conversation ending; today's widget
+            loads from outside the repo.
+          </td>
+        </tr>
+        <tr>
+          <td>4 - the session HUD</td>
+          <td>
+            Task 20260825-153801 lands as a widget on this runtime - the
+            escalation surface, spawned through the same verbs.
+          </td>
+          <td>Per that task's own verification.</td>
+        </tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================================================ 09 -->
+  <section id="s09">
+    <div class="shead">
+      <span class="snum">09</span>
+      <h2>Decisions to review</h2>
+      <span class="srule"></span
+      ><span class="stag">your call, then they land in RESEARCH.md</span>
+    </div>
+    <ul class="qlist">
+      <li>
+        <b>The shelf.</b> Above the pill, centered, capped at 3, oldest unpinned
+        retires first - or do you want exhibits to a side edge instead?
+      </li>
+      <li>
+        <b>The aging trigger.</b> "A turn completed and neither opened nor
+        updated this exhibit" is the concrete reading of "topic change". Sharp
+        enough, or too eager for multi-turn work on one topic?
+      </li>
+      <li>
+        <b>Backend stdin.</b> V1 backends are output-only (SIGTERM is the whole
+        input). Interactive instruments will eventually want a line in the other
+        direction - add it now or when the first widget needs it?
+      </li>
+      <li>
+        <b>Summoning instruments.</b> Tray submenu for sure; is the second path
+        a voice verb ("show the calendar"), a rofi entry, or a scufris-ctl verb
+        riding the command socket the i3-mode task will build?
+      </li>
+      <li>
+        <b>The note widget's reach.</b> Plain text with emphasis and lists, or
+        markdown-complete? Plain keeps increment 1 honest; markdown invites the
+        exhibit to become a document.
+      </li>
+      <li>
+        <b>Widget windows on workspaces.</b> Exhibits stick to all workspaces
+        (they accompany speech) while instruments stay on theirs - agree?
+      </li>
+    </ul>
+  </section>
+
+  <footer>
+    scufris widgets - design page for task 20260825-194822. Findings and
+    citations: tasks/20260825-194822/RESEARCH.md. Product behavior inherited
+    from the pill design review, task 20260822-132001.
+  </footer>
+</div>

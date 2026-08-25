@@ -1,6 +1,6 @@
 # Dashboardd embed: exhibits and instruments
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 50
 - TAGS: voice, desktop, hud
 
@@ -37,3 +37,10 @@ runtime. dashboardd itself stays Scufris-agnostic.
 Decisions: `tasks/20260822-132001/RESEARCH.md` design review section
 (exhibits and instruments; exhibit lifecycle). Depends on the session
 HUD task for the spawn interface.
+
+## Closed (2026-08-25)
+
+Superseded by `tasks/20260825-194822`. Alex decided the widget runtime
+is rewritten natively inside scufris-desktop and dashboardd is removed
+from this project entirely, with no compatibility kept. The exhibit and
+instrument lifecycle decisions above carry over as product behavior.

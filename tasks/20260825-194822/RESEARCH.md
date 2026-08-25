@@ -10,6 +10,11 @@ dashboards.
 
 - Every widget may have a backend. Even CPU: Scufris says "CPU is at
   90%" and spawns the widget to watch it live.
+- Backends are reusable across widgets (page review, 2026-08-25):
+  a backend is a named shared source, not a per-widget process. The
+  design keys one process per (backend id, spawn data) pair,
+  refcounted, with each stdout line fanned out whole to every
+  subscriber.
 - No links, no inputs between widgets. A Scufris widget shows
   something; connecting widgets stays dashboardd territory.
 - Breakage is progress. Reimplementing the agent extension from scratch

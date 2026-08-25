@@ -580,12 +580,14 @@
       ><span class="stag">a couple hours, honestly</span>
     </div>
     <p>
-      A widget is a directory: one small manifest, one frontend module, and
-      optionally one backend executable. The manifest is declarative and stays
-      small; the view is real code. Every declarative widget DSL in the
-      prior-art sweep grew a logic escape hatch under pressure (eww wants
-      functions, Rainmeter grew Lua, Plasma's DataEngines died), so we do not
-      build one.
+      A widget is a directory: one small manifest and one frontend module. Live
+      data comes from a <b>backend</b> - a named data source under
+      <code>desktop/backends/&lt;id&gt;</code> that any number of widgets can
+      subscribe to (review decision: backends are reusable, not per-widget). The
+      manifest is declarative and stays small; the view is real code. Every
+      declarative widget DSL in the prior-art sweep grew a logic escape hatch
+      under pressure (eww wants functions, Rainmeter grew Lua, Plasma's
+      DataEngines died), so we do not build one.
     </p>
 
     <div class="cols">
@@ -598,12 +600,14 @@
 <span class="k">description</span> = <span class="s">"Live CPU load"</span>
 <span class="k">width</span> = <span class="s">280</span>
 <span class="k">height</span> = <span class="s">120</span>
-<span class="k">backend</span> = <span class="s">"backend.py"</span>  <span class="cm"># optional</span></pre>
+<span class="k">backend</span> = <span class="s">"system"</span>  <span class="cm"># optional; a shared source by id</span></pre>
         <p class="mocknote">
           No variants, no options, no ports. A widget that wants a second look
           is a second widget; that is cheaper than variant machinery when a
           widget costs a couple hours. Width and height are logical pixels; the
-          window is exactly this size, like the pill.
+          window is exactly this size, like the pill. The
+          <code>backend</code> names a source, not a file: cpu, memory, and
+          network widgets all say <code>"system"</code> and share one process.
         </p>
       </div>
       <div>
@@ -978,35 +982,46 @@
       ><span class="stag">backends // the deflisten contract</span>
     </div>
     <p>
-      Every widget may have a backend: one executable per open widget, owned
-      entirely by the companion. The wire contract is eww's
-      <code>deflisten</code>, the simplest one that survived a decade of ricing:
-      <b>one stdout line = one JSON update</b>. No envelope, no handshake, no
-      stdin protocol in v1.
+      A backend is a named source, owned entirely by the companion and
+      <b>shared by every widget that subscribes to it</b>. The wire contract is
+      eww's <code>deflisten</code>, the simplest one that survived a decade of
+      ricing: <b>one stdout line = one JSON update</b>, fanned out whole to
+      every subscriber - each widget renders the fields it cares about, so a cpu
+      widget and a memory widget ride one "system" process. No envelope, no
+      handshake, no stdin protocol in v1.
     </p>
 
     <pre
       class="code"
-    ><span class="cm"># desktop/widgets/cpu/backend.py - Python stdlib, the whole thing</span>
-<span class="cm"># argv[1] is the spawn data as JSON; stdout lines become update()</span>
+    ><span class="cm"># desktop/backends/system - Python stdlib, the whole thing</span>
+<span class="cm"># argv[1] is the spawn data as JSON; stdout lines fan out to subscribers</span>
 spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <span class="t">else</span> {}
 <span class="t">while</span> True:
-    print(json.dumps({<span class="s">"percent"</span>: read_proc_stat()}), flush=True)
+    print(json.dumps({<span class="s">"cpu"</span>: cpu_pct(), <span class="s">"memory"</span>: mem_pct()}), flush=True)
     time.sleep(1.0)</pre>
+
+    <div class="hint">
+      <b>Sharing rule:</b> the companion runs one process per (backend id, spawn
+      data) pair, refcounted - started when the first subscriber opens, SIGTERM
+      when the last one closes. Widgets that pass no spawn data share the
+      instance (cpu + memory + network on one "system"); a widget that needs its
+      own world passes instance data and gets its own process (every timer
+      carries its duration and start, so two timers never collide).
+    </div>
 
     <div class="panel">
       <h3>Supervision - the host never trusts a widget to clean up</h3>
       <ul>
         <li>
           <b>Spawn</b> in its own process group with the PID recorded; stderr
-          goes to journald under a per-widget target, like the pill's webview
+          goes to journald under a per-backend target, like the pill's webview
           logs.
         </li>
         <li>
-          <b>Close</b> means SIGTERM to the group, SIGKILL after 3 seconds,
-          children reaped. Kill-on-window-close is unconditional - zombie
-          backends are the best-documented widget-runtime failure (four separate
-          eww issues).
+          <b>Close</b> of the last subscriber means SIGTERM to the group,
+          SIGKILL after 3 seconds, children reaped. The refcount never trusts a
+          widget to clean up - zombie backends are the best-documented widget
+          runtime failure (four separate eww issues).
         </li>
         <li>
           <b>Pace</b> is coalesced in Rust: at most one push per widget per 250
@@ -1353,9 +1368,10 @@ spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <
         <tr>
           <td>2 - live and aging</td>
           <td>
-            Backend supervision (spawn, kill group, coalesce, staleness); the
-            <b>cpu</b> widget; the full exhibit lifecycle: dim, grace, revive,
-            pin, clear, frozen clocks.
+            Backend supervision (refcounted sharing, kill group, coalesce,
+            staleness); the shared <b>system</b> backend and the <b>cpu</b>
+            widget on it; the full exhibit lifecycle: dim, grace, revive, pin,
+            clear, frozen clocks.
           </td>
           <td>
             "CPU is at 90 percent" spawns the live graph; it dims on topic

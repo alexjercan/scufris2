@@ -1,6 +1,6 @@
 # Fast-verb tier with timers and agent fallback
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 65
 - TAGS: voice, desktop
 
@@ -31,3 +31,9 @@ else falls through to Pi unchanged. Sub-1.5 s decides voice adoption.
 - A timer survives a companion restart.
 
 Backlog item 2 in `tasks/20260822-132001/RESEARCH.md` section 5.
+
+## Closed (2026-08-25)
+
+Won't do for now. Alex's backlog triage. The one live piece it
+described - timers as persistent widget content - lands through the
+widget runtime instead (`tasks/20260825-215520`, increment 3).

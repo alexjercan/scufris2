@@ -1,6 +1,6 @@
 # Dictation-everywhere pill mode
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 70
 - TAGS: voice, desktop
 
@@ -27,3 +27,8 @@ the research: it makes the hotkey hourly muscle memory.
 - Cancel types nothing and restores nothing.
 
 Backlog item 1 in `tasks/20260822-132001/RESEARCH.md` section 5.
+
+## Closed (2026-08-25)
+
+Won't do. Alex's backlog triage: dedicated dictation apps already
+cover this, and it is not worth building into the pill.

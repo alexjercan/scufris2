@@ -20,7 +20,9 @@ The four increments from design page section 09, in order:
    the pill's, warm window pool, shell page with chrome and tokens,
    the note widget (text only), new `extensions/scufris/widgets`
    tools; dashboardd removed - flake input, both extension surfaces,
-   the helper, the skill, the docs, and the nix ripples.
+   the helper, the skill, the docs, and the nix ripples. The shell's
+   busy indicator is the thinking-orbs orb the pill task vendors
+   (`tasks/20260825-222037`, Alex approved 2026-08-25).
 2. Live and aging: backend supervision (refcounted sharing keyed on
    (backend id, spawn data), kill group, coalesce, staleness), the
    shared `system` backend with the cpu widget on it, the full exhibit

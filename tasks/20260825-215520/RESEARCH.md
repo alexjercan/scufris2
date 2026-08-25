@@ -105,11 +105,14 @@ Direction (plan page review, 2026-08-25, section 08 threads):
   and closing the layer takes them along, state intact. Promotion out
   of the layer is the existing Q7 mechanism (pin tick or any drag off
   the shelf); a promoted widget unsticks, stays put, survives the
-  pill; a shelf drop demotes it. Awaiting Alex's nod on the flagged
-  consequence: the pill stays on screen (resting, passive) while any
-  runtime-owned widget is up and Escape closes the whole layer,
-  versus keeping today's auto-hide with only Escape touching the
-  layer. First reading recommended on the page.
+  pill; a shelf drop demotes it. Decided (same round): no consequence
+  was left to confirm - the flagged "auto-hide" premise was wrong.
+  Alex corrected it and `state.rs` documents the pill as "a resident
+  HUD: only the person's Escape puts it away, and only their
+  activation brings it back" (the `posture()` doc comment). Escape
+  therefore hides the layer whole per the Q6 follow-up, the next
+  activation restores it as it was, and pinned widgets are exempt
+  because pinning promoted them off the layer (Q7). Nothing open.
 - Decided (same review round): the turn boundary. Alex: "idle means
   one turn ended". The assistant state falling back to idle after
   working/speaking is the turn-ended signal; an explicit turn-ended

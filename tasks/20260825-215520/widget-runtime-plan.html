@@ -1222,8 +1222,9 @@
   <section id="p08">
     <div class="shead">
       <span class="snum">08</span>
-      <h2>Risks and open details</h2>
-      <span class="srule"></span><span class="stag">one decided, one open</span>
+      <h2>Risks and review decisions</h2>
+      <span class="srule"></span
+      ><span class="stag">both details decided on this page</span>
     </div>
     <ul>
       <li>
@@ -1258,28 +1259,23 @@
       explicit turn-ended message - a one-variant addition. Lands with increment
       2.
     </div>
-    <div class="hint open">
-      <span class="tag"
-        >one scratchpad, one pill - reworked after page review</span
-      >
-      Alex's model (page comment, 2026-08-25): the pill and the scratchpad layer
-      are the same thing. The shelf and the edge slots belong to the pill's
-      layer; a runtime-owned widget lives on that layer and is visible exactly
-      when the pill is; closing the layer takes them with it, state intact.
-      Promotion out of the layer already has its mechanism - it is pinning, as
-      decided in Q7: the pin tick, or any drag ending off the shelf. A promoted
-      widget becomes yours on the current workspace, stops being sticky, stays
-      where you put it, and survives the pill; dropping it back on a shelf slot
-      demotes it into the layer.
-      <br /><br />
-      One consequence to confirm: today the pill hides itself after every
-      interaction. For "pill visible = layer visible" to hold as one rule, the
-      pill stays on screen (resting, passive) while any runtime-owned widget is
-      up, and Escape closes the whole layer - pill and exhibits together,
-      returning on the next activation. The alternative keeps today's auto-hide
-      and ties the layer only to the deliberate Escape, at the cost of the pill
-      sometimes being gone while its layer is not. First reading recommended;
-      lands with increment 2.
+    <div class="hint done">
+      <span class="tag">decided - one scratchpad, one pill</span>
+      Alex's model (page review, 2026-08-25): the pill and the scratchpad layer
+      are the same thing - and the code already agrees.
+      <code>state.rs</code> documents the pill as "a resident HUD: only the
+      person's Escape puts it away, and only their activation brings it back";
+      an earlier framing here claimed the pill auto-hides after each
+      interaction, which was wrong and is withdrawn. So the linked model holds
+      with no new rule. The shelf and the edge slots belong to the pill's layer;
+      a runtime-owned widget is visible exactly when the pill is. Escape hides
+      the layer whole - pill and every runtime-owned widget, state intact, aging
+      clocks frozen (the Q6 follow-up decision) - and the next activation brings
+      it back exactly as it was. Promotion out of the layer is pinning, as
+      decided in Q7: the pin tick or any drag ending off the shelf; a promoted
+      widget unsticks, stays where you put it, and is exempt from Escape because
+      it left the layer. Dropping it back on a shelf slot demotes it. Nothing
+      here remains open; lands with increment 2.
     </div>
   </section>
 </div>

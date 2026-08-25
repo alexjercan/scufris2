@@ -9,9 +9,12 @@
 Implementation plan: `widget-runtime-plan.html` in this directory -
 data structures for both sides of the socket and the shell, protocol
 v2 with the correlation machinery, the file-by-file change map with
-the complete dashboardd removal, increment 1 as five commits, and two
-open details flagged for Alex (the turn-boundary inference and what
-"hiding the pill" means). Raw code inventory in `RESEARCH.md`.
+the complete dashboardd removal, and increment 1 as five commits. Both
+details flagged for Alex were decided in page review the same day:
+idle after working/speaking is the turn-ended signal, and Escape hides
+the scratchpad layer whole (the pill is already a resident HUD; the
+plan's auto-hide premise was wrong and is withdrawn). Raw code
+inventory and the decision record in `RESEARCH.md`.
 Published copy:
 https://claude.ai/code/artifact/891f3c61-93fd-4b2f-9863-b8b4b4b667a5
 

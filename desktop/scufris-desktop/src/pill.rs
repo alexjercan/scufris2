@@ -1,9 +1,14 @@
 //! The always-on-top bottom-center orb window.
 //!
-//! The pill is the orb: a small square frame with nothing in it but the dotted
-//! thought orb, whose shape and accent carry the whole state. It must never
-//! cover the desktop the user keeps working in. Positioning is a pure
-//! calculation so the bottom-center placement is testable without a display.
+//! The pill is the orb: a frame with nothing in it but the dotted thought orb,
+//! whose shape and accent carry the whole state. It must never cover the
+//! desktop the user keeps working in. Positioning is a pure calculation so the
+//! bottom-center placement is testable without a display.
+//!
+//! What is on screen is not the frame but a blob inside it: the window is cut
+//! down to the ellipse inscribed in its own rectangle, so the corners are not
+//! drawn and the desktop is visible around the orb. See [`crate::blob`] for
+//! what that costs.
 //!
 //! Arriving is motion and nothing else. The window carries no alpha, so it
 //! cannot fade, and its size is pinned by equal min and max hints, so it cannot
@@ -17,11 +22,13 @@ use std::{
     time::Duration,
 };
 
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
 };
 
-use crate::app::Shown;
+use crate::{app::Shown, blob};
 
 /// Stable window label.
 pub const LABEL: &str = "pill";
@@ -30,29 +37,37 @@ pub const LABEL: &str = "pill";
 ///
 /// The window is exactly what `pill.css` lays out. The two cannot be adjusted
 /// apart: a frame narrower than the layout clips the orb, and a wider one
-/// leaves a black margin around it. Six pixels either side of the 64 pixel orb,
-/// which is what the mic-level scale needs at its loudest.
-pub const WIDTH: f64 = 76.0;
+/// leaves ground nobody asked for around it. Fifteen pixels either side of the
+/// 160 pixel orb, which is what the mic-level scale needs at its loudest.
+///
+/// Two and a half times the 76 by 92 frame the orb study landed on. Every
+/// distance in the frame carries the same factor, so the pill is the same
+/// drawing at a size that can be read from across the desk.
+pub const WIDTH: f64 = 190.0;
 
 /// Pill height in logical pixels.
-///
-/// The window is exactly the opaque panel. A window with margins around the
-/// panel needs per-pixel alpha, which bare X11 without a compositor cannot
-/// do: the alpha is discarded and the margins render as black.
 ///
 /// Taller than it is wide by one line: the listening timer's row is reserved in
 /// every state rather than resized into, because equal min and max hints cannot
 /// be changed while the window is up without re-applying them, and a frame that
 /// resizes under the orb moves the orb.
-pub const HEIGHT: f64 = 92.0;
+///
+/// The frame is not what is seen. [`crate::blob`] cuts the window down to the
+/// ellipse inscribed in it, and the layout keeps the orb and the timer inside
+/// that curve.
+pub const HEIGHT: f64 = 230.0;
 
 /// Gap between the pill and the bottom edge of the screen, in logical pixels.
+///
+/// A distance to the screen, not a part of the frame, so it did not grow with
+/// the frame: the pill is bigger, and it stands off the edge by as much as it
+/// ever did.
 pub const BOTTOM_MARGIN: f64 = 72.0;
 
 /// How far below its resting spot the pill starts an entrance, in logical
-/// pixels. About a third of the frame: the smaller the window, the shorter the
-/// travel that still reads as arriving rather than flying in.
-const RISE: f64 = 28.0;
+/// pixels. About a third of the frame: the travel is a proportion of the thing
+/// that travels, so it grew with it and the entrance still takes as long.
+const RISE: f64 = 70.0;
 
 /// How many positions one entrance steps through.
 const RISE_STEPS: u32 = 13;
@@ -79,6 +94,14 @@ static ENTRANCE: AtomicU64 = AtomicU64::new(0);
 /// that travels is a window that guessed.
 static STILLNESS: AtomicBool = AtomicBool::new(true);
 
+/// Whether the window has been cut down to its blob.
+///
+/// The cut is set on the X window and stays set, so it is asked for once. It
+/// cannot be asked for before the window is realized, which is what showing it
+/// does, and a cut that did not happen leaves this false so the next show tries
+/// again.
+static SHAPED: AtomicBool = AtomicBool::new(false);
+
 /// Returns the physical bottom-center position of the pill on one monitor.
 pub fn bottom_center(
     monitor_x: i32,
@@ -100,8 +123,9 @@ pub fn ensure(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     if let Some(window) = app.get_webview_window(LABEL) {
         return Ok(window);
     }
-    // Opaque on purpose: the page fills the window with the panel, so nothing
-    // depends on compositing being available.
+    // Opaque on purpose: the page fills the window with the panel, and the
+    // desktop shows around it because the window is cut to a blob, not because
+    // anything blends. Nothing here depends on a compositor.
     //
     // The size is pinned with min == max hints on a window left resizable,
     // because that is the one combination GTK honors: a non-resizable GTK
@@ -109,7 +133,7 @@ pub fn ensure(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     // 200 logical pixels, and GTK clamps size hints to that natural size for
     // it too. The equal hints keep the person from resizing the pill and are
     // also what makes a tiling window manager float it.
-    WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html".into()))
+    let window = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html".into()))
         .title("Scufris")
         .inner_size(WIDTH, HEIGHT)
         .min_inner_size(WIDTH, HEIGHT)
@@ -120,7 +144,26 @@ pub fn ensure(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .shadow(false)
         .visible(false)
         .focused(false)
-        .build()
+        .build()?;
+    // The blob is cut from the event loop, because that is where the window
+    // starts existing on the display: a window that has just been mapped
+    // reports where the window manager put it, and every report is another
+    // chance to cut a pill that is still a rectangle.
+    let target = window.clone();
+    window.on_window_event(move |event| {
+        // A mask is measured in the frame's own pixels, so a frame that changed
+        // size is wearing one that no longer fits and has to be cut again. The
+        // size hints keep the person from causing this; a monitor whose scale
+        // changes under the pill does it anyway.
+        if matches!(
+            event,
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
+        ) {
+            SHAPED.store(false, Ordering::SeqCst);
+        }
+        shape(&target);
+    });
+    Ok(window)
 }
 
 /// Answers whether the pill window currently holds the keyboard.
@@ -128,6 +171,51 @@ pub fn focused(app: &AppHandle) -> bool {
     app.get_webview_window(LABEL)
         .and_then(|window| window.is_focused().ok())
         .unwrap_or(false)
+}
+
+/// Cuts the window down to its blob, once there is a window to cut.
+///
+/// Nothing rests on this. A window that cannot be cut is the rectangle it was
+/// built as, carrying the same orb it always did, which is what shipped before
+/// there was a blob at all - so a failure is said once per attempt and the pill
+/// goes up either way.
+///
+/// Showing a window is a message to the event loop rather than an act, so at
+/// the moment a caller returns from `show` there is usually no X window yet to
+/// cut - and at startup, before the loop has run at all, there certainly is
+/// none. That is not a failure and is not said out loud: every show asks again,
+/// and so does every event the window reports, one of which is the move the
+/// window manager sends it the moment it is mapped.
+fn shape(window: &WebviewWindow) {
+    if SHAPED.load(Ordering::SeqCst) {
+        return;
+    }
+    match cut(window) {
+        Ok(true) => SHAPED.store(true, Ordering::SeqCst),
+        Ok(false) => {}
+        Err(reason) => tracing::warn!("the pill stays a rectangle: {reason}"),
+    }
+}
+
+/// Asks the display to cut the pill's own window down to the blob, and answers
+/// whether there was a window to cut.
+fn cut(window: &WebviewWindow) -> Result<bool, String> {
+    // No handle means the window has not reached the display yet, which every
+    // later attempt is there to catch.
+    let Ok(handle) = window.window_handle() else {
+        return Ok(false);
+    };
+    let RawWindowHandle::Xlib(display) = handle.as_raw() else {
+        return Err("the pill is not on an X display".into());
+    };
+    let id = u32::try_from(display.window)
+        .map_err(|_| "the pill's window is not an X window".to_string())?;
+    // The window's own size in physical pixels, which is what a mask is
+    // measured in: on a scaled monitor the frame is bigger than the layout.
+    let size = window
+        .inner_size()
+        .map_err(|error| format!("the pill would not say how big it is: {error}"))?;
+    blob::cut(id, size.width, size.height).map(|()| true)
 }
 
 /// Records what the page reports about `prefers-reduced-motion`.
@@ -281,6 +369,11 @@ fn reveal(window: &WebviewWindow, mut doubt: String) -> Result<Shown, String> {
     window
         .show()
         .map_err(|error| format!("the pill could not be shown: {error}"))?;
+    // Cutting comes before the questions below, and before any of them can
+    // return early: the window exists on the display from the moment it is
+    // shown, and a pill that answered "not up" and stayed a rectangle would be
+    // the black box this shape exists to avoid.
+    shape(window);
     match window.is_visible() {
         Ok(true) => {}
         Ok(false) => return Err("the pill did not come up".into()),
@@ -324,6 +417,9 @@ pub fn show_passive(app: &AppHandle) -> Result<(), String> {
     window
         .show()
         .map_err(|error| format!("the pill could not be shown: {error}"))?;
+    // The same reason as the active pill: shown is when the window is on the
+    // display, and that is when it has to stop being a rectangle.
+    shape(&window);
     match window.is_visible() {
         Ok(true) => {}
         Ok(false) => return Err("the pill did not come up".into()),
@@ -369,11 +465,39 @@ mod tests {
     fn the_frame_is_the_size_the_page_lays_out() {
         // pill.css lays the orb and its reserved timer row out at exactly these
         // logical pixels, and the window cannot be resized once it is up. A
-        // frame and a layout that drift apart are a clipped orb or a black
-        // margin around it, so the numbers are pinned here rather than only
-        // derived from themselves.
-        assert_eq!(WIDTH, 76.0);
-        assert_eq!(HEIGHT, 92.0);
+        // frame and a layout that drift apart are a clipped orb or ground
+        // nobody asked for around it, so the numbers are pinned here rather
+        // than only derived from themselves.
+        assert_eq!(WIDTH, 190.0);
+        assert_eq!(HEIGHT, 230.0);
+        // 15 + 160 + 15 across, and 20 + 160 + 5 + 35 + 10 down.
+        assert_eq!(WIDTH, 15.0 + 160.0 + 15.0);
+        assert_eq!(HEIGHT, 20.0 + 160.0 + 5.0 + 35.0 + 10.0);
+    }
+
+    #[test]
+    fn the_orb_stays_inside_the_blob_at_its_loudest() {
+        // The window is cut to the ellipse inscribed in the frame, so a layout
+        // that fits the rectangle is not enough: the orb has to fit the curve,
+        // at the 1.12 scale pill.css gives it when the microphone is loudest.
+        let radius_x = WIDTH / 2.0;
+        let radius_y = HEIGHT / 2.0;
+        // Measured from the engine's own frames rather than assumed: across
+        // every state the furthest dot, its radius included, lands within 0.44
+        // of the box it is drawn in.
+        let orb = 160.0 * 0.44 * 1.12;
+        // The orb box is 20 from the top of a 160 tall square, so its middle
+        // sits above the middle of the frame.
+        let lift = radius_y - (20.0 + 80.0);
+        for step in 0..=90 {
+            let angle = f64::from(step) * std::f64::consts::PI / 180.0;
+            let x = orb * angle.cos() / radius_x;
+            let y = (orb * angle.sin() + lift) / radius_y;
+            assert!(
+                x * x + y * y < 1.0,
+                "the orb reaches outside the blob at {step} degrees"
+            );
+        }
     }
 
     #[test]
@@ -389,6 +513,22 @@ mod tests {
         assert!(
             furthest < 1.15,
             "the entrance overshoots far enough to read as a bounce: {furthest}"
+        );
+    }
+
+    #[test]
+    fn the_timer_row_fits_across_the_bottom_of_the_blob() {
+        // The row is 35 tall under the orb, and the 20 pixel digits sit in the
+        // middle of it: the widest a take can read is "59:59", which is five
+        // characters of a monospace face at about 0.6 of its size.
+        let radius_x = WIDTH / 2.0;
+        let radius_y = HEIGHT / 2.0;
+        let row = 20.0 + 160.0 + 5.0;
+        let baseline = row + 35.0 / 2.0 + 20.0 / 2.0;
+        let across = 2.0 * radius_x * (1.0 - ((baseline - radius_y) / radius_y).powi(2)).sqrt();
+        assert!(
+            across > 5.0 * 20.0 * 0.6,
+            "the blob is only {across} across where the timer is"
         );
     }
 

@@ -25,18 +25,25 @@ pub const LABEL: &str = "review";
 ///
 /// The window is exactly what `review.css` lays out, for the same reason the
 /// pill window is: without a compositor there is no alpha to hide a margin in.
-pub const WIDTH: f64 = 460.0;
+/// This one keeps its corners - it is a box of words, and an ellipse would cut
+/// the ends off the lines it exists to show.
+///
+/// Wider than the 460 the orb study landed on, by as much as the type grew:
+/// the same words per line, in letters that match a pill two and a half times
+/// the size it was.
+pub const WIDTH: f64 = 620.0;
 
 /// Box height in logical pixels.
 ///
-/// Three lines of transcript, the caret, and the hint line. A take longer than
-/// that scrolls under a fade rather than resizing the window: equal min and max
-/// hints cannot be changed while the window is up without re-applying them.
-pub const HEIGHT: f64 = 108.0;
+/// Three lines of transcript and the hint line. A take longer than that scrolls
+/// under a fade rather than resizing the window: equal min and max hints cannot
+/// be changed while the window is up without re-applying them.
+pub const HEIGHT: f64 = 140.0;
 
 /// Gap between the bottom of the box and the top of the orb window, in logical
-/// pixels.
-const GAP: f64 = 12.0;
+/// pixels. Twice what it was, because what it separates the box from is now
+/// two and a half times the size.
+const GAP: f64 = 24.0;
 
 /// The states whose words the person has to decide about.
 ///
@@ -179,8 +186,14 @@ mod tests {
     fn the_frame_is_the_size_the_page_lays_out() {
         // review.css lays the box out at exactly these logical pixels, and the
         // window cannot be resized once it is up.
-        assert_eq!(WIDTH, 460.0);
-        assert_eq!(HEIGHT, 108.0);
+        assert_eq!(WIDTH, 620.0);
+        assert_eq!(HEIGHT, 140.0);
+        // 16 above and 14 below the three 26.1 pixel lines, and the hint line
+        // ten under them: room for three lines and no room for a fourth, which
+        // is what puts the fade at the bottom of a long take.
+        let lines = HEIGHT - (16.0 + 14.0) - (18.0 + 10.0);
+        assert!(lines >= 3.0 * 26.1, "the box cannot hold three lines");
+        assert!(lines < 4.0 * 26.1, "the box holds a fourth line");
     }
 
     #[test]

@@ -7,6 +7,7 @@
 
 mod app;
 mod audio;
+mod blob;
 mod config;
 mod daemon;
 mod focus;

@@ -1,8 +1,8 @@
 /* The bare orb, from the Orb Study section 03 "The pill is the orb"
- * (tasks/20260825-231826/orb-study.html). The window is a small square around
- * the 64px orb and nothing else: no label, no transcript line, no wave, no
- * frame. The orb's shape and accent carry the state on their own, and the only
- * other mark is the listening timer, one dim line under it.
+ * (tasks/20260825-231826/orb-study.html). The window is a frame around the
+ * 160px orb and nothing else: no label, no transcript line, no wave, no border.
+ * The orb's shape and accent carry the state on their own, and the only other
+ * mark is the listening timer, one dim line under it.
  *
  * Color follows the state grammar: yellow listening, brown transcribing,
  * quartz review, niagara working, green speaking, wisteria attention, red only
@@ -30,9 +30,11 @@
 }
 
 /* Exactly the panel the orb painter mixes from. Bare X11 without a compositor
- * discards per-pixel alpha, so the window cannot be a transparent cut-out
- * around the orb; what it can be is the same near-black the far dots fade
- * into, which is what makes the frame disappear on a dark desktop. */
+ * discards per-pixel alpha, so nothing here can be see-through: what shows the
+ * desktop around the orb is the host cutting the window down to the ellipse
+ * inscribed in this frame (src/blob.rs). The ground stays the near-black the
+ * far dots fade into, so the blob reads as one dark object rather than a hole
+ * with an edge. */
 html,
 body {
   height: 100%;
@@ -55,7 +57,9 @@ body {
   align-items: center;
   width: 100%;
   height: 100%;
-  padding: 8px 6px 4px;
+  /* 20 + 160 + 5 + 35 + 10 down and 15 + 160 + 15 across: exactly the frame
+   * src/pill.rs pins, and everything in it inside the blob's curve. */
+  padding: 20px 15px 10px;
   transition: filter 0.25s ease;
 }
 
@@ -118,7 +122,7 @@ body {
 .pill[data-state="attention"] .orb::after {
   content: "";
   position: absolute;
-  inset: -5px;
+  inset: -12px;
   border-radius: 50%;
   border: 1px solid var(--wisteria);
   animation: ping 2.6s ease-out infinite;
@@ -167,16 +171,18 @@ body {
 
 /* ---------- pieces ---------- */
 
-/* The dotted thought orb, at the engine's tuned 64px preset. pill.ts paints it
- * from --acc every frame; the attribute size is replaced by the device pixel
- * ratio, so the CSS box is what fixes the drawn size. The mic level breathes
- * the whole orb, and the frame carries six pixels either side for the loudest
- * of it. */
+/* The dotted thought orb. pill.ts asks the engine for the tuned 64px preset and
+ * draws it at this size, which is the engine's own way of getting a bigger orb:
+ * the same dots, finer against a wider sphere, rather than a 64px drawing blown
+ * up. It paints from --acc every frame; the attribute size is replaced by the
+ * device pixel ratio, so the CSS box is what fixes the drawn size. The mic
+ * level breathes the whole orb, and the frame carries fifteen pixels either
+ * side for the loudest of it. */
 .orb {
   position: relative;
   flex: 0 0 auto;
-  width: 64px;
-  height: 64px;
+  width: 160px;
+  height: 160px;
   transform: scale(calc(0.82 + 0.3 * var(--lv)));
   transition: transform 0.1s linear;
 }
@@ -194,22 +200,27 @@ body {
  * frame that resized under the orb would move the orb. */
 .timer {
   flex: 0 0 auto;
-  margin-top: 2px;
-  height: 14px;
-  line-height: 14px;
+  margin-top: 5px;
+  height: 35px;
+  line-height: 35px;
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  /* The frame grew two and a half times; this did not grow with it. A caption
+   * that scales with its container stops being a caption, and this row sits
+   * near the bottom of the blob where the curve is narrowest. */
+  font-size: 20px;
   letter-spacing: 0.04em;
   color: var(--bg4);
 }
 
 /* Off the orb entirely, and still focusable: the keys are the orb window's,
  * so the field that holds the words has to live in it. What the person types
- * is mirrored into the review window, which is where they read it. */
+ * is mirrored into the review window, which is where they read it. Kept inside
+ * the blob rather than in a cut-away corner, so nothing about the window's
+ * shape can ever be what decides whether the keys land. */
 .transcript {
   position: absolute;
-  left: 0;
-  bottom: 0;
+  left: 50%;
+  bottom: 20px;
   width: 1px;
   height: 1px;
   border: none;

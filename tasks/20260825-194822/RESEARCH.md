@@ -27,9 +27,20 @@ dashboards.
   collision solver. The session HUD takeover displaces shelf widgets to
   free edges and restores them on close. Drags are i3's floating
   modifier; the runtime snaps a settled window into a slot within
-  reach, or marks it user-placed and never moves it again. An
-  interactive demo of the choreography is section 05 of the design
-  page.
+  reach. An interactive demo of the choreography is section 05 of the
+  design page.
+- Demo feedback round (page review, 2026-08-25): a shelf widget with no
+  free edge slot now hides while the session HUD is open instead of
+  showing through it; every widget carries the always-visible close
+  tick from the section 04 chrome; pinned widgets read as pinned with
+  an accent border, a bottom-left corner mark, and a unified "pinned"
+  badge (the separate "yours" state is gone); "clear" closes the
+  runtime's exhibits and leaves user-owned widgets standing. Drag
+  ownership is an open question with four options in section 05: A
+  "touch means yours" (the shelf is the runtime's, everywhere else is
+  yours - implemented in the demo, Alex's stated inclination), B only
+  edge slots pin, C only the pin tick pins, D hold-to-pin. Alex
+  confirms or picks before implementation.
 - No links, no inputs between widgets. A Scufris widget shows
   something; connecting widgets stays dashboardd territory.
 - Breakage is progress. Reimplementing the agent extension from scratch

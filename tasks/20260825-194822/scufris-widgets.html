@@ -1015,9 +1015,11 @@
       <li>
         <b>Drag and snap:</b> in the real thing you drag with the i3 floating
         modifier; the runtime watches the window settle and, if it rests within
-        reach of a slot, glides it in - dropping on an edge slot pins it into an
-        instrument. Settling anywhere else marks it user-placed, and the runtime
-        never moves it again.
+        reach of a slot, glides it in. Ownership follows one sentence:
+        <b>the shelf is the runtime's; everywhere else is yours.</b> Any drag
+        that ends off the shelf pins the widget - snapped into an edge slot or
+        standing where you dropped it - and the runtime stops aging and moving
+        it. Dropping it back on a shelf slot returns it to the flow.
       </li>
     </ul>
 
@@ -1157,18 +1159,46 @@
         font-size: 9.5px;
         font-weight: 400;
         color: var(--fg);
-        right: 8px;
+        right: 54px;
         bottom: 6px;
         line-height: 1.4;
       }
       .dwb {
         position: absolute;
         right: 8px;
-        top: 4px;
+        bottom: 6px;
         font-size: 7.5px;
         letter-spacing: 0.14em;
         text-transform: uppercase;
         color: var(--acc, #95a99f);
+      }
+      .dwx {
+        position: absolute;
+        top: 2px;
+        right: 6px;
+        font-size: 9px;
+        color: var(--quartz);
+        border: 1px solid var(--bg3);
+        padding: 0 5px;
+        line-height: 1.5;
+        cursor: pointer;
+      }
+      .dwx:hover {
+        color: var(--red);
+        border-color: var(--red);
+      }
+      .dwidget.pinned {
+        border-color: var(--acc, #95a99f);
+      }
+      .dwidget.pinned::after {
+        content: "";
+        position: absolute;
+        bottom: -1px;
+        left: -1px;
+        width: 6px;
+        height: 6px;
+        border-bottom: 2px solid var(--acc, #95a99f);
+        border-left: 2px solid var(--acc, #95a99f);
       }
       #wm-chat {
         position: absolute;
@@ -1220,11 +1250,46 @@
     </div>
     <p class="mocknote">
       Try it: spawn three exhibits, open the session HUD and watch them yield to
-      the edges, close it and watch them come home. Drag a widget - slots light
-      up; drop it on an edge slot to pin it (its badge flips), or drop it in the
-      open to make it user-placed, which the runtime then never touches. A
-      fourth exhibit retires the oldest.
+      the edges (shelf widgets with no free edge hide until the HUD closes),
+      close it and watch them come home. Drag a widget anywhere off the shelf
+      and it becomes yours - accent border, "pinned" badge - snapped to an edge
+      slot or standing where you dropped it. Drop it back on a shelf slot to
+      hand it back to the runtime. The x closes any widget instantly. A fourth
+      exhibit retires the oldest.
     </p>
+
+    <div class="panel">
+      <h3>Who owns a dragged widget - four options</h3>
+      <ul>
+        <li>
+          <b>A. Touch means yours</b> (implemented above, your inclination). Any
+          drag that ends off the shelf pins the widget; only dropping it back on
+          a shelf slot returns it to the runtime. One sentence covers every
+          case, and the pin tick becomes a shortcut, not a requirement. Cost: an
+          accidental nudge silently opts a widget out of aging - the accent
+          border is the only tell.
+        </li>
+        <li>
+          <b>B. Slots pin, the open floor does not.</b> Dropping into an edge
+          slot pins; dropping in the open is a temporary shove and the runtime
+          reclaims the widget at the next layout pass. Deliberate placements
+          persist, accidents self-heal. Cost: "I moved it and it moved back" is
+          the classic window manager betrayal.
+        </li>
+        <li>
+          <b>C. Only the pin tick pins.</b> Dragging never changes ownership;
+          position and lifecycle stay orthogonal. Purest model, but a dragged
+          exhibit can age out of the spot you just chose for it, which reads as
+          the runtime overriding you.
+        </li>
+        <li>
+          <b>D. Hold to pin.</b> A short drag shoves temporarily; holding the
+          drop for ~half a second pins, with the border filling in as
+          confirmation. Expressive but undiscoverable, and misreads under i3's
+          floating modifier where the runtime only sees the settle.
+        </li>
+      </ul>
+    </div>
 
     <script>
       (function () {
@@ -1301,9 +1366,18 @@
           shelf.forEach(function (wo, i) {
             if (chatOpen) {
               if (!wo.temp) wo.temp = freeEdge();
-              if (wo.temp) put(wo, wo.temp);
+              if (wo.temp) {
+                wo.el.style.opacity = "";
+                wo.el.style.pointerEvents = "";
+                put(wo, wo.temp);
+              } else {
+                wo.el.style.opacity = "0";
+                wo.el.style.pointerEvents = "none";
+              }
             } else {
               wo.temp = null;
+              wo.el.style.opacity = "";
+              wo.el.style.pointerEvents = "";
               if (i < 3) put(wo, "shelf" + i);
             }
           });
@@ -1335,11 +1409,21 @@
             '">' +
             spec.v +
             "</span>" +
-            '<span class="dwb">live</span>';
+            '<span class="dwb">live</span>' +
+            '<span class="dwx">x</span>';
           demo.appendChild(el);
           var wo = { el: el, temp: null };
           el.addEventListener("pointerdown", function (ev) {
             startDrag(wo, ev);
+          });
+          var xbtn = el.querySelector(".dwx");
+          xbtn.addEventListener("pointerdown", function (ev) {
+            ev.stopPropagation();
+          });
+          xbtn.addEventListener("click", function () {
+            detach(wo);
+            retire(wo);
+            layout();
           });
           return wo;
         }
@@ -1420,14 +1504,14 @@
           if (slot && slot.indexOf("shelf") === 0 && !chatOpen) {
             shelf.unshift(wo);
             if (shelf.length > 3) retire(shelf.pop());
-            setBadge(wo, "live");
-          } else if (slot && !pinned[slot]) {
+            setOwned(wo, false);
+          } else if (slot && slot.indexOf("shelf") !== 0 && !pinned[slot]) {
             pinned[slot] = wo;
             put(wo, slot);
-            setBadge(wo, "pinned");
+            setOwned(wo, true);
           } else {
             loose.push(wo);
-            setBadge(wo, "yours");
+            setOwned(wo, true);
           }
           drag = null;
           layout();
@@ -1441,8 +1525,9 @@
             if (pinned[slot] === wo) delete pinned[slot];
           });
         }
-        function setBadge(wo, text) {
-          wo.el.querySelector(".dwb").textContent = text;
+        function setOwned(wo, owned) {
+          wo.el.classList.toggle("pinned", owned);
+          wo.el.querySelector(".dwb").textContent = owned ? "pinned" : "live";
         }
 
         document
@@ -1473,11 +1558,9 @@
         document
           .getElementById("wm-clear")
           .addEventListener("click", function () {
+            // "clear" closes the runtime's exhibits; pinned widgets are
+            // yours and stay until you close them.
             shelf.slice().forEach(function (wo) {
-              detach(wo);
-              retire(wo);
-            });
-            loose.slice().forEach(function (wo) {
               detach(wo);
               retire(wo);
             });
@@ -1493,7 +1576,7 @@
       animation are the companion's own moves (set position after show, the warm
       pool, and hide). The drag itself is i3's floating modifier - the runtime
       only watches the window settle and then either glides it into a slot or
-      marks it user-placed. Nothing here fights the window manager.
+      leaves it standing as yours. Nothing here fights the window manager.
     </div>
   </section>
 
@@ -1964,6 +2047,11 @@ spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <
       <li>
         <b>Widget windows on workspaces.</b> Exhibits stick to all workspaces
         (they accompany speech) while instruments stay on theirs - agree?
+      </li>
+      <li>
+        <b>Drag ownership.</b> The demo implements option A from section 05: the
+        shelf is the runtime's, everywhere else is yours. Confirm A, or pick B
+        (only slots pin), C (only the pin tick pins), or D (hold to pin).
       </li>
     </ul>
   </section>

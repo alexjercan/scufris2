@@ -1,9 +1,26 @@
+/* The square gruber HUD pill from the reviewed design page
+ * (tasks/20260822-132001/scufris-hud.html). Color follows the state grammar:
+ * yellow listening, brown transcribing, quartz review, niagara working,
+ * green speaking, wisteria attention, red only for error and the mic ring.
+ * Motion pattern, not hue, separates states, so everything survives
+ * grayscale. */
+
 :root {
-  --pill-surface: rgba(18, 20, 26, 0.94);
-  --pill-border: rgba(255, 255, 255, 0.12);
-  --pill-text: #f2f4f8;
-  --pill-muted: #9aa3b2;
-  --pill-accent: #c8c8c8;
+  --bg2: #282828;
+  --bg3: #453d41;
+  --bg4: #52494e;
+  --fg: #e4e4ef;
+  --fg1: #f4f4ff;
+  --yellow: #ffdd33;
+  --brown: #cc8c3c;
+  --quartz: #95a99f;
+  --niagara: #96a6c8;
+  --wisteria: #9e95c7;
+  --green: #73c936;
+  --red: #f43841;
+  --mono:
+    Iosevka, "Iosevka Nerd Font", "Iosevka Term", "JetBrains Mono",
+    ui-monospace, monospace;
 }
 
 * {
@@ -17,77 +34,244 @@ body {
   height: 100%;
   background: transparent;
   overflow: hidden;
-  font-family: system-ui, sans-serif;
-  color: var(--pill-text);
+  font-family: var(--mono);
+  color: var(--fg);
   user-select: none;
 }
 
-.pill {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 100%;
-  margin: 8px;
-  padding: 0 22px;
-  border: 1px solid var(--pill-border);
-  border-radius: 40px;
-  background: var(--pill-surface);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-}
-
-.pill[data-state="listening"] {
-  --pill-accent: #e03b3b;
-}
-.pill[data-state="transcribing"] {
-  --pill-accent: #e08b2b;
-}
-.pill[data-state="review"],
-.pill[data-state="retained"] {
-  --pill-accent: #3b8be0;
-}
-.pill[data-state="sent"] {
-  --pill-accent: #35b58a;
-}
-.pill[data-state="working"] {
-  --pill-accent: #3b8be0;
-}
-.pill[data-state="speaking"] {
-  --pill-accent: #35b58a;
-}
-.pill[data-state="attention"] {
-  --pill-accent: #e0c02b;
-}
-.pill[data-state="error"] {
-  --pill-accent: #c02b2b;
-}
-.pill[data-state="disconnected"] {
-  --pill-accent: #6b6b6b;
-}
-
-.orb {
-  position: relative;
-  flex: 0 0 auto;
-  width: 44px;
-  height: 44px;
+body {
   display: grid;
   place-items: center;
 }
 
-.wave {
-  width: 26px;
-  height: 26px;
+.pill {
+  /* --acc paints the state, --glow is its rgb triple for the halo, --lv is
+   * the sprung level the script writes every frame. */
+  --acc: var(--quartz);
+  --glow: 149, 169, 159;
+  --lv: 0.15;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: calc(100% - 40px);
+  height: 60px;
+  padding: 0 18px 0 13px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 38%),
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.015) 0 1px,
+      transparent 1px 3px
+    ),
+    linear-gradient(180deg, #15151a, #0d0d11);
+  border: 1px solid #2e2c33;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.5);
+  transition: filter 0.25s ease;
+}
+
+.pill::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  box-shadow: 0 0 16px 2px rgba(var(--glow), 0.55);
+  opacity: calc(0.1 + 0.5 * var(--lv));
+  transition: opacity 0.12s linear;
+  /* Idle personality: the glow never sits still. */
+  animation: breathe 4.4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  50% {
+    filter: brightness(1.45);
+  }
+}
+
+.pill::after {
+  /* State-colored corner ticks, the same language as the HUD panels. */
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--acc), var(--acc)) left top / 9px 1px,
+    linear-gradient(var(--acc), var(--acc)) left top / 1px 9px,
+    linear-gradient(var(--acc), var(--acc)) right bottom / 9px 1px,
+    linear-gradient(var(--acc), var(--acc)) right bottom / 1px 9px;
+  background-repeat: no-repeat;
+  opacity: 0.9;
+}
+
+/* ---------- state grammar ---------- */
+
+.pill[data-state="listening"] {
+  --acc: var(--yellow);
+  --glow: 255, 221, 51;
+}
+.pill[data-state="transcribing"] {
+  --acc: var(--brown);
+  --glow: 204, 140, 60;
+}
+.pill[data-state="transcribing"] .wave {
+  opacity: 0.55;
+}
+.pill[data-state="transcribing"] .orb i {
+  animation-duration: 3s;
+}
+.pill[data-state="review"] {
+  --acc: var(--quartz);
+  --glow: 149, 169, 159;
+}
+.pill[data-state="review"] .orb i {
+  animation-duration: 14s;
+}
+.pill[data-state="sent"] {
+  --acc: var(--green);
+  --glow: 115, 201, 54;
+}
+.pill[data-state="working"] {
+  --acc: var(--niagara);
+  --glow: 150, 166, 200;
+}
+.pill[data-state="working"] .orb i {
+  animation-duration: 2.2s;
+}
+.pill[data-state="working"] .label {
+  /* Gemini-style shimmer: self-animating, clearly busy, clearly not
+   * listening. */
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    var(--quartz) 0%,
+    var(--quartz) 30%,
+    var(--fg1) 47%,
+    #fff 50%,
+    var(--quartz) 62%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: sweep 1.7s linear infinite;
+}
+@keyframes sweep {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+.pill[data-state="speaking"] {
+  --acc: var(--green);
+  --glow: 115, 201, 54;
+}
+.pill[data-state="attention"],
+.pill[data-state="retained"],
+.pill[data-state="uncertain"] {
+  --acc: var(--wisteria);
+  --glow: 158, 149, 199;
+}
+.pill[data-state="attention"] .orb::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
   border-radius: 50%;
-  background: var(--pill-accent);
-  transform: scale(var(--level, 0.55));
-  transition:
-    transform 90ms linear,
-    background 200ms ease;
+  border: 1px solid var(--wisteria);
+  animation: ping 2.6s ease-out infinite;
+}
+@keyframes ping {
+  0% {
+    transform: scale(0.6);
+    opacity: 1;
+  }
+  18% {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+  22% {
+    transform: scale(0.6);
+    opacity: 1;
+  }
+  40% {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+  41%,
+  78% {
+    opacity: 0;
+  }
+  80% {
+    transform: scale(0.7);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.2);
+    opacity: 0;
+  }
+}
+.pill[data-state="error"] {
+  --acc: var(--red);
+  --glow: 244, 56, 65;
+  filter: saturate(0.85);
+}
+.pill[data-state="error"] .orb i {
+  animation: none;
+}
+.pill[data-state="disconnected"] {
+  --acc: var(--bg4);
+  --glow: 82, 73, 78;
+  filter: saturate(0.4);
+}
+.pill[data-state="disconnected"] .orb i {
+  animation-duration: 22s;
+  opacity: 0.7;
+}
+
+/* ---------- pieces ---------- */
+
+.orb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  transform: scale(calc(0.82 + 0.3 * var(--lv)));
+  transition: transform 0.1s linear;
+}
+
+.orb i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background:
+    radial-gradient(
+      circle at 34% 32%,
+      rgba(255, 255, 255, 0.55),
+      transparent 42%
+    ),
+    conic-gradient(
+      var(--acc),
+      transparent 28%,
+      var(--acc) 52%,
+      transparent 78%,
+      var(--acc)
+    );
+  animation: rot 5.5s linear infinite;
+}
+
+@keyframes rot {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .record {
+  /* The mic privacy ring. Red is reserved for error and the mic, and this is
+   * the mic. */
   position: absolute;
-  inset: 0;
-  border: 2px solid #ff3030;
+  inset: -5px;
+  border: 2px solid var(--red);
   border-radius: 50%;
   opacity: 0;
 }
@@ -107,40 +291,55 @@ body {
   }
 }
 
+.wave {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 26px;
+  display: none;
+}
+
+.pill[data-state="listening"] .wave,
+.pill[data-state="transcribing"] .wave,
+.pill[data-state="speaking"] .wave {
+  display: block;
+}
+
 .body {
   flex: 1 1 auto;
   min-width: 0;
 }
 
 .label {
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  font-size: 10px;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--pill-muted);
+  color: var(--acc);
+  transition: color 0.18s ease;
 }
 
 .transcript {
   width: 100%;
   margin-top: 2px;
   border: none;
-  border-bottom: 1px solid var(--pill-border);
+  border-bottom: 1px solid var(--bg3);
   background: transparent;
-  color: var(--pill-text);
+  color: var(--fg);
   font: inherit;
-  font-size: 16px;
+  font-size: 14px;
+  caret-color: var(--acc);
   outline: none;
   user-select: text;
 }
 
 .transcript[readonly] {
   border-bottom-color: transparent;
-  color: var(--pill-muted);
+  color: var(--quartz);
 }
 
 .detail {
   margin-top: 2px;
-  font-size: 12px;
-  color: var(--pill-muted);
+  font-size: 11px;
+  color: var(--quartz);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -153,10 +352,20 @@ body {
 .timer {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
-  font-size: 14px;
-  color: var(--pill-muted);
+  font-size: 13px;
+  color: var(--quartz);
 }
 
 .timer:empty {
   display: none;
+}
+
+/* Reduced motion: crossfades instead of motion. The glow still tracks the
+ * level through --lv; only the self-driven animation stops. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+  }
 }

@@ -7,9 +7,14 @@
   </head>
   <body>
     <main id="pill" class="pill" data-state="idle">
-      <div class="orb">
-        <span class="record"></span><span class="wave"></span>
-      </div>
+      <div class="orb"><span class="record"></span><i></i></div>
+      <canvas
+        id="wave"
+        class="wave"
+        width="64"
+        height="26"
+        aria-hidden="true"
+      ></canvas>
       <div class="body">
         <p id="label" class="label">Scufris</p>
         <input

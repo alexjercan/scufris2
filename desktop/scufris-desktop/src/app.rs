@@ -62,6 +62,9 @@ pub const TICK_EVENT: &str = "scufris://tick";
 /// Event name asking the frontend to put a transcript on the clipboard.
 pub const COPY_EVENT: &str = "scufris://copy";
 
+/// Event name carrying the sound cue enablement to the frontend.
+pub const CUES_EVENT: &str = "scufris://cues";
+
 /// Interval between recording progress updates.
 const TICK_INTERVAL: Duration = Duration::from_millis(60);
 

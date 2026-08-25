@@ -17,10 +17,19 @@ mod state;
 mod stt;
 mod tray;
 
-use std::{env, error::Error, os::unix::process::CommandExt, process::ExitCode, sync::Arc};
+use std::{
+    env,
+    error::Error,
+    os::unix::process::CommandExt,
+    process::ExitCode,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use app::{
-    ACK_TIMEOUT, App, Backend, COPY_EVENT, Executor, PRESENTATION_EVENT, Ports,
+    ACK_TIMEOUT, App, Backend, COPY_EVENT, CUES_EVENT, Executor, PRESENTATION_EVENT, Ports,
     PresentationPayload, Shown, Surface, TICK_EVENT, ThreadExecutor, TickPayload, Transcriber,
 };
 use audio::{CpalRecorder, Recorder};
@@ -31,7 +40,7 @@ use pending::{FilePendingStore, PendingStore};
 use state::Event;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, menu::Menu};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 fn main() -> ExitCode {
     match run() {
@@ -89,6 +98,10 @@ fn configure_webkit_renderer() -> Result<(), Box<dyn Error>> {
         .exec();
     Err(error.into())
 }
+
+/// Whether the four boundary earcons play. Session-scoped: every start ships
+/// them enabled, the tray menu mutes them.
+struct CueSwitch(AtomicBool);
 
 /// The pill window, the tray, and focus restoration.
 struct DesktopSurface {
@@ -186,6 +199,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             pill_submit,
             pill_cancel,
             pill_copy,
+            pill_cues,
             pill_log
         ])
         .setup(move |tauri| {
@@ -198,15 +212,26 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                 restart_available,
                 &app::status_line("disconnected", "The Scufris backend is unavailable."),
             )?;
+            tauri.manage(CueSwitch(AtomicBool::new(true)));
+            let cue_menu = menu.clone();
             tray::install(
                 &handle,
                 &menu,
-                |app, id| {
+                move |app, id| {
                     let runtime = app.state::<Arc<App>>().inner().clone();
                     match id {
                         tray::MENU_CHAT => runtime.open_chat(),
                         tray::MENU_VOICE => runtime.handle(Event::Activate),
                         tray::MENU_RESTART => runtime.restart_backend(),
+                        tray::MENU_CUES => {
+                            let enabled =
+                                !app.state::<CueSwitch>().0.fetch_xor(true, Ordering::AcqRel);
+                            if let Err(error) = tray::set_cues_label(&cue_menu, enabled) {
+                                warn!("{error}");
+                            }
+                            let _ = app.emit(CUES_EVENT, enabled);
+                            info!(enabled, "sound cues");
+                        }
                         tray::MENU_QUIT => app.exit(0),
                         _ => {}
                     }
@@ -280,6 +305,13 @@ fn pill_cancel(runtime: tauri::State<'_, Arc<App>>) {
 #[tauri::command]
 fn pill_copy(runtime: tauri::State<'_, Arc<App>>) {
     runtime.inner().clone().handle(Event::Copy);
+}
+
+/// The current sound cue enablement, asked for once when the webview loads.
+/// Later changes arrive over the cues event.
+#[tauri::command]
+fn pill_cues(cues: tauri::State<'_, CueSwitch>) -> bool {
+    cues.0.load(Ordering::Acquire)
 }
 
 /// Webview console output, forwarded so pill behaviour is visible from

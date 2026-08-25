@@ -1,6 +1,6 @@
 # Redesign the pill: square gruber HUD, state grammar, dynamic glow, earcons
 
-- STATUS: OPEN
+- STATUS: IN_PROGRESS
 - PRIORITY: 85
 - TAGS: voice, desktop, design
 

@@ -22,19 +22,24 @@ pub const MENU_CHAT: &str = "chat";
 pub const MENU_VOICE: &str = "voice";
 pub const MENU_STATUS: &str = "status";
 pub const MENU_RESTART: &str = "restart";
+pub const MENU_CUES: &str = "cues";
 pub const MENU_QUIT: &str = "quit";
 
 /// Returns the opaque colour that identifies one tray state.
+///
+/// The gruber state grammar the pill uses: yellow listening, brown
+/// transcribing, niagara working, green speaking, wisteria attention, red
+/// reserved for error and the mic ring.
 pub fn state_color(state: &str) -> [u8; 3] {
     match state {
-        "listening" => [0xE0, 0x3B, 0x3B],
-        "transcribing" => [0xE0, 0x8B, 0x2B],
-        "working" => [0x3B, 0x8B, 0xE0],
-        "speaking" => [0x35, 0xB5, 0x8A],
-        "attention" => [0xE0, 0xC0, 0x2B],
-        "error" => [0xC0, 0x2B, 0x2B],
-        "disconnected" => [0x6B, 0x6B, 0x6B],
-        _ => [0xC8, 0xC8, 0xC8],
+        "listening" => [0xFF, 0xDD, 0x33],
+        "transcribing" => [0xCC, 0x8C, 0x3C],
+        "working" => [0x96, 0xA6, 0xC8],
+        "speaking" => [0x73, 0xC9, 0x36],
+        "attention" => [0x9E, 0x95, 0xC7],
+        "error" => [0xF4, 0x38, 0x41],
+        "disconnected" => [0x52, 0x49, 0x4E],
+        _ => [0x95, 0xA9, 0x9F],
     }
 }
 
@@ -54,7 +59,7 @@ pub fn icon_rgba(state: &str) -> Vec<u8> {
         for x in 0..size {
             let distance = (((x as f32 - center).powi(2)) + ((y as f32 - center).powi(2))).sqrt();
             let pixel = if privacy && distance > 12.0 && distance <= 15.0 {
-                [0xFF, 0x30, 0x30, 0xFF]
+                [0xF4, 0x38, 0x41, 0xFF]
             } else if distance <= 11.0 {
                 [color[0], color[1], color[2], 0xFF]
             } else {
@@ -90,6 +95,15 @@ pub fn tooltip(state: &str, detail: &str) -> String {
     }
 }
 
+/// Returns the label of the sound cue switch for one enablement.
+pub fn cues_label(enabled: bool) -> &'static str {
+    if enabled {
+        "Mute sound cues"
+    } else {
+        "Unmute sound cues"
+    }
+}
+
 /// Builds the tray status menu.
 pub fn build_menu(
     app: &AppHandle,
@@ -111,9 +125,19 @@ pub fn build_menu(
                 .enabled(restart_available)
                 .build(app)?,
         )
+        .text(MENU_CUES, cues_label(true))
         .separator()
         .text(MENU_QUIT, "Quit Scufris desktop")
         .build()
+}
+
+/// Applies one cue enablement to the switch label in the menu.
+pub fn set_cues_label(menu: &Menu<tauri::Wry>, enabled: bool) -> Result<(), String> {
+    let Some(MenuItemKind::MenuItem(item)) = menu.get(MENU_CUES) else {
+        return Err("the sound cue switch is not in the menu".into());
+    };
+    item.set_text(cues_label(enabled))
+        .map_err(|error| format!("the sound cue switch would not change: {error}"))
 }
 
 /// Installs the tray icon and wires its click behaviour.
@@ -218,11 +242,27 @@ mod tests {
                 listening[offset + 3],
             ]
         };
-        assert_eq!(ring_pixel(ICON_SIZE / 2, 2), [0xFF, 0x30, 0x30, 0xFF]);
+        assert_eq!(ring_pixel(ICON_SIZE / 2, 2), [0xF4, 0x38, 0x41, 0xFF]);
         assert_eq!(
             icon_rgba("working")[((2 * ICON_SIZE + ICON_SIZE / 2) * 4) as usize + 3],
             0
         );
+    }
+
+    #[test]
+    fn the_cue_switch_offers_the_opposite_of_the_current_enablement() {
+        assert_eq!(cues_label(true), "Mute sound cues");
+        assert_eq!(cues_label(false), "Unmute sound cues");
+    }
+
+    #[test]
+    fn red_is_reserved_for_error_and_the_mic_ring() {
+        assert_eq!(state_color("error"), [0xF4, 0x38, 0x41]);
+        for state in STATES {
+            if state != "error" {
+                assert_ne!(state_color(state), state_color("error"), "{state}");
+            }
+        }
     }
 
     #[test]

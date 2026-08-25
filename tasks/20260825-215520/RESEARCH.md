@@ -97,6 +97,23 @@ Decision (plan page review, 2026-08-25): Alex accepted the breaking
 removal of `programs.scufris.dashboard.*` (section 08 comment,
 "accepted"). The CHANGELOG entry and release note stay required.
 
+Direction (plan page review, 2026-08-25, section 08 threads):
+
+- One scratchpad, one pill. Alex: the pill and the scratchpad layer
+  are the same thing - the shelf and edge slots belong to the pill's
+  layer, runtime-owned widgets are visible exactly when the pill is,
+  and closing the layer takes them along, state intact. Promotion out
+  of the layer is the existing Q7 mechanism (pin tick or any drag off
+  the shelf); a promoted widget unsticks, stays put, survives the
+  pill; a shelf drop demotes it. Awaiting Alex's nod on the flagged
+  consequence: the pill stays on screen (resting, passive) while any
+  runtime-owned widget is up and Escape closes the whole layer,
+  versus keeping today's auto-hide with only Escape touching the
+  layer. First reading recommended on the page.
+- The turn-boundary hint was reworded in plain terms after Alex asked;
+  the proposal is unchanged (idle after working/speaking ends a turn,
+  explicit turn-ended message as the fallback).
+
 ## Extension facts that shape the plan
 
 - Tools are `pi.registerTool(defineTool({name, label, description,

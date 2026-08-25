@@ -1,6 +1,6 @@
 # Pill orb on the thinking-orbs engine
 
-- STATUS: OPEN
+- STATUS: IN_PROGRESS
 - PRIORITY: 75
 - TAGS: desktop, ux
 
@@ -50,6 +50,7 @@ without a compositor wants.
 - Reduced motion shows a still frame; a hidden pill runs no RAF.
 - The desktop build passes (`cargo build` runs tsc via build.rs).
 
-Reference: Orb Study artifact,
+Design document: `tasks/20260825-222037/orb-study.html` - the working
+demo with the real engine inline, the gruber painter, and the state
+mapping. Published copy:
 https://claude.ai/code/artifact/0c723f03-fc1e-48ad-8d10-59f4ba06c855
-(the gruber painter and the state mapping are on the page).

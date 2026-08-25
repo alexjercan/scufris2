@@ -57,6 +57,14 @@ dashboards.
 - Q2 the aging trigger: decided 2026-08-25, keep the concrete reading.
   "A turn completed and neither opened nor updated this exhibit" is the
   topic-change trigger that starts the dim and grace clock.
+- Q3 backend stdin: decided 2026-08-25, add input now. The contract
+  gains a mirror line: one stdin line = one JSON action, written when a
+  widget calls `ctx.send`. Alex's case is the calendar tasks widget:
+  typing a task by hand must work without going through Scufris, and
+  the redundancy against the voice path is acceptable. Output-only
+  backends simply never read stdin. An action from any subscriber
+  lands on the shared instance's stdin; the backend answers by
+  emitting refreshed state, which fans out to every subscriber.
 
 ## Settled product behavior (carried over from the design review)
 

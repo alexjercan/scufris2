@@ -628,7 +628,7 @@
         ><span class="cm">// desktop/widgets/cpu/widget.ts (strict TS)</span>
 <span class="t">export function</span> mount(
   root: HTMLElement,
-  ctx: { spawn: unknown },
+  ctx: { spawn: unknown; send(action: unknown): <span class="t">void</span> },
 ): View;
 
 <span class="t">interface</span> View {
@@ -640,7 +640,9 @@
           the gruber tokens; the widget renders content into
           <code>root</code> and repaints on <code>update</code>. Data comes from
           the backend, from Scufris, or both - the widget cannot tell and does
-          not care.
+          not care. <code>send</code> goes the other way: one JSON action onto
+          the backend's stdin, so an instrument like calendar tasks takes a
+          hand-typed entry without going through Scufris.
         </p>
       </div>
     </div>
@@ -1600,10 +1602,16 @@
       A backend is a named source, owned entirely by the companion and
       <b>shared by every widget that subscribes to it</b>. The wire contract is
       eww's <code>deflisten</code>, the simplest one that survived a decade of
-      ricing: <b>one stdout line = one JSON update</b>, fanned out whole to
-      every subscriber - each widget renders the fields it cares about, so a cpu
-      widget and a memory widget ride one "system" process. No envelope, no
-      handshake, no stdin protocol in v1.
+      ricing, plus a mirror for input (review decision):
+      <b>one stdout line = one JSON update</b>, fanned out whole to every
+      subscriber - each widget renders the fields it cares about, so a cpu
+      widget and a memory widget ride one "system" process - and
+      <b>one stdin line = one JSON action</b>, written when a widget calls
+      <code>ctx.send</code>. No envelope, no handshake. A backend that only
+      reports never reads its stdin; a backend that owns something writable (the
+      calendar tasks file) handles the action and answers by emitting the
+      refreshed state on stdout, so a task you type by hand and a task Scufris
+      adds travel the same loop.
     </p>
 
     <pre
@@ -1621,7 +1629,9 @@ spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <
       when the last one closes. Widgets that pass no spawn data share the
       instance (cpu + memory + network on one "system"); a widget that needs its
       own world passes instance data and gets its own process (every timer
-      carries its duration and start, so two timers never collide).
+      carries its duration and start, so two timers never collide). Input rides
+      the same sharing: an action from any subscriber lands on the one shared
+      stdin, and the refreshed state fans back out to all of them.
     </div>
 
     <div class="panel">
@@ -2043,6 +2053,10 @@ spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <
         <b>Backend stdin.</b> V1 backends are output-only (SIGTERM is the whole
         input). Interactive instruments will eventually want a line in the other
         direction - add it now or when the first widget needs it?
+        <span class="qdone"
+          >decided 2026-08-25: add it now - one stdin line = one JSON action,
+          via ctx.send</span
+        >
       </li>
       <li>
         <b>Summoning instruments.</b> Tray submenu for sure; is the second path

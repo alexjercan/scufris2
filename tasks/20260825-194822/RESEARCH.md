@@ -54,6 +54,9 @@ dashboards.
 - Q1 the shelf: decided 2026-08-25, keep as designed. Above the pill,
   centered, capped at 3, newest at center, oldest unpinned retires
   first.
+- Q2 the aging trigger: decided 2026-08-25, keep the concrete reading.
+  "A turn completed and neither opened nor updated this exhibit" is the
+  topic-change trigger that starts the dim and grace clock.
 
 ## Settled product behavior (carried over from the design review)
 

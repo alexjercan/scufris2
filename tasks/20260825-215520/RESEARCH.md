@@ -93,6 +93,10 @@ Scope note: ~30 historical task documents under `tasks/` mention
 dashboardd and stay untouched (append-only records). The acceptance
 grep "no dashboardd anywhere" is scoped to non-`tasks/` paths.
 
+Decision (plan page review, 2026-08-25): Alex accepted the breaking
+removal of `programs.scufris.dashboard.*` (section 08 comment,
+"accepted"). The CHANGELOG entry and release note stay required.
+
 ## Extension facts that shape the plan
 
 - Tools are `pi.registerTool(defineTool({name, label, description,

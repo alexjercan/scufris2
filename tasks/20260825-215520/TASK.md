@@ -18,6 +18,10 @@ inventory and the decision record in `RESEARCH.md`.
 Published copy:
 https://claude.ai/code/artifact/891f3c61-93fd-4b2f-9863-b8b4b4b667a5
 
+Plan accepted by Alex (2026-08-25, "the Widget Runtime Buildout is
+sound"). The planning exploration is closed; the page stands as the
+reference for implementation.
+
 ## Goal
 
 Implement the native widget runtime in scufris-desktop per the reviewed

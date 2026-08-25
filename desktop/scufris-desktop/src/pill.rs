@@ -49,10 +49,18 @@ pub fn ensure(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     }
     // Opaque on purpose: the page fills the window with the panel, so nothing
     // depends on compositing being available.
+    //
+    // The size is pinned with min == max hints on a window left resizable,
+    // because that is the one combination GTK honors: a non-resizable GTK
+    // window ignores the requested size and grows to the webview's natural
+    // 200 logical pixels, and GTK clamps size hints to that natural size for
+    // it too. The equal hints keep the person from resizing the pill and are
+    // also what makes a tiling window manager float it.
     WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html".into()))
         .title("Scufris")
         .inner_size(WIDTH, HEIGHT)
-        .resizable(false)
+        .min_inner_size(WIDTH, HEIGHT)
+        .max_inner_size(WIDTH, HEIGHT)
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)

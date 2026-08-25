@@ -33,6 +33,27 @@ i3/X11 session runs no compositor, so per-pixel alpha is discarded. The
 opaque exact-fit window needs nothing from the environment. A compositor
 would only ever be needed to move the glow back outside the panel.
 
+The size is pinned with min == max inner-size hints on a window left
+resizable. Round 2's playtest showed the panel as a big block: `xwininfo`
+measured the window at 560x200, and `WM_NORMAL_HINTS` showed the app itself
+publishing a 200 minimum. A plain-GTK reproduction (`resize(560, 64)`,
+`set_resizable(false)`, a WebKit view in a box) confirmed the mechanism: the
+WebKitGTK view's natural height is 200, a non-resizable GTK window ignores
+the requested size and takes the natural size, and GTK clamps size hints up
+to it. The same reproduction with the window resizable and min == max
+geometry hints comes up at 560x64, so that is what `ensure` builds; the
+equal hints keep the person from resizing and make i3 float the pill.
+Verified live on the i3 session: the pill maps at `560x64+680+944`,
+bottom-center with the 72 px margin on the 1920x1080 monitor, and a screen
+capture of the mapped pill matches the harness renders.
+
+Known pre-existing flake, out of scope here: the start()-recovery path
+(pending transcript found at startup) can log "the pill did not come up"
+because `show` asks `is_visible` before the event loop has mapped the
+window. It predates this task (the unmodified packaged binary does it too),
+only affects recovery-at-startup, and the abandon path keeps the transcript
+on disk as designed.
+
 ## Grayscale and reduced motion
 
 - `grayscale.png`: the eight main states desaturated. Each stays legible by

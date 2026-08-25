@@ -2,8 +2,8 @@
 
 Scufris is a personal assistant that runs in the Pi conversation harness. It
 adds a focused foreground identity, a project workflow engine with delegated
-worker jobs, Dashboardd widget control, Calm transcript presentation, and
-optional local speech.
+worker jobs, Dashboardd widget control, Calm transcript presentation, optional
+local speech, and an optional desktop voice pill.
 
 Scufris ships as a Nix flake package and a Home Manager module. The default
 package contains no speech code or speech runtime in its closure. Linux users
@@ -12,7 +12,7 @@ Manager.
 
 ## Components
 
-Scufris packages four capability-owned Pi extensions:
+Scufris packages five capability-owned Pi extensions:
 
 - `workflow` is the core engine. It owns the Scufris identity, project
   workflow preferences, delegated job spawn and control, worker events,
@@ -21,6 +21,14 @@ Scufris packages four capability-owned Pi extensions:
   playback in voice-capable packages.
 - `calm` reduces transcript and working-state clutter.
 - `dashboard` owns Dashboardd widget surfaces and their tools.
+- `desktop` serves the control socket in the popup process and reports one
+  assistant state to the desktop companion.
+
+`scufris-desktop` is the desktop companion: a voice pill and a tray icon,
+built from the `desktop/` cargo workspace and shipped as a separate Linux
+package. It records, transcribes locally, and submits the words as an ordinary
+user message. The conversation stays in the popup Pi process, so a companion
+crash never stops it. See [Desktop companion](dev/desktop.md).
 
 Deterministic executables called by extensions live under `tools/`. Commands
 for people live under `scripts/`. Model-facing workflow and dashboard policy

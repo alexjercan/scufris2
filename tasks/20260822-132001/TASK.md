@@ -1,6 +1,6 @@
 # Add scufris-desktop: voice HUD pill, tray, and conversation shell
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: voice, desktop, hud, tray
 
@@ -260,3 +260,26 @@ running backend, which the implementation workspace does not have.
 Market research for the pill redesign, diegetic feedback, focus-free keys,
 wake word, and the post-v1 feature direction is in `RESEARCH.md`, with raw
 sweep reports under `research/`.
+
+The reviewed design page is persisted as `scufris-hud.html` in this
+directory: a self-contained HTML file (open it in a browser) with the
+interactive pill demo, the desktop mockups, the state machine, the
+exhibit lifecycle, and the review verdicts. It is the final state of the
+Claude artifact the review ran on
+(https://claude.ai/code/artifact/efabac50-503b-40d5-81a0-7025950b084b).
+
+## Closure (2026-08-25)
+
+Closed with v1 implemented and the design review complete. Follow-up
+implementation is split into its own tasks, in build order: 20260825-153740
+(logging), 20260825-153743 (pill redesign), 20260825-153746 (i3 mode),
+20260825-153751 (dictation), 20260825-153754 (fast verbs), 20260825-153756
+(context capture), 20260825-153801 (session HUD, the v2 increment),
+20260825-153804 (dashboardd embed, the v3 increment), 20260825-153806
+(wake word).
+
+The live playtesting listed at the end of `VERIFICATION.md` did not run
+here; it needs a real desktop session. It moves to the follow-up tasks:
+the logging task makes it observable, and the pill redesign and i3 mode
+tasks exercise the live pill, microphone, tray, and popup paths as part
+of their own verification.

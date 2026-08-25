@@ -12,8 +12,8 @@ typing in their editor while recording.
 ## Scope
 
 - i3 binding mode: `bindsym $mod+d exec scufris-ctl open; mode
-  "scufris"`. Inside the mode, bare Escape and Return exec `scufris-ctl
-  cancel|accept; mode "default"`. Bare keys are the review verdict;
+"scufris"`. Inside the mode, bare Escape and Return exec `scufris-ctl
+cancel|accept; mode "default"`. Bare keys are the review verdict;
   $mod variants stay the documented fallback.
 - The pill window gets a `no_focus` floating rule. No focus to restore
   on close.

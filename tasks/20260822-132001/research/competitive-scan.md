@@ -67,33 +67,39 @@ e. Sources: https://www.amazon.com/gp/help/customer/display.html?nodeId=GKLDRFT7
 ## 6. Dictation tools
 
 ### Wispr Flow
+
 a/b. The "Flow Bar": a slim, minimal dark floating pill with a live waveform and a pulsing recording dot while listening, then a near-instant transition to finished text. The waveform area is deliberately not clickable during dictation so you cannot abort by accident.
 c. Bottom of screen by default; can dock to left/right edges, where the bar reorients vertically and the waveform reflows.
 d. Steal: restraint (dark, quiet, no chrome), the non-interactive recording zone, and the edge-docking reflow.
 e. https://docs.wisprflow.ai/articles/6409258247-starting-your-first-dictation , https://docs.wisprflow.ai/articles/5002934560-why-is-the-wispr-bar-is-not-appearing-or-disappearing , https://abduzeedo.com/wispr-flow-voice-dictation-app
 
 ### Superwhisper
+
 a/b. Floating recording window with a live waveform plus a color-coded status dot: yellow = model loading, blue = processing, green = done. Shows the active mode and its shortcut, plus a "context captured" light when it grabbed clipboard/selection. A compact mini window shows a small idle indicator and reveals controls on hover.
 c. Small floating window; mini mode can stay resident when idle.
 d. Steal: the tiny status dot as a secondary channel (pill shape carries the main state, a 6px dot carries substate), and the "context captured" confirmation light, which is a diegetic trust cue. Hover-to-reveal controls keeps idle chrome at zero.
 e. https://superwhisper.com/docs/get-started/interface-rec-window
 
 ### VoiceInk
+
 a/b. Open-source macOS dictation with a mini recorder and a notch-style recorder, and a menu of selectable recorder animation styles: Gold Pulse, Waveform, Ripple, Neon Ring, Morph, Vortex, Quantum, Time Travel, Ink Pen. States: recording, transcribing, AI enhancement.
 d. Steal: shipping the visualizer as a user-selectable theme. The pill renderer can be a pluggable "style" (ring, waveform, blob) over one shared state machine.
 e. https://tryvoiceink.com/ , https://mac.softpedia.com/get/Generative-AI-Tools/VoiceInk.shtml
 
 ### Aqua Voice
+
 a/b. Hold-to-talk pill focused on latency: starts in under 50ms, inserts text in about a second. UI is minimal; the marketing emphasis is speed over spectacle. No detailed public docs on the indicator visuals.
 d. Steal: the latency bar. An indicator that appears within one frame of the hotkey is itself the strongest feedback; animation must never delay perceived start.
 e. https://aquavoice.com/ , https://www.producthunt.com/products/aqua
 
 ### MacWhisper and the mac-whisper-clone ecosystem
+
 a/b. MacWhisper dictation is hotkey plus a small overlay. The surrounding open-source ecosystem converged on the same pattern: menu bar waveform icon that turns red when recording (local-whisper); a floating overlay cycling recording -> transcribing -> fixing -> done (WhisperApp); a floating indicator with an animated "Siri-style border" while recording (look-ma-no-hands).
 d. Steal: the explicit four-step state ladder (recording, transcribing, fixing, done) shown in one small overlay; it matches the listening/transcribing/review/working ladder almost exactly.
 e. https://docs.macwhisper.com/article/14-how-to-use-the-dictation-feature , https://github.com/luisalima/local-whisper , https://github.com/Gamezxz/WhisperApp , https://github.com/qaid/look-ma-no-hands
 
 ### Apple Dictation
+
 a/b/c. A small feedback popover near the cursor or bottom of screen: blue mic icon with fluctuating loudness bars, plus a ready tone. With multiple languages the popover also shows the current language as a clickable chip.
 d. Steal: the ready tone paired with the visual (audio + visual redundancy for eyes-elsewhere use), and surfacing one bit of session metadata (language, or here the active mode) on the indicator itself.
 e. https://support.apple.com/guide/mac-help/use-dictation-mh40584/11.0/mac/11.0 , https://macmost.com/how-to-use-dictation-on-your-mac-2.html
@@ -101,40 +107,48 @@ e. https://support.apple.com/guide/mac-help/use-dictation-mh40584/11.0/mac/11.0 
 ## 7. Launcher-style tools
 
 ### Raycast
+
 a/b. The "Dictation Pill": floats above the active app with a live waveform and a session timer. Toggle or hold-to-talk hotkey; release ends the session and processing begins; text pastes into the focused app.
 c. A pill, floating, small, above whatever you are doing.
 d. Steal: the timer next to the waveform (cheap, reassuring, tells you the take is still rolling), and the accept-on-release interaction. Raycast is the closest commercial analog to scufris-desktop's form factor.
 e. https://manual.raycast.com/ai/dictation , https://www.raycast.com/changelog/macos-beta/0-57
 
 ### Alfred and Ulauncher
+
 Neither has a native voice UI; Alfred users fall back to macOS dictation inside the search field, Ulauncher has no voice story at all. The takeaway is negative but useful: keyboard-launcher chrome (input field + list) is the wrong metaphor for voice; the pill/orb overlay is the right one. Sources: https://www.raycast.com/finjo/whisper-dictation , https://startupik.com/ulauncher-vs-alfred-which-tool-is-better/
 
 ## 8. Open-source / Linux
 
 ### Home Assistant Voice PE (and Assist satellites)
+
 a/b. The LED ring grammar, from the shipped ESPHome config: wake word acknowledged = slow clockwise spin with trailing decay; actively listening = the same spin but fast; thinking = two opposing LEDs pulsing in place; replying = fast counter-clockwise spin (direction reversal marks who is talking); error = rapid red pulse; muted = two fixed red LEDs at ring positions 3 and 9 over the base color; timer = arc whose length is remaining time; volume = arc whose length is level. Accent color is user-configurable; red is hardcoded for error/mute.
 d. Steal: this is the best documented open state grammar in the survey. Speed encodes intensity (waiting vs listening), direction encodes speaker (you vs it), position encodes persistent flags (mute pips), arc length encodes scalars. All of it maps directly onto a conic-gradient ring or the pill's border.
 e. https://github.com/esphome/home-assistant-voice-pe/blob/dev/home-assistant-voice.yaml , https://esphome.io/components/voice_assistant/ , https://www.home-assistant.io/blog/2024/12/19/voice-chapter-8-assist-in-the-home/
 
 ### Mycroft / OVOS
+
 a/b. Mark II GUI cycles full screens per utterance: listening (vertical bar animation) -> thinking -> speaking -> idle. Known pain point: latency between wake word and the animation starting undermined trust, and the team explicitly worked to simplify the screen states.
 d. Steal: the warning. Long state ladders shown as discrete screen swaps feel laggy; continuous morphing of one element between states feels alive.
 e. https://github.com/MycroftAI/skill-mark-2/issues/49 , https://mycroft-ai.gitbook.io/docs/skill-development/displaying-information/mycroft-gui
 
 ### whisper-overlay (oddlama)
+
 a/b. Wayland layer-shell overlay, push-to-talk. Shows realtime partial transcription on screen as you speak, then replaces it with the high-fidelity pass on release, then types it into the focused window. GTK, themeable via user style.css. Companion waybar module: gray = disconnected, blue = connected idle, red = recording/transcribing.
 d. Steal: live partial text as the primary feedback (the words themselves are the best "it hears me" signal), plus a three-color connection state for the disconnected state. Also validates layer-shell overlay + hotkey as the native Linux pattern.
 e. https://github.com/oddlama/whisper-overlay
 
 ### hyprwhspr / Voxtype (Omarchy, Hyprland ecosystem)
+
 a/b. hyprwhspr: animated microphone OSD overlay on layer-shell compositors (Hyprland, Sway, niri, KDE) that auto-matches the live shell theme on Omarchy/Noctalia; beep on start, boop on stop; waybar status module. Voxtype: Rust, hold-hotkey, waybar text states for recording/processing.
 d. Steal: theme-matching (read the user's accent color) and the start/stop earcons. Waybar-only feedback is the ceiling of the current Linux ecosystem, which is exactly the opening scufris-desktop can exploit.
 e. https://github.com/goodroot/hyprwhspr , https://github.com/basecamp/omarchy/discussions/1258 , https://paolino.me/dictation-is-the-new-prompt/
 
 ### Speech Note (dsnote)
+
 Qt Flatpak app, note-window-centric with global shortcuts; no ambient overlay indicator. Confirms the gap. https://github.com/mkiol/dsnote
 
 ### Ready-made web implementations (directly reusable technique)
+
 VoiceOrbs: 14 orb styles, all with the same state set (idle, connecting, listening, thinking, speaking, error, disabled); notable ones for a webview pill: Halo (pure CSS conic halo with pulsing core), Gooey (SVG turbulence/displacement liquid blob), Waveform Ring (canvas polar waveform), Edge Glow (Siri-style masked conic-gradient frame that wraps your own content), Plasma (canvas shader, no Three.js). Also: voiceorb (Three.js + GLSL, Perlin displacement, Fresnel rim, 4 states) and a CSS-only morphing border-radius blob. https://voiceorbs.vercel.app/ , https://github.com/aguscruiz/voiceorb , https://codeshack.io/morphing-voice-assistant-orb-css/ , https://medium.com/@therealmilesjackson/building-a-voice-reactive-orb-in-react-audio-visualization-for-voice-assistants-2bee12797b93
 
 ## Ranked shortlist: 5 ideas to copy

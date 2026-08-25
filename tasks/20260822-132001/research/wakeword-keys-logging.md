@@ -7,6 +7,7 @@ Agent report, 2026-08-25. Raw findings; synthesis lives in ../RESEARCH.md.
 ### Engine survey
 
 **openWakeWord** (https://github.com/dscripka/openWakeWord)
+
 - Code Apache-2.0; pre-trained models CC BY-NC-SA 4.0 (non-commercial). Fine for a personal assistant; self-trained models carry no such restriction.
 - Accuracy target: <5% false rejects, <0.5 false accepts/hour with threshold tuning. This is the engine Home Assistant standardized on for real-world accuracy (https://www.home-assistant.io/voice_control/about_wake_word/).
 - CPU: one Raspberry Pi 3 core runs 15-20 models in real time. On a desktop x86 this is negligible (well under 1% of a core per model). Audio: 16 kHz 16-bit mono, 80 ms frames, `model.predict(frame)` streaming API.
@@ -15,24 +16,30 @@ Agent report, 2026-08-25. Raw findings; synthesis lives in ../RESEARCH.md.
 - Nix: packaged as `wyoming-openwakeword` in nixpkgs with a NixOS module `services.wyoming.openwakeword` (threshold, triggerLevel, preloadModels, customModelsDirectories, uri) (https://mynixos.com/nixpkgs/options/services.wyoming.openwakeword). One known pitfall: SIGILL on CPUs without expected SIMD (https://github.com/NixOS/nixpkgs/issues/358973).
 
 **microWakeWord** (https://esphome.io/components/micro_wake_word/, https://github.com/kahrendt/microWakeWord)
+
 - Inception-based streaming tflite models built for ESP32-S3; lower latency and better false-accept rates than openWakeWord in HA's own tests (about 0.187 false accepts/hour on the Dinner Party Corpus) (https://www.home-assistant.io/blog/2024/06/26/voice-chapter-7/).
 - Ecosystem and tooling are ESPHome-shaped. Running it on a desktop means driving tflite yourself with community models. Viable but off the paved path. Best regarded as the "satellite firmware" engine, not a desktop library.
 
 **Picovoice Porcupine** (https://github.com/Picovoice/porcupine)
+
 - Best-in-class accuracy reputation and tiny CPU cost, 9+ languages, custom words via their console.
 - Licensing disqualifies it: repo wrapper is Apache-2.0 but the engine needs an AccessKey validated at init, with periodic online activation since v2.0. The free tier AccessKeys were shut off on June 30, 2026 (https://community.home-assistant.io/t/fyi-picovoice-confirmed-free-tier-accesskeys-will-stop-working-after-june-30-2026/1012744). A key-gated, phone-home proprietary blob is a poor fit for a NixOS local-first assistant.
 
 **Vosk keyword spotting** (https://github.com/alphacep/vosk-api)
+
 - Apache-2.0, packaged widely, 20+ languages: the best multilingual option. Grammar mode restricts the WFST search to a word list, cutting CPU (https://zenn.dev/diced/articles/vosk-silero-vad-wakeword-android?locale=en). OVOS ships a Vosk wake word plugin (https://github.com/OpenVoiceOS/ovos-ww-plugin-vosk).
 - But it is full ASR running always-on: markedly more CPU and RAM (small model ~50 MB resident) than a dedicated spotter, and more prone to false accepts on short words. Sensible only for a non-English wake word.
 
 **Snowboy**
+
 - Dead. Online model training and CDN went offline January 1, 2021; only legacy pre-trained models still work (https://github.com/Kitt-AI/snowboy). Do not build on it.
 
 **Home Assistant satellite pipeline** (https://github.com/rhasspy/wyoming-satellite)
+
 - Architecture worth copying: the satellite process owns the mic (`arecord -r 16000 -c 1 -f S16_LE -t raw` piped in) and talks to a separate wake word service (wyoming-openwakeword) over the Wyoming protocol on TCP (`--wake-uri tcp://127.0.0.1:10400`). On detection it fires `--detection-command` (wake word name on stdin) and optionally plays `--awake-wav`. Both processes run as systemd services. This is exactly the "separate service signals the app" shape.
 
 **Rustpotter** (https://github.com/GiviMAD/rustpotter)
+
 - Apache-2.0, pure Rust, on crates.io: the only engine that embeds directly into a Tauri backend with zero extra runtime. Two modes: DTW references from 3-8 personal WAV samples (quick, weaker), or a trained small NN model (better). Accepts any sample rate, resamples to 16 kHz f32 internally, 30 ms chunks. `Rustpotter::new(config)`, `add_wakeword_from_file()`, `process(buffer) -> Option<RustpotterDetection>`.
 - Reputation: fine for a personal, single-speaker wake word (it is speaker-adapted by construction); less robust than openWakeWord across voices, noise, and distance. Used by openHAB as a KS option (https://www.openhab.org/addons/voice/rustpotterks/). Maintenance is slow but the crate is stable.
 
@@ -49,14 +56,17 @@ Always-listening should be visible. i3 has no built-in mic indicator (GNOME/KDE 
 ### Mechanisms
 
 **Tauri global-shortcut plugin** (https://v2.tauri.app/plugin/global-shortcut/)
+
 - Wraps the `global-hotkey` crate, which uses XGrabKey: a passive grab on keysym+modifiers on the root window. X11 only; the shortcut thread is explicitly disabled on Wayland to avoid libX11 segfaults (https://github.com/tauri-apps/tao/pull/543), and Wayland has no protocol for it yet (https://github.com/tauri-apps/tauri/issues/3578).
 - XGrabKey semantics: a grabbed key is delivered only to the grabber, system-wide, and a second client grabbing the same combo gets BadAccess. Registering plain Escape/Enter permanently would swallow them for every app and destroy normal typing. Registering them only while the pill is visible and unregistering on hide is workable, but you are racing i3 (which also grabs keys) and any registration failure leaves dead keys with no indicator.
 
 **i3 binding modes** (https://i3wm.org/docs/userguide.html)
+
 - `mode "scufris" { bindsym Escape ...; bindsym Return ... }` swaps the active binding set. Bound keys are captured regardless of window focus; all unbound keys pass through to the focused window, so the user keeps typing in their editor while the pill listens. i3bar shows the mode name, giving a free visual indicator. i3 owns all grabs, so there are no BadAccess conflicts and no stuck-grab failure mode. Sway supports the identical syntax, so this ports to Wayland-on-sway unchanged.
 - Wiring: `bindsym $mod+d exec scufris-ctl open; mode "scufris"` and inside the mode Escape/Return exec `scufris-ctl cancel|accept; mode "default"`. The app needs a tiny control channel (unix socket or `i3-msg`-driven) and must run `i3-msg mode default` itself whenever the pill closes for any other reason (timeout, click, tray) so mode and UI never desync.
 
 **Push-to-talk (hold Super)**
+
 - Needs key release detection. XGrabKey-based PTT historically breaks focus during the hold (https://bugs.launchpad.net/bugs/714696). The grab-free options are XInput2 raw key events, selectable only on the root window (https://lists.freedesktop.org/archives/xorg/2020-May/060269.html), or polling the keymap the way Discord does. i3 has `bindsym --release` but modes cannot express "while held" cleanly. Under Wayland this whole class needs compositor help or evdev access (https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/2838). Treat PTT as a later, X11-specific experiment.
 
 ### Focus behavior of launchers

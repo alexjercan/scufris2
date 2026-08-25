@@ -51,16 +51,16 @@ is reserved for mic-off/error) and Home Assistant Voice PE's ring grammar
 (speed encodes intensity, direction encodes who is talking, position encodes
 persistent flags, arc length encodes scalars).
 
-| State | Motion | Color | Sound |
-|---|---|---|---|
-| listening | glow/waveform tracks mic level | cyan/blue | short rising earcon on mic open |
-| transcribing | waveform collapses into orb; shimmer; partial text streams | blue to violet | short falling earcon on mic close |
-| review | near-still, faint breathing; caret is the live element | neutral, low glow | none |
-| working | slow self-driven gradient travel, sharp head, diffuse tail (Gemini shimmer) | violet | none |
-| speaking | pulse tracks TTS output level; motion direction reversed vs listening | teal/green | none |
-| attention | two soft bright pulses, then slow loop | amber | one gentle chime, once |
-| error | quick flash, 2-3 fast shallow pulses, settle dim; plain-language line | red | one low tone |
-| disconnected | desaturated gray, very slow breathing | gray | tone on transition only |
+| State        | Motion                                                                      | Color             | Sound                             |
+| ------------ | --------------------------------------------------------------------------- | ----------------- | --------------------------------- |
+| listening    | glow/waveform tracks mic level                                              | cyan/blue         | short rising earcon on mic open   |
+| transcribing | waveform collapses into orb; shimmer; partial text streams                  | blue to violet    | short falling earcon on mic close |
+| review       | near-still, faint breathing; caret is the live element                      | neutral, low glow | none                              |
+| working      | slow self-driven gradient travel, sharp head, diffuse tail (Gemini shimmer) | violet            | none                              |
+| speaking     | pulse tracks TTS output level; motion direction reversed vs listening       | teal/green        | none                              |
+| attention    | two soft bright pulses, then slow loop                                      | amber             | one gentle chime, once            |
+| error        | quick flash, 2-3 fast shallow pulses, settle dim; plain-language line       | red               | one low tone                      |
+| disconnected | desaturated gray, very slow breathing                                       | gray              | tone on transition only           |
 
 Rules that came up in every source: red only for error/mute; sounds only at
 boundaries the eye can miss (mic open, mic close, attention, error), never

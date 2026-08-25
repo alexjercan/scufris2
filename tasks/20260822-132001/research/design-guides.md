@@ -85,16 +85,16 @@ No WebGL. Honor `prefers-reduced-motion`: disable rotation and waveform, keep a 
 
 Follows the Alexa grammar: input states react to sound, processing states self-animate, alerts pulse, faults are red/dim. One color family per phase; motion pattern is the color-independent differentiator. Sounds only at boundaries the user must not miss (mic open, mic close, attention, error); never a sound for working or speaking.
 
-| State | Motion | Color | Sound |
-|---|---|---|---|
-| listening | Orb breathes; waveform amplitude tracks mic `--level` (your voice visibly moves it) | Cool cyan/blue | Short rising two-note earcon on mic open |
-| transcribing | Waveform collapses into orb; gradient shimmer/slow spin; partial text streams in | Blue shifting toward violet | Short falling earcon on mic close (endpointing) |
-| review | Orb settles almost still, faint slow breathing; text caret is the live element | Neutral white/soft blue, low glow | None |
-| working | Continuous slow gradient rotation with gentle hue drift (clearly self-animating, not audio-reactive) | Violet/magenta | None |
-| speaking | Orb pulse tracks TTS output level (same reactive grammar as listening, different color) | Teal/green | None (the voice is the sound) |
-| attention | Two soft scale-and-brighten pulses, then loop a slow pulse until acknowledged | Amber/yellow | One gentle chime, not repeated |
-| error | Single quick desaturate-flash, then 2-3 fast shallow pulses, settle dim; short plain-language line in transcript area | Red/orange | One low discordant tone |
-| disconnected | Orb dims to gray, very slow shallow breathing (alive but inert) | Desaturated gray | One low tone on transition only, silence while disconnected |
+| State        | Motion                                                                                                                | Color                             | Sound                                                       |
+| ------------ | --------------------------------------------------------------------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------- |
+| listening    | Orb breathes; waveform amplitude tracks mic `--level` (your voice visibly moves it)                                   | Cool cyan/blue                    | Short rising two-note earcon on mic open                    |
+| transcribing | Waveform collapses into orb; gradient shimmer/slow spin; partial text streams in                                      | Blue shifting toward violet       | Short falling earcon on mic close (endpointing)             |
+| review       | Orb settles almost still, faint slow breathing; text caret is the live element                                        | Neutral white/soft blue, low glow | None                                                        |
+| working      | Continuous slow gradient rotation with gentle hue drift (clearly self-animating, not audio-reactive)                  | Violet/magenta                    | None                                                        |
+| speaking     | Orb pulse tracks TTS output level (same reactive grammar as listening, different color)                               | Teal/green                        | None (the voice is the sound)                               |
+| attention    | Two soft scale-and-brighten pulses, then loop a slow pulse until acknowledged                                         | Amber/yellow                      | One gentle chime, not repeated                              |
+| error        | Single quick desaturate-flash, then 2-3 fast shallow pulses, settle dim; short plain-language line in transcript area | Red/orange                        | One low discordant tone                                     |
+| disconnected | Orb dims to gray, very slow shallow breathing (alive but inert)                                                       | Desaturated gray                  | One low tone on transition only, silence while disconnected |
 
 Reduced motion variant: replace all of the above motion with opacity/color crossfades; keep glow intensity tracking `--level` in listening/speaking (brightness change, not movement).
 

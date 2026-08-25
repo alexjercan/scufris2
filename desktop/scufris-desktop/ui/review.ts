@@ -7,6 +7,11 @@
 // to the orb window, which is the one holding the field these words come from.
 // The host owns whether this window is up at all.
 //
+// The words are one run, and the caret and the selection are blocks laid under
+// them: the browser is asked where a letter is drawn, and a block is put there.
+// Nothing about the caret is part of the line, so nothing about the line moves
+// when the caret does.
+//
 // Wrapped in a block: pill.ts and this file are separate classic scripts in one
 // tsc project, so a name at the top level of either is a name in the other's
 // global scope.
@@ -43,9 +48,9 @@
 
   const box = element<HTMLElement>("box");
   const text = element<HTMLElement>("text");
-  const before = element<HTMLElement>("before");
-  const after = element<HTMLElement>("after");
-  const caret = element<HTMLElement>("caret");
+  const words = element<HTMLElement>("words");
+  const marks = element<HTMLElement>("marks");
+  const probe = element<HTMLElement>("probe");
   const hint = element<HTMLElement>("hint");
 
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
@@ -61,16 +66,101 @@
   let showing = false;
   let editable = false;
 
-  // The caret is drawn where the person's own caret is, so the words either
-  // side of it are two runs rather than one.
-  const draw = (words: string, at: number): void => {
-    const split = Math.max(0, Math.min(at, words.length));
-    before.textContent = words.slice(0, split);
-    after.textContent = words.slice(split);
-    caret.hidden = !editable;
-    // A take longer than the box gets a soft edge instead of a hard cut.
+  /** Where one mark goes, in the text area's own coordinates. */
+  interface Mark {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  }
+
+  const within = (at: number, length: number): number =>
+    Math.max(0, Math.min(at, length));
+
+  // A mark is placed against the text area, not the window, and against its
+  // scrolled contents, not what is on screen: a long take scrolls, and a caret
+  // measured on screen would then be drawn a line away from its letter.
+  const place = (rect: DOMRect, frame: DOMRect): Mark => ({
+    left: rect.left - frame.left + text.scrollLeft,
+    top: rect.top - frame.top + text.scrollTop,
+    width: rect.width,
+    height: rect.height,
+  });
+
+  // Where the browser actually drew a stretch of the words: one rectangle per
+  // line it fell across. Measuring beats arithmetic here - the type is
+  // monospace by preference and not by guarantee, and the box wraps.
+  const drawn = (from: number, to: number): DOMRect[] => {
+    const node = words.firstChild;
+    if (node === null || from >= to) return [];
+    const range = document.createRange();
+    range.setStart(node, from);
+    range.setEnd(node, to);
+    return Array.from(range.getClientRects());
+  };
+
+  // The block the caret is: the box of the letter it sits on, so it lies under
+  // that letter rather than between two of them. Past the last letter there is
+  // no box to take, so the last one's right edge carries a letter's width; on
+  // an empty line there is neither, and the probe is what a letter would be.
+  const caretMark = (value: string, at: number, frame: DOMRect): Mark => {
+    const index = within(at, value.length);
+    const advance = probe.getBoundingClientRect();
+    if (index < value.length) {
+      const rect = drawn(index, index + 1)[0];
+      if (rect !== undefined) return place(rect, frame);
+    }
+    if (value.length > 0) {
+      const rects = drawn(value.length - 1, value.length);
+      const rect = rects[rects.length - 1];
+      if (rect !== undefined) {
+        const mark = place(rect, frame);
+        return {
+          left: mark.left + mark.width,
+          top: mark.top,
+          width: advance.width || mark.width,
+          height: mark.height,
+        };
+      }
+    }
+    return { left: 0, top: 0, width: advance.width, height: advance.height };
+  };
+
+  const block = (kind: string, mark: Mark): HTMLElement => {
+    const node = document.createElement("span");
+    node.className = kind;
+    node.style.left = `${mark.left}px`;
+    node.style.top = `${mark.top}px`;
+    node.style.width = `${mark.width}px`;
+    node.style.height = `${mark.height}px`;
+    return node;
+  };
+
+  // The words, then everything that is not the words. The run is replaced whole
+  // and never split, so a caret that moves changes nothing about the line it is
+  // in; the marks are thrown away and laid again, which is the cheap half.
+  const draw = (
+    value: string,
+    start: number,
+    end: number,
+    focus: number,
+  ): void => {
+    words.textContent = value;
+    marks.textContent = "";
+    // Measured with no marks in the way: they are out of flow, but they are
+    // still inside the box being asked how tall its contents are.
     text.classList.toggle("overflowing", text.scrollHeight > text.clientHeight);
-    if (editable) caret.scrollIntoView({ block: "nearest" });
+    if (!editable) return;
+    const frame = text.getBoundingClientRect();
+    const from = within(Math.min(start, end), value.length);
+    const to = within(Math.max(start, end), value.length);
+    for (const rect of drawn(from, to)) {
+      marks.appendChild(block("pick", place(rect, frame)));
+    }
+    const caret = marks.appendChild(
+      block("caret", caretMark(value, focus, frame)),
+    );
+    caret.scrollIntoView({ block: "nearest" });
   };
 
   const pop = (): void => {
@@ -94,13 +184,14 @@
       // transcript never appears behind a flash of the last one.
       showing = false;
       editable = false;
-      draw("", 0);
+      draw("", 0, 0, 0);
       return;
     }
     box.dataset["state"] = presentation.state;
     hint.textContent = line;
     editable = presentation.editable;
-    draw(presentation.text, presentation.text.length);
+    const end = presentation.text.length;
+    draw(presentation.text, end, end, end);
     // The window is raised for this presentation and only this one, so the
     // entrance runs once per arrival rather than on every re-render.
     if (!showing) pop();
@@ -110,7 +201,7 @@
   void listen("scufris://draft", (event) => {
     if (!showing) return;
     const draft = event.payload as Draft;
-    draw(draft.text, draft.caret);
+    draw(draft.text, draft.start, draft.end, draft.caret);
   });
 
   // A transcript recovered from a previous process is published while this page

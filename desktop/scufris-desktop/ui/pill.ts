@@ -3,12 +3,11 @@
 // the Rust state machine, including whether a key sends anything at all.
 //
 // The look is the Orb Study's bare orb (tasks/20260825-231826/orb-study.html,
-// section 03): the window is a small square around the vendored thinking-orbs
-// engine at its 64px preset, repainted in gruber ink, and the orb's shape and
-// accent are the whole state. The only other mark is the listening timer. One
-// rAF loop drives the mic level and the orb; it stops under reduced motion and
-// while the window is hidden. Four soft earcons mark the boundaries the eye
-// can miss.
+// section 03): the window is a frame around the vendored thinking-orbs engine,
+// repainted in gruber ink, and the orb's shape and accent are the whole state.
+// The only other mark is the listening timer. One rAF loop drives the mic level
+// and the orb; it stops under reduced motion and while the window is hidden.
+// Four soft earcons mark the boundaries the eye can miss.
 //
 // The words live here even though they are read next door: the keys belong to
 // this window, so the field the person types into does too, invisible, and
@@ -213,9 +212,18 @@ function applyLevel(level: number): void {
 // carries the whole depth range instead of the engine's grayscale.
 type Rgb = [number, number, number];
 
-// The engine's larger tuned preset, drawn at its own size: far richer than the
-// 20px one, and the whole reason the bare orb is worth a window.
-const ORB_SIZE = 64;
+// The engine tunes two presets, 64 and 20, and 64 is the rich one: it is what
+// the study drew and the only one worth a window of its own. Asking for any
+// other size is not a size the preset table has.
+const ORB_PRESET = 64;
+
+// What the orb is drawn at, which is not the preset it comes from. The frame
+// functions take the size as an argument and scale the dots by (size/300)^0.6,
+// so the engine's own answer to a bigger orb is the same dots spread finer over
+// a wider sphere - which is the direction its 64-to-20 tuning already points,
+// in reverse. Drawing the 64 preset on a 64 canvas and scaling that up would
+// keep the study's proportions and give 160 pixels of 64-pixel drawing instead.
+const ORB_SIZE = 160;
 const PANEL: Rgb = [16, 16, 16];
 const QUARTZ: Rgb = [149, 169, 159];
 // The frozen instant reduced motion renders, in engine seconds.
@@ -254,7 +262,7 @@ if (orbContext !== null) {
 }
 
 let orbLook = RESTING;
-let orbPreset = engine.resolvePreset(RESTING.state, ORB_SIZE);
+let orbPreset = engine.resolvePreset(RESTING.state, ORB_PRESET);
 let orbAccent: Rgb = QUARTZ;
 
 function mix(from: Rgb, to: Rgb, f: number, alpha: number): string {
@@ -337,7 +345,7 @@ function retune(next: string): void {
   const accent = getComputedStyle(pill).getPropertyValue("--acc").trim();
   orbAccent = parseAccent(accent) ?? QUARTZ;
   orbLook = ORB_LOOKS[next] ?? RESTING;
-  orbPreset = engine.resolvePreset(orbLook.state, ORB_SIZE);
+  orbPreset = engine.resolvePreset(orbLook.state, ORB_PRESET);
   if (looping()) {
     if (frameId === null) frameId = requestAnimationFrame(frame);
     return;
@@ -384,11 +392,22 @@ void listen("scufris://entrance", () => arrive());
 const REVIEW_WINDOW = "review";
 let warnedMirror = false;
 
+function editing(): boolean {
+  return !transcript.hidden && !transcript.readOnly;
+}
+
 function mirror(): void {
-  if (transcript.hidden || transcript.readOnly) return;
+  if (!editing()) return;
+  const start = transcript.selectionStart ?? transcript.value.length;
+  const end = transcript.selectionEnd ?? start;
+  // Which end of a selection the person is dragging: the caret belongs there,
+  // the same as it does in the field itself.
+  const caret = transcript.selectionDirection === "backward" ? start : end;
   emitTo(REVIEW_WINDOW, "scufris://draft", {
     text: transcript.value,
-    caret: transcript.selectionStart ?? transcript.value.length,
+    start,
+    end,
+    caret,
   }).catch((error: unknown) => {
     // Once only: a mirror that fails fails on every keystroke, and the words
     // being unreadable is already reported by the host.
@@ -403,6 +422,76 @@ transcript.addEventListener("keyup", mirror);
 transcript.addEventListener("select", mirror);
 // Arrow keys, Home, and a click all move the caret without changing the text.
 document.addEventListener("selectionchange", mirror);
+
+// ---------- editing ----------
+
+// The field is an ordinary text input, so the ordinary textbox keys are the
+// port's: arrows, Ctrl and the arrows, Home, End, Backspace, Delete, shift to
+// select, Ctrl+A, and the clipboard. Every one of them lands in the field and
+// then in the mirror, because a keyup and a selectionchange follow it.
+//
+// The deletions below are done here rather than left to it. They are the ones
+// a port either binds or does not - Ctrl+Backspace is a GTK binding, Ctrl+U and
+// Ctrl+K are a terminal habit - and a transcript window that loses a word on
+// one desktop and not on another is worse than one that decides for itself.
+// Doing them here also means the mirror is told, whatever WebKit would have
+// done.
+
+/** Whitespace is the only word boundary: "don't" and "http://x" are one word. */
+const BREAK = /\s/;
+
+// A word deletion takes two runs: the one the caret is in and the one beyond
+// it. Whichever way it goes, that is a word and the gap beside it, so deleting
+// a word never leaves the two spaces that used to be either side of it.
+function wordStart(text: string, at: number): number {
+  let index = Math.max(0, Math.min(at, text.length));
+  const gap = BREAK.test(text.charAt(index - 1));
+  while (index > 0 && BREAK.test(text.charAt(index - 1)) === gap) index -= 1;
+  while (index > 0 && BREAK.test(text.charAt(index - 1)) !== gap) index -= 1;
+  return index;
+}
+
+function wordEnd(text: string, at: number): number {
+  let index = Math.max(0, Math.min(at, text.length));
+  const gap = BREAK.test(text.charAt(index));
+  while (index < text.length && BREAK.test(text.charAt(index)) === gap) {
+    index += 1;
+  }
+  while (index < text.length && BREAK.test(text.charAt(index)) !== gap) {
+    index += 1;
+  }
+  return index;
+}
+
+/** What one key deletes, or null when the field keeps the key. */
+function deletion(event: KeyboardEvent): [number, number] | null {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return null;
+  const text = transcript.value;
+  const start = transcript.selectionStart ?? text.length;
+  const end = transcript.selectionEnd ?? start;
+  // A selection is already a range, and deleting it is what the field's own
+  // Backspace does. Only a caret needs a range worked out for it.
+  if (start !== end) return null;
+  if (event.key === "Backspace") return [wordStart(text, start), start];
+  if (event.key === "Delete") return [start, wordEnd(text, start)];
+  if (event.key === "u") return [0, start];
+  if (event.key === "k") return [start, text.length];
+  return null;
+}
+
+function erase(from: number, to: number): void {
+  if (from >= to) return;
+  const before = transcript.value;
+  transcript.setSelectionRange(from, to);
+  // execCommand keeps the field's own undo history, which setRangeText does
+  // not, so it is tried first and checked rather than trusted: a command the
+  // port does not carry can answer true and do nothing.
+  if (!document.execCommand("delete") || transcript.value === before) {
+    transcript.setRangeText("", from, to, "end");
+  }
+  // setRangeText raises no input event, and neither path may skip the mirror.
+  mirror();
+}
 
 // ---------- rendering ----------
 
@@ -479,6 +568,15 @@ window.addEventListener("keydown", (event) => {
     if (transcript.selectionStart !== transcript.selectionEnd) return;
     event.preventDefault();
     void invoke("pill_copy");
+    return;
+  }
+  // Nothing is edited where nothing is editable: the words of a frozen
+  // transcript are not the person's to change from here.
+  if (!editing()) return;
+  const range = deletion(event);
+  if (range !== null) {
+    event.preventDefault();
+    erase(range[0], range[1]);
   }
 });
 

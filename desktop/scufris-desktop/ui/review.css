@@ -2,7 +2,10 @@
  * "The pill is the orb" (tasks/20260825-231826/orb-study.html). It exists only
  * while there is a decision to make about the words: the transcript, a caret
  * where the person is typing, and one line saying what the keys do. The keys
- * themselves belong to the orb window; nothing here is focusable. */
+ * themselves belong to the orb window; nothing here is focusable.
+ *
+ * The type is larger than the study's, by as much as the orb window grew, and
+ * the box grew with the type: the same three lines, the same words on a line. */
 
 :root {
   --bg4: #52494e;
@@ -24,7 +27,11 @@
 /* The window is exactly the box, and the same near-black behind it: bare X11
  * without a compositor discards per-pixel alpha, so a margin around the box
  * would render black anyway. Painting the window in the box's own color is
- * what lets the box fade in without a black rectangle arriving first. */
+ * what lets the box fade in without a black rectangle arriving first.
+ *
+ * This window keeps its corners. The orb window is cut down to a blob because
+ * an orb is round; a box of words is not, and a curve through the ends of the
+ * lines would cut the words it exists to show. */
 html,
 body {
   height: 100%;
@@ -37,11 +44,14 @@ body {
 
 .box {
   --acc: var(--quartz);
+  --pick: rgba(149, 169, 159, 0.26);
   display: flex;
   flex-direction: column;
   width: 100%;
   height: 100%;
-  padding: 12px 16px 10px;
+  /* 16 above and 14 below three 26.1 pixel lines, with the hint line under
+   * them: exactly the 620 by 140 frame src/review.rs pins. */
+  padding: 16px 24px 14px;
   background: #101010;
   border: 1px solid var(--acc);
 }
@@ -65,18 +75,45 @@ body {
 }
 
 .text {
+  position: relative;
   flex: 1 1 auto;
   overflow: hidden;
-  font-size: 13.5px;
+  font-size: 18px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
-/* Each run of the transcript keeps its own spaces, so what is drawn is what
- * would be sent. The line around them does not, so the page source can be
- * indented without indenting the words. */
+/* The transcript, in one run: whatever the caret is doing, these are the same
+ * words in the same places. The run keeps its own spaces, so what is drawn is
+ * what would be sent; the line around it does not, so the page source can be
+ * indented without indenting the words.
+ *
+ * Positioned only to be given a layer: the marks below are positioned, and a
+ * positioned element paints over ordinary inline text however it is ordered. */
 .run {
+  position: relative;
+  z-index: 1;
   white-space: pre-wrap;
+}
+
+/* Where the caret and the selection are drawn, under the words. It is the size
+ * of the text area and scrolls with it, so a mark's place is measured in the
+ * same coordinates the words are laid out in. */
+.marks {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+/* One character of the box's own type, measured rather than assumed: it is what
+ * gives the caret a width on an empty line and past the last letter. Out of
+ * flow and invisible, so it is in no line and takes no space. */
+.probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  white-space: pre;
 }
 
 /* A take longer than the box scrolls under a soft edge instead of resizing the
@@ -98,20 +135,21 @@ body {
   );
 }
 
-/* Only where typing is possible: an uncertain transcript is frozen, and a
+/* A block the width of the letter it sits under, not a rule between two
+ * letters: the caret moves and blinks without the words moving at all. Only
+ * where typing is possible, too - an uncertain transcript is frozen, and a
  * caret blinking in it would offer an edit that Enter would not carry. */
 .caret {
-  display: inline-block;
-  width: 7px;
-  height: 14px;
-  margin-left: 1px;
-  vertical-align: -2px;
+  position: absolute;
   background: var(--yellow);
   animation: blink 1.1s steps(1) infinite;
 }
 
-.caret[hidden] {
-  display: none;
+/* The same layer, the same idea: the selection is a band under the words, so
+ * selecting them does not move them either. */
+.pick {
+  position: absolute;
+  background: var(--pick);
 }
 
 @keyframes blink {
@@ -122,10 +160,10 @@ body {
 
 .hint {
   flex: 0 0 auto;
-  margin-top: 8px;
-  height: 14px;
-  line-height: 14px;
-  font-size: 10.5px;
+  margin-top: 10px;
+  height: 18px;
+  line-height: 18px;
+  font-size: 13px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--bg4);

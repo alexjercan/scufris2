@@ -34,8 +34,16 @@ interface Tick {
   level: number;
 }
 
-/** What the person has typed into the orb window's field so far. */
+/**
+ * What the person has typed into the orb window's field so far.
+ *
+ * The whole selection travels, not just the caret: the review window draws the
+ * selection under the words the same way it draws the caret, and `caret` is the
+ * end of it the person is dragging.
+ */
 interface Draft {
   text: string;
+  start: number;
+  end: number;
   caret: number;
 }

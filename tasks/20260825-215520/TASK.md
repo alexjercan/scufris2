@@ -25,7 +25,9 @@ The four increments from design page section 09, in order:
    (backend id, spawn data), kill group, coalesce, staleness), the
    shared `system` backend with the cpu widget on it, the full exhibit
    lifecycle (dim, grace, revive, pin, clear, frozen clocks), sticky
-   exhibits with pin promoting to the current workspace.
+   exhibits with pin promoting to the current workspace, and
+   runtime-owned widgets hiding and returning with the pill (state
+   intact, clocks frozen while hidden).
 3. Instruments: tray plus the voice verb for summoning, the timer and
    a tasks widget, `ctx.send` stdin actions for hand-typed input,
    `SCUFRIS_WIDGET_PATH` external roots for today's own widget.

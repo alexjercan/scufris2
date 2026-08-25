@@ -78,7 +78,13 @@ dashboards.
   the widget onto the current workspace, like dragging it off the
   scratchpad; handing it back to the runtime restores sticky. The
   mechanism is the sticky flag only; i3's actual scratchpad is not
-  involved.
+  involved. Follow-up decision from the same thread: hiding the pill
+  hides the scratchpad - every runtime-owned widget hides with it,
+  state intact and aging clocks frozen, and returns on unhide. Pinned
+  widgets were promoted onto your workspaces and stay. This revises
+  the earlier "closing the pill changes nothing on screen": closing
+  still kills nothing, but visibility of runtime-owned widgets now
+  follows the pill.
 - Q7 drag ownership: decided 2026-08-25, option A. Alex: "shelf is
   what is ephemeral, if I move something myself it's pinned ... if I
   do not touch the widget it is runtime's." Any drag ending off the
@@ -97,11 +103,14 @@ the rewrite:
   aids while he speaks) and instruments (summoned by the user,
   interactive, alive until closed). Timers sit in both camps.
 - Exhibits age on topic relevance, not on the pill; closing the pill
-  changes nothing on screen. A topic change dims to ~40%, a ~60s grace
-  window follows, then a quick exit. Nothing disappears straight from
-  LIVE. Citation or hover revives. Every aging clock freezes while the
-  mic is hot, Scufris speaks, or the pointer is over the exhibit. Only
-  the close tick and a "clear" verb exit instantly.
+  kills nothing. A topic change dims to ~40%, a ~60s grace window
+  follows, then a quick exit. Nothing disappears straight from LIVE.
+  Citation or hover revives. Every aging clock freezes while the mic
+  is hot, Scufris speaks, or the pointer is over the exhibit. Only the
+  close tick and a "clear" verb exit instantly. (Revised in this
+  review, Q6 follow-up: "changes nothing on screen" became "hides with
+  the pill" - visibility follows the pill for runtime-owned widgets,
+  state intact; see the section 10 answers.)
 - The pin tick promotes an exhibit into an instrument: aging stops, the
   user owns it.
 - Escalation is one spawn interface with increasing prominence: a line

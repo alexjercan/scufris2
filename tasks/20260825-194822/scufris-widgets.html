@@ -693,7 +693,9 @@
       ages on topic relevance and leaves on its own. The user opens (or pins)
       the same widget as an <b>instrument</b>: it stays until closed. Timers sit
       in both camps. These rules were settled at the pill design review and
-      carry over unchanged.
+      carry over with one revision from this review: runtime-owned widgets hide
+      and return with the pill (the scratchpad move, section 04) instead of
+      ignoring it - closing the pill still kills nothing.
     </p>
 
     <figure>
@@ -932,6 +934,14 @@
       off the scratchpad onto it. Handing a widget back to the runtime makes it
       sticky again. The mechanism is just the sticky flag; nothing touches i3's
       actual scratchpad.
+    </p>
+    <p>
+      The model carries one more move:
+      <b>hiding the pill hides the scratchpad</b>. Every runtime-owned widget
+      hides with it - state intact, backends running, aging clocks frozen - and
+      comes back exactly as it was when the pill returns. Pinned widgets were
+      promoted onto your workspaces, so they stay. Closing the pill still kills
+      nothing; it just takes its exhibits with it.
     </p>
 
     <div class="shelfrow">
@@ -2089,8 +2099,9 @@ spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <
         (they accompany speech) while instruments stay on theirs - agree?
         <span class="qdone"
           >decided 2026-08-25: yes, with the scratchpad model - exhibits ride
-          sticky like the scratchpad, pin promotes onto the current
-          workspace</span
+          sticky like the scratchpad, pin promotes onto the current workspace,
+          and hiding the pill hides everything the runtime owns until it
+          returns</span
         >
       </li>
       <li>

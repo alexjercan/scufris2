@@ -54,10 +54,10 @@ body {
   z-index: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   width: 100%;
   height: 100%;
-  padding: 0 18px 0 13px;
+  padding: 0 22px 0 16px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 38%),
     repeating-linear-gradient(
@@ -76,7 +76,7 @@ body {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  box-shadow: inset 0 0 18px 3px rgba(var(--glow), 0.55);
+  box-shadow: inset 0 0 22px 4px rgba(var(--glow), 0.55);
   opacity: calc(0.1 + 0.5 * var(--lv));
   transition: opacity 0.12s linear;
   /* Idle personality: the glow never sits still. */
@@ -96,12 +96,41 @@ body {
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(var(--acc), var(--acc)) left top / 9px 1px,
-    linear-gradient(var(--acc), var(--acc)) left top / 1px 9px,
-    linear-gradient(var(--acc), var(--acc)) right bottom / 9px 1px,
-    linear-gradient(var(--acc), var(--acc)) right bottom / 1px 9px;
+    linear-gradient(var(--acc), var(--acc)) left top / 11px 1px,
+    linear-gradient(var(--acc), var(--acc)) left top / 1px 11px,
+    linear-gradient(var(--acc), var(--acc)) right bottom / 11px 1px,
+    linear-gradient(var(--acc), var(--acc)) right bottom / 1px 11px;
   background-repeat: no-repeat;
   opacity: 0.9;
+}
+
+/* ---------- entrance ---------- */
+
+/* The window cannot fade and cannot grow while it is up: bare X11 without a
+ * compositor discards alpha, and the size is pinned by equal min and max
+ * hints. So arriving is split in two. The host rises the window into its
+ * resting spot from below and carries a little past it; this is the other
+ * half, the panel growing into the frame on the way up and squashing once as
+ * it lands. The reduced-motion rule at the foot of this file stops this half,
+ * and the page reports the same preference to the host over pill_ready so the
+ * window stops travelling too. */
+.pill.arriving {
+  animation: arrive 240ms cubic-bezier(0.22, 0.9, 0.32, 1) both;
+}
+
+@keyframes arrive {
+  0% {
+    transform: scale(0.9, 0.86);
+  }
+  60% {
+    transform: scale(1.01, 1.04);
+  }
+  78% {
+    transform: scale(1.03, 0.95);
+  }
+  100% {
+    transform: scale(1, 1);
+  }
 }
 
 /* ---------- state grammar ---------- */
@@ -167,7 +196,7 @@ body {
 .pill[data-state="attention"] .orb::after {
   content: "";
   position: absolute;
-  inset: -4px;
+  inset: -5px;
   border-radius: 50%;
   border: 1px solid var(--wisteria);
   animation: ping 2.6s ease-out infinite;
@@ -221,50 +250,26 @@ body {
 .orb {
   position: relative;
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   transform: scale(calc(0.82 + 0.3 * var(--lv)));
   transition: transform 0.1s linear;
 }
 
 /* The dotted thought orb. pill.ts paints it from --acc every frame; the
  * attribute size is replaced by the device pixel ratio, so the CSS box is
- * what fixes the drawn size at 30px. */
+ * what fixes the drawn size at 36px. Recording reads from that accent and
+ * from the label: there is no separate mic dot to disagree with them. */
 .orb canvas {
   display: block;
   width: 100%;
   height: 100%;
 }
 
-.record {
-  /* The mic privacy ring. Red is reserved for error and the mic, and this is
-   * the mic. */
-  position: absolute;
-  inset: -5px;
-  border: 2px solid var(--red);
-  border-radius: 50%;
-  opacity: 0;
-}
-
-.pill[data-state="listening"] .record {
-  opacity: 1;
-  animation: privacy 1.1s ease-in-out infinite;
-}
-
-@keyframes privacy {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
-}
-
 .wave {
   flex: 0 0 auto;
-  width: 64px;
-  height: 26px;
+  width: 76px;
+  height: 30px;
   display: none;
 }
 
@@ -280,7 +285,7 @@ body {
 }
 
 .label {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--acc);
@@ -289,13 +294,13 @@ body {
 
 .transcript {
   width: 100%;
-  margin-top: 2px;
+  margin-top: 3px;
   border: none;
   border-bottom: 1px solid var(--bg3);
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 14px;
+  font-size: 16px;
   caret-color: var(--acc);
   outline: none;
   user-select: text;
@@ -307,8 +312,8 @@ body {
 }
 
 .detail {
-  margin-top: 2px;
-  font-size: 11px;
+  margin-top: 3px;
+  font-size: 13px;
   color: var(--quartz);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -322,7 +327,7 @@ body {
 .timer {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--quartz);
 }
 
@@ -331,7 +336,8 @@ body {
 }
 
 /* Reduced motion: crossfades instead of motion. The glow still tracks the
- * level through --lv; only the self-driven animation stops. */
+ * level through --lv; only the self-driven animation stops, the entrance
+ * included, and the host is told the same so the window appears in place. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

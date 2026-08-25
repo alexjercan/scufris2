@@ -293,8 +293,13 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// The page saying hello, and saying with it whether the person asked for
+/// reduced motion. Only the page can read that preference, and the window's
+/// half of the entrance is the host's to run, so it travels with the first
+/// word the page says.
 #[tauri::command]
-fn pill_ready(runtime: tauri::State<'_, Arc<App>>) {
+fn pill_ready(runtime: tauri::State<'_, Arc<App>>, reduced_motion: bool) {
+    pill::set_reduced_motion(reduced_motion);
     runtime.inner().clone().publish();
 }
 

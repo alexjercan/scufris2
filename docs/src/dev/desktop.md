@@ -31,8 +31,9 @@ not stop the backend, and a companion crash does not stop the conversation.
 
 - The activation accelerator, `Super+D` by default, opens the bottom-center
   pill, gives it keyboard focus, and starts recording immediately.
-- The pill shows a red privacy ring, a level-driven orb, and the recording
-  duration.
+- The pill rises into place from the bottom of the screen and shows a
+  level-driven orb in the recording accent, the state label, and the recording
+  duration. The tray keeps the red privacy ring.
 - `Escape` while recording stops and discards the recording.
 - `Enter` while recording stops, transcribes, shows the sent text, and submits
   without another confirmation.

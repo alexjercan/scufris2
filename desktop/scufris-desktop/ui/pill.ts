@@ -9,6 +9,10 @@
 // gruber ink. One rAF loop drives glow, wave and orb; it stops under reduced
 // motion and while the window is hidden.
 //
+// Arriving is shared with the host: the window rises into place from below,
+// and the panel grows into the frame and squashes once as it lands. The host
+// cannot read prefers-reduced-motion, so this page reports it once.
+//
 // Compiled by tsc from build.rs into ui/dist; the window loads the output.
 
 interface TauriCore {
@@ -235,9 +239,11 @@ const BASELINE: Record<string, number> = {
 };
 
 const WAVE_STATES = new Set(["listening", "transcribing", "speaking"]);
-const WAVE_WIDTH = 64;
-const WAVE_HEIGHT = 26;
-const BARS = 14;
+const WAVE_WIDTH = 76;
+const WAVE_HEIGHT = 30;
+// Two more bars than the smaller pill carried, so the wave keeps its density
+// rather than spreading out.
+const BARS = 16;
 
 const waveContext = wave.getContext("2d");
 if (waveContext !== null) {
@@ -288,8 +294,10 @@ function applyLevel(level: number): void {
 // carries the whole depth range instead of the engine's grayscale.
 type Rgb = [number, number, number];
 
-const ORB_SIZE = 30;
-// The 20px preset is the tuned inline design, drawn here at 30px.
+const ORB_SIZE = 36;
+// The 20px preset is the tuned inline design, drawn here at 36px. Only 64 and
+// 20 are tuned, so the preset stays put while the drawn size grows with the
+// frame.
 const ORB_PRESET = 20;
 const PANEL: Rgb = [16, 16, 16];
 const QUARTZ: Rgb = [149, 169, 159];
@@ -321,7 +329,7 @@ const RESTING: OrbLook = { state: "breathing", speed: 1 };
 const engine = window.OrbEngine;
 const orbContext = orb.getContext("2d");
 if (orbContext !== null) {
-  // Capped at 2: past that the extra arc fills buy nothing at 30px.
+  // Capped at 2: past that the extra arc fills buy nothing at this size.
   const scale = Math.min(window.devicePixelRatio || 1, 2);
   orb.width = ORB_SIZE * scale;
   orb.height = ORB_SIZE * scale;
@@ -430,6 +438,28 @@ function retune(next: string): void {
 reducedMotion.addEventListener?.("change", () => retune(currentState()));
 document.addEventListener("visibilitychange", () => retune(currentState()));
 
+// ---------- entrance ----------
+
+// The host rises the window into its resting spot from below and tells the page
+// the moment it starts; this half grows the panel into the frame and squashes
+// it once as it lands. The window cannot be resized while it is up, so growing
+// is something only the page can do. The host runs its half only on a
+// hidden-to-visible transition, so this never replays for a re-render.
+function arrive(): void {
+  if (reducedMotion.matches) return;
+  pill.classList.remove("arriving");
+  // Reading a layout value between the two forces the restart; without it the
+  // class change is coalesced and the animation carries on where it was.
+  void pill.offsetWidth;
+  pill.classList.add("arriving");
+}
+
+pill.addEventListener("animationend", (event) => {
+  if (event.animationName === "arrive") pill.classList.remove("arriving");
+});
+
+void listen("scufris://entrance", () => arrive());
+
 // ---------- rendering ----------
 
 function formatDuration(seconds: number): string {
@@ -510,4 +540,6 @@ window.addEventListener("keydown", (event) => {
 });
 
 retune(currentState());
-void invoke("pill_ready");
+// The preference goes with the first hello: the host owns the window's half of
+// the entrance and has no media query of its own to read.
+void invoke("pill_ready", { reducedMotion: reducedMotion.matches });

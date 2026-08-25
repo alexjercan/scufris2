@@ -13,6 +13,7 @@ mod focus;
 mod logging;
 mod pending;
 mod pill;
+mod review;
 mod state;
 mod stt;
 mod tray;
@@ -127,6 +128,11 @@ impl Surface for DesktopSurface {
     }
 
     fn hide_pill(&self) -> Result<(), String> {
+        // The box belongs to the orb, so it goes first: a pill on its way down
+        // must never leave a transcript hanging over the desktop behind it.
+        if let Err(error) = review::hide(&self.handle) {
+            warn!("{error}");
+        }
         pill::hide(&self.handle)
     }
 
@@ -135,6 +141,14 @@ impl Surface for DesktopSurface {
     }
 
     fn present(&self, payload: PresentationPayload) -> Result<(), String> {
+        // The box is raised before the presentation is emitted, so the page it
+        // renders is already on screen when the words reach it. A box that
+        // would not come up is a warning and not a refusal: the orb is what the
+        // runtime rests on, and failing here would keep the words from reaching
+        // it too.
+        if let Err(error) = review::follow(&self.handle, payload.state) {
+            warn!("{error}");
+        }
         self.handle
             .emit(PRESENTATION_EVENT, payload)
             .map_err(|error| format!("the pill would not render: {error}"))
@@ -202,6 +216,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
         )
         .invoke_handler(tauri::generate_handler![
             pill_ready,
+            review_ready,
             pill_submit,
             pill_cancel,
             pill_copy,
@@ -211,6 +226,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
         .setup(move |tauri| {
             let handle = tauri.handle().clone();
             pill::ensure(&handle)?;
+            review::ensure(&handle)?;
 
             let menu = tray::build_menu(
                 &handle,
@@ -300,6 +316,17 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
 #[tauri::command]
 fn pill_ready(runtime: tauri::State<'_, Arc<App>>, reduced_motion: bool) {
     pill::set_reduced_motion(reduced_motion);
+    runtime.inner().clone().publish();
+}
+
+/// The transcript page saying hello, and asking what it has missed.
+///
+/// A transcript recovered from a previous process is published as the companion
+/// starts, which can be before this window's page is listening. Rather than let
+/// the box come up empty over words nobody can read, the page asks for the
+/// presentation again once it is ready for one.
+#[tauri::command]
+fn review_ready(runtime: tauri::State<'_, Arc<App>>) {
     runtime.inner().clone().publish();
 }
 

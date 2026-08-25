@@ -1,0 +1,141 @@
+/* The transcript box that rises above the orb, from the Orb Study section 03
+ * "The pill is the orb" (tasks/20260825-231826/orb-study.html). It exists only
+ * while there is a decision to make about the words: the transcript, a caret
+ * where the person is typing, and one line saying what the keys do. The keys
+ * themselves belong to the orb window; nothing here is focusable. */
+
+:root {
+  --bg4: #52494e;
+  --fg1: #f4f4ff;
+  --quartz: #95a99f;
+  --wisteria: #9e95c7;
+  --yellow: #ffdd33;
+  --mono:
+    Iosevka, "Iosevka Nerd Font", "Iosevka Term", "JetBrains Mono",
+    ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* The window is exactly the box, and the same near-black behind it: bare X11
+ * without a compositor discards per-pixel alpha, so a margin around the box
+ * would render black anyway. Painting the window in the box's own color is
+ * what lets the box fade in without a black rectangle arriving first. */
+html,
+body {
+  height: 100%;
+  background: #101010;
+  overflow: hidden;
+  font-family: var(--mono);
+  color: var(--fg1);
+  user-select: none;
+}
+
+.box {
+  --acc: var(--quartz);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: 12px 16px 10px;
+  background: #101010;
+  border: 1px solid var(--acc);
+}
+
+.box[data-state="uncertain"] {
+  --acc: var(--wisteria);
+}
+
+/* It pops in place rather than travelling: the orb window is the one that
+ * rises, and a box that flew in from somewhere would pull the eye off the
+ * words it came to show. */
+.box.popping {
+  animation: boxpop 200ms ease-out;
+}
+
+@keyframes boxpop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+  }
+}
+
+.text {
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-size: 13.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* Each run of the transcript keeps its own spaces, so what is drawn is what
+ * would be sent. The line around them does not, so the page source can be
+ * indented without indenting the words. */
+.run {
+  white-space: pre-wrap;
+}
+
+/* A take longer than the box scrolls under a soft edge instead of resizing the
+ * window, which equal min and max size hints cannot do while it is up. */
+.text.overflowing {
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 12px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    180deg,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 12px),
+    transparent 100%
+  );
+}
+
+/* Only where typing is possible: an uncertain transcript is frozen, and a
+ * caret blinking in it would offer an edit that Enter would not carry. */
+.caret {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 1px;
+  vertical-align: -2px;
+  background: var(--yellow);
+  animation: blink 1.1s steps(1) infinite;
+}
+
+.caret[hidden] {
+  display: none;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.hint {
+  flex: 0 0 auto;
+  margin-top: 8px;
+  height: 14px;
+  line-height: 14px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bg4);
+}
+
+/* Reduced motion: the box appears in place, caret and all. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+  }
+}

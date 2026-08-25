@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Scufris transcript</title>
+    <link rel="stylesheet" href="review.css" />
+  </head>
+  <body>
+    <main id="box" class="box" data-state="review">
+      <!-- The words either side of the person's own caret. The runs sit against
+           each other because the space between two of them would be a space in
+           the transcript; each run keeps its own spaces, the line does not. -->
+      <p id="text" class="text">
+        <span id="before" class="run"></span
+        ><span id="caret" class="caret" hidden></span
+        ><span id="after" class="run"></span>
+      </p>
+      <p id="hint" class="hint"></p>
+    </main>
+    <script src="review.js"></script>
+  </body>
+</html>

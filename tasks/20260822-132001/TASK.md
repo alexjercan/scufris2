@@ -254,3 +254,9 @@ limits are stated in `VERIFICATION.md` and `docs/src/dev/desktop.md`.
 Still open before this task closes: the live playtesting listed at the end of
 `VERIFICATION.md`. It needs a real desktop session, microphone, speaker, and a
 running backend, which the implementation workspace does not have.
+
+## Market research (2026-08-25)
+
+Market research for the pill redesign, diegetic feedback, focus-free keys,
+wake word, and the post-v1 feature direction is in `RESEARCH.md`, with raw
+sweep reports under `research/`.

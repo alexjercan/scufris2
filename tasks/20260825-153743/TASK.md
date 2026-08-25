@@ -1,6 +1,6 @@
 # Redesign the pill: square gruber HUD, state grammar, dynamic glow, earcons
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 85
 - TAGS: voice, desktop, design
 
@@ -79,6 +79,10 @@ playtesting".
   shown rather than hidden, and Enter on an error rests while Escape
   dismisses.
 
-Remaining: playtest round 3 - residency (pill stays after the turn,
-Esc dismisses, Super+D brings it home), plus the round-2 leftovers
-(audible cues with journal lines, flush window).
+## Closed (2026-08-25)
+
+Playtest round 3 passed: the flush 560x64 window, the audible cues, and
+the resident pill that stays through and after the turn all confirmed
+live by Alex. Follow-up ideas left unbuilt: dismissing the resting
+passive pill without the Super+D + Escape detour (a click on the pill,
+or a tray item).

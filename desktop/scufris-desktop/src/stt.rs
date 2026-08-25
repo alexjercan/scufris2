@@ -4,7 +4,7 @@
 //! transcription fails, so every failure path returns a short message the pill
 //! shows instead of a transcript.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -79,7 +79,31 @@ pub fn parse_transcript(body: &str) -> Result<String, TranscriptionError> {
 }
 
 /// Transcribes one WAV recording through the configured endpoint.
+///
+/// Only sizes and timing reach the log; the transcript itself never does.
 pub fn transcribe(endpoint: &str, wav: &[u8]) -> Result<String, TranscriptionError> {
+    let started = Instant::now();
+    let outcome = request(endpoint, wav);
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    match &outcome {
+        Ok(text) => tracing::debug!(
+            wav_bytes = wav.len(),
+            elapsed_ms,
+            transcript_bytes = text.len(),
+            "transcribed"
+        ),
+        Err(error) => {
+            tracing::error!(
+                wav_bytes = wav.len(),
+                elapsed_ms,
+                "transcription failed: {error}"
+            )
+        }
+    }
+    outcome
+}
+
+fn request(endpoint: &str, wav: &[u8]) -> Result<String, TranscriptionError> {
     let client = reqwest::blocking::Client::builder()
         .timeout(TRANSCRIPTION_TIMEOUT)
         .build()

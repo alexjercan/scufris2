@@ -167,11 +167,14 @@ Run the companion package directly to see it before you adopt the module:
 
 ```bash
 nix run .#scufris-desktop -- --print-config
-nix run .#scufris-desktop
+nix run .#scufris-desktop -- --foreground
 ```
 
 `--print-config` prints the resolved configuration and exits without opening a
-window. Every value comes from the environment:
+window. `--foreground` runs the companion with pretty logs on stderr instead
+of journald, which is the view for watching it work; without the flag, read
+the logs with `journalctl --user -t scufris-desktop`. Every value comes from
+the environment:
 
 | Variable                          | Default                                        |
 | --------------------------------- | ---------------------------------------------- |

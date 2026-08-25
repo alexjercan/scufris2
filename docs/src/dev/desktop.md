@@ -511,6 +511,28 @@ rejected, and that the module wires the services and the restart hook it claims.
 `scufris-desktop --print-config` prints the resolved configuration and exits
 without starting a window, which is what makes that check cheap.
 
+## Logging
+
+The companion logs through `tracing`. Without `--foreground` it sends
+structured fields straight to journald and falls back to stderr when no
+journald socket is reachable; `--foreground` forces pretty stderr output with
+ANSI colors when stderr is a terminal, which is the development view:
+
+```bash
+RUST_LOG=debug nix run .#scufris-desktop -- --foreground
+journalctl --user -t scufris-desktop -f
+```
+
+The level policy keeps the steady state quiet. INFO carries lifecycle and
+state transitions only: starting and stopping, every phase change of the pill
+state machine (one log point under the companion lock, so none is missed),
+daemon connect, and assistant state changes. DEBUG carries per-request detail:
+whisper request timing and sizes, daemon submissions and answers, and the
+webview console, which is forwarded through the `pill_log` command under the
+`webview` target. WARN is degraded operation and ERROR is a user-visible
+failure. `RUST_LOG` overrides all of it. Transcripts never reach the log at
+any level; only their sizes do.
+
 ## Environment
 
 | Variable                          | Meaning                                                |

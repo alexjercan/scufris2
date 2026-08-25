@@ -23,6 +23,7 @@ use std::{
 };
 
 use serde::Serialize;
+use tracing::{debug, error, info, warn};
 
 use crate::{
     audio::{Capture, MAX_RECORDING, Recorder},
@@ -505,6 +506,11 @@ impl App {
                 return;
             }
             companion.set_connected(connected);
+            if connected {
+                info!("daemon connected");
+            } else {
+                warn!("daemon disconnected");
+            }
         }
         // The phase is untouched, so the window has nothing to catch up to.
         self.publish();
@@ -517,14 +523,22 @@ impl App {
     /// one transcript must not settle the transcript that replaced it.
     pub fn observe(self: &Arc<Self>, event: DaemonEvent) {
         match event {
-            DaemonEvent::Connected(_) => self.set_connected(true),
+            DaemonEvent::Connected(session) => {
+                debug!(session = %session, "daemon welcome");
+                self.set_connected(true)
+            }
             DaemonEvent::Disconnected => self.set_connected(false),
             DaemonEvent::State(state, detail) => self.set_assistant(state, detail),
-            DaemonEvent::Acknowledged(id) => self.handle(Event::Acknowledged(id)),
+            DaemonEvent::Acknowledged(id) => {
+                debug!(id = %id, "submission acknowledged");
+                self.handle(Event::Acknowledged(id))
+            }
             DaemonEvent::Refused(id, detail) => {
+                debug!(id = %id, detail = %detail, "submission refused");
                 self.handle(Event::SubmissionFailed { id, reason: detail })
             }
             DaemonEvent::Uncertain(id, detail) => {
+                debug!(id = %id, detail = %detail, "submission uncertain");
                 self.handle(Event::SubmissionUncertain { id, reason: detail })
             }
         }
@@ -532,10 +546,20 @@ impl App {
 
     /// Records the assistant state the daemon reported.
     pub fn set_assistant(self: &Arc<Self>, state: scufris_control::AssistantState, detail: String) {
-        self.companion
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .set_assistant(state, detail);
+        {
+            let mut companion = self
+                .companion
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if companion.assistant() != state {
+                info!(
+                    from = companion.assistant().name(),
+                    to = state.name(),
+                    "assistant state"
+                );
+            }
+            companion.set_assistant(state, detail);
+        }
         self.publish();
     }
 
@@ -604,7 +628,7 @@ impl App {
     /// pill to answer in. The tray still says what happened, and the person's
     /// next activation is what tries the window again.
     fn abandon(self: &Arc<Self>, reason: String) {
-        eprintln!("scufris-desktop: {reason}");
+        error!("{reason}");
         let (actions, decision) = self.decide(|companion| companion.abandon(reason));
         for action in actions {
             // Stopping the microphone and the transcription reaches nothing
@@ -621,7 +645,14 @@ impl App {
             .companion
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        let before = companion.phase_name();
         let value = change(&mut companion);
+        let after = companion.phase_name();
+        if before != after {
+            // Every phase change passes through here under the companion lock,
+            // so this is the one place the transition log cannot miss one.
+            info!(from = before, to = after, "phase");
+        }
         let decision = self.stamp(&companion);
         (value, decision)
     }
@@ -742,7 +773,7 @@ impl App {
             // A newer presentation is worth more than another try at one the
             // companion has already left behind.
             if attempt == RENDER_ATTEMPTS || self.surface.pending() {
-                eprintln!("scufris-desktop: {}", trouble.join("; "));
+                warn!("{}", trouble.join("; "));
                 return;
             }
         }
@@ -762,7 +793,7 @@ impl App {
                 // The person can see the pill, which is what the privacy
                 // indicator needs. The keyboard is asked for again, because
                 // this is not recorded as the pill being ready.
-                eprintln!("scufris-desktop: {trouble}");
+                warn!("{trouble}");
                 self.set_screen(Screen::Seen);
                 Ok(())
             }
@@ -770,7 +801,7 @@ impl App {
                 // Up, but perhaps behind what the person is looking at. The
                 // phase still has a window, so it goes on; what it does not
                 // have is anything to rest a privacy indicator on.
-                eprintln!("scufris-desktop: {trouble}");
+                warn!("{trouble}");
                 self.set_screen(Screen::Doubtful);
                 Ok(())
             }
@@ -789,7 +820,7 @@ impl App {
         if let Err(reason) = self.ports.surface.restore_focus() {
             // The pill is going away either way. Only the window behind it is
             // worse off, and saying so is all there is to do about it.
-            eprintln!("scufris-desktop: {reason}");
+            warn!("{reason}");
         }
         match self.ports.surface.hide_pill() {
             Ok(()) => {
@@ -801,7 +832,7 @@ impl App {
                 // as down: that record is what would stop it ever being taken
                 // down again. Focus has gone, so it is up but not ready, and
                 // the repair below is what takes it down.
-                eprintln!("scufris-desktop: {reason}");
+                warn!("{reason}");
                 self.set_screen(Screen::Seen);
                 Err(reason)
             }
@@ -946,7 +977,7 @@ impl App {
             match self.ports.pending.clear() {
                 Ok(()) => return,
                 Err(error) if attempt == CLEAR_ATTEMPTS => {
-                    eprintln!("scufris-desktop: {error}");
+                    error!("{error}");
                 }
                 Err(_) => {}
             }
@@ -965,9 +996,7 @@ impl App {
         };
         match self.ports.pending.tombstone(id) {
             Ok(()) => {
-                eprintln!(
-                    "scufris-desktop: {removal}; the discarded transcript was tombstoned instead"
-                );
+                warn!("{removal}; the discarded transcript was tombstoned instead");
                 Ok(())
             }
             Err(error) => Err(Event::DiscardFailed(format!(
@@ -1138,7 +1167,7 @@ impl App {
             self.snapshot(),
             Box::new(|outcome| {
                 if let Err(reason) = outcome {
-                    eprintln!("scufris-desktop: {reason}");
+                    warn!("{reason}");
                 }
             }),
         );
@@ -1147,7 +1176,7 @@ impl App {
     /// Opens the full popup chat through the configured hook.
     pub fn open_chat(&self) {
         let Some(command) = &self.ports.chat_command else {
-            eprintln!("scufris-desktop: no chat command is configured");
+            warn!("no chat command is configured");
             return;
         };
         spawn_hook(command);
@@ -1156,7 +1185,7 @@ impl App {
     /// Restarts the owned backend service inside the bounded restart budget.
     pub fn restart_backend(&self) {
         let Some(command) = &self.ports.restart_command else {
-            eprintln!("scufris-desktop: no backend restart command is configured");
+            warn!("no backend restart command is configured");
             return;
         };
         let now = SystemTime::now()
@@ -1169,7 +1198,7 @@ impl App {
             .unwrap_or_else(|error| error.into_inner())
             .allow(now)
         {
-            eprintln!("scufris-desktop: backend restart budget is exhausted");
+            warn!("backend restart budget is exhausted");
             return;
         }
         spawn_hook(command);
@@ -1183,7 +1212,7 @@ fn spawn_hook(command: &Path) {
                 let _ = child.wait();
             });
         }
-        Err(error) => eprintln!("scufris-desktop: cannot run {}: {error}", command.display()),
+        Err(error) => error!("cannot run {}: {error}", command.display()),
     }
 }
 

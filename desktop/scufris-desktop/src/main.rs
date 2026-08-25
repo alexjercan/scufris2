@@ -10,6 +10,7 @@ mod audio;
 mod config;
 mod daemon;
 mod focus;
+mod logging;
 mod pending;
 mod pill;
 mod state;
@@ -30,10 +31,13 @@ use pending::{FilePendingStore, PendingStore};
 use state::Event;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, menu::Menu};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tracing::{debug, error, info};
 
 fn main() -> ExitCode {
     match run() {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
+        // Only what fails before logging is up lands here: a bad argument, or
+        // logging itself. Stderr is all there is for those.
         Err(error) => {
             eprintln!("scufris-desktop: {error}");
             ExitCode::FAILURE
@@ -41,20 +45,33 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<(), Box<dyn Error>> {
-    let arguments: Vec<String> = env::args().skip(1).collect();
-    match arguments.first().map(String::as_str) {
-        Some("--version") => {
-            println!("scufris-desktop {}", env!("CARGO_PKG_VERSION"));
-            return Ok(());
+fn run() -> Result<ExitCode, Box<dyn Error>> {
+    let mut foreground = false;
+    for argument in env::args().skip(1) {
+        match argument.as_str() {
+            "--version" => {
+                println!("scufris-desktop {}", env!("CARGO_PKG_VERSION"));
+                return Ok(ExitCode::SUCCESS);
+            }
+            "--print-config" => {
+                print!("{}", Config::from_env()?.describe());
+                return Ok(ExitCode::SUCCESS);
+            }
+            "--foreground" => foreground = true,
+            unknown => return Err(format!("unknown argument {unknown}").into()),
         }
-        Some("--print-config") => {
-            print!("{}", Config::from_env()?.describe());
-            return Ok(());
-        }
-        Some(unknown) => return Err(format!("unknown argument {unknown}").into()),
-        None => {}
     }
+    logging::init(foreground)?;
+    match serve() {
+        Ok(()) => Ok(ExitCode::SUCCESS),
+        Err(error) => {
+            error!("{error}");
+            Ok(ExitCode::FAILURE)
+        }
+    }
+}
+
+fn serve() -> Result<(), Box<dyn Error>> {
     let config = Config::from_env()?;
     configure_webkit_renderer()?;
     start(config)
@@ -136,6 +153,14 @@ impl Backend for DaemonLink {
 }
 
 fn start(config: Config) -> Result<(), Box<dyn Error>> {
+    // After the WebKit re-exec, so one start logs one starting line.
+    info!(
+        version = env!("CARGO_PKG_VERSION"),
+        socket = %config.socket.display(),
+        stt = %config.stt_endpoint,
+        hotkey = %config.hotkey,
+        "starting"
+    );
     let shortcut: Shortcut = config
         .hotkey
         .parse()
@@ -160,7 +185,8 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             pill_ready,
             pill_submit,
             pill_cancel,
-            pill_copy
+            pill_copy,
+            pill_log
         ])
         .setup(move |tauri| {
             let handle = tauri.handle().clone();
@@ -227,6 +253,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
     tauri_app.run(|handle, event| match event {
         RunEvent::ExitRequested { api, code, .. } if code.is_none() => api.prevent_exit(),
         RunEvent::Exit => {
+            info!("stopping");
             handle.state::<Arc<DaemonLink>>().stop();
             handle.state::<Arc<App>>().shutdown();
         }
@@ -253,4 +280,12 @@ fn pill_cancel(runtime: tauri::State<'_, Arc<App>>) {
 #[tauri::command]
 fn pill_copy(runtime: tauri::State<'_, Arc<App>>) {
     runtime.inner().clone().handle(Event::Copy);
+}
+
+/// Webview console output, forwarded so pill behaviour is visible from
+/// journalctl. Everything arrives at DEBUG; the console level rides along as a
+/// field so it stays filterable.
+#[tauri::command]
+fn pill_log(level: String, message: String) {
+    debug!(target: "webview", level = %level, "{message}");
 }

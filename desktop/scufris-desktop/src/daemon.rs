@@ -151,7 +151,7 @@ fn serve(
             Ok(message) => message,
             Err(MessageError::Empty) => return Ok(()),
             Err(error) => {
-                eprintln!("scufris-desktop: rejected daemon message: {error}");
+                tracing::warn!("rejected daemon message: {error}");
                 return Err(());
             }
         };

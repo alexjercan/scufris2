@@ -1,6 +1,6 @@
 # Adopt tracing with journald and foreground logging in scufris-desktop
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 90
 - TAGS: voice, desktop, logging
 

@@ -72,6 +72,21 @@ pub enum Phase {
     },
 }
 
+impl Phase {
+    /// Short stable name for logs. The transcript itself never appears in it.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Phase::Hidden => "hidden",
+            Phase::Listening => "listening",
+            Phase::Transcribing { .. } => "transcribing",
+            Phase::Reviewing { .. } => "reviewing",
+            Phase::Sent { .. } => "sent",
+            Phase::Retained { .. } => "retained",
+            Phase::Failed { .. } => "failed",
+        }
+    }
+}
+
 /// How much is known about a retained transcript's fate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Delivery {
@@ -257,6 +272,16 @@ impl Companion {
     #[cfg(test)]
     pub fn phase(&self) -> &Phase {
         &self.phase
+    }
+
+    /// Short stable name of the current phase, for logs.
+    pub fn phase_name(&self) -> &'static str {
+        self.phase.name()
+    }
+
+    /// Returns the assistant state last reported by the daemon.
+    pub fn assistant(&self) -> AssistantState {
+        self.assistant
     }
 
     /// Returns true while this exact submission is still unacknowledged.
@@ -763,6 +788,26 @@ impl Companion {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn phase_names_are_stable_and_free_of_transcripts() {
+        assert_eq!(Phase::Hidden.name(), "hidden");
+        assert_eq!(Phase::Listening.name(), "listening");
+        assert_eq!(
+            Phase::Reviewing {
+                transcript: "secret words".into(),
+                id: "pill-1".into(),
+                notice: String::new(),
+            }
+            .name(),
+            "reviewing"
+        );
+        let mut companion = Companion::new("pill");
+        assert_eq!(companion.phase_name(), "hidden");
+        companion.set_connected(true);
+        companion.apply(Event::Activate);
+        assert_eq!(companion.phase_name(), "listening");
+    }
 
     fn opened() -> Companion {
         let mut companion = Companion::new("pill");

@@ -5,6 +5,43 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
+// Console output and uncaught failures are forwarded to the companion at
+// DEBUG under the `webview` target, so pill behaviour is readable from
+// journalctl and --foreground runs. Forwarding must never throw or reject,
+// or an uncaught rejection would forward itself forever.
+function forwardLog(level, message) {
+  try {
+    invoke("pill_log", { level, message }).catch(() => {});
+  } catch {
+    // Nothing to do: the log stays in the webview console only.
+  }
+}
+
+function logText(value) {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+for (const level of ["debug", "log", "info", "warn", "error"]) {
+  const original = console[level].bind(console);
+  console[level] = (...args) => {
+    original(...args);
+    forwardLog(level, args.map(logText).join(" "));
+  };
+}
+
+window.addEventListener("error", (event) => {
+  forwardLog("error", `uncaught: ${event.message}`);
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  forwardLog("error", `unhandled rejection: ${logText(event.reason)}`);
+});
+
 const pill = document.getElementById("pill");
 const label = document.getElementById("label");
 const transcript = document.getElementById("transcript");

@@ -69,6 +69,12 @@ dashboards.
   submenu plus "show the calendar" through Scufris; no rofi entry and
   no scufris-ctl verb for now. A summoned instrument lands in a free
   edge slot per the slot model.
+- Q5 the note widget: decided 2026-08-25, text only, no formatting.
+  Alex flagged the overengineering risk and named the use case he is
+  circling: a quick-capture note - open the widget, write something
+  down, save it (for example into today). Not settled as a feature;
+  if it lands it is an instrument built on the Q3 stdin action
+  (save = one JSON action to a backend that writes into today).
 
 ## Settled product behavior (carried over from the design review)
 

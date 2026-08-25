@@ -205,8 +205,17 @@
   .open {
     border-left-color: var(--yellow);
   }
+  .done {
+    border-left-color: var(--green);
+  }
   .open .tag {
     color: var(--yellow);
+  }
+  .done .tag {
+    color: var(--green);
+  }
+  .open .tag,
+  .done .tag {
     font-size: 11px;
     letter-spacing: 0.14em;
     text-transform: uppercase;
@@ -1213,9 +1222,8 @@
   <section id="p08">
     <div class="shead">
       <span class="snum">08</span>
-      <h2>Risks and two open details</h2>
-      <span class="srule"></span
-      ><span class="stag">flagged now, decided cheap</span>
+      <h2>Risks and open details</h2>
+      <span class="srule"></span><span class="stag">one decided, one open</span>
     </div>
     <ul>
       <li>
@@ -1240,18 +1248,15 @@
         cap) - this explains the 48 "failures" seen on a clean master.
       </li>
     </ul>
-    <div class="hint open">
-      <span class="tag">open detail - the turn boundary</span>
-      In plain words: an exhibit starts fading only when the conversation has
-      moved on - the reviewed trigger is "a turn ended and Scufris neither
-      opened nor updated this exhibit during it". So the companion must notice
-      "a turn ended". It has no such signal today, but it already receives every
-      assistant state change over the socket. Proposed: when the state falls
-      back to idle after working or speaking, that is the end of a turn; every
-      exhibit Scufris did not touch during that turn starts its dim clock then.
-      Costs no new wire message; if the inference misfires (states can flap), v2
-      gains an explicit turn-ended message instead - a one-variant addition.
-      Lands with increment 2.
+    <div class="hint done">
+      <span class="tag">decided - the turn boundary</span>
+      Decided on this page, 2026-08-25 (Alex: "idle means one turn ended"). The
+      assistant state falling back to idle after working or speaking is the
+      turn-ended signal; every exhibit Scufris neither opened nor updated during
+      that turn starts its dim clock then. Costs no new wire message; if the
+      inference proves unreliable in practice (states can flap), v2 gains an
+      explicit turn-ended message - a one-variant addition. Lands with increment
+      2.
     </div>
     <div class="hint open">
       <span class="tag"

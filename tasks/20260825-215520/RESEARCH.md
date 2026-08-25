@@ -110,9 +110,10 @@ Direction (plan page review, 2026-08-25, section 08 threads):
   runtime-owned widget is up and Escape closes the whole layer,
   versus keeping today's auto-hide with only Escape touching the
   layer. First reading recommended on the page.
-- The turn-boundary hint was reworded in plain terms after Alex asked;
-  the proposal is unchanged (idle after working/speaking ends a turn,
-  explicit turn-ended message as the fallback).
+- Decided (same review round): the turn boundary. Alex: "idle means
+  one turn ended". The assistant state falling back to idle after
+  working/speaking is the turn-ended signal; an explicit turn-ended
+  message stays the v2 fallback if the inference proves unreliable.
 
 ## Extension facts that shape the plan
 

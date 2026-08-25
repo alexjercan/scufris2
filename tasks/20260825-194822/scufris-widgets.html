@@ -1278,15 +1278,15 @@
     </p>
 
     <div class="panel">
-      <h3>Who owns a dragged widget - four options</h3>
+      <h3>Who owns a dragged widget - decided: option A (2026-08-25)</h3>
       <ul>
         <li>
-          <b>A. Touch means yours</b> (implemented above, your inclination). Any
-          drag that ends off the shelf pins the widget; only dropping it back on
-          a shelf slot returns it to the runtime. One sentence covers every
-          case, and the pin tick becomes a shortcut, not a requirement. Cost: an
-          accidental nudge silently opts a widget out of aging - the accent
-          border is the only tell.
+          <b>A. Touch means yours</b> (implemented above, decided in review).
+          Any drag that ends off the shelf pins the widget; only dropping it
+          back on a shelf slot returns it to the runtime. One sentence covers
+          every case, and the pin tick becomes a shortcut, not a requirement.
+          Cost: an accidental nudge silently opts a widget out of aging - the
+          accent border is the only tell.
         </li>
         <li>
           <b>B. Slots pin, the open floor does not.</b> Dropping into an edge
@@ -2097,6 +2097,10 @@ spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <
         <b>Drag ownership.</b> The demo implements option A from section 05: the
         shelf is the runtime's, everywhere else is yours. Confirm A, or pick B
         (only slots pin), C (only the pin tick pins), or D (hold to pin).
+        <span class="qdone"
+          >decided 2026-08-25: option A - the shelf is ephemeral, a widget you
+          move is pinned, an untouched widget is the runtime's</span
+        >
       </li>
     </ul>
   </section>

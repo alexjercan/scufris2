@@ -36,11 +36,8 @@ dashboards.
   an accent border, a bottom-left corner mark, and a unified "pinned"
   badge (the separate "yours" state is gone); "clear" closes the
   runtime's exhibits and leaves user-owned widgets standing. Drag
-  ownership is an open question with four options in section 05: A
-  "touch means yours" (the shelf is the runtime's, everywhere else is
-  yours - implemented in the demo, Alex's stated inclination), B only
-  edge slots pin, C only the pin tick pins, D hold-to-pin. Alex
-  confirms or picks before implementation.
+  ownership was presented as four options in section 05 and decided as
+  option A - see Q7 in the section 10 answers.
 - No links, no inputs between widgets. A Scufris widget shows
   something; connecting widgets stays dashboardd territory.
 - Breakage is progress. Reimplementing the agent extension from scratch
@@ -82,6 +79,13 @@ dashboards.
   scratchpad; handing it back to the runtime restores sticky. The
   mechanism is the sticky flag only; i3's actual scratchpad is not
   involved.
+- Q7 drag ownership: decided 2026-08-25, option A. Alex: "shelf is
+  what is ephemeral, if I move something myself it's pinned ... if I
+  do not touch the widget it is runtime's." Any drag ending off the
+  shelf pins the widget (snapped to an edge slot or standing where
+  dropped); dropping back on a shelf slot hands it to the runtime; an
+  untouched widget always belongs to the runtime. Options B, C, D
+  rejected.
 
 ## Settled product behavior (carried over from the design review)
 

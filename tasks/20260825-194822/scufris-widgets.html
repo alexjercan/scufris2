@@ -279,14 +279,18 @@
     position: absolute;
     top: 4px;
     right: 8px;
-    display: flex;
-    gap: 6px;
   }
-  .wticks span {
+  .wpin {
+    position: absolute;
+    bottom: 4px;
+    left: 8px;
+  }
+  .wticks span,
+  .wpin span {
     font-size: 9px;
     color: var(--quartz);
     border: 1px solid var(--bg3);
-    padding: 0 4px;
+    padding: 1px 6px;
     line-height: 1.5;
     cursor: default;
   }
@@ -914,7 +918,8 @@
     <div class="shelfrow">
       <div class="wmock" style="--acc: var(--niagara)">
         <span class="wtitle">CPU</span>
-        <span class="wticks"><span>pin</span><span>x</span></span>
+        <span class="wticks"><span>x</span></span>
+        <span class="wpin"><span>pin</span></span>
         <div class="big">91%</div>
         <svg
           viewBox="0 0 220 34"
@@ -933,7 +938,8 @@
       </div>
       <div class="wmock" style="--acc: var(--quartz)">
         <span class="wtitle">Note</span>
-        <span class="wticks"><span>pin</span><span>x</span></span>
+        <span class="wticks"><span>x</span></span>
+        <span class="wpin"><span>pin</span></span>
         <div class="lines">
           <b>nix flake check</b> failed on<br />
           <code>checks.desktop</code>: the launcher<br />
@@ -943,14 +949,16 @@
       </div>
       <div class="wmock" style="--acc: var(--green); width: 190px">
         <span class="wtitle">Timer - tea</span>
-        <span class="wticks"><span>pin</span><span>x</span></span>
+        <span class="wticks"><span>x</span></span>
+        <span class="wpin"><span>pin</span></span>
         <div class="big">04:37</div>
         <div class="mut">of 05:00</div>
         <span class="wbadge">live</span>
       </div>
       <div class="wmock dimmed" style="--acc: var(--quartz); width: 190px">
         <span class="wtitle">CPU</span>
-        <span class="wticks"><span>pin</span><span>x</span></span>
+        <span class="wticks"><span>x</span></span>
+        <span class="wpin"><span>pin</span></span>
         <div class="big">34%</div>
         <span class="wbadge">dim</span>
       </div>
@@ -959,7 +967,12 @@
       The v1 set, plus a dimmed exhibit riding out its grace window. The timer
       flips to wisteria attention at zero and rings the existing attention
       earcon; the note widget is the generic "show this" exhibit that needs no
-      backend at all.
+      backend at all. The two ticks sit in opposite corners (review decision):
+      close alone at the top right, pin at the bottom left beside the badge
+      whose state it changes - the destructive action and the reversible one are
+      never adjacent, and each tick's hit zone is a generous corner area, not
+      the glyph. A misclosed exhibit is also cheap to recover: ask and Scufris
+      respawns it.
     </p>
 
     <div class="hint">

@@ -15,6 +15,10 @@ dashboards.
   design keys one process per (backend id, spawn data) pair,
   refcounted, with each stdout line fanned out whole to every
   subscriber.
+- Pin and close never sit adjacent (page review, 2026-08-25): Alex
+  flagged the misclick risk. Close stays alone at the top right, pin
+  moves to the bottom left beside the lifecycle badge, and both get
+  corner-sized hit zones rather than glyph-sized ones.
 - No links, no inputs between widgets. A Scufris widget shows
   something; connecting widgets stays dashboardd territory.
 - Breakage is progress. Reimplementing the agent extension from scratch

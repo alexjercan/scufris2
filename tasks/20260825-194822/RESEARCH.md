@@ -19,6 +19,17 @@ dashboards.
   flagged the misclick risk. Close stays alone at the top right, pin
   moves to the bottom left beside the lifecycle badge, and both get
   corner-sized hit zones rather than glyph-sized ones.
+- Placement is slot-based, a tiny window manager (page review,
+  2026-08-25, Alex: "scufris HUD is like a window manager"). Named
+  slots: shelf (3, exhibits, newest center), edges (4, instruments),
+  center stage (session HUD). Every widget knows home and displaced
+  slots, so motion is tweening between known positions, never a
+  collision solver. The session HUD takeover displaces shelf widgets to
+  free edges and restores them on close. Drags are i3's floating
+  modifier; the runtime snaps a settled window into a slot within
+  reach, or marks it user-placed and never moves it again. An
+  interactive demo of the choreography is section 05 of the design
+  page.
 - No links, no inputs between widgets. A Scufris widget shows
   something; connecting widgets stays dashboardd territory.
 - Breakage is progress. Reimplementing the agent extension from scratch

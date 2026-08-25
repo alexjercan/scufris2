@@ -990,6 +990,517 @@
   <section id="s05">
     <div class="shead">
       <span class="snum">05</span>
+      <h2>The choreography</h2>
+      <span class="srule"></span
+      ><span class="stag">interactive // a tiny window manager</span>
+    </div>
+    <p>
+      The runtime is a small slot-based window manager, not free pixels. Widgets
+      live in named slots: the <b>shelf</b> (three slots above the pill,
+      exhibits, newest at center), the <b>edges</b> (four instrument slots), and
+      the <b>center stage</b> (one surface, the session HUD). Every widget knows
+      its home slot and, during a takeover, its displaced slot - so all motion
+      is a tween between two known positions, never a collision solver.
+    </p>
+    <ul>
+      <li>
+        <b>Spawn:</b> a new exhibit takes the center shelf slot; the others
+        shift outward; a fourth retires the oldest unpinned one.
+      </li>
+      <li>
+        <b>Takeover:</b> opening the session HUD (click the pill) claims the
+        center stage; shelf widgets glide to free edge slots and glide home when
+        it closes.
+      </li>
+      <li>
+        <b>Drag and snap:</b> in the real thing you drag with the i3 floating
+        modifier; the runtime watches the window settle and, if it rests within
+        reach of a slot, glides it in - dropping on an edge slot pins it into an
+        instrument. Settling anywhere else marks it user-placed, and the runtime
+        never moves it again.
+      </li>
+    </ul>
+
+    <style>
+      .demobar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 14px 0 10px;
+      }
+      .demobar button {
+        background: var(--bg1);
+        border: 1px solid var(--bg3);
+        color: var(--fg);
+        font-family: var(--mono);
+        font-size: 11px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+      .demobar button:hover {
+        border-color: var(--quartz);
+        color: var(--fg1);
+      }
+      .demobar button:focus-visible {
+        outline: 1px solid var(--yellow);
+        outline-offset: 1px;
+      }
+      #wm-demo {
+        position: relative;
+        height: 500px;
+        background: #141414;
+        border: 1px solid var(--bg2);
+        overflow: hidden;
+        margin: 4px 0 8px;
+        touch-action: none;
+      }
+      #wm-demo .dbar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 18px;
+        background: var(--bg1);
+        border-bottom: 1px solid var(--bg2);
+        font-size: 9px;
+        color: var(--quartz);
+        display: flex;
+        align-items: center;
+        padding: 0 8px;
+      }
+      #wm-pill {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: 26px;
+        width: 220px;
+        height: 26px;
+        background: #101010;
+        border: 1px solid var(--quartz);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        color: var(--fg);
+        cursor: pointer;
+        user-select: none;
+      }
+      #wm-pill:hover {
+        border-color: var(--fg1);
+      }
+      .dzone {
+        position: absolute;
+        border: 1px dashed var(--bg3);
+        color: var(--bg4);
+        font-size: 8px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 2px 4px;
+        opacity: 0;
+        transition: opacity 0.2s;
+        pointer-events: none;
+      }
+      #wm-demo.dragging .dzone {
+        opacity: 0.9;
+      }
+      .dzone.near {
+        border-color: var(--wisteria);
+        color: var(--wisteria);
+      }
+      .dwidget {
+        position: absolute;
+        width: 150px;
+        height: 64px;
+        background: #101010;
+        border: 1px solid #33302e;
+        cursor: grab;
+        user-select: none;
+        transition:
+          left 0.35s ease,
+          top 0.35s ease,
+          opacity 0.35s ease;
+      }
+      .dwidget.drag {
+        transition: none;
+        cursor: grabbing;
+        z-index: 5;
+      }
+      .dwidget::before {
+        content: "";
+        position: absolute;
+        top: -1px;
+        left: -1px;
+        width: 6px;
+        height: 6px;
+        border-top: 2px solid var(--acc, #95a99f);
+        border-left: 2px solid var(--acc, #95a99f);
+      }
+      .dwt {
+        position: absolute;
+        top: 4px;
+        left: 8px;
+        font-size: 8px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--quartz);
+      }
+      .dwv {
+        position: absolute;
+        left: 8px;
+        bottom: 8px;
+        font-size: 19px;
+        font-weight: 800;
+        color: var(--fg1);
+        font-variant-numeric: tabular-nums;
+      }
+      .dwv.small {
+        font-size: 9.5px;
+        font-weight: 400;
+        color: var(--fg);
+        right: 8px;
+        bottom: 6px;
+        line-height: 1.4;
+      }
+      .dwb {
+        position: absolute;
+        right: 8px;
+        top: 4px;
+        font-size: 7.5px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--acc, #95a99f);
+      }
+      #wm-chat {
+        position: absolute;
+        background: #101010;
+        border: 1px solid var(--wisteria);
+        z-index: 3;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        color: var(--wisteria);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 0.3s ease,
+          transform 0.3s ease;
+        transform: translateY(12px);
+      }
+      #wm-chat.open {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .dwidget,
+        #wm-chat,
+        .dzone {
+          transition: none;
+        }
+      }
+    </style>
+
+    <div class="demobar">
+      <button id="wm-cpu" type="button">say: "cpu?"</button>
+      <button id="wm-note" type="button">say: "show a note"</button>
+      <button id="wm-timer" type="button">say: "timer 5 minutes"</button>
+      <button id="wm-hud" type="button">click the pill: session HUD</button>
+      <button id="wm-clear" type="button">say: "clear"</button>
+    </div>
+    <div
+      id="wm-demo"
+      role="img"
+      aria-label="Interactive placement demo: exhibits spawn onto the shelf above the pill, the session HUD takes the center stage and displaces them to edge slots, and dragging a widget snaps it to the nearest slot"
+    >
+      <div class="dbar">i3 bar</div>
+      <div id="wm-pill">the pill</div>
+      <div id="wm-chat">session HUD - center stage</div>
+    </div>
+    <p class="mocknote">
+      Try it: spawn three exhibits, open the session HUD and watch them yield to
+      the edges, close it and watch them come home. Drag a widget - slots light
+      up; drop it on an edge slot to pin it (its badge flips), or drop it in the
+      open to make it user-placed, which the runtime then never touches. A
+      fourth exhibit retires the oldest.
+    </p>
+
+    <script>
+      (function () {
+        var demo = document.getElementById("wm-demo");
+        var chat = document.getElementById("wm-chat");
+        var W = 150,
+          H = 64;
+        var EDGES = ["ml", "mr", "tl", "tr"];
+        var shelf = []; // widget objects, newest first
+        var pinned = {}; // slot id -> widget object
+        var loose = []; // user-placed widgets
+        var zones = {};
+        var chatOpen = false;
+
+        function geom() {
+          var w = demo.clientWidth,
+            h = demo.clientHeight,
+            cx = w / 2;
+          var shelfY = h - 26 - 26 - 12 - H;
+          return {
+            shelf0: { x: cx - W / 2, y: shelfY },
+            shelf1: { x: cx - W / 2 - W - 12, y: shelfY },
+            shelf2: { x: cx + W / 2 + 12, y: shelfY },
+            tl: { x: 14, y: 30 },
+            tr: { x: w - W - 14, y: 30 },
+            ml: { x: 14, y: h / 2 - H / 2 },
+            mr: { x: w - W - 14, y: h / 2 - H / 2 },
+            chat: { x: cx - 170, y: shelfY - 176, w: 340, h: 240 },
+          };
+        }
+
+        function ensureZones() {
+          var g = geom();
+          ["shelf0", "shelf1", "shelf2", "tl", "tr", "ml", "mr"].forEach(
+            function (id) {
+              if (!zones[id]) {
+                var z = document.createElement("div");
+                z.className = "dzone";
+                z.textContent = id.indexOf("shelf") === 0 ? "shelf" : "edge";
+                demo.appendChild(z);
+                zones[id] = z;
+              }
+              zones[id].style.left = g[id].x + "px";
+              zones[id].style.top = g[id].y + "px";
+              zones[id].style.width = W - 2 + "px";
+              zones[id].style.height = H - 2 + "px";
+            },
+          );
+          chat.style.left = g.chat.x + "px";
+          chat.style.top = g.chat.y + "px";
+          chat.style.width = g.chat.w + "px";
+          chat.style.height = g.chat.h + "px";
+        }
+
+        function put(wo, slot) {
+          var g = geom();
+          wo.el.style.left = g[slot].x + "px";
+          wo.el.style.top = g[slot].y + "px";
+        }
+
+        function freeEdge() {
+          for (var i = 0; i < EDGES.length; i++) {
+            var used = pinned[EDGES[i]];
+            var temp = shelf.some(function (wo) {
+              return wo.temp === EDGES[i];
+            });
+            if (!used && !temp) return EDGES[i];
+          }
+          return null;
+        }
+
+        function layout() {
+          ensureZones();
+          shelf.forEach(function (wo, i) {
+            if (chatOpen) {
+              if (!wo.temp) wo.temp = freeEdge();
+              if (wo.temp) put(wo, wo.temp);
+            } else {
+              wo.temp = null;
+              if (i < 3) put(wo, "shelf" + i);
+            }
+          });
+          Object.keys(pinned).forEach(function (slot) {
+            put(pinned[slot], slot);
+          });
+        }
+
+        function make(kind) {
+          var spec = {
+            cpu: { t: "CPU", v: "91%", a: "var(--niagara)" },
+            note: {
+              t: "NOTE",
+              v: "nix flake check failed on checks.desktop",
+              a: "var(--quartz)",
+              small: true,
+            },
+            timer: { t: "TIMER - TEA", v: "04:37", a: "var(--green)" },
+          }[kind];
+          var el = document.createElement("div");
+          el.className = "dwidget";
+          el.style.setProperty("--acc", spec.a);
+          el.innerHTML =
+            '<span class="dwt">' +
+            spec.t +
+            "</span>" +
+            '<span class="dwv' +
+            (spec.small ? " small" : "") +
+            '">' +
+            spec.v +
+            "</span>" +
+            '<span class="dwb">live</span>';
+          demo.appendChild(el);
+          var wo = { el: el, temp: null };
+          el.addEventListener("pointerdown", function (ev) {
+            startDrag(wo, ev);
+          });
+          return wo;
+        }
+
+        function retire(wo) {
+          wo.el.style.opacity = "0";
+          setTimeout(function () {
+            wo.el.remove();
+          }, 380);
+        }
+
+        function spawn(kind) {
+          var wo = make(kind);
+          var g = geom();
+          wo.el.style.left = g.shelf0.x + "px";
+          wo.el.style.top = demo.clientHeight + "px";
+          shelf.unshift(wo);
+          if (shelf.length > 3) retire(shelf.pop());
+          requestAnimationFrame(function () {
+            requestAnimationFrame(layout);
+          });
+        }
+
+        function setChat(open) {
+          chatOpen = open;
+          chat.classList.toggle("open", open);
+          layout();
+        }
+
+        var drag = null;
+        function startDrag(wo, ev) {
+          ev.preventDefault();
+          drag = {
+            wo: wo,
+            dx: ev.clientX - wo.el.offsetLeft,
+            dy: ev.clientY - wo.el.offsetTop,
+          };
+          wo.el.classList.add("drag");
+          demo.classList.add("dragging");
+          wo.el.setPointerCapture(ev.pointerId);
+        }
+        function nearestSlot(x, y) {
+          var g = geom(),
+            best = null,
+            dist = 90;
+          ["shelf0", "shelf1", "shelf2", "tl", "tr", "ml", "mr"].forEach(
+            function (id) {
+              var d = Math.hypot(g[id].x - x, g[id].y - y);
+              if (d < dist) {
+                dist = d;
+                best = id;
+              }
+            },
+          );
+          return best;
+        }
+        demo.addEventListener("pointermove", function (ev) {
+          if (!drag) return;
+          var x = ev.clientX - drag.dx,
+            y = ev.clientY - drag.dy;
+          drag.wo.el.style.left = x + "px";
+          drag.wo.el.style.top = y + "px";
+          var near = nearestSlot(x, y);
+          Object.keys(zones).forEach(function (id) {
+            zones[id].classList.toggle("near", id === near);
+          });
+        });
+        demo.addEventListener("pointerup", function () {
+          if (!drag) return;
+          var wo = drag.wo;
+          wo.el.classList.remove("drag");
+          demo.classList.remove("dragging");
+          Object.keys(zones).forEach(function (id) {
+            zones[id].classList.remove("near");
+          });
+          var slot = nearestSlot(wo.el.offsetLeft, wo.el.offsetTop);
+          detach(wo);
+          if (slot && slot.indexOf("shelf") === 0 && !chatOpen) {
+            shelf.unshift(wo);
+            if (shelf.length > 3) retire(shelf.pop());
+            setBadge(wo, "live");
+          } else if (slot && !pinned[slot]) {
+            pinned[slot] = wo;
+            put(wo, slot);
+            setBadge(wo, "pinned");
+          } else {
+            loose.push(wo);
+            setBadge(wo, "yours");
+          }
+          drag = null;
+          layout();
+        });
+        function detach(wo) {
+          var i = shelf.indexOf(wo);
+          if (i >= 0) shelf.splice(i, 1);
+          i = loose.indexOf(wo);
+          if (i >= 0) loose.splice(i, 1);
+          Object.keys(pinned).forEach(function (slot) {
+            if (pinned[slot] === wo) delete pinned[slot];
+          });
+        }
+        function setBadge(wo, text) {
+          wo.el.querySelector(".dwb").textContent = text;
+        }
+
+        document
+          .getElementById("wm-cpu")
+          .addEventListener("click", function () {
+            spawn("cpu");
+          });
+        document
+          .getElementById("wm-note")
+          .addEventListener("click", function () {
+            spawn("note");
+          });
+        document
+          .getElementById("wm-timer")
+          .addEventListener("click", function () {
+            spawn("timer");
+          });
+        document
+          .getElementById("wm-hud")
+          .addEventListener("click", function () {
+            setChat(!chatOpen);
+          });
+        document
+          .getElementById("wm-pill")
+          .addEventListener("click", function () {
+            setChat(!chatOpen);
+          });
+        document
+          .getElementById("wm-clear")
+          .addEventListener("click", function () {
+            shelf.slice().forEach(function (wo) {
+              detach(wo);
+              retire(wo);
+            });
+            loose.slice().forEach(function (wo) {
+              detach(wo);
+              retire(wo);
+            });
+            layout();
+          });
+        window.addEventListener("resize", layout);
+        ensureZones();
+      })();
+    </script>
+
+    <div class="hint">
+      <b>What maps to what:</b> slot assignment, the takeover, and the retire
+      animation are the companion's own moves (set position after show, the warm
+      pool, and hide). The drag itself is i3's floating modifier - the runtime
+      only watches the window settle and then either glides it into a slot or
+      marks it user-placed. Nothing here fights the window manager.
+    </div>
+  </section>
+
+  <!-- ============================================================ 06 -->
+  <section id="s06">
+    <div class="shead">
+      <span class="snum">06</span>
       <h2>Live data</h2>
       <span class="srule"></span
       ><span class="stag">backends // the deflisten contract</span>
@@ -1237,10 +1748,10 @@ spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <
     </figure>
   </section>
 
-  <!-- ============================================================ 06 -->
-  <section id="s06">
+  <!-- ============================================================ 07 -->
+  <section id="s07">
     <div class="shead">
-      <span class="snum">06</span>
+      <span class="snum">07</span>
       <h2>The agent's verbs</h2>
       <span class="srule"></span><span class="stag">control protocol v2</span>
     </div>
@@ -1293,10 +1804,10 @@ spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <
     </ul>
   </section>
 
-  <!-- ============================================================ 07 -->
-  <section id="s07">
+  <!-- ============================================================ 08 -->
+  <section id="s08">
     <div class="shead">
-      <span class="snum">07</span>
+      <span class="snum">08</span>
       <h2>Inside the companion</h2>
       <span class="srule"></span
       ><span class="stag">warm pool // measured numbers</span>
@@ -1348,10 +1859,10 @@ spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <
     </div>
   </section>
 
-  <!-- ============================================================ 08 -->
-  <section id="s08">
+  <!-- ============================================================ 09 -->
+  <section id="s09">
     <div class="shead">
-      <span class="snum">08</span>
+      <span class="snum">09</span>
       <h2>What ships when</h2>
       <span class="srule"></span
       ><span class="stag">increments // dashboardd leaves in the first</span>
@@ -1417,10 +1928,10 @@ spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <
     </div>
   </section>
 
-  <!-- ============================================================ 09 -->
-  <section id="s09">
+  <!-- ============================================================ 10 -->
+  <section id="s10">
     <div class="shead">
-      <span class="snum">09</span>
+      <span class="snum">10</span>
       <h2>Decisions to review</h2>
       <span class="srule"></span
       ><span class="stag">your call, then they land in RESEARCH.md</span>

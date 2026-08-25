@@ -72,12 +72,13 @@ response, and Calm extensions are always present. Dashboard control is enabled
 by default; set `programs.scufris.dashboard.enable = false` when Dashboardd is
 unavailable.
 
-A configuration that also manages Pi can pass its final package:
+The default Pi package comes from the pinned `llm-agents.nix` input. A
+configuration that manages Pi itself can pass its own package:
 
 ```nix
 programs.scufris = {
   enable = true;
-  piPackage = config.programs.pi.coding-agent.finalPackage;
+  piPackage = inputs.llm-agents.packages.${pkgs.system}.pi;
 };
 ```
 

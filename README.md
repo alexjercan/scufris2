@@ -15,7 +15,7 @@ Home Manager:
 ```nix
 programs.scufris = {
   enable = true;
-  piPackage = config.programs.pi.coding-agent.finalPackage;
+  piPackage = inputs.llm-agents.packages.${pkgs.system}.pi;
 
   voice = {
     enable = true;

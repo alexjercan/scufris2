@@ -45,7 +45,7 @@ in {
     piPackage = lib.mkOption {
       type = lib.types.package;
       default = piPackageFor system;
-      defaultText = lib.literalExpression "inputs.pi.packages.${system}.default";
+      defaultText = lib.literalExpression "inputs.llm-agents.packages.${system}.pi";
       description = "Pi package used by the Scufris launcher.";
     };
 

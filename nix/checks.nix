@@ -74,21 +74,16 @@
   voiceHome = inputs.home-manager.lib.homeManagerConfiguration {
     inherit pkgs;
     modules = [
-      inputs.pi.homeModules.default
       self.homeModules.default
-      ({config, ...}: {
+      {
         home = {
           username = "scufris-test";
           homeDirectory = "/home/scufris-test";
           stateVersion = "25.05";
         };
-        programs.pi.coding-agent = {
-          enable = true;
-          package = systemPi;
-        };
         programs.scufris = {
           enable = true;
-          piPackage = config.programs.pi.coding-agent.finalPackage;
+          piPackage = systemPi;
           dashboard.enable = false;
           voice = {
             enable = true;
@@ -99,7 +94,7 @@
             };
           };
         };
-      })
+      }
       ({config, ...}: {
         home.sessionVariables = {
           SCUFRIS_TEST_FINAL_PACKAGE = toString config.programs.scufris.finalPackage;
@@ -160,7 +155,7 @@ in
     launcher-fallback-pi = pkgs.runCommand "scufris-launcher-fallback-pi-check" {} ''
       export HOME="$TMPDIR/home"
       mkdir -p "$HOME"
-      expected="$(${inputs.pi.packages.${system}.default}/bin/pi --version)"
+      expected="$(${inputs.llm-agents.packages.${system}.pi}/bin/pi --version)"
       actual="$(PATH=/nonexistent ${launcher}/bin/scufris --version)"
       test "$actual" = "$expected"
       touch "$out"

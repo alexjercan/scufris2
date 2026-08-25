@@ -10,8 +10,8 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    pi = {
-      url = "github:lukasl-dev/pi.nix";
+    llm-agents = {
+      url = "github:numtide/llm-agents.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -30,7 +30,6 @@
       systems = [
         "x86_64-linux"
         "aarch64-linux"
-        "x86_64-darwin"
         "aarch64-darwin"
       ];
 
@@ -62,13 +61,13 @@
         };
         launcher = import ./nix/launcher.nix {
           inherit pkgs resources;
-          piPackage = inputs.pi.packages.${system}.default;
+          piPackage = inputs.llm-agents.packages.${system}.pi;
           dashboardctlPackage = inputs.dashboardd.packages.${system}.dashboardd-desktop;
         };
         voiceLauncher = import ./nix/launcher.nix {
           inherit pkgs;
           resources = voiceResources;
-          piPackage = inputs.pi.packages.${system}.default;
+          piPackage = inputs.llm-agents.packages.${system}.pi;
           dashboardctlPackage = inputs.dashboardd.packages.${system}.dashboardd-desktop;
           voice = true;
           inherit (voice) piperPackage;
@@ -140,7 +139,7 @@
         homeModules.default = import ./nix/home-manager.nix {
           resourcesFor = system: self.packages.${system}.resources;
           voiceResourcesFor = system: self.packages.${system}.voice-resources;
-          piPackageFor = system: inputs.pi.packages.${system}.default;
+          piPackageFor = system: inputs.llm-agents.packages.${system}.pi;
           dashboardctlPackageFor = system: inputs.dashboardd.packages.${system}.dashboardd-desktop;
         };
       };

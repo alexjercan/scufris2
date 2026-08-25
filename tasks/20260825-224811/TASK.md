@@ -1,6 +1,6 @@
 # Pill polish: frame, entrance, record dot
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 70
 - TAGS: desktop, ux
 
@@ -92,3 +92,5 @@ Checks run:
 Not verified here: nothing on this branch runs the pill on a display. The rise,
 the recoil, the panel squash, the larger type, and the absence of the dot are
 Alex's to sign off on the live desktop.
+
+The remaining live visual check for this task is absorbed by task 20260825-231826, which re-tuned the frame and the entrance for the bare orb.

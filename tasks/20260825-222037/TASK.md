@@ -1,6 +1,6 @@
 # Pill orb on the thinking-orbs engine
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 75
 - TAGS: desktop, ux
 
@@ -109,3 +109,5 @@ orb") demonstrating it live with the 64px preset, the pop-in review
 box, and the small timer. Alex approved the vision the same day;
 implementation is task `20260825-231826`, and the study page moved
 there with it (`tasks/20260825-231826/orb-study.html`).
+
+The remaining live visual check for this task is absorbed by task 20260825-231826, which replaced this design with the bare orb.

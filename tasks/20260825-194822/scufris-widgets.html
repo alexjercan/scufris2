@@ -924,6 +924,15 @@
       steals the keyboard mid-sentence, always-on-top, skip taskbar, position
       set after show.
     </p>
+    <p>
+      Workspaces follow Alex's mental model from review: an exhibit lives
+      <b>as if on i3's scratchpad</b> - sticky across all workspaces, riding
+      along with the conversation wherever you are. The pin tick promotes it:
+      sticky drops and the widget lands on the current workspace, as if dragged
+      off the scratchpad onto it. Handing a widget back to the runtime makes it
+      sticky again. The mechanism is just the sticky flag; nothing touches i3's
+      actual scratchpad.
+    </p>
 
     <div class="shelfrow">
       <div class="wmock" style="--acc: var(--niagara)">
@@ -2078,6 +2087,11 @@ spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <
       <li>
         <b>Widget windows on workspaces.</b> Exhibits stick to all workspaces
         (they accompany speech) while instruments stay on theirs - agree?
+        <span class="qdone"
+          >decided 2026-08-25: yes, with the scratchpad model - exhibits ride
+          sticky like the scratchpad, pin promotes onto the current
+          workspace</span
+        >
       </li>
       <li>
         <b>Drag ownership.</b> The demo implements option A from section 05: the

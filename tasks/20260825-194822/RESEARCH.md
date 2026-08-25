@@ -75,6 +75,13 @@ dashboards.
   down, save it (for example into today). Not settled as a feature;
   if it lands it is an instrument built on the Q3 stdin action
   (save = one JSON action to a backend that writes into today).
+- Q6 workspaces: decided 2026-08-25, confirmed with a sharper mental
+  model from Alex: exhibits live as if on i3's scratchpad - sticky
+  across all workspaces, following the conversation. Pinning promotes
+  the widget onto the current workspace, like dragging it off the
+  scratchpad; handing it back to the runtime restores sticky. The
+  mechanism is the sticky flag only; i3's actual scratchpad is not
+  involved.
 
 ## Settled product behavior (carried over from the design review)
 

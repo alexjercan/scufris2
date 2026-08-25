@@ -49,6 +49,12 @@ dashboards.
 - The design document opens with a short "the pill spawns these" intro,
   then covers only the widgets and how they work.
 
+## Section 10 answers (Alex, page review)
+
+- Q1 the shelf: decided 2026-08-25, keep as designed. Above the pill,
+  centered, capped at 3, newest at center, oldest unpinned retires
+  first.
+
 ## Settled product behavior (carried over from the design review)
 
 From `tasks/20260822-132001/RESEARCH.md`, design review 2026-08-25.

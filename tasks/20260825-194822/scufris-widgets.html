@@ -362,6 +362,14 @@
     left: 0;
     top: 2px;
   }
+  .qdone {
+    display: block;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--green);
+    margin-top: 2px;
+  }
   footer {
     padding: 44px 0 60px;
     color: var(--bg4);
@@ -2023,6 +2031,7 @@ spawn = json.loads(sys.argv[1]) <span class="t">if</span> len(sys.argv) &gt; 1 <
       <li>
         <b>The shelf.</b> Above the pill, centered, capped at 3, oldest unpinned
         retires first - or do you want exhibits to a side edge instead?
+        <span class="qdone">decided 2026-08-25: keep as designed</span>
       </li>
       <li>
         <b>The aging trigger.</b> "A turn completed and neither opened nor

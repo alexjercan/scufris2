@@ -65,6 +65,10 @@ dashboards.
   backends simply never read stdin. An action from any subscriber
   lands on the shared instance's stdin; the backend answers by
   emitting refreshed state, which fans out to every subscriber.
+- Q4 summoning instruments: decided 2026-08-25, the voice verb. Tray
+  submenu plus "show the calendar" through Scufris; no rofi entry and
+  no scufris-ctl verb for now. A summoned instrument lands in a free
+  edge slot per the slot model.
 
 ## Settled product behavior (carried over from the design review)
 

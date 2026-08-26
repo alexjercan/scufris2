@@ -53,3 +53,23 @@ PID-only process stops, and tasks/ archives are never flagged.
   matches the existing development-skill wiring.
 - First real run: the widget runtime increment 1 range (task
   20260825-215520) when it lands, as agreed in the design discussion.
+
+## First real run (2026-08-27)
+
+Done, against `50c6f90..f0e56a8`. Verdict and findings in
+`tasks/20260825-215520/REVIEW.md`. What the run showed about the skill:
+
+- **The 2000-line cap is wrong for a subsystem increment.** That range
+  is 4853 insertions across 47 files, which is one increment of one
+  task rather than an oversized change. The cap would have refused the
+  first thing the skill was written for. Raise it, or measure the
+  range in increments rather than in lines.
+- **Five lanes at one increment each is the shape that worked.** Every
+  lane found something no other lane found, and the two blockers came
+  from different lanes.
+- **Adjudication is where the value is, and it is not cheap.** Three of
+  the lanes' findings were wrong on the facts and one blocker had to be
+  ranked down. Re-deriving each load-bearing claim from the tree took
+  longer than dispatching the panel did. The skill should say so.
+
+Open until the cap and that note land in `SKILL.md`.

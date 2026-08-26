@@ -1,6 +1,6 @@
 # Pill scale, block caret, and see-through blob
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 70
 - TAGS: desktop, ux
 
@@ -257,3 +257,8 @@ which of them the port also implements.
   the state machine treats that as "the pill did not come up". The
   window is cut correctly on that path now, but the restored words are
   dropped. This deserves a task of its own.
+
+Alex signed off the look on the live desktop (2026-08-26): "that's the
+right look for now". An interaction bug found in the same live session
+(the pill stops taking input after a turn returns to idle) is tracked
+as its own task, 20260826-094501.

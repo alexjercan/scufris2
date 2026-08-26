@@ -1,6 +1,6 @@
 # Bare orb pill: the orb is the pill
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 75
 - TAGS: desktop, ux
 
@@ -210,3 +210,7 @@ unnoticeable; whether the review box sits at a comfortable distance above the
 orb and is wide enough for a real take; whether the pop and the shortened rise
 still read as arriving; and whether the states are still distinguishable with
 neither label nor detail line. The visual sign-off is Alex's.
+
+Alex signed off the look on the live desktop (2026-08-26): "that's the
+right look for now". The remaining live check is done; the retained-box
+gap stays a recorded option, not an open item.

@@ -22,6 +22,11 @@ serde_json = "1.0.151"
 tauri = { version = "2.11.5", features = ["tray-icon"] }
 tauri-plugin-global-shortcut = "2.3.2"
 thiserror = "2.0.20"
+toml = { version = "0.9.12", default-features = false, features = [
+  "parse",
+  "serde",
+  "std",
+] }
 tracing = "0.1.41"
 tracing-journald = "0.3.1"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }

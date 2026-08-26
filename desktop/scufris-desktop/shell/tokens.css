@@ -1,0 +1,33 @@
+/* The tokens every widget styles against.
+ *
+ * One file rethemes the fleet. A widget that reaches for a hex value instead
+ * is a widget that stops matching the rest of them the first time the palette
+ * moves, and there is no way to find it except by looking.
+ *
+ * The palette is gruber, the same one the pill and the transcript box wear. */
+
+:root {
+  --sw-bg: #101010;
+  --sw-panel: #101010;
+  --sw-line: #33302e;
+  --sw-fg: #e4e4ef;
+  --sw-fg-strong: #f4f4ff;
+  --sw-muted: #95a99f;
+  --sw-accent: #95a99f;
+  --sw-attention: #9e95c7;
+  --sw-warn: #ffdd33;
+  --sw-mono:
+    Iosevka, "Iosevka Nerd Font", "Iosevka Term", "JetBrains Mono",
+    ui-monospace, monospace;
+
+  /* The panel's own measurements, so a widget can lay out inside the padding
+   * the chrome leaves it rather than guessing at it. */
+  --sw-pad-x: 14px;
+  --sw-pad-top: 26px;
+  --sw-pad-bottom: 20px;
+
+  --sw-size-big: 26px;
+  --sw-size-body: 11.5px;
+  --sw-size-small: 9.5px;
+  --sw-lead: 1.6;
+}

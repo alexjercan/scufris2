@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "declaration": false,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ES2022",
+    "noUncheckedIndexedAccess": true,
+    "outDir": "../scufris-desktop/ui/dist/widgets",
+    "rootDir": ".",
+    "strict": true,
+    "target": "ES2022",
+    "types": []
+  },
+  "include": ["widget.d.ts", "*/widget.ts"]
+}

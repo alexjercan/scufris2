@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ES2022",
+    "noUncheckedIndexedAccess": true,
+    "outDir": "../ui/dist",
+    "strict": true,
+    "target": "ES2022",
+    "types": []
+  },
+  "include": ["contract.d.ts", "shell.ts"]
+}

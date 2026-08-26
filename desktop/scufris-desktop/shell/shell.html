@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>scufris-widget</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="shell.css" />
+  </head>
+  <body>
+    <!-- The shell owns every part of this panel except #root. Widgets never
+         draw chrome: the corner ticks, the micro-title, the two ticks and the
+         badge are the same on every widget, and a widget that drew its own
+         would be the one that got them wrong. -->
+    <main id="panel" class="panel" data-life="live">
+      <span id="title" class="title"></span>
+      <!-- The two ticks sit in opposite corners: the destructive one and the
+           reversible one are never adjacent, and each hit zone is the corner
+           rather than the glyph. -->
+      <button id="close" class="tick close" type="button" title="Close">
+        x
+      </button>
+      <button id="pin" class="tick pin" type="button" title="Pin">pin</button>
+      <span id="badge" class="badge">live</span>
+      <div id="root" class="root"></div>
+    </main>
+    <script src="shell.js"></script>
+  </body>
+</html>

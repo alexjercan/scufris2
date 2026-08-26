@@ -1,0 +1,5 @@
+id = "note"
+name = "Note"
+description = "Show a few lines of text beside the pill. Data is { text: string }, and the widget keeps whatever the last update carried."
+width = 250
+height = 110

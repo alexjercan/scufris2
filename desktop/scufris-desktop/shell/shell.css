@@ -1,0 +1,134 @@
+/* The window chrome every widget wears, from the widgets design page section
+ * 04 (tasks/20260825-194822/scufris-widgets.html): a square opaque panel on
+ * near-black, corner ticks in the accent, an uppercase micro-title, tabular
+ * numerals.
+ *
+ * Opaque on purpose, like the pill and the transcript box: bare X11 without a
+ * compositor discards per-pixel alpha, so a margin around the panel would
+ * render black anyway. The window is exactly the panel. */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--sw-bg);
+  overflow: hidden;
+  font-family: var(--sw-mono);
+  font-size: var(--sw-size-body);
+  color: var(--sw-fg);
+  user-select: none;
+  /* Nothing in a widget window takes the keyboard: the window is built
+   * unfocusable and the caret would be a caret nobody can type into. */
+  cursor: default;
+}
+
+.panel {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: var(--sw-pad-top) var(--sw-pad-x) var(--sw-pad-bottom);
+  background: var(--sw-panel);
+  border: 1px solid var(--sw-line);
+}
+
+/* Two corners rather than four: the frame is a bracket the panel sits in, not
+ * a box drawn around it. The same mark the pill's design language uses. */
+.panel::before,
+.panel::after {
+  content: "";
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  pointer-events: none;
+}
+
+.panel::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid var(--sw-accent);
+  border-left: 2px solid var(--sw-accent);
+}
+
+.panel::after {
+  right: -1px;
+  bottom: -1px;
+  border-right: 2px solid var(--sw-accent);
+  border-bottom: 2px solid var(--sw-accent);
+}
+
+/* A widget the person took over drops to a quieter frame: it is theirs now,
+ * and the accent is what says the runtime is still looking after it. */
+.panel[data-life="pinned"] {
+  --sw-accent: var(--sw-line);
+}
+
+.title {
+  position: absolute;
+  top: 6px;
+  left: 12px;
+  font-size: var(--sw-size-small);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--sw-muted);
+}
+
+/* The hit zone is the corner, not the glyph: these are 9 pixel letters, and a
+ * target that small is a target the person misses. */
+.tick {
+  position: absolute;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--sw-muted);
+  background: transparent;
+  border: 1px solid var(--sw-line);
+  cursor: default;
+}
+
+.tick:hover {
+  color: var(--sw-fg-strong);
+  border-color: var(--sw-accent);
+}
+
+/* Opposite corners, by review decision: the destructive tick and the
+ * reversible one are never next to each other. */
+.close {
+  top: 3px;
+  right: 5px;
+}
+
+.pin {
+  bottom: 3px;
+  left: 5px;
+}
+
+.badge {
+  position: absolute;
+  right: 10px;
+  bottom: 6px;
+  font-size: 8.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--sw-accent);
+}
+
+.root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+
+/* What a widget that would not load leaves behind. Silence would be a blank
+ * panel the person has no way to read. */
+.broken {
+  color: var(--sw-attention);
+  font-size: var(--sw-size-small);
+  line-height: var(--sw-lead);
+}

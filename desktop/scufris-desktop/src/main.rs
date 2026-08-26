@@ -19,6 +19,7 @@ mod review;
 mod state;
 mod stt;
 mod tray;
+mod widgets;
 
 use std::{
     env,
@@ -26,7 +27,7 @@ use std::{
     os::unix::process::CommandExt,
     process::ExitCode,
     sync::{
-        Arc, OnceLock,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
     thread,
@@ -41,9 +42,8 @@ use config::Config;
 use daemon::{DaemonEvent, DaemonLink};
 use focus::FocusTracker;
 use pending::{FilePendingStore, PendingStore};
-use scufris_control::ClientBody;
 use state::Event;
-use tauri::{AppHandle, Emitter, Manager, RunEvent, menu::Menu};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent, http, ipc::Channel, menu::Menu};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tracing::{debug, error, info, warn};
 
@@ -251,6 +251,27 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                 })
                 .build(),
         )
+        // The widget modules, served to the window that is holding them and to
+        // nothing else. `webview_label` is what makes that true: the page asks
+        // for one address, and what comes back depends on who asked.
+        .register_uri_scheme_protocol("scufris-widget", |ctx, _request| {
+            let label = ctx.webview_label().to_string();
+            let module = ctx
+                .app_handle()
+                .try_state::<Arc<widgets::Widgets>>()
+                .and_then(|widgets| widgets.module(&label));
+            match module {
+                Some(script) => http::Response::builder()
+                    .header(http::header::CONTENT_TYPE, "text/javascript")
+                    // The shell page is served from the app's own origin and
+                    // the module from this scheme, so the import is a
+                    // cross-origin one and the browser asks before it runs it.
+                    .header(http::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                    .body(script.into_bytes())
+                    .unwrap_or_else(|_| refused()),
+                None => refused(),
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             pill_ready,
             review_ready,
@@ -258,7 +279,9 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             pill_cancel,
             pill_copy,
             pill_cues,
-            pill_log
+            pill_log,
+            widget_shell_ready,
+            widget_tick
         ])
         .setup(move |tauri| {
             let handle = tauri.handle().clone();
@@ -323,33 +346,29 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             }));
             tauri.manage(Arc::clone(&runtime));
 
+            let widgets = widgets::Widgets::start(handle.clone())?;
+            tauri.manage(Arc::clone(&widgets));
+
             let observer = Arc::clone(&runtime);
-            // The link answers widget commands through the same connection it
-            // reads them from, so the closure needs the link the closure is
-            // built for. The cell is filled the moment the link exists, before
-            // the first command can arrive.
-            let answers: Arc<OnceLock<Arc<DaemonLink>>> = Arc::new(OnceLock::new());
-            let sink = Arc::clone(&answers);
+            let surfaces = Arc::clone(&widgets);
             let link = Arc::new(DaemonLink::start(
                 config.socket.clone(),
                 move |event| match event {
-                    // No widgets runtime in this build. Refusing is what keeps
-                    // the daemon's turn moving: an unanswered command costs it
-                    // the whole request timeout and tells it nothing.
-                    DaemonEvent::Widget(command) => {
-                        let Some(link) = sink.get() else { return };
-                        if let Err(error) = link.report(ClientBody::WidgetFailed {
-                            id: command.id().to_string(),
-                            code: "no_runtime".into(),
-                            detail: "the companion has no widgets runtime".into(),
-                        }) {
-                            debug!(%error, "widget command went unanswered");
-                        }
+                    // Routed away from the pill before it can reach the state
+                    // machine. The runtime is the pill's sibling, and a widget
+                    // command has nothing to say about a conversation.
+                    DaemonEvent::Widget(command) => surfaces.command(command),
+                    // The catalog goes out once per connection, as soon as
+                    // there is a daemon to read it: it is what the daemon types
+                    // its widget tools from.
+                    DaemonEvent::Connected(session) => {
+                        surfaces.announce();
+                        observer.observe(DaemonEvent::Connected(session));
                     }
                     event => observer.observe(event),
                 },
             ));
-            let _ = answers.set(Arc::clone(&link));
+            widgets.attach(Arc::clone(&link));
             runtime.set_backend(Arc::clone(&link) as Arc<dyn Backend>);
             tauri.manage(link);
 
@@ -370,6 +389,16 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             // exist and threw the words away on the answer.
             let runtime = handle.state::<Arc<App>>().inner().clone();
             thread::spawn(move || runtime.start());
+        }
+        // Something outside the companion asked a widget window to close - an
+        // i3 kill, a window manager clean-up. The runtime is told, so what the
+        // conversation believes is on screen stays what is on screen.
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::CloseRequested { .. },
+            ..
+        } if widgets::is_shell(&label) => {
+            handle.state::<Arc<widgets::Widgets>>().dismissed(label);
         }
         RunEvent::ExitRequested { api, code, .. } if code.is_none() => api.prevent_exit(),
         RunEvent::Exit => {
@@ -431,4 +460,48 @@ fn pill_cues(cues: tauri::State<'_, CueSwitch>) -> bool {
 #[tauri::command]
 fn pill_log(level: String, message: String) {
     debug!(target: "webview", level = %level, "{message}");
+}
+
+/// One shell page saying hello, and handing over the channel it listens on.
+///
+/// The channel is the whole host-to-page contract, and it is the page that
+/// makes it: a channel is a callback in the webview, so only the webview can
+/// hand one out. Until this arrives the window is built but deaf, which is why
+/// the pool counts a shell as warm only from here.
+#[tauri::command]
+fn widget_shell_ready(
+    widgets: tauri::State<'_, Arc<widgets::Widgets>>,
+    window: tauri::Window,
+    channel: Channel<widgets::pool::ShellMsg>,
+) {
+    widgets.ready(window.label().to_string(), channel);
+}
+
+/// One of the two chrome ticks, from the window it was clicked in.
+///
+/// The window says which surface this is; the page never does. A page that
+/// named its own surface could name another window's.
+#[tauri::command]
+fn widget_tick(
+    widgets: tauri::State<'_, Arc<widgets::Widgets>>,
+    window: tauri::Window,
+    kind: String,
+) {
+    let surface = window.label().to_string();
+    match kind.as_str() {
+        "close" => widgets.dismissed(surface),
+        "pin" => widgets.pinned(surface),
+        unknown => debug!(kind = %unknown, "a widget window reported an unknown tick"),
+    }
+}
+
+/// The answer for a widget module request nothing can serve.
+///
+/// A page that gets this draws what it could not load, which is the one thing
+/// worth seeing in a window that would otherwise be blank.
+fn refused() -> http::Response<Vec<u8>> {
+    http::Response::builder()
+        .status(http::StatusCode::NOT_FOUND)
+        .body(Vec::new())
+        .expect("a bodyless response is well formed")
 }

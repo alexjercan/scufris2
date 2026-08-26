@@ -40,3 +40,25 @@ This is also what settles the focus contest recorded in task
 `20260826-143950`: today the pill takes the keyboard back only when no
 window holds it, and a window that takes it and stays keeps it. Keys
 that never need focus remove the contest instead of deciding it.
+
+## The resting pill is dismissed here too (2026-08-26)
+
+Live finding: once the pill rests on screen it cannot be put away with
+Escape. `Phase::Resting` is `Posture::Passive` - on screen without the
+keyboard (`state.rs:230`) - and Escape reaches the app only through the
+pill page's keydown (`ui/pill.ts:588` -> `pill_cancel`), which needs
+focus. `app.rs:1005` states the same: a passive pill "cannot even be
+sent an Escape". Today the only road down is `$mod+d` then Escape,
+which opens the microphone on the way.
+
+`scufris-ctl cancel` is the mechanism this needs, so it belongs to this
+task rather than to a second accelerator in the app. Two additions to
+the scope:
+
+- A bare `$mod+Escape` binding outside the scufris mode, so a resting
+  pill is dismissed from anywhere in one press.
+- `(Phase::Resting, Event::Escape)` in the state machine. The arm does
+  not exist, so the verb would reach the runtime and do nothing.
+
+Alex decided to leave the gap until this task lands rather than add an
+app-side accelerator for it.

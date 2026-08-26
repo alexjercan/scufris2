@@ -5,11 +5,14 @@
 Repository ownership follows the runtime architecture:
 
 - `extensions/scufris/` contains the Pi extensions: `workflow/`, `voice/`,
-  `desktop/`, and the small independent `calm.ts`. Extensions own lifecycle
-  events, native tools, session state, and notifications.
+  `desktop/`, `widgets/`, and the small independent `calm.ts`. Extensions own
+  lifecycle events, native tools, session state, and notifications.
 - `desktop/` is a cargo workspace holding `scufris-control`, the desktop control
-  protocol, and `scufris-desktop`, the Tauri voice pill and tray companion. It
-  ships as its own flake package. See [Desktop companion](desktop.md).
+  protocol, and `scufris-desktop`, the Tauri voice pill, widget runtime, and
+  tray companion. It ships as its own flake package. Beside the workspace,
+  `desktop/widgets/` holds the widgets themselves and `desktop/backends/` the
+  samplers that feed them; both are compiled into the companion by its
+  `build.rs`. See [Desktop companion](desktop.md) and [Widgets](widgets.md).
 - `tools/` contains deterministic executables called by extensions:
   `jobs/scufris-jobs`, `jobs/scufris-report`,
   `quick-review-agent/scufris-quick-review-agent`,
@@ -17,8 +20,8 @@ Repository ownership follows the runtime architecture:
 - `scripts/` contains commands called directly by people:
   `scufris-jobs` (inspection CLI), `scufris-artifacts-prune`, and the
   development launcher `scufris-dev`.
-- `skills/` contains the distributed model-facing `workflow` skill.
-  Development-only skills live in `.agents/skills/`.
+- `skills/` contains the distributed model-facing skills, `workflow` and
+  `widgets`. Development-only skills live in `.agents/skills/`.
 - `nix/` contains one file per build concern: `resources.nix`, `launcher.nix`,
   `popup.nix`, `voice.nix`, `desktop.nix`, `whisper.nix`, `dev-shell.nix`,
   `docs.nix`, and `home-manager.nix`. `nix/scufris.nix` composes them into the

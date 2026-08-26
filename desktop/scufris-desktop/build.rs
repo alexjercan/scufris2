@@ -84,8 +84,12 @@ fn build_widgets() {
     );
     for directory in directories {
         let manifest = root.join("../widgets").join(&directory).join("widget.toml");
+        // Outside ui/dist on purpose. Everything under the frontend directory
+        // is bundled into the app protocol and reachable from any window, and
+        // a widget module served from there would make the per-surface
+        // scufris-widget: scheme a formality rather than a gate.
         let script = root
-            .join("ui/dist/widgets")
+            .join("../widgets/dist")
             .join(&directory)
             .join("widget.js");
         assert!(

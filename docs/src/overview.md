@@ -12,7 +12,7 @@ Manager.
 
 ## Components
 
-Scufris packages four capability-owned Pi extensions:
+Scufris packages five capability-owned Pi extensions:
 
 - `workflow` is the core engine. It owns the Scufris identity, project
   workflow preferences, delegated job spawn and control, worker events,
@@ -22,10 +22,13 @@ Scufris packages four capability-owned Pi extensions:
 - `calm` reduces transcript and working-state clutter.
 - `desktop` serves the control socket in the popup process and reports one
   assistant state to the desktop companion.
+- `widgets` opens small panels on the desktop while Scufris answers. The tools
+  are registered from the catalog the companion announces, so the widgets the
+  model can name are the ones that are installed. See [Widgets](dev/widgets.md).
 
-`scufris-desktop` is the desktop companion: a voice pill and a tray icon,
-built from the `desktop/` cargo workspace and shipped as a separate Linux
-package. It records, transcribes locally, and submits the words as an ordinary
+`scufris-desktop` is the desktop companion: a voice pill, a widget runtime, and
+a tray icon, built from the `desktop/` cargo workspace and shipped as a separate
+Linux package. It records, transcribes locally, and submits the words as an ordinary
 user message. The conversation stays in the popup Pi process, so a companion
 crash never stops it. See [Desktop companion](dev/desktop.md).
 

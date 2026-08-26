@@ -22,7 +22,7 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
-use scufris_control::CatalogEntry;
+use scufris_control::{CatalogEntry, is_identifier};
 use serde::Deserialize;
 use tracing::{debug, warn};
 
@@ -108,6 +108,12 @@ pub enum CatalogError {
         directory: String,
         /// The identifier the manifest claimed.
         id: String,
+    },
+    /// The directory name is not a name the protocol can carry.
+    #[error("widgets/{directory} is not a bounded identifier, and a widget id crosses the socket")]
+    Unnamed {
+        /// The directory whose name cannot be an identifier.
+        directory: String,
     },
     /// Two roots install the same identifier.
     #[error("two widget directories are both named {id}")]
@@ -300,6 +306,15 @@ pub fn search(path: &str) -> Vec<External> {
 
 /// Reads one widget directory, or says why it cannot be installed.
 fn install(source: Source<'_>, backends: &[&str]) -> Result<Widget, CatalogError> {
+    // The directory name becomes the widget's id, and the id is written into
+    // the catalog line and read back out of every `widget_open`. A name the
+    // decoder at either end refuses is a widget nothing can ask for, so it is
+    // refused here, where the directory at fault can be named.
+    if !is_identifier(source.directory) {
+        return Err(CatalogError::Unnamed {
+            directory: source.directory.to_string(),
+        });
+    }
     let manifest: Manifest =
         toml::from_str(source.manifest).map_err(|error| CatalogError::Unreadable {
             directory: source.directory.to_string(),
@@ -391,6 +406,21 @@ height = 110
             Err(CatalogError::Renamed {
                 directory: "note".into(),
                 id: "scratch".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_directory_the_socket_could_not_name_is_a_startup_failure() {
+        // A widget on the search path is a directory somebody made, and a
+        // directory name is not bounded to what the protocol carries. One with
+        // a space in it would be announced in the catalog and then refused on
+        // the way back in, so the widget would exist and be unopenable.
+        let named = NOTE.replace("\"note\"", "\"my note\"");
+        assert_eq!(
+            Catalog::build(&[source("my note", &named)], BACKENDS),
+            Err(CatalogError::Unnamed {
+                directory: "my note".into(),
             })
         );
     }

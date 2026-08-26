@@ -10,3 +10,4 @@ docs/book/
 desktop/target/
 desktop/scufris-desktop/gen/
 desktop/scufris-desktop/ui/dist/
+desktop/widgets/dist/

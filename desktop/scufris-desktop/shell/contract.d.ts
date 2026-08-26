@@ -3,6 +3,11 @@
 // page is a classic script: a declaration at its top level would be a global
 // anyway, and this is the file that says so out loud.
 //
+// The contract between the page and the widget it mounts is not here. That one
+// is `widgets/widget.d.ts`, which this project reads directly, because it is
+// also what every widget is written against and two copies of it would be two
+// contracts.
+//
 // Named for what it holds rather than for the page that reads it. A
 // `shell.d.ts` beside `shell.ts` is what tsc would emit as that file's own
 // declarations, so it drops it from the project and every name in it goes
@@ -39,22 +44,3 @@ type ShellMsg =
   | { kind: "health"; state: "fresh" | "stale" | "dead" }
   | { kind: "refused"; detail: string }
   | { kind: "retire" };
-
-/** What the shell hands a widget when it mounts it. */
-interface WidgetContext {
-  /** The spawn payload the open carried. */
-  spawn: unknown;
-  /** Sends one action back the way the data came. */
-  send(action: unknown): void;
-}
-
-/** What a widget hands back, so the shell can drive and unmount it. */
-interface WidgetView {
-  update(data: unknown): void;
-  destroy(): void;
-}
-
-/** The one export every `widget.ts` has. */
-interface WidgetModule {
-  mount(root: HTMLElement, ctx: WidgetContext): WidgetView;
-}

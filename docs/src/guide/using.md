@@ -179,3 +179,47 @@ privacy ring. Left-click opens the full chat. Right-click opens a menu that can
 start voice input, show what went wrong, restart an unavailable backend, and
 quit the companion. A backend crash leaves the tray running with an error
 state; a companion crash leaves the conversation running.
+
+## Panels on the desktop
+
+Scufris can put a small panel beside the pill instead of only saying something.
+A departure board, a timer, the machine's load: anything easier to look at than
+to listen to. The panels sit above the pill and the desktop stays usable around
+them. They are read, not operated, and the conversation carries on while they
+are up.
+
+There are two kinds, and which one you get depends on who asked for it.
+
+- **Ones Scufris puts up.** They stand on a shelf above the pill, three at a
+  time, newest nearest the middle. A fourth takes away the one that has been up
+  longest. You never have to close one: a panel the conversation has moved on
+  from dims and goes on its own after a minute.
+- **Ones you keep.** Ask for something to stay and it takes one of the four
+  screen edges. It stops fading, and it survives a request to clear the screen.
+  There are four edges, so a fifth is refused rather than stacked.
+
+Every panel wears the same three ticks in its corners.
+
+- **Close** takes it away now. Scufris is told, so it stops talking about it.
+- **Pin** promotes a panel Scufris put up into one of yours. It leaves the
+  shelf, moves to a free edge, and stops fading. Pin again to hand it back. A
+  pin with no free edge says so on the badge rather than doing nothing.
+- **Restart** appears only while the thing feeding the panel has stopped, which
+  is the one moment starting it again is worth offering.
+
+Panels never take the keyboard. One that arrives mid-sentence cannot take your
+keys, and the ticks are clicks for the same reason.
+
+A panel you are reading does not go away under you. The clock stops while your
+pointer is over it, while Scufris is speaking, while the microphone is open, and
+while the pill is put away. Time you are not looking at the screen does not
+count against a panel.
+
+`Super+D` puts the pill away and takes the shelf down with it. Nothing is lost:
+the panels come back exactly as they were, with the time they had left. Panels
+you kept are not on that layer and stay where they are.
+
+You can also put one up yourself. The tray menu carries a submenu of the panels
+that can fill themselves, and one you summon is yours: it takes an edge slot,
+fades never, and is not part of the conversation. Ask Scufris to clear the
+screen and it takes down what it opened and leaves yours standing.

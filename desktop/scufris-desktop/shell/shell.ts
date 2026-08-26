@@ -108,8 +108,16 @@
           },
         };
         view = mount(root, ctx);
-        deliver(pending === undefined ? message.data : pending);
-        pending = undefined;
+        // The spawn payload already reached the widget, as `ctx.spawn`. What
+        // to draw from it is the widget's own business: for a note it is the
+        // data, and for a timer it is only the request the data answers, so a
+        // shell that handed it to `update` would be handing half of them a
+        // payload of the wrong shape. What the shell must not lose is an update
+        // that arrived while the module was still importing.
+        if (pending !== undefined) {
+          deliver(pending);
+          pending = undefined;
+        }
       })
       .catch((error: unknown) => {
         broken(`${message.widget} would not load: ${String(error)}`);

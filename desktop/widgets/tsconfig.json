@@ -4,7 +4,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ES2022",
     "noUncheckedIndexedAccess": true,
-    "outDir": "../scufris-desktop/ui/dist/widgets",
+    "outDir": "dist",
     "rootDir": ".",
     "strict": true,
     "target": "ES2022",

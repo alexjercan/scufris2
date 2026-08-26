@@ -112,7 +112,16 @@ Every command travels over the control socket and waits for the companion's
 answer under a correlation identifier, bounded at five seconds. A refusal
 becomes a tool error carrying the companion's own code, and the codes are the
 point: `widget_not_found`, `no_free_slot`, `surface_not_found`, `no_shell`,
-`companion_unavailable`, and `timeout` each call for something different.
+`not_shown`, `companion_unavailable`, and `timeout` each call for something
+different.
+
+`widget_opened` means the panel is on the screen and nothing weaker. A window
+the display would not size, would not raise, or would not say which monitor it
+is on is retired and answered `not_shown`, because the alternative is Scufris
+describing a panel the person cannot see. The same rule runs the other way: an
+answer that arrives after its command was given up on is a panel whose
+identifier exists nowhere, so the daemon closes it again rather than leaving it
+standing with nothing able to reach it.
 
 The daemon's idea of what is open is not authoritative and is not treated as
 such. Exhibits age out on their own and a clear leaves whatever the user
@@ -172,6 +181,11 @@ after the first paint, so a window that is merely unfocused advertises
 A panel that landed mid-sentence would then take the keys out of whatever the
 user was typing into. Clicks and the two chrome ticks work without focus.
 
+For the same reason a widget window is one of the companion's own as far as the
+focus tracker is concerned. The pill gives the keyboard back to the window the
+person was using, and a window it cannot type into is not one to give it back
+to.
+
 Placement is arithmetic over the monitor the window reports, in the same style
 as the pill's `bottom_center`, and it is unit-tested without a desktop session.
 Position is set after the window is shown, because i3 places a floating window
@@ -186,9 +200,16 @@ it a single message on its own `tauri::ipc::Channel`.
 
 A shell is used once. Its label is the surface identifier the daemon is answered
 with, so a label handed out twice would let an update meant for a widget that is
-gone land on whatever took its place. Labels are minted monotonically, a retired
-shell is destroyed rather than re-adopted, and the pool builds the replacement
-in the background.
+gone land on whatever took its place. Labels are minted monotonically and carry
+a stamp of the run that minted them, because a counter that starts at one each
+process would hand `widget-1` out again to a daemon that outlived the companion.
+A retired shell is destroyed rather than re-adopted, and the pool builds the
+replacement as soon as one is taken rather than once the pool is dry.
+
+A shell that builds but whose page never loads is given ten seconds and then
+written off, with a line saying so. Otherwise it would count against the pool's
+depth for the life of the process, and two of them would leave every later open
+refusing with `no_shell` for a reason nothing said out loud.
 
 Because the label is the surface identifier, the host reserves a shell before it
 asks the runtime to open anything. A runtime that then refuses the open leaves
@@ -222,6 +243,17 @@ line back to the backend. The returned view is driven with `update(data)` and
 released with `destroy()`. A widget renders into the element it is handed and
 nothing else: it draws no chrome, asks who sent nothing, and runs on no clock.
 
+The widget draws its first frame from `ctx.spawn`, inside `mount`. The shell
+never hands that payload to `update`, because the two are not the same shape:
+a note's spawn payload is its data, while a timer's is the request its data
+answers. What the shell does hold is an update that arrived while the module was
+still importing, which is that widget's first data rather than a lost message.
+
+`desktop/widgets/widget.d.ts` is the whole contract and the only copy of it.
+The shell's own tsconfig reads that same file rather than declaring the types a
+second time: two copies of a contract are two contracts, and the day they drift
+is a day both projects compile and the panel breaks in front of the person.
+
 A widget that offers its own buttons gives them the chrome's own `tick` class.
 That is the one class a widget may wear: a widget's controls and the chrome's
 ticks are the same affordance, and a widget that styled its own would be the one
@@ -232,6 +264,12 @@ and a click has never needed focus.
 manifests and compiled modules into the binary. What ships is what was built,
 and a widget whose TypeScript does not compile fails the build rather than the
 first person who asks for it.
+
+The compiled modules land in `desktop/widgets/dist/`, outside the frontend
+directory on purpose. Everything under `ui/dist` is bundled into the app
+protocol and reachable from any window, so a widget module served from there
+would make the per-surface `scufris-widget:` scheme a formality rather than a
+gate.
 
 ## Backends
 

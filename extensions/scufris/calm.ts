@@ -6,14 +6,12 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { WIDGET_EVENT_MESSAGE } from "./widgets/index.ts";
 
 const calmStateKey = Symbol.for("scufris:calm-state:v1");
 const calmPatchKey = Symbol.for("scufris:calm-patches:v1");
 const calmStateType = "scufris-calm-state-v1";
-const hiddenCustomTypes = new Set([
-  "scufris-job-event",
-  "scufris-widget-event",
-]);
+const hiddenCustomTypes = new Set(["scufris-job-event", WIDGET_EVENT_MESSAGE]);
 
 type CalmState = { enabled: boolean };
 

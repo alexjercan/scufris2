@@ -147,6 +147,12 @@ pub trait Surface: Send + Sync {
     fn show_pill_passive(&self) -> Result<Shown, String>;
     /// Hides the pill, and says what that achieved.
     fn hide_pill(&self) -> Result<Hidden, String>;
+    /// Answers whether the pill holds the keyboard at this moment.
+    ///
+    /// What a show achieved was true when it was written down, and the person
+    /// can click their own window straight afterwards. A phase that needs the
+    /// keys asks the display rather than reading that record.
+    fn pill_has_keyboard(&self) -> bool;
     /// Gives focus back to the window the pill covered.
     fn restore_focus(&self) -> Result<(), String>;
     /// Renders one presentation in the pill.
@@ -817,9 +823,20 @@ impl App {
     }
 
     /// Puts the pill on screen, and records only what that achieved.
+    ///
+    /// A record that the pill has the keyboard is worth skipping the work for
+    /// only while it is still true. The person can click their own window
+    /// between one phase and the next, and every phase that reaches here is one
+    /// whose keys - Enter, Escape - have nowhere else to go. So the display is
+    /// asked, and a pill that has lost the keyboard is shown again with a whole
+    /// repair chain behind it rather than left on a record written earlier.
     fn raise(&self) -> Result<(), String> {
-        if self.screen() == Screen::Ready {
+        if self.screen() == Screen::Ready && self.ports.surface.pill_has_keyboard() {
             return Ok(());
+        }
+        // Whatever the record said, the keyboard is not on the pill.
+        if self.screen() == Screen::Ready {
+            self.set_screen(Screen::Seen);
         }
         match self.ports.surface.show_pill() {
             Ok(shown) => {
@@ -1553,6 +1570,9 @@ mod tests {
                 ));
             }
             Ok(Hidden::Down)
+        }
+        fn pill_has_keyboard(&self) -> bool {
+            self.focused.load(Ordering::SeqCst)
         }
         fn restore_focus(&self) -> Result<(), String> {
             self.window.lock().unwrap().push("restore");
@@ -2462,6 +2482,32 @@ mod tests {
         harness.app.handle(Event::Escape);
         harness.app.set_screen(Screen::Seen);
         assert_eq!(harness.app.shortfall(), "the pill is still up");
+    }
+
+    /// A phase whose keys have nowhere else to go asks for the keyboard again.
+    ///
+    /// Reaching review is the moment this matters most: the words are on
+    /// screen, Enter sends them and Escape throws them away, and a runtime that
+    /// read an older record instead of asking would leave the person pressing
+    /// both into whatever window took the keyboard in the meantime.
+    #[test]
+    fn a_phase_that_needs_the_keys_asks_again_when_the_pill_has_lost_them() {
+        let harness = harness(FakeRecorder::default(), Ok("recovered".into()));
+        harness.app.handle(Event::Activate);
+        assert_eq!(harness.app.screen(), Screen::Ready);
+
+        // The person clicked their own window. Nothing told the runtime, which
+        // is exactly why the record is not the thing to trust.
+        harness.surface.focused.store(false, Ordering::SeqCst);
+        let before = harness.surface.window().len();
+
+        harness.app.handle(Event::Activate);
+
+        assert!(
+            harness.surface.window()[before..].contains(&"show"),
+            "review inherited a keyboard the pill no longer had"
+        );
+        assert_eq!(harness.app.screen(), Screen::Ready);
     }
 
     /// Asking again is bounded. A window manager that has refused every time

@@ -139,6 +139,10 @@ impl Surface for DesktopSurface {
         pill::hide(&self.handle)
     }
 
+    fn pill_has_keyboard(&self) -> bool {
+        pill::focused(&self.handle)
+    }
+
     fn restore_focus(&self) -> Result<(), String> {
         self.focus.restore()
     }

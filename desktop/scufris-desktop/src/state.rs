@@ -330,14 +330,16 @@ impl Companion {
             return Posture::Off;
         }
         match &self.phase {
-            Phase::Resting => {
+            // The two passive phases: on screen, reporting, holding nothing.
+            // Dismissal is theirs alone, because they are the only ones the
+            // person can put away without also cancelling something.
+            Phase::Resting | Phase::Sent { .. } => {
                 if self.dismissed {
                     Posture::Off
                 } else {
                     Posture::Passive
                 }
             }
-            Phase::Sent { .. } => Posture::Passive,
             _ => Posture::Focused,
         }
     }
@@ -580,6 +582,19 @@ impl Companion {
             // Escape dismisses the pill; Enter only acknowledges the failure
             // and lets the pill rest on screen.
             (Phase::Failed { .. }, Event::Escape) => self.close(Vec::new()),
+            // The two phases the pill is on screen without the keyboard in.
+            // Escape there is the person putting the pill away, and it had no
+            // road down until the verb could arrive without focus: the pill
+            // takes no keys while it is passive, so the only way down was to
+            // open the microphone with the hotkey and then cancel it.
+            //
+            // The phase is left alone. A send in flight is a turn the pill is
+            // watching, and losing it to put the window away would lose the
+            // acknowledgment the words are waiting on.
+            (Phase::Resting | Phase::Sent { .. }, Event::Escape) => {
+                self.dismissed = true;
+                Vec::new()
+            }
             (Phase::Failed { .. }, Event::Enter { .. }) => self.settle(Vec::new()),
             // The interaction has already ended by the time this arrives, so
             // it is reported: silently keeping discarded words would be worse.
@@ -1640,6 +1655,40 @@ mod tests {
             Vec::new()
         );
         assert_eq!(companion.presentation().state, "error");
+    }
+
+    #[test]
+    fn escape_puts_a_resting_pill_away_and_an_activation_brings_it_back() {
+        let mut companion = handed_off();
+        assert_eq!(companion.posture(), Posture::Passive);
+        // Nothing to cancel, so nothing to do but go down. Before the verb
+        // could arrive without focus this had no road at all: the pill takes
+        // no keys while it rests, so the only way down was to open the
+        // microphone with the hotkey and then cancel that.
+        assert_eq!(companion.apply(Event::Escape), Vec::new());
+        assert_eq!(companion.posture(), Posture::Off);
+        assert_eq!(companion.phase(), &Phase::Resting);
+        companion.apply(Event::Activate);
+        assert_eq!(companion.posture(), Posture::Focused);
+    }
+
+    #[test]
+    fn escape_while_a_submission_is_in_flight_hides_the_pill_and_keeps_waiting() {
+        let mut companion = opened();
+        companion.apply(Event::Enter { text: None });
+        companion.apply(Event::Transcribed("open the tasks widget".into()));
+        let Phase::Sent { id, .. } = companion.phase().clone() else {
+            panic!("the transcript was handed over: {:?}", companion.phase());
+        };
+        assert_eq!(companion.apply(Event::Escape), Vec::new());
+        assert_eq!(companion.posture(), Posture::Off);
+        // The words are still waiting on their acknowledgment, and it still
+        // lands. Putting the window away is not abandoning the submission.
+        assert_eq!(
+            companion.apply(Event::Acknowledged(id)),
+            vec![Action::ClearPending]
+        );
+        assert_eq!(companion.phase(), &Phase::Resting);
     }
 
     #[test]

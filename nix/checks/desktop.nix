@@ -21,6 +21,9 @@
   testChat = pkgs.writeShellScriptBin "scufris-chat" ''
     printf 'open the chat\n'
   '';
+  testMode = pkgs.writeShellScriptBin "scufris-desktop-mode" ''
+    printf 'mode %s\n' "$1"
+  '';
   popupSettings = {
     enable = true;
     popup = {
@@ -36,6 +39,7 @@
         enable = true;
         package = desktop;
         chatCommand = testChat;
+        modeCommand = testMode;
         stt.whisper = {
           package = testWhisper;
           model = testWhisperModel;
@@ -91,6 +95,10 @@ in
         "$(readlink -f ${desktop}/bin/scufris-desktop)"
       test -f ${desktop}/share/applications/scufris-desktop.desktop
       test -f ${desktop}/share/icons/hicolor/scalable/apps/scufris.svg
+
+      # A window manager binding runs the command client by name, so it ships
+      # with the companion rather than as something the person installs next.
+      ${desktop}/bin/scufris-ctl --help | grep -F 'usage: scufris-ctl <verb>'
       touch "$out"
     '';
 
@@ -98,14 +106,19 @@ in
       export SCUFRIS_DESKTOP_SOCKET=/run/user/1000/scufris/daemon.sock
       export HOME=/home/scufris-test
       unset XDG_STATE_HOME
+      # A build sandbox has no session runtime directory, which is exactly the
+      # case the command socket must not be fatal for.
+      unset XDG_RUNTIME_DIR
       ${desktop}/bin/scufris-desktop --print-config > defaults
       cat > expected-defaults <<'EOF'
       socket=/run/user/1000/scufris/daemon.sock
+      command_socket=none
       state_file=/home/scufris-test/.local/state/scufris-desktop/pending.json
       stt_endpoint=http://127.0.0.1:10301/inference
       hotkey=Super+D
       chat_command=none
       restart_command=none
+      mode_command=none
       EOF
       diff -u expected-defaults defaults
 
@@ -115,17 +128,21 @@ in
 
       SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10302/inference \
         SCUFRIS_DESKTOP_HOTKEY=Super+G \
+        SCUFRIS_DESKTOP_COMMAND_SOCKET=/run/user/1000/scufris/desktop.sock \
         SCUFRIS_DESKTOP_STATE_FILE=/run/user/1000/scufris-desktop/pending.json \
         SCUFRIS_DESKTOP_CHAT_COMMAND=/nix/store/fake/bin/scufris-chat \
         SCUFRIS_DESKTOP_RESTART_COMMAND=/nix/store/fake/bin/scufris-restart-backend \
+        SCUFRIS_DESKTOP_MODE_COMMAND=/nix/store/fake/bin/scufris-desktop-mode \
         ${desktop}/bin/scufris-desktop --print-config > overridden
       cat > expected-overridden <<'EOF'
       socket=/run/user/1000/scufris/daemon.sock
+      command_socket=/run/user/1000/scufris/desktop.sock
       state_file=/run/user/1000/scufris-desktop/pending.json
       stt_endpoint=http://127.0.0.1:10302/inference
       hotkey=Super+G
       chat_command=/nix/store/fake/bin/scufris-chat
       restart_command=/nix/store/fake/bin/scufris-restart-backend
+      mode_command=/nix/store/fake/bin/scufris-desktop-mode
       EOF
       diff -u expected-overridden overridden
 
@@ -164,6 +181,8 @@ in
     assert lib.elem "SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10302/inference" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_HOTKEY=Super+D" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe testChat}" desktopUnit.Service.Environment;
+    assert lib.elem "SCUFRIS_DESKTOP_MODE_COMMAND=${lib.getExe testMode}" desktopUnit.Service.Environment;
+    assert !(lib.any (lib.hasPrefix "SCUFRIS_DESKTOP_MODE_COMMAND=") configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment);
     assert lib.hasInfix "--port 10302" (builtins.head whisperUnit.Service.ExecStart);
     assert lib.hasInfix "--host 127.0.0.1" (builtins.head whisperUnit.Service.ExecStart);
     assert lib.hasInfix "--inference-path /inference" (builtins.head whisperUnit.Service.ExecStart);

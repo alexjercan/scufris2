@@ -73,6 +73,14 @@ pub const COPY_EVENT: &str = "scufris://copy";
 /// Event name carrying the sound cue enablement to the frontend.
 pub const CUES_EVENT: &str = "scufris://cues";
 
+/// Event name asking the pill page to accept what it is showing.
+///
+/// Enter arriving from outside the window. It goes to the page rather than
+/// straight to the state machine because the page holds the editable field:
+/// the same words a person's own Enter would send are the words this sends,
+/// whether or not they edited them.
+pub const ACCEPT_EVENT: &str = "scufris://accept";
+
 /// Interval between recording progress updates.
 const TICK_INTERVAL: Duration = Duration::from_millis(60);
 
@@ -184,6 +192,24 @@ pub trait Surface: Send + Sync {
     /// Copying is inert either way, so a clipboard that refuses the text is not
     /// worth interrupting the person for.
     fn copy(&self, text: String);
+}
+
+/// Where the pill's keys are held while the pill is up.
+///
+/// The pill never takes the keyboard from the person's editor, so Escape and
+/// Enter cannot reach it by being typed into it. Something outside the window
+/// has to read them: a window manager binding mode, or an accelerator the
+/// display grabs. Which of those applies is not the same for every posture -
+/// bare keys belong to a pill the person is answering, and a modified key is
+/// safe for as long as the pill is on screen at all - so the runtime says how
+/// the pill stands and leaves the arrangement here.
+pub trait Keys: Send + Sync {
+    /// Says where the pill stands, and only when that changes.
+    ///
+    /// Nothing is reported back. A key that could not be arranged is not a
+    /// phase that failed: the tray, the hotkey, and `scufris-ctl` all still
+    /// reach the same runtime.
+    fn stand(&self, posture: Posture);
 }
 
 /// Local speech-to-text.
@@ -422,6 +448,8 @@ impl Screen {
 pub struct Ports {
     /// The pill window and the tray.
     pub surface: Arc<dyn Surface>,
+    /// Where the pill's keys are held while the pill is up.
+    pub keys: Arc<dyn Keys>,
     /// The microphone.
     pub recorder: Arc<dyn Recorder>,
     /// Durable storage for an accepted transcript.
@@ -475,6 +503,10 @@ pub struct App {
     /// True while the keyboard is being watched, so a phase that needs it does
     /// not collect one watch per decision.
     watching: AtomicBool,
+    /// How the pill stood when its keys were last arranged. Arranging them
+    /// costs a process and a round trip to the display, so only a change is
+    /// worth one.
+    keys_stand: Mutex<Posture>,
 }
 
 impl App {
@@ -498,6 +530,7 @@ impl App {
             drawn_recording: AtomicBool::new(false),
             repairing: AtomicBool::new(false),
             watching: AtomicBool::new(false),
+            keys_stand: Mutex::new(Posture::Off),
         }
     }
 
@@ -635,6 +668,10 @@ impl App {
     /// Stops any live recording. The accepted transcript stays on disk.
     pub fn shutdown(&self) {
         self.tick.fetch_add(1, Ordering::Relaxed);
+        // Before anything else that can fail. A binding mode is the window
+        // manager's state, not the companion's, and a companion that exits
+        // holding one leaves the person's Escape key going nowhere.
+        self.set_keys(Posture::Off);
         if let Some(recording) = self.take_recording() {
             recording.discard();
         }
@@ -795,6 +832,9 @@ impl App {
         } else if !self.repairing.swap(true, Ordering::SeqCst) {
             self.repair(REPAIR_ATTEMPTS);
         }
+        // Where the pill stands is what decides which of its keys are worth
+        // arranging, so the arrangement follows every posture rather than one.
+        self.set_keys(surfaced.posture);
         // A phase that holds the person's keys keeps them for as long as it is
         // on screen, and nothing outside the runtime can say when they are
         // gone: a person whose keys reach nothing has no key left to ask with.
@@ -1053,6 +1093,24 @@ impl App {
             return;
         }
         self.look_again();
+    }
+
+    /// Arranges the pill's keys, and only when the posture changes.
+    ///
+    /// A binding mode is a process and a grab is a round trip to the display,
+    /// so a phase that is focused after another focused phase pays for neither.
+    /// The lock is held across the arrangement so two threads changing the
+    /// posture at once cannot leave the keys on the older of the two.
+    fn set_keys(&self, posture: Posture) {
+        let mut stood = self
+            .keys_stand
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if *stood == posture {
+            return;
+        }
+        *stood = posture;
+        self.ports.keys.stand(posture);
     }
 
     fn look_again(self: &Arc<Self>) {
@@ -1884,6 +1942,22 @@ mod tests {
         }
     }
 
+    /// Every arrangement of the pill's keys, in the order they were asked for.
+    #[derive(Default)]
+    struct RecordedKeys(Mutex<Vec<Posture>>);
+
+    impl Keys for RecordedKeys {
+        fn stand(&self, posture: Posture) {
+            self.0.lock().unwrap().push(posture);
+        }
+    }
+
+    impl RecordedKeys {
+        fn changes(&self) -> Vec<Posture> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
     /// Work that runs while one submission is on the wire.
     type Interleave = Box<dyn FnOnce(String) + Send>;
 
@@ -1913,6 +1987,7 @@ mod tests {
     struct Harness {
         app: Arc<App>,
         surface: Arc<RecordedSurface>,
+        keys: Arc<RecordedKeys>,
         recorder: Arc<FakeRecorder>,
         store: Arc<MemoryStore>,
         executor: Arc<QueueExecutor>,
@@ -1929,11 +2004,13 @@ mod tests {
         store: Arc<MemoryStore>,
     ) -> Harness {
         let surface = Arc::new(RecordedSurface::default());
+        let keys = Arc::new(RecordedKeys::default());
         let recorder = Arc::new(recorder);
         let executor = Arc::new(QueueExecutor::default());
         let backend = Arc::new(RecordingBackend::default());
         let app = Arc::new(App::new(Ports {
             surface: Arc::clone(&surface) as Arc<dyn Surface>,
+            keys: Arc::clone(&keys) as Arc<dyn Keys>,
             recorder: Arc::clone(&recorder) as Arc<dyn Recorder>,
             pending: Arc::clone(&store) as Arc<dyn PendingStore>,
             transcriber: Arc::new(FakeTranscriber(transcript)),
@@ -1948,6 +2025,7 @@ mod tests {
         Harness {
             app,
             surface,
+            keys,
             recorder,
             store,
             executor,
@@ -2696,6 +2774,60 @@ mod tests {
         // The next phase that needs the keys watches them again.
         harness.app.handle(Event::Activate);
         assert!(harness.app.watching.load(Ordering::SeqCst));
+    }
+
+    /// The pill's keys are arranged for where the pill stands. One posture is
+    /// arranged once: a focused phase following another focused phase changes
+    /// nothing, because each arrangement costs a process and a grab.
+    #[test]
+    fn the_pills_keys_are_arranged_once_for_each_posture_the_pill_takes() {
+        let harness = harness(FakeRecorder::default(), Ok("recovered".into()));
+        harness.app.handle(Event::Activate);
+        assert_eq!(harness.keys.changes(), [Posture::Focused]);
+
+        // Recording to review is one focused phase after another.
+        harness.app.handle(Event::Activate);
+        harness.executor.drain();
+        assert_eq!(
+            harness.keys.changes(),
+            [Posture::Focused],
+            "the mode was entered twice for one pill"
+        );
+
+        harness.app.handle(Event::Escape);
+        harness.executor.drain();
+        assert_eq!(harness.app.posture(), Posture::Off);
+        assert_eq!(harness.keys.changes(), [Posture::Focused, Posture::Off]);
+    }
+
+    /// A pill the person only watches is something they glance at while they
+    /// type, and it is told apart from a pill that is gone. The bare keys a
+    /// focused pill holds are not its to hold; the pill is still on screen, so
+    /// the keys that put it away are.
+    #[test]
+    fn a_pill_the_person_only_watches_is_told_from_one_that_is_gone() {
+        let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
+        harness.app.handle(Event::Activate);
+        harness.app.handle(Event::Enter { text: None });
+        harness.executor.drain();
+
+        assert_eq!(harness.surface.last().state, "sent");
+        assert_eq!(harness.app.posture(), Posture::Passive);
+        assert_eq!(harness.keys.changes(), [Posture::Focused, Posture::Passive]);
+    }
+
+    /// A binding mode is the window manager's state and not the companion's, so
+    /// a companion that goes away holding one leaves the person's Escape key
+    /// reaching nothing at all.
+    #[test]
+    fn a_companion_that_stops_does_not_take_the_persons_escape_key_with_it() {
+        let harness = harness(FakeRecorder::default(), Ok("unused".into()));
+        harness.app.handle(Event::Activate);
+        assert_eq!(harness.keys.changes(), [Posture::Focused]);
+
+        harness.app.shutdown();
+
+        assert_eq!(harness.keys.changes(), [Posture::Focused, Posture::Off]);
     }
 
     /// Asking again is bounded. A window manager that has refused every time

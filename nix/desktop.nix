@@ -50,6 +50,10 @@ in
     mkdir -p "$out/bin" "$out/share/applications" \
       "$out/share/icons/hicolor/scalable/apps"
     ln -s ${unwrapped}/bin/scufris-desktop "$out/bin/scufris-desktop"
+    # The command client belongs beside the companion it talks to. A window
+    # manager binding needs it on PATH, and a person who installed the
+    # companion has already installed the thing it presses the keys of.
+    ln -s ${unwrapped}/bin/scufris-ctl "$out/bin/scufris-ctl"
     cp ${source}/scufris-desktop/icons/scufris.svg \
       "$out/share/icons/hicolor/scalable/apps/scufris.svg"
     cat > "$out/share/applications/scufris-desktop.desktop" <<EOF

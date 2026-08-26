@@ -113,6 +113,66 @@ it anyway.
 Pill messages and their answers are part of the one conversation the popup
 shows. There is no second session.
 
+### Keys that reach the pill from anywhere
+
+`scufris-ctl` presses the pill's keys from outside its window, so a key binding
+can be the thing that reads them. It ships with the companion and takes one
+verb: `open` brings the pill up and starts recording, `cancel` cancels what is
+running or puts a resting pill away, and `accept` accepts what the pill is
+showing.
+
+On i3, that turns the pill's three keys into a binding mode. Bare `Escape` and
+`Return` belong to the pill only while the mode is on; the rest of the time
+they are your editor's.
+
+Two halves, and both are needed. Your configuration enters the mode when you
+open the pill:
+
+```
+# exec takes the rest of the line, so the command is quoted to chain onto it.
+bindsym $mod+d exec --no-startup-id "scufris-ctl open"; mode "scufris"
+
+mode "scufris" {
+    bindsym Escape exec --no-startup-id "scufris-ctl cancel"
+    bindsym Return exec --no-startup-id "scufris-ctl accept"
+    # The way out by hand, if the companion is not running.
+    bindsym $mod+d mode "default"
+}
+
+# A resting pill is put away from anywhere, without opening the microphone
+# on the way.
+bindsym $mod+Escape exec --no-startup-id "scufris-ctl cancel"
+```
+
+The companion leaves it, and it does that whenever the pill stops wanting those
+keys - after a cancel, after a send, and as it exits - so the mode and what is
+on screen stay in step even when the pill closed for a reason you never asked
+for. Give it the way to say so:
+
+```nix
+programs.scufris.desktop.modeCommand = pkgs.writeShellScriptBin "scufris-mode" ''
+  exec ${pkgs.i3}/bin/i3-msg mode "$1"
+'';
+```
+
+Note that the mode bindings do not leave the mode themselves. The pill is what
+knows whether it still wants the key: the first `Enter` on an uncertain
+transcript answers you and keeps waiting, and a binding that dropped the mode
+there would have taken your next `Enter` away from it.
+
+Once i3 owns `$mod+d`, the companion cannot also take it, and it says so in the
+log at startup. That is expected here - your binding opens the pill, and it
+opens the same pill.
+
+`binding_mode_indicator yes` in your `bar` block shows the mode name while you
+are in it, which is a free indicator that the pill is listening. Sway runs the
+same configuration with `swaymsg` in place of `i3-msg`.
+
+Without any of this the pill still answers `Super+Escape` and `Super+Enter`
+while it is on screen, built from whatever modifier your activation hotkey
+uses. That is the fallback on a desktop with no binding modes; on i3 the
+bindings above take those keys first, and they reach the same place.
+
 The tray icon carries the state: idle, recording, transcribing, working,
 speaking, needs you, and backend unavailable. Recording always shows the red
 privacy ring. Left-click opens the full chat. Right-click opens a menu that can

@@ -577,12 +577,26 @@ void listen("scufris://tick", (event) => {
   }
 });
 
+// Accepting what the pill is showing, with whatever is in the field. The one
+// place that decides which words are sent, so a key pressed here and a verb
+// arriving from the window manager send the same ones.
+const accept = (): void => {
+  void invoke("pill_submit", {
+    text: transcript.readOnly || transcript.hidden ? null : transcript.value,
+  });
+};
+
+// Enter arriving from outside the window, because the window does not hold the
+// keyboard. Escape has no twin here: it carries no words, so it goes straight
+// to the runtime and works even when this page does not.
+void listen("scufris://accept", () => {
+  accept();
+});
+
 window.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
-    void invoke("pill_submit", {
-      text: transcript.readOnly || transcript.hidden ? null : transcript.value,
-    });
+    accept();
     return;
   }
   if (event.key === "Escape") {

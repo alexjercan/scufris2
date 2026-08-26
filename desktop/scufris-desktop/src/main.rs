@@ -8,10 +8,12 @@
 mod app;
 mod audio;
 mod blob;
+mod command;
 mod config;
 mod daemon;
 mod display;
 mod focus;
+mod keys;
 mod logging;
 mod pending;
 mod pill;
@@ -34,14 +36,16 @@ use std::{
 };
 
 use app::{
-    ACK_TIMEOUT, App, Backend, COPY_EVENT, CUES_EVENT, Executor, Hidden, PRESENTATION_EVENT, Ports,
-    PresentationPayload, Shown, Surface, TICK_EVENT, ThreadExecutor, TickPayload, Transcriber,
+    ACCEPT_EVENT, ACK_TIMEOUT, App, Backend, COPY_EVENT, CUES_EVENT, Executor, Hidden, Keys,
+    PRESENTATION_EVENT, Ports, PresentationPayload, Shown, Surface, TICK_EVENT, ThreadExecutor,
+    TickPayload, Transcriber,
 };
 use audio::{CpalRecorder, Recorder};
 use config::Config;
 use daemon::{DaemonEvent, DaemonLink};
 use focus::FocusTracker;
 use pending::{FilePendingStore, PendingStore};
+use scufris_control::command::{Outcome, Verb};
 use state::Event;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent, http, ipc::Channel, menu::Menu};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -273,12 +277,25 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
     let tauri_app = tauri::Builder::default()
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        app.state::<Arc<App>>()
+                .with_handler(|app, shortcut, event| {
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+                    // The hotkey that opens the pill, or one of the two the
+                    // pill grabs while it is up. Every accelerator arrives
+                    // here, so which one it is decides what it means.
+                    match app
+                        .try_state::<Arc<keys::PillKeys>>()
+                        .and_then(|keys| keys.verb(shortcut))
+                    {
+                        Some(verb) => {
+                            let _ = perform(app, verb);
+                        }
+                        None => app
+                            .state::<Arc<App>>()
                             .inner()
                             .clone()
-                            .handle(Event::Activate);
+                            .handle(Event::Activate),
                     }
                 })
                 .build(),
@@ -371,12 +388,22 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                 |app| app.state::<Arc<App>>().open_chat(),
             )?;
 
+            // Managed as well as held by the runtime: the accelerator handler
+            // has only the app to ask which key it was given.
+            let pill_keys = Arc::new(keys::PillKeys::new(
+                handle.clone(),
+                config.mode_command.clone(),
+                &config.hotkey,
+            ));
+            tauri.manage(Arc::clone(&pill_keys));
+
             let runtime = Arc::new(App::new(Ports {
                 surface: Arc::new(DesktopSurface {
                     handle: handle.clone(),
                     menu,
                     focus: FocusTracker::new(),
                 }) as Arc<dyn Surface>,
+                keys: Arc::clone(&pill_keys) as Arc<dyn Keys>,
                 recorder: Arc::new(CpalRecorder) as Arc<dyn Recorder>,
                 pending: Arc::new(FilePendingStore::new(config.state_file.clone()))
                     as Arc<dyn PendingStore>,
@@ -421,7 +448,34 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             runtime.set_backend(Arc::clone(&link) as Arc<dyn Backend>);
             tauri.manage(link);
 
-            tauri.global_shortcut().register(shortcut)?;
+            // A window manager that has already taken the activation key is the
+            // good case rather than a fault: under the binding mode recipe its
+            // own binding runs `scufris-ctl open` and arrives in the same
+            // place. The display reports a key somebody else grabbed as one
+            // that is already registered, which is what it looks like from
+            // here. Refusing to start over it would leave the person with no
+            // companion for a key that was going to work.
+            if let Err(error) = tauri.global_shortcut().register(shortcut) {
+                warn!(
+                    hotkey = %config.hotkey,
+                    "the activation accelerator belongs to somebody else: {error}"
+                );
+            }
+
+            // The window manager's way in. Started last, because a verb that
+            // arrives is acted on immediately and everything it acts on has to
+            // be here. A socket that cannot be made is reported and nothing
+            // else: the hotkey and the tray still work, and refusing to start
+            // over a socket the person may never use is the worse trade.
+            if let Some(socket) = config.command_socket.clone() {
+                let acting = handle.clone();
+                match command::listen(socket, move |verb| perform(&acting, verb)) {
+                    Ok(path) => {
+                        tauri.manage(CommandSocket(path));
+                    }
+                    Err(error) => warn!("no command socket: {error}"),
+                }
+            }
             Ok(())
         })
         .build(tauri::generate_context!())?;
@@ -457,11 +511,53 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             // own process group and so does not die with the companion. One
             // left behind is a sampler running until the machine is rebooted.
             handle.state::<Arc<widgets::Widgets>>().halt();
+            // A socket file with nothing behind it makes `scufris-ctl` report
+            // a refused connection rather than a companion that is not running.
+            if let Some(socket) = handle.try_state::<CommandSocket>() {
+                command::unbind(&socket.0);
+            }
             handle.state::<Arc<App>>().shutdown();
         }
         _ => {}
     });
     Ok(())
+}
+
+/// Where the command socket is, so the exit can take it away again.
+struct CommandSocket(std::path::PathBuf);
+
+/// Carries out one verb from the desktop.
+///
+/// Two of the three go straight to the state machine, because they carry no
+/// words. Accepting does not: the pill page holds the editable field, so the
+/// verb goes there and the page sends what a person's own Enter would have
+/// sent. It is answered as taken once the page has been told, which is as far
+/// as an event can be followed.
+fn perform(handle: &AppHandle, verb: Verb) -> Outcome {
+    match verb {
+        Verb::Open => {
+            handle
+                .state::<Arc<App>>()
+                .inner()
+                .clone()
+                .handle(Event::Activate);
+            Outcome::Taken
+        }
+        Verb::Cancel => {
+            handle
+                .state::<Arc<App>>()
+                .inner()
+                .clone()
+                .handle(Event::Escape);
+            Outcome::Taken
+        }
+        Verb::Accept => match handle.emit_to(pill::LABEL, ACCEPT_EVENT, ()) {
+            Ok(()) => Outcome::Taken,
+            Err(error) => Outcome::Refused {
+                detail: format!("the pill would not take it: {error}"),
+            },
+        },
+    }
 }
 
 /// The page saying hello, and saying with it whether the person asked for

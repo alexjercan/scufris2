@@ -166,6 +166,19 @@ in {
         '';
       };
 
+      modeCommand = lib.mkOption {
+        type = lib.types.nullOr lib.types.package;
+        default = null;
+        description = ''
+          Executable that puts the window manager into one named binding mode,
+          run with the mode name as its only argument. The companion asks for
+          "scufris" while the pill wants a bare Escape or Return, and "default"
+          the rest of the time. On i3 this wraps `i3-msg mode "$1"`, on sway
+          `swaymsg mode "$1"`; a session with no binding modes leaves it null
+          and answers the pill with the modified accelerators instead.
+        '';
+      };
+
       stt = {
         endpoint = lib.mkOption {
           type = lib.types.nullOr (lib.types.strMatching "https?://.*");
@@ -319,7 +332,9 @@ in {
               "SCUFRIS_DESKTOP_RESTART_COMMAND=${lib.getExe backendRestart}"
             ]
             ++ lib.optional (desktopCfg.chatCommand != null)
-            "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe desktopCfg.chatCommand}";
+            "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe desktopCfg.chatCommand}"
+            ++ lib.optional (desktopCfg.modeCommand != null)
+            "SCUFRIS_DESKTOP_MODE_COMMAND=${lib.getExe desktopCfg.modeCommand}";
           # The companion must survive its own faults; a backend crash is
           # reported in the tray instead of taking the companion down.
           Restart = "on-failure";

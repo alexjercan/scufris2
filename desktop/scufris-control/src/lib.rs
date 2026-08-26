@@ -23,6 +23,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod command;
+
 /// Wire protocol version accepted by both peers.
 pub const PROTOCOL_VERSION: u32 = 2;
 
@@ -55,13 +57,24 @@ pub const MAX_SUBMISSION_TEXT_BYTES: usize = 8 * 1024;
 
 /// Returns the daemon socket path for the current user session.
 pub fn socket_path() -> Result<PathBuf, ControlPathError> {
-    let runtime_dir = env::var_os("XDG_RUNTIME_DIR").ok_or(ControlPathError::MissingRuntimeDir)?;
+    in_runtime_dir(env::var_os("XDG_RUNTIME_DIR"), SOCKET_FILE_NAME)
+}
+
+/// Returns one socket path below the session runtime directory.
+///
+/// The directory is taken rather than read, so the rule can be tested without
+/// a test setting a variable every other test in the process can see.
+pub(crate) fn in_runtime_dir(
+    runtime_dir: Option<std::ffi::OsString>,
+    name: &str,
+) -> Result<PathBuf, ControlPathError> {
+    let runtime_dir = runtime_dir.ok_or(ControlPathError::MissingRuntimeDir)?;
     if runtime_dir.is_empty() {
         return Err(ControlPathError::MissingRuntimeDir);
     }
     Ok(PathBuf::from(runtime_dir)
         .join(SOCKET_DIRECTORY_NAME)
-        .join(SOCKET_FILE_NAME))
+        .join(name))
 }
 
 /// Failure to resolve the current user's daemon socket path.

@@ -61,6 +61,65 @@ Everything the runtime reaches outside itself - the microphone, the endpoint,
 the socket, the window, the disk, and where deferred work runs - is a port on
 `App`, so the failure paths are tested without any of them.
 
+## Keys that do not need the window
+
+A key typed at the pill only arrives while the pill holds the keyboard, and the
+pill holding the keyboard is the pill taking it away from whatever the person
+was typing in. So the same three keys have a second road in, and it does not go
+through the window at all.
+
+`desktop/scufris-desktop/src/command.rs` listens on a Unix socket at
+`$XDG_RUNTIME_DIR/scufris/desktop.sock`, beside the daemon socket and not it.
+This is the one place the companion is the server: `daemon.rs` connects out, and
+this listens for the person's own window manager. One LF-terminated JSON line
+each way, one verb per connection, and the connection closes:
+
+```
+{"v":1,"verb":"open"}      ->  {"v":1,"answer":"taken"}
+{"v":1,"verb":"cancel"}    ->  {"v":1,"answer":"refused","detail":"..."}
+{"v":1,"verb":"accept"}
+```
+
+`scufris-ctl <verb>` is the client, and it ships beside the companion because a
+window manager binding runs it by name. Its exit status is what a binding can
+branch on: 0 the verb reached the pill, 1 it did not, 2 the run was wrong.
+
+`open` and `cancel` go straight to the state machine, as `Activate` and
+`Escape`. `accept` does not: the pill page holds the editable field, so the verb
+is emitted to the page as `scufris://accept` and the page sends whatever a
+person's own `Enter` would have sent. The socket is the person's alone, in their
+own runtime directory under a private one; anything that can open it can already
+act as them. A session with no runtime directory gets no command socket and
+starts anyway.
+
+`desktop/scufris-desktop/src/keys.rs` is the other half: it arranges, for each
+posture the pill takes, where those keys are read.
+
+- A **binding mode**, through the `SCUFRIS_DESKTOP_MODE_COMMAND` hook, run with
+  one argument. The companion asks for `scufris` while the pill is focused and
+  `default` for every other posture, including as it exits. i3 and sway hold
+  bare Escape and Return inside a named mode, which is the only way a bare key
+  reaches the pill without being taken off the desktop for every other program.
+  The window manager enters the mode when the person opens the pill; the
+  companion is what leaves it, so a pill that closed for a reason nobody asked
+  for does not leave the keyboard in a mode.
+- **Modified accelerators** the display grabs, for a desktop with no binding
+  modes. They are built from the activation hotkey's own modifiers, so `Super+D`
+  gives `Super+Escape` and `Super+Enter`, and they are grabbed only while the
+  pill is on screen - an accelerator held all session is one no other program
+  can use. A hotkey with no modifier grabs nothing: a bare accelerator the
+  display granted the companion is a key no other program would see again.
+
+Both run for every posture change and neither is required. A window manager that
+already holds one of the accelerators refuses the grab, which is the good case:
+its own binding runs `scufris-ctl` and arrives in the same place.
+
+The activation accelerator itself follows the same rule. Under the binding mode
+recipe the window manager owns `$mod+d`, so the companion's own registration of
+it is refused; that is logged and the companion starts anyway. X reports a key
+another client has grabbed as `BadAccess`, which the display layer surfaces as
+"already registered", so that is what the log line says.
+
 ## Pill design
 
 The pill is the orb. The window is a small square around the dotted thought
@@ -601,7 +660,10 @@ Setting both is an error.
 
 `nix/desktop.nix` builds the workspace with `rustPlatform.buildRustPackage`,
 runs the Rust tests in its check phase, and wraps the binary with the WebKitGTK
-and tray libraries it dlopens. The result also ships a desktop entry and icon.
+and tray libraries it dlopens. The result also ships a desktop entry, an icon,
+and `scufris-ctl`, which belongs beside the companion it talks to: a window
+manager binding needs it on `PATH`, and a person who installed the companion has
+already installed the thing whose keys it presses.
 
 `nix/checks.nix` asserts that the companion, WebKitGTK, and their closure stay
 out of the default and voice launcher closures, that `--print-config` resolves
@@ -639,11 +701,13 @@ any level; only their sizes do.
 | --------------------------------- | ------------------------------------------------------ |
 | `SCUFRIS_DAEMON`                  | `1` in the popup process, which then serves the socket |
 | `SCUFRIS_DESKTOP_SOCKET`          | Control socket path override                           |
+| `SCUFRIS_DESKTOP_COMMAND_SOCKET`  | Command socket path override                           |
 | `SCUFRIS_DESKTOP_STATE_FILE`      | Durable accepted-transcript file                       |
 | `SCUFRIS_STT_ENDPOINT`            | Transcription endpoint                                 |
 | `SCUFRIS_DESKTOP_HOTKEY`          | Activation accelerator                                 |
 | `SCUFRIS_DESKTOP_CHAT_COMMAND`    | Absolute executable that opens the full chat           |
 | `SCUFRIS_DESKTOP_RESTART_COMMAND` | Absolute executable that restarts the backend          |
+| `SCUFRIS_DESKTOP_MODE_COMMAND`    | Absolute executable that sets the binding mode         |
 
 ## Limits
 

@@ -1,8 +1,8 @@
 //! Companion configuration resolved from the environment.
 //!
-//! Every outside effect the companion can start is named here. The chat and
-//! restart hooks are absolute executables supplied by the deployment, so the
-//! companion never builds a command line or reaches for a shell.
+//! Every outside effect the companion can start is named here. The chat,
+//! restart, and mode hooks are absolute executables supplied by the deployment,
+//! so the companion never builds a command line or reaches for a shell.
 
 use std::{
     env,
@@ -32,6 +32,12 @@ pub const RESTART_WINDOW_SECONDS: u64 = 600;
 pub struct Config {
     /// Daemon control socket the companion connects to.
     pub socket: PathBuf,
+    /// Command socket the companion listens on, for the desktop's own verbs.
+    ///
+    /// Absent when the session names no runtime directory to put one in. The
+    /// companion still starts: the socket is how a window manager binding
+    /// reaches the pill, and the hotkey and the tray reach it without one.
+    pub command_socket: Option<PathBuf>,
     /// whisper-server-compatible transcription endpoint.
     pub stt_endpoint: String,
     /// Accelerator that opens the pill and starts recording.
@@ -40,6 +46,9 @@ pub struct Config {
     pub chat_command: Option<PathBuf>,
     /// Executable that restarts the owned backend service, when configured.
     pub restart_command: Option<PathBuf>,
+    /// Executable that puts the window manager into a binding mode, when one is
+    /// configured. Run with the mode name as its only argument.
+    pub mode_command: Option<PathBuf>,
     /// File holding an accepted transcript that has not been acknowledged.
     pub state_file: PathBuf,
 }
@@ -66,10 +75,14 @@ impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::resolve(
             env::var_os("SCUFRIS_DESKTOP_SOCKET"),
+            env::var_os("SCUFRIS_DESKTOP_COMMAND_SOCKET"),
             env::var_os("SCUFRIS_STT_ENDPOINT"),
             env::var_os("SCUFRIS_DESKTOP_HOTKEY"),
-            env::var_os("SCUFRIS_DESKTOP_CHAT_COMMAND"),
-            env::var_os("SCUFRIS_DESKTOP_RESTART_COMMAND"),
+            Hooks {
+                chat: env::var_os("SCUFRIS_DESKTOP_CHAT_COMMAND"),
+                restart: env::var_os("SCUFRIS_DESKTOP_RESTART_COMMAND"),
+                mode: env::var_os("SCUFRIS_DESKTOP_MODE_COMMAND"),
+            },
             State {
                 configured: env::var_os("SCUFRIS_DESKTOP_STATE_FILE"),
                 xdg: env::var_os("XDG_STATE_HOME"),
@@ -80,15 +93,23 @@ impl Config {
 
     fn resolve(
         socket: Option<OsString>,
+        command_socket: Option<OsString>,
         endpoint: Option<OsString>,
         hotkey: Option<OsString>,
-        chat: Option<OsString>,
-        restart: Option<OsString>,
+        hooks: Hooks,
         state: State,
     ) -> Result<Self, ConfigError> {
         let socket = match non_empty(socket) {
             Some(value) => PathBuf::from(value),
             None => scufris_control::socket_path()?,
+        };
+        let command_socket = match non_empty(command_socket) {
+            Some(value) => Some(PathBuf::from(value)),
+            // Not an error, unlike the daemon socket: a companion with no
+            // command socket is one the person opens from the tray and the
+            // hotkey, and a companion that refused to start over a socket they
+            // may never use would be the worse trade.
+            None => scufris_control::command::command_socket_path().ok(),
         };
         let stt_endpoint = match non_empty(endpoint) {
             Some(value) => value.to_string_lossy().into_owned(),
@@ -102,10 +123,12 @@ impl Config {
             .unwrap_or_else(|| DEFAULT_HOTKEY.to_string());
         Ok(Self {
             socket,
+            command_socket,
             stt_endpoint,
             hotkey,
-            chat_command: absolute(chat, "SCUFRIS_DESKTOP_CHAT_COMMAND")?,
-            restart_command: absolute(restart, "SCUFRIS_DESKTOP_RESTART_COMMAND")?,
+            chat_command: absolute(hooks.chat, "SCUFRIS_DESKTOP_CHAT_COMMAND")?,
+            restart_command: absolute(hooks.restart, "SCUFRIS_DESKTOP_RESTART_COMMAND")?,
+            mode_command: absolute(hooks.mode, "SCUFRIS_DESKTOP_MODE_COMMAND")?,
             state_file: state.resolve()?,
         })
     }
@@ -119,15 +142,28 @@ impl Config {
                 .unwrap_or_else(|| "none".to_string())
         };
         format!(
-            "socket={}\nstate_file={}\nstt_endpoint={}\nhotkey={}\nchat_command={}\nrestart_command={}\n",
+            "socket={}\ncommand_socket={}\nstate_file={}\nstt_endpoint={}\nhotkey={}\nchat_command={}\nrestart_command={}\nmode_command={}\n",
             self.socket.display(),
+            optional(&self.command_socket),
             self.state_file.display(),
             self.stt_endpoint,
             self.hotkey,
             optional(&self.chat_command),
             optional(&self.restart_command),
+            optional(&self.mode_command),
         )
     }
+}
+
+/// The executables the deployment supplies, as the environment gave them.
+///
+/// Together rather than as three arguments: they are one kind of thing - an
+/// absolute path to something the companion may run - and they are checked the
+/// same way.
+struct Hooks {
+    chat: Option<OsString>,
+    restart: Option<OsString>,
+    mode: Option<OsString>,
 }
 
 /// The three inputs that can name the durable state file, in priority order.
@@ -204,12 +240,25 @@ mod tests {
         endpoint: Option<&str>,
         chat: Option<&str>,
     ) -> Result<Config, ConfigError> {
+        hooked(socket, endpoint, chat, None)
+    }
+
+    fn hooked(
+        socket: &str,
+        endpoint: Option<&str>,
+        chat: Option<&str>,
+        mode: Option<&str>,
+    ) -> Result<Config, ConfigError> {
         Config::resolve(
             Some(OsString::from(socket)),
+            Some(OsString::from("/run/user/1000/scufris/desktop.sock")),
             endpoint.map(OsString::from),
             None,
-            chat.map(OsString::from),
-            None,
+            Hooks {
+                chat: chat.map(OsString::from),
+                restart: None,
+                mode: mode.map(OsString::from),
+            },
             state(),
         )
     }
@@ -221,6 +270,37 @@ mod tests {
         assert_eq!(config.hotkey, DEFAULT_HOTKEY);
         assert_eq!(config.chat_command, None);
         assert_eq!(config.restart_command, None);
+        assert_eq!(config.mode_command, None);
+    }
+
+    /// The command socket is what a window manager binding reaches the pill
+    /// through, and a session that has nowhere to put one is a session with no
+    /// binding to make. So an unresolvable command socket is left absent rather
+    /// than refused: the daemon socket is what the companion cannot do without.
+    #[test]
+    fn a_command_socket_that_cannot_be_placed_is_absent_rather_than_fatal() {
+        let config = Config::resolve(
+            Some(OsString::from("/run/user/1000/scufris/daemon.sock")),
+            None,
+            None,
+            None,
+            Hooks {
+                chat: None,
+                restart: None,
+                mode: None,
+            },
+            state(),
+        )
+        .expect("the companion still resolves");
+        assert_eq!(
+            config.socket,
+            PathBuf::from("/run/user/1000/scufris/daemon.sock")
+        );
+        assert_eq!(
+            config.command_socket,
+            scufris_control::command::command_socket_path().ok(),
+            "the runtime directory decides this one, and nothing else does"
+        );
     }
 
     #[test]
@@ -244,25 +324,32 @@ mod tests {
             resolve("/socket", None, Some("scufris-chat")),
             Err(ConfigError::Command("SCUFRIS_DESKTOP_CHAT_COMMAND"))
         ));
+        assert!(matches!(
+            hooked("/socket", None, None, Some("i3-msg")),
+            Err(ConfigError::Command("SCUFRIS_DESKTOP_MODE_COMMAND"))
+        ));
     }
 
     #[test]
     fn the_description_names_every_outside_effect() {
-        let config = resolve(
+        let config = hooked(
             "/run/user/1000/scufris/daemon.sock",
             None,
             Some("/nix/store/x/bin/scufris-chat"),
+            Some("/nix/store/x/bin/scufris-desktop-mode"),
         )
         .unwrap();
         assert_eq!(
             config.describe(),
             concat!(
                 "socket=/run/user/1000/scufris/daemon.sock\n",
+                "command_socket=/run/user/1000/scufris/desktop.sock\n",
                 "state_file=/run/user/1000/scufris-desktop/pending.json\n",
                 "stt_endpoint=http://127.0.0.1:10301/inference\n",
                 "hotkey=Super+D\n",
                 "chat_command=/nix/store/x/bin/scufris-chat\n",
                 "restart_command=none\n",
+                "mode_command=/nix/store/x/bin/scufris-desktop-mode\n",
             )
         );
     }

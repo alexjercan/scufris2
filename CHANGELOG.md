@@ -54,6 +54,17 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   so another project can ship a widget for the desktop. Widgets that shipped
   with Scufris always win, and one that will not install is reported in the log
   rather than stopping the companion.
+- `scufris-ctl`, which presses the pill's keys from outside its window. It ships
+  with the companion and takes one verb - `open`, `cancel`, or `accept` - so a
+  window manager binding can be the thing that reads the key. On i3 that makes
+  bare `Escape` and `Return` a binding mode the pill owns only while it is up;
+  `programs.scufris.desktop.modeCommand` is how the companion leaves the mode
+  again, including when the pill closed for a reason you never asked for. See
+  [Using Scufris](docs/src/guide/using.md).
+- The pill answers `Super+Escape` and `Super+Enter` while it is on screen,
+  built from whatever modifier your activation hotkey uses. That is the
+  fallback on a desktop with no binding modes, and it is what puts a resting
+  pill away without opening the microphone on the way.
 
 ### Changed
 

@@ -10,6 +10,17 @@
 //! built and shown exactly like a passive pill and is never focused. A box that
 //! took the keyboard would take those keys away from the window that acts on
 //! them.
+//!
+//! Refusing the keyboard is said again before every raise, not once at build
+//! time. The window is built refusing it, and the toolkit hands that refusal
+//! back on its own: tao restores `accept-focus` from a one-shot draw handler,
+//! so the box advertises `WM_HINTS.input = True` from its first appearance
+//! onwards. A window manager that unmanages a hidden window and manages it
+//! again on the next show - i3 does - then reads those hints and gives the
+//! newly mapped box the keyboard. The first review is unaffected because the
+//! box has not been drawn yet; every later one loses the orb its keys, and
+//! nothing on the orb can ask for them back, because a review has no further
+//! change to make and an activation does nothing in it.
 
 use tauri::{
     AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
@@ -115,29 +126,80 @@ pub fn follow(app: &AppHandle, state: &str) -> Result<(), String> {
     }
 }
 
+/// The window operations one raise needs.
+///
+/// A trait so the order they run in is testable without a display. The order is
+/// the whole of the keyboard contract: refusing the keyboard has to reach the
+/// window before the window manager sees it, and a window manager sees it when
+/// it is mapped.
+trait Frame {
+    /// Says whether the box may hold the keyboard.
+    fn accept_focus(&self, accept: bool) -> Result<(), String>;
+    /// Puts the box where it belongs.
+    fn place(&self) -> Result<(), String>;
+    /// Puts the box on screen.
+    fn show(&self) -> Result<(), String>;
+    /// Answers whether the box is up.
+    fn visible(&self) -> Result<bool, String>;
+    /// Keeps the box over the desktop.
+    fn keep_on_top(&self) -> Result<(), String>;
+}
+
+impl Frame for WebviewWindow {
+    fn accept_focus(&self, accept: bool) -> Result<(), String> {
+        self.set_focusable(accept)
+            .map_err(|error| format!("the transcript box would not refuse the keyboard: {error}"))
+    }
+
+    fn place(&self) -> Result<(), String> {
+        place(self).map_err(|error| format!("the transcript box could not be placed: {error}"))
+    }
+
+    fn show(&self) -> Result<(), String> {
+        WebviewWindow::show(self)
+            .map_err(|error| format!("the transcript box could not be shown: {error}"))
+    }
+
+    fn visible(&self) -> Result<bool, String> {
+        self.is_visible()
+            .map_err(|error| format!("the transcript box could not confirm that it is up: {error}"))
+    }
+
+    fn keep_on_top(&self) -> Result<(), String> {
+        self.set_always_on_top(true)
+            .map_err(|error| format!("the transcript box could not be kept on top: {error}"))
+    }
+}
+
 /// Shows the box above the orb without ever touching the keyboard.
 fn show(app: &AppHandle) -> Result<(), String> {
     let window = ensure(app).map_err(|error| format!("the transcript box is missing: {error}"))?;
+    raise(&window)
+}
+
+/// Puts one box on screen, in the only order that keeps the orb its keys.
+fn raise(frame: &impl Frame) -> Result<(), String> {
+    // First, and every time. See the module note: the toolkit gives the box
+    // back its right to the keyboard after the first draw, so a raise that did
+    // not say this again would hand the orb's keys to a window that has no use
+    // for them and no way to give them back. A box that will not refuse them is
+    // worse than no box at all - unread words leave the person their keys - so
+    // this is the one thing here that refuses rather than reports.
+    frame.accept_focus(false)?;
     // Placement is part of being read: the orb window is bottom-center on
     // whichever monitor the window manager reports, and the box belongs
     // directly above it.
-    if let Err(error) = place(&window) {
-        tracing::warn!("the transcript box could not be placed: {error}");
+    if let Err(error) = frame.place() {
+        tracing::warn!("{error}");
     }
-    window
-        .show()
-        .map_err(|error| format!("the transcript box could not be shown: {error}"))?;
-    match window.is_visible() {
+    frame.show()?;
+    match frame.visible() {
         Ok(true) => {}
         Ok(false) => return Err("the transcript box did not come up".into()),
-        Err(error) => {
-            return Err(format!(
-                "the transcript box could not confirm that it is up: {error}"
-            ));
-        }
+        Err(error) => return Err(error),
     }
-    if let Err(error) = window.set_always_on_top(true) {
-        tracing::warn!("the transcript box could not be kept on top: {error}");
+    if let Err(error) = frame.keep_on_top() {
+        tracing::warn!("{error}");
     }
     Ok(())
 }
@@ -180,7 +242,109 @@ fn place(window: &WebviewWindow) -> tauri::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, collections::HashMap};
+
     use super::*;
+
+    /// One box that records what it was told, in order.
+    #[derive(Default)]
+    struct RecordedFrame {
+        operations: RefCell<Vec<String>>,
+        /// Operations that answer with a failure instead of doing anything.
+        refuse: HashMap<&'static str, &'static str>,
+    }
+
+    impl RecordedFrame {
+        fn refusing(operation: &'static str, reason: &'static str) -> Self {
+            Self {
+                refuse: HashMap::from([(operation, reason)]),
+                ..Self::default()
+            }
+        }
+
+        fn attempt(&self, operation: &'static str) -> Result<(), String> {
+            self.operations.borrow_mut().push(operation.to_string());
+            match self.refuse.get(operation) {
+                Some(reason) => Err((*reason).to_string()),
+                None => Ok(()),
+            }
+        }
+
+        fn operations(&self) -> Vec<String> {
+            self.operations.borrow().clone()
+        }
+    }
+
+    impl Frame for RecordedFrame {
+        fn accept_focus(&self, accept: bool) -> Result<(), String> {
+            self.operations
+                .borrow_mut()
+                .push(format!("accept-focus {accept}"));
+            match self.refuse.get("accept-focus") {
+                Some(reason) => Err((*reason).to_string()),
+                None => Ok(()),
+            }
+        }
+        fn place(&self) -> Result<(), String> {
+            self.attempt("place")
+        }
+        fn show(&self) -> Result<(), String> {
+            self.attempt("show")
+        }
+        fn visible(&self) -> Result<bool, String> {
+            self.attempt("visible")?;
+            Ok(true)
+        }
+        fn keep_on_top(&self) -> Result<(), String> {
+            self.attempt("keep-on-top")
+        }
+    }
+
+    /// Every raise refuses the keyboard, and refuses it before the box is on
+    /// screen, because a window manager reads that refusal when the window is
+    /// mapped. Saying it once at build time is not enough: the toolkit restores
+    /// the window's right to the keyboard after its first draw, so from the
+    /// second raise on an unsaid refusal hands the orb's keys to a box that
+    /// cannot use them and cannot give them back.
+    #[test]
+    fn every_raise_refuses_the_keyboard_before_the_box_is_on_screen() {
+        let frame = RecordedFrame::default();
+        assert_eq!(raise(&frame), Ok(()));
+        assert_eq!(raise(&frame), Ok(()));
+        assert_eq!(
+            frame.operations(),
+            [
+                "accept-focus false",
+                "place",
+                "show",
+                "visible",
+                "keep-on-top",
+                "accept-focus false",
+                "place",
+                "show",
+                "visible",
+                "keep-on-top",
+            ]
+        );
+    }
+
+    /// Placement and always-on-top are chrome around the orb and are reported.
+    /// The keyboard is not: a box that would hold it takes every key the
+    /// person has, so it does not come up at all.
+    #[test]
+    fn a_box_that_will_not_refuse_the_keyboard_never_comes_up() {
+        let frame =
+            RecordedFrame::refusing("accept-focus", "the box would not refuse the keyboard");
+        assert_eq!(
+            raise(&frame),
+            Err("the box would not refuse the keyboard".into())
+        );
+        assert_eq!(frame.operations(), ["accept-focus false"]);
+
+        let frame = RecordedFrame::refusing("place", "the box could not be placed");
+        assert_eq!(raise(&frame), Ok(()));
+        assert!(frame.operations().iter().any(|step| step == "show"));
+    }
 
     #[test]
     fn the_frame_is_the_size_the_page_lays_out() {

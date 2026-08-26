@@ -20,6 +20,7 @@ in {
     test -f ${resources}/share/scufris/extensions/scufris/desktop/index.ts
     test -f ${resources}/share/scufris/extensions/scufris/desktop/protocol.ts
     test -f ${resources}/share/scufris/extensions/scufris/desktop/server.ts
+    test -f ${resources}/share/scufris/extensions/scufris/widgets/index.ts
     test -f ${voiceResources}/share/scufris/extensions/scufris/voice/speech.ts
     test -x ${voiceResources}/share/scufris/tools/voice/scufris-speak
     test ! -e ${resources}/share/scufris/scripts/scufris-dev
@@ -32,6 +33,7 @@ in {
     test -x ${resources}/share/scufris/scripts/scufris-jobs
     test -x ${resources}/share/scufris/scripts/scufris-artifacts-prune
     test -f ${resources}/share/scufris/skills/workflow/SKILL.md
+    test -f ${resources}/share/scufris/skills/widgets/SKILL.md
     touch "$out"
   '';
 }

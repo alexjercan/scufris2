@@ -9,6 +9,17 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Added
+
+- Native widgets. Scufris can open a small panel on the desktop while it
+  answers: an exhibit on a shelf above the pill, which ages out on its own, or
+  an instrument in one of four edge slots when you ask to keep it. A widget
+  window never takes the keyboard. The `widgets` extension registers
+  `scufris_widget_open`, `scufris_widget_update`, `scufris_widget_close`, and
+  `scufris_widget_clear`, typed from what the companion says it has installed,
+  and ships with the `note` widget. See the
+  [widgets](docs/src/dev/widgets.md) chapter.
+
 ### Changed
 
 - Control protocol version 2. It adds the widget commands, the first messages

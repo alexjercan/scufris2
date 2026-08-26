@@ -28,8 +28,10 @@ import {
   ControlServer,
   MAX_REMEMBERED_SUBMISSIONS,
   SocketBusyError,
+  WIDGET_CONTROL_EVENT,
   submissionDigest,
   type ControlHost,
+  type WidgetControlSignal,
 } from "./server.ts";
 
 const maxSessionNameLength = 128;
@@ -233,9 +235,10 @@ export default function desktop(pi: ExtensionAPI): void {
       return;
     }
     if (!server) server = new ControlServer(socketPath, host, notify);
-    if (!server.listening) {
+    const serving = server;
+    if (!serving.listening) {
       try {
-        await server.start();
+        await serving.start();
       } catch (error) {
         server = undefined;
         notify(
@@ -248,6 +251,12 @@ export default function desktop(pi: ExtensionAPI): void {
       }
     }
     publish();
+    // Widgets are commanded over this socket by the extension that owns them,
+    // and this is the only way it reaches one: the socket is this extension's,
+    // and a server lives no longer than the session that started it.
+    pi.events.emit(WIDGET_CONTROL_EVENT, {
+      control: serving,
+    } satisfies WidgetControlSignal);
   });
 
   pi.on("agent_start", () => {
@@ -264,6 +273,9 @@ export default function desktop(pi: ExtensionAPI): void {
     tracker.reset();
     ledger.clear();
     acceptance.reset();
+    // Withdrawn before the socket closes, so nothing sends a command into a
+    // connection that is being taken down under it.
+    pi.events.emit(WIDGET_CONTROL_EVENT, {} satisfies WidgetControlSignal);
     const stopping = server;
     server = undefined;
     context = undefined;

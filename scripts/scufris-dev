@@ -62,9 +62,11 @@ extensions=(
   "$root/extensions/scufris/voice/index.ts"
   "$root/extensions/scufris/calm.ts"
   "$root/extensions/scufris/desktop/index.ts"
+  "$root/extensions/scufris/widgets/index.ts"
 )
 skills=(
   "$root/skills/workflow"
+  "$root/skills/widgets"
 )
 if [[ "$voice" == true ]]; then
   if [[ "${SCUFRIS_DEV_VOICE:-}" != 1 ]] \

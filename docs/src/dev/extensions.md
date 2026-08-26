@@ -1,7 +1,7 @@
 # Extensions
 
-All four extensions are listed in `package.json`, by the development launcher,
-and by the Nix launcher, together with the workflow skill.
+All five extensions are listed in `package.json`, by the development launcher,
+and by the Nix launcher, together with the workflow and widgets skills.
 
 ## workflow
 
@@ -81,3 +81,13 @@ enabled it hides thinking blocks, tool call text, tool execution rows, and
 `scufris-job-event` and `scufris-widget-event` rows. `/calm on|off` persists
 the state as a session entry; the default is on. Calm is presentation only:
 the underlying entries stay in the session.
+
+## widgets
+
+`widgets/index.ts` owns the desktop companion's widgets. It registers
+`scufris_widget_open`, `scufris_widget_update`, `scufris_widget_close`, and
+`scufris_widget_clear`, typed from the catalog the companion announces on each
+connection, and turns a surface the user closed into a `scufris-widget-event`
+follow-up message. It reaches the control socket through the desktop extension,
+which emits the two verbs it needs when it starts serving and withdraws them
+when it stops. See [Widgets](widgets.md).

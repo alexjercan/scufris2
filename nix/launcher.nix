@@ -20,6 +20,10 @@ assert !voice || (piperPackage != null && piperModel != null && piperConfig != n
     "${resources}/share/scufris/extensions/scufris/calm.ts"
     "--extension"
     "${resources}/share/scufris/extensions/scufris/desktop/index.ts"
+    "--extension"
+    "${resources}/share/scufris/extensions/scufris/widgets/index.ts"
+    "--skill"
+    "${resources}/share/scufris/skills/widgets"
   ];
   renderedArgs = pkgs.lib.concatMapStringsSep " " pkgs.lib.escapeShellArg extensionArgs;
 in

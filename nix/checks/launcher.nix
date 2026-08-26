@@ -36,6 +36,10 @@ in
         ${resources}/share/scufris/extensions/scufris/calm.ts
         --extension
         ${resources}/share/scufris/extensions/scufris/desktop/index.ts
+        --extension
+        ${resources}/share/scufris/extensions/scufris/widgets/index.ts
+        --skill
+        ${resources}/share/scufris/skills/widgets
         user-argument
         EOF
         diff -u expected actual
@@ -77,6 +81,10 @@ in
         ${voiceResources}/share/scufris/extensions/scufris/calm.ts
         --extension
         ${voiceResources}/share/scufris/extensions/scufris/desktop/index.ts
+        --extension
+        ${voiceResources}/share/scufris/extensions/scufris/widgets/index.ts
+        --skill
+        ${voiceResources}/share/scufris/skills/widgets
         user-argument
         EOF
         diff -u expected actual

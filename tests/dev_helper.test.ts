@@ -143,6 +143,7 @@ function expectedArgs(projectRoot: string, sessionDirectory: string): string[] {
     // The desktop extension is what serves the control socket, so a
     // working-tree run without it cannot answer the pill at all.
     join("desktop", "index.ts"),
+    join("widgets", "index.ts"),
   ];
   return [
     ...extensions.flatMap((name) => [
@@ -151,6 +152,8 @@ function expectedArgs(projectRoot: string, sessionDirectory: string): string[] {
     ]),
     "--skill",
     join(projectRoot, "skills", "workflow"),
+    "--skill",
+    join(projectRoot, "skills", "widgets"),
     "--session-dir",
     sessionDirectory,
     "--continue",

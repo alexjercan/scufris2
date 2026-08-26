@@ -69,3 +69,36 @@ Per the proof column of design page section 09:
 - The session HUD per task 20260825-153801's own verification.
 
 Design and decisions: `tasks/20260825-194822/RESEARCH.md`.
+
+## Increment 1 landed (2026-08-26)
+
+Five commits, in the plan's landing order:
+
+1. `5441f2c` Remove Dashboardd widget control
+2. `50c6f90` Bump the control protocol to version 2
+3. `ddd81b3` Correlate widget commands with their answers
+4. `e04d6e1` Give the companion a widgets runtime and its windows
+5. this commit: the widgets extension, its four tools, and the skill
+
+Two deviations from the plan, both deliberate:
+
+- The protocol carries nine widget body variants, not eight.
+  `widget_done` answers an update, a close, and a clear, which name no
+  new surface. Without it those three would have to answer with
+  `widget_opened` and a surface they did not create.
+- Surface identifiers are minted by the shell pool and never reused. A
+  retired shell is destroyed rather than re-adopted, and the host
+  reserves a shell before it asks the runtime to open anything, so the
+  label is the surface identifier from the start. This resolves the
+  plan's own conflict between "the surface id doubles as the window
+  label" and "a retired shell returns to the pool". `Slot::Stage` is
+  deferred to increment 4 with its first user, and the pin tick is a
+  toggle rather than one-way.
+
+Checks: `npm run check` (138 tests, Prettier clean), `cargo test` (168
+tests), `cargo clippy --all-targets` clean, `nix flake check -L
+--offline` all checks passed, `python3 -m unittest discover -s tests`
+(33 tests). A scoped grep finds no dashboardd outside `tasks/` and
+outside the CHANGELOG entry that records its removal.
+
+Live acceptance of "show a note" is Alex's, on the desktop.

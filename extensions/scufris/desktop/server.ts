@@ -162,6 +162,30 @@ export type WidgetNotice =
   | { type: "widget_event"; surface: string; event: SurfaceEvent }
   | { type: "catalog"; widgets: CatalogEntry[] };
 
+/**
+ * Event this daemon emits with the widget control it is serving.
+ *
+ * The socket, its ownership, and its lifetime belong to the extension that
+ * serves it. What the extension that owns widgets needs from it is two verbs,
+ * so two verbs are what travel: a control while one is served, and nothing once
+ * it is not.
+ */
+export const WIDGET_CONTROL_EVENT = "scufris:widget-control";
+
+/** The daemon half of widgets, as the extension that owns them sees it. */
+export interface WidgetControl {
+  /** Sends one command to the companion and answers with what it produced. */
+  request(command: WidgetCommand): Promise<WidgetAnswer>;
+  /** Registers the one listener for companion messages that answer no command. */
+  watchWidgets(listener: (notice: WidgetNotice) => void): void;
+}
+
+/** What [`WIDGET_CONTROL_EVENT`] carries. */
+export interface WidgetControlSignal {
+  /** The control now serving, or nothing once the socket is closed. */
+  control?: WidgetControl;
+}
+
 /** One widget command waiting for its answer. */
 interface PendingWidget {
   resolve: (answer: WidgetAnswer) => void;

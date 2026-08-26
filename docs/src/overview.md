@@ -2,8 +2,8 @@
 
 Scufris is a personal assistant that runs in the Pi conversation harness. It
 adds a focused foreground identity, a project workflow engine with delegated
-worker jobs, Dashboardd widget control, Calm transcript presentation, optional
-local speech, and an optional desktop voice pill.
+worker jobs, Calm transcript presentation, optional local speech, and an
+optional desktop voice pill.
 
 Scufris ships as a Nix flake package and a Home Manager module. The default
 package contains no speech code or speech runtime in its closure. Linux users
@@ -12,7 +12,7 @@ Manager.
 
 ## Components
 
-Scufris packages five capability-owned Pi extensions:
+Scufris packages four capability-owned Pi extensions:
 
 - `workflow` is the core engine. It owns the Scufris identity, project
   workflow preferences, delegated job spawn and control, worker events,
@@ -20,7 +20,6 @@ Scufris packages five capability-owned Pi extensions:
 - `voice` owns response shaping in every package and optional Piper speech
   playback in voice-capable packages.
 - `calm` reduces transcript and working-state clutter.
-- `dashboard` owns Dashboardd widget surfaces and their tools.
 - `desktop` serves the control socket in the popup process and reports one
   assistant state to the desktop companion.
 
@@ -31,8 +30,8 @@ user message. The conversation stays in the popup Pi process, so a companion
 crash never stops it. See [Desktop companion](dev/desktop.md).
 
 Deterministic executables called by extensions live under `tools/`. Commands
-for people live under `scripts/`. Model-facing workflow and dashboard policy
-lives in small skills under `skills/`.
+for people live under `scripts/`. Model-facing workflow policy lives in small
+skills under `skills/`.
 
 ## Responsibilities
 
@@ -40,8 +39,6 @@ lives in small skills under `skills/`.
   including optional speech-to-text input.
 - Scufris delegates work expected to take minutes to independent worker jobs
   in tmux sessions. The foreground conversation never blocks on them.
-- Dashboardd is an external service. It supplies the widget catalog and the
-  `dashboardctl` command.
 - The desktop configuration owns popup placement, keybindings, and toggle
   policy.
 

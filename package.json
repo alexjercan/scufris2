@@ -20,7 +20,6 @@
       "./extensions/scufris/workflow/index.ts",
       "./extensions/scufris/voice/index.ts",
       "./extensions/scufris/calm.ts",
-      "./extensions/scufris/dashboard/index.ts",
       "./extensions/scufris/desktop/index.ts"
     ],
     "skills": [

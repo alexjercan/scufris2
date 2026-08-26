@@ -5,20 +5,20 @@
 Repository ownership follows the runtime architecture:
 
 - `extensions/scufris/` contains the Pi extensions: `workflow/`, `voice/`,
-  `dashboard/`, `desktop/`, and the small independent `calm.ts`. Extensions own
-  lifecycle events, native tools, session state, and notifications.
+  `desktop/`, and the small independent `calm.ts`. Extensions own lifecycle
+  events, native tools, session state, and notifications.
 - `desktop/` is a cargo workspace holding `scufris-control`, the desktop control
   protocol, and `scufris-desktop`, the Tauri voice pill and tray companion. It
   ships as its own flake package. See [Desktop companion](desktop.md).
 - `tools/` contains deterministic executables called by extensions:
   `jobs/scufris-jobs`, `jobs/scufris-report`,
   `quick-review-agent/scufris-quick-review-agent`,
-  `dashboard/scufris-dashboard`, and `voice/scufris-speak`.
+  `desktop/scufris-socket-lock`, and `voice/scufris-speak`.
 - `scripts/` contains commands called directly by people:
   `scufris-jobs` (inspection CLI), `scufris-artifacts-prune`, and the
   development launcher `scufris-dev`.
-- `skills/` contains the distributed model-facing `workflow` and `dashboard`
-  skills. Development-only skills live in `.agents/skills/`.
+- `skills/` contains the distributed model-facing `workflow` skill.
+  Development-only skills live in `.agents/skills/`.
 - `nix/` contains one file per build concern: `resources.nix`, `launcher.nix`,
   `popup.nix`, `voice.nix`, `desktop.nix`, `whisper.nix`, `dev-shell.nix`,
   `docs.nix`, and `home-manager.nix`. `nix/scufris.nix` composes them into the
@@ -33,8 +33,8 @@ process and filesystem work lives in the small owning helper scripts.
 One codebase serves two roles selected by `SCUFRIS_ROLE`:
 
 - `orchestrator`: the foreground Scufris session. The launcher sets this. The
-  identity, orchestration, response, speech, and dashboard modules activate
-  only in this role.
+  identity, orchestration, response, and speech modules activate only in this
+  role.
 - `worker`: a delegated job execution. The jobs helper sets this when it
   launches a harness inside a tmux pane. Pi workers load only the
   `worker-report.ts` extension, which registers the `scufris_report` tool.
@@ -60,10 +60,9 @@ through `runPrivateHelper` in `extensions/scufris/shared/runtime.ts`:
 - Output is bounded at 2 MiB and every call has a deadline. Helpers validate
   request fields strictly and reject unknown fields.
 
-The helpers are `tools/jobs/scufris-jobs` (job lifecycle, see
-[Jobs](jobs.md)) and `tools/dashboard/scufris-dashboard` (a bounded
-`dashboardctl` adapter). `tools/voice/scufris-speak` uses the same subprocess
-shape with text on stdin and exit codes instead of JSON.
+The helper is `tools/jobs/scufris-jobs` (job lifecycle, see [Jobs](jobs.md)).
+`tools/voice/scufris-speak` uses the same subprocess shape with text on stdin
+and exit codes instead of JSON.
 
 ## Trust model
 

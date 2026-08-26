@@ -61,13 +61,6 @@ restarts the implementation job with the review feedback. The separate agent
 is closed when the review completes, the workflow stops, or the Scufris session
 shuts down.
 
-## Dashboard widgets
-
-Ask Scufris to show live information and it opens a native Dashboardd widget.
-Widgets and variants are discovered when the session starts. Scufris updates,
-focuses, and closes only surfaces it opened. When a widget is closed outside
-Scufris, it forgets the surface and does not reopen it unasked.
-
 ## Commands
 
 - `/speech on|off|once|replay`: control spoken responses in a voice-capable

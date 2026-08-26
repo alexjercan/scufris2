@@ -7,6 +7,15 @@ and this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Releases are
 immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
+## [Unreleased]
+
+### Removed
+
+- Dashboardd widget control. The `dashboard` extension, its skill, the
+  `scufris-dashboard` helper, the `dashboardd` flake input, and the
+  `programs.scufris.dashboard.*` options are gone. Widgets return as a native
+  runtime inside the desktop companion.
+
 ## [0.4.0] - 2026-08-25
 
 ### Added

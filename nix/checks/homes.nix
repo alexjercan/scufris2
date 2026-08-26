@@ -25,7 +25,6 @@
             programs.scufris = {
               enable = true;
               piPackage = fixtures.systemPi;
-              dashboard.enable = false;
             };
           }
           {programs.scufris = settings;}

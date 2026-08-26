@@ -158,9 +158,7 @@ Test ownership:
   unrelated sessions survive.
 - `tests/test_quick_review_agent.py`: the strict RPC adapter, pinned npm
   extension invocation, resource isolation, and completion relay.
-- `tests/test_scufris_dashboard.py` and
-  `tests/test_scufris_artifacts_prune.py`: the dashboard adapter and sidecar
-  pruning.
+- `tests/test_scufris_artifacts_prune.py`: sidecar pruning.
 
 ## Documentation
 

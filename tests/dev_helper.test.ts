@@ -140,7 +140,6 @@ function expectedArgs(projectRoot: string, sessionDirectory: string): string[] {
     join("workflow", "index.ts"),
     join("voice", "index.ts"),
     "calm.ts",
-    join("dashboard", "index.ts"),
     // The desktop extension is what serves the control socket, so a
     // working-tree run without it cannot answer the pill at all.
     join("desktop", "index.ts"),
@@ -152,8 +151,6 @@ function expectedArgs(projectRoot: string, sessionDirectory: string): string[] {
     ]),
     "--skill",
     join(projectRoot, "skills", "workflow"),
-    "--skill",
-    join(projectRoot, "skills", "dashboard"),
     "--session-dir",
     sessionDirectory,
     "--continue",

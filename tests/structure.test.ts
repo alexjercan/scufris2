@@ -23,7 +23,6 @@ test("package loads only capability-owned Scufris extensions", async () => {
     "./extensions/scufris/workflow/index.ts",
     "./extensions/scufris/voice/index.ts",
     "./extensions/scufris/calm.ts",
-    "./extensions/scufris/dashboard/index.ts",
     "./extensions/scufris/desktop/index.ts",
   ]);
 
@@ -44,7 +43,6 @@ test("package loads only capability-owned Scufris extensions", async () => {
     join(root, "extensions", "scufris", "workflow", "worker-report.ts"),
   );
   await access(join(root, "tools", "jobs", "scufris-report"));
-  await access(join(root, "tools", "dashboard", "scufris-dashboard"));
   await access(join(root, "tools", "voice", "scufris-speak"));
   assert.deepEqual((await readdir(join(root, "scripts"))).sort(), [
     "scufris-artifacts-prune",

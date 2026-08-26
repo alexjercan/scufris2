@@ -34,8 +34,6 @@
       then defaults.voiceResources
       else defaults.resources;
     piPackage = cfg.piPackage;
-    dashboardctlPackage = cfg.dashboard.dashboardctlPackage;
-    dashboard = cfg.dashboard.enable;
     voice = cfg.voice.enable;
     piperPackage = cfg.voice.piper.package;
     piperModel = cfg.voice.piper.model;
@@ -74,21 +72,6 @@ in {
       type = lib.types.listOf lib.types.str;
       default = ["~/personal" "~/work" "~/third-party"];
       description = "Directories recursively searched for workflow projects.";
-    };
-
-    dashboard = {
-      enable =
-        lib.mkEnableOption "dashboardd widget control"
-        // {
-          default = true;
-        };
-
-      dashboardctlPackage = lib.mkOption {
-        type = lib.types.package;
-        default = defaults.dashboardctlPackage;
-        defaultText = lib.literalExpression "inputs.dashboardd.packages.${system}.dashboardd-desktop";
-        description = "Package that provides dashboardctl.";
-      };
     };
 
     voice = {

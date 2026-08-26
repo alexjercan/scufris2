@@ -14,12 +14,11 @@
     voice = true;
   };
   piPackage = inputs.llm-agents.packages.${system}.pi;
-  dashboardctlPackage = inputs.dashboardd.packages.${system}.dashboardd-desktop;
   launcher = import ./launcher.nix {
-    inherit pkgs resources piPackage dashboardctlPackage;
+    inherit pkgs resources piPackage;
   };
   voiceLauncher = import ./launcher.nix {
-    inherit pkgs piPackage dashboardctlPackage;
+    inherit pkgs piPackage;
     resources = voiceResources;
     voice = true;
     inherit (voice) piperPackage;
@@ -39,7 +38,6 @@ in {
     resources
     voiceResources
     piPackage
-    dashboardctlPackage
     launcher
     voiceLauncher
     desktop

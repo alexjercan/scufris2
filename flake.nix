@@ -14,11 +14,6 @@
       url = "github:numtide/llm-agents.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    dashboardd = {
-      url = "github:alexjercan/dashboardd/v0.2.0";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs = inputs @ {
@@ -89,7 +84,6 @@
             resources = self.packages.${system}.resources;
             voiceResources = self.packages.${system}.voice-resources;
             piPackage = inputs.llm-agents.packages.${system}.pi;
-            dashboardctlPackage = inputs.dashboardd.packages.${system}.dashboardd-desktop;
             desktopPackage = self.packages.${system}.scufris-desktop;
           };
         };

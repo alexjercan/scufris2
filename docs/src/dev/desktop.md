@@ -4,10 +4,6 @@
 application built from the `desktop/` cargo workspace and shipped as its own
 flake package, so consumers who never enable it never build Tauri.
 
-The stack matches `dashboardd-desktop` on purpose. A later increment embeds the
-Dashboardd runtime in this same host, and a shared stack makes that a mechanical
-change instead of an architectural one.
-
 ## Ownership
 
 scufris-desktop owns:

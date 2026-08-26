@@ -168,7 +168,7 @@ in
         restart=${lib.getExe desktopConfig.restartCommand}
         # The companion may only restart the backend service this module owns.
         grep -F 'systemctl --user restart scufris-popup.service' "$restart"
-        ! grep -Ei 'whisper|dashboardd|kitty' "$restart"
+        ! grep -Ei 'whisper|kitty' "$restart"
         touch "$out"
       '';
   }

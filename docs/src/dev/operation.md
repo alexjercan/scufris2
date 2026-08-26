@@ -80,8 +80,6 @@ journalctl --user -u scufris-popup.service
   failures never fail the assistant turn.
 - Voice input does not work: speech-to-text is Pi configuration, not
   Scufris.
-- Dashboard control fails: Dashboardd is external. Confirm its service and
-  `dashboardctl`, or set `programs.scufris.dashboard.enable = false`.
 - A job shows `failed: worker execution was lost`: startup reconciliation
   found no live pane for a running record, for example after a reboot. The
   report and conversation survive; steer the job to continue it in a new

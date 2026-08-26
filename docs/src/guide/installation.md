@@ -70,9 +70,7 @@ Import the module from the pinned flake input:
 ```
 
 This installs the rendered launcher in `home.packages`. The workflow,
-response, and Calm extensions are always present. Dashboard control is enabled
-by default; set `programs.scufris.dashboard.enable = false` when Dashboardd is
-unavailable.
+response, Calm, and desktop extensions are always present.
 
 The default Pi package comes from the pinned `llm-agents.nix` input. A
 configuration that manages Pi itself can pass its own package:

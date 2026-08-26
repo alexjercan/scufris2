@@ -5,7 +5,7 @@ Global `~/AGENTS.md` applies. This file defines project-specific instructions.
 ## Project
 
 - `scufris2` is the package. Scufris is the user-facing Pi assistant.
-- Pi owns the foreground conversation. Dashboardd is an external widget service.
+- Pi owns the foreground conversation. The desktop companion owns windows.
 - Keep orchestration narrow. Prefer product skills and small deterministic
   helpers over extension complexity.
 

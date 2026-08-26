@@ -1,9 +1,7 @@
 # Extensions
 
-All four extensions are listed in `package.json` and by the development
-launcher. The Nix launcher always passes the workflow, voice, and calm
-extensions and the workflow skill; it adds the dashboard extension and its
-skill only when dashboard control is enabled, which is the default.
+All four extensions are listed in `package.json`, by the development launcher,
+and by the Nix launcher, together with the workflow skill.
 
 ## workflow
 
@@ -83,22 +81,3 @@ enabled it hides thinking blocks, tool call text, tool execution rows, and
 `scufris-job-event` and `scufris-widget-event` rows. `/calm on|off` persists
 the state as a session entry; the default is on. Calm is presentation only:
 the underlying entries stay in the session.
-
-## dashboard
-
-`dashboard/index.ts` controls Dashboardd widgets through the
-`scufris-dashboard` helper, which validates requests and drives
-`dashboardctl` with bounded output and a five second deadline.
-
-At `session_start` it discovers the widget catalog, validates it strictly,
-and registers tools generated from the catalog:
-
-- `scufris_widget_open`: a union schema with one branch per widget variant,
-  including typed options and inputs.
-- `scufris_widget_update`, `scufris_widget_focus`, `scufris_widget_close`:
-  operate only on surfaces this session opened.
-- `scufris_widget_list`: all surfaces, with ownership marked.
-
-While owned surfaces exist it polls the surface list once per second. A
-surface closed outside Scufris is forgotten and reported as a
-`scufris-widget-event` follow-up message without triggering a turn.

@@ -109,6 +109,24 @@ pub enum Life {
     Pinned,
 }
 
+/// What the backend behind a surface is doing, if it has one.
+///
+/// Separate from [`Life`] rather than folded into it, because the two say
+/// different things and hold at the same time: a panel the person pinned can
+/// still be showing numbers from a process that died, and a dim exhibit whose
+/// sampler is fine is not the same as a bright one whose sampler is gone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Health {
+    /// Writing, and recently.
+    Fresh,
+    /// Still running, but it has not written for a while. The number on screen
+    /// is old rather than wrong.
+    Stale,
+    /// Gone. The number on screen will never change again.
+    Dead,
+}
+
 /// Why the runtime's clocks are stopped, if they are.
 ///
 /// A set rather than a flag, because the reasons overlap and each one is lifted
@@ -147,6 +165,16 @@ pub struct Surface {
     pub hovered: bool,
     /// How long it has been dim, counting only the time its clock ran.
     pub aging: Duration,
+    /// Which backend feeds it, if any. A widget with no backend shows only
+    /// what the open and the updates carried.
+    pub backend: Option<String>,
+    /// The payload the open carried. Kept because it is half of what finds the
+    /// running backend, which is what a restart needs to name.
+    pub spawn: Value,
+    /// How often its widget says a reading should arrive.
+    pub cadence: Duration,
+    /// What its backend is doing, if it has one.
+    pub health: Health,
 }
 
 impl Surface {
@@ -234,6 +262,25 @@ pub enum Cmd {
         /// True when the layer goes down.
         hidden: bool,
     },
+    /// A backend wrote a reading for one surface.
+    Feed {
+        /// Surface whose backend wrote it.
+        surface: SurfaceId,
+        /// What the backend wrote.
+        data: Value,
+    },
+    /// A backend's health changed for one surface.
+    Health {
+        /// Surface whose backend it is.
+        surface: SurfaceId,
+        /// What it now is.
+        health: Health,
+    },
+    /// The person used one surface's restart tick.
+    Restart {
+        /// Surface whose tick the person used.
+        surface: SurfaceId,
+    },
 }
 
 /// One thing the host has to carry out.
@@ -297,6 +344,34 @@ pub enum Act {
         surface: SurfaceId,
         /// What the person reads.
         detail: String,
+    },
+    /// Start reading a backend for one surface, or start it over.
+    Subscribe {
+        /// The surface that reads it.
+        surface: SurfaceId,
+        /// Which backend.
+        backend: String,
+        /// The payload it is started with, which is half of what finds a
+        /// process already answering the same question.
+        spawn: Value,
+        /// How often the widget says a reading should arrive.
+        cadence: Duration,
+        /// True when whatever is running has to be stopped first. The person
+        /// used the restart tick, and a shared process comes back for every
+        /// panel that was reading it.
+        restart: bool,
+    },
+    /// Stop reading a backend for one surface.
+    Unsubscribe {
+        /// The surface that stops reading.
+        surface: SurfaceId,
+    },
+    /// Change what a surface's chrome says about its backend.
+    Health {
+        /// The surface whose chrome changes.
+        surface: SurfaceId,
+        /// What it now says.
+        health: Health,
     },
     /// Change what a surface's chrome says about it.
     Life {
@@ -365,6 +440,9 @@ impl Runtime {
                 Vec::new()
             }
             Cmd::Conceal { hidden } => self.conceal(hidden),
+            Cmd::Feed { surface, data } => self.feed(surface, data),
+            Cmd::Health { surface, health } => self.health(surface, health),
+            Cmd::Restart { surface } => self.restart(surface),
         }
     }
 
@@ -404,6 +482,10 @@ impl Runtime {
                 }
             },
         };
+        // Kept as well as handed to the widget: it is half of what finds the
+        // process behind a live panel, and the restart tick has to name it
+        // again long after the open is over.
+        let spawn = data.clone();
         self.surfaces.insert(
             surface.clone(),
             Surface {
@@ -419,6 +501,10 @@ impl Runtime {
                 cited: true,
                 hovered: false,
                 aging: Duration::ZERO,
+                backend: installed.backend.clone(),
+                spawn: spawn.clone(),
+                cadence: installed.cadence,
+                health: Health::Fresh,
             },
         );
         let exhibit = posture == Posture::Exhibit;
@@ -438,6 +524,17 @@ impl Runtime {
             acts.push(Act::Stick {
                 surface: surface.clone(),
                 sticky: exhibit,
+            });
+        }
+        // After the adopt, so the window exists by the time the first reading
+        // is beaten out of the coalescer.
+        if let Some(backend) = installed.backend.clone() {
+            acts.push(Act::Subscribe {
+                surface: surface.clone(),
+                backend,
+                spawn,
+                cadence: installed.cadence,
+                restart: false,
             });
         }
         if posture == Posture::Exhibit {
@@ -477,6 +574,64 @@ impl Runtime {
         acts.push(Act::Update { surface, data });
         acts.push(Act::Report(ClientBody::WidgetDone { id }));
         acts
+    }
+
+    /// Hands one backend's reading to the surface reading it.
+    ///
+    /// A reading is not a citation. Scufris naming a panel is what says the
+    /// conversation is still about it; a sampler writing its line every second
+    /// says only that the machine is on. A live graph that revived itself would
+    /// be the one exhibit that never ages out, and the shelf would fill with
+    /// them.
+    fn feed(&mut self, surface: SurfaceId, data: Value) -> Vec<Act> {
+        if !self.surfaces.contains_key(&surface) {
+            return Vec::new();
+        }
+        vec![Act::Update { surface, data }]
+    }
+
+    /// Records what a surface's backend is doing.
+    fn health(&mut self, surface: SurfaceId, health: Health) -> Vec<Act> {
+        let Some(open) = self.surfaces.get_mut(&surface) else {
+            return Vec::new();
+        };
+        if open.health == health {
+            return Vec::new();
+        }
+        open.health = health;
+        vec![Act::Health { surface, health }]
+    }
+
+    /// Starts one surface's backend over, because the person asked.
+    fn restart(&mut self, surface: SurfaceId) -> Vec<Act> {
+        let Some(open) = self.surfaces.get_mut(&surface) else {
+            return Vec::new();
+        };
+        let Some(backend) = open.backend.clone() else {
+            return vec![Act::Refuse {
+                surface,
+                detail: "nothing feeds this".into(),
+            }];
+        };
+        // Said before the process is started rather than after it writes: the
+        // tick has to answer immediately, and the panel goes back to saying
+        // dead on its own if the new process does not last.
+        open.health = Health::Fresh;
+        let spawn = open.spawn.clone();
+        let cadence = open.cadence;
+        vec![
+            Act::Health {
+                surface: surface.clone(),
+                health: Health::Fresh,
+            },
+            Act::Subscribe {
+                surface,
+                backend,
+                spawn,
+                cadence,
+                restart: true,
+            },
+        ]
     }
 
     /// Dims every exhibit the turn that just ended never mentioned.
@@ -718,7 +873,12 @@ impl Runtime {
         while self.shelf.len() > SHELF_SLOTS
             && let Some(oldest) = self.shelf.pop_back()
         {
-            self.surfaces.remove(&oldest);
+            let gone = self.surfaces.remove(&oldest);
+            if gone.is_some_and(|surface| surface.backend.is_some()) {
+                acts.push(Act::Unsubscribe {
+                    surface: oldest.clone(),
+                });
+            }
             acts.push(Act::Retire { surface: oldest });
         }
         acts
@@ -726,13 +886,21 @@ impl Runtime {
 
     /// Takes one surface off the screen, whoever asked.
     fn retire(&mut self, surface: &str) -> Vec<Act> {
-        if self.surfaces.remove(surface).is_none() {
+        let Some(gone) = self.surfaces.remove(surface) else {
             return Vec::new();
-        }
+        };
         self.shelf.retain(|id| id != surface);
-        let mut acts = vec![Act::Retire {
+        let mut acts = Vec::new();
+        if gone.backend.is_some() {
+            // Before the retire, so the last panel reading a sampler stops it
+            // rather than leaving a process writing to a window that is gone.
+            acts.push(Act::Unsubscribe {
+                surface: surface.to_string(),
+            });
+        }
+        acts.push(Act::Retire {
             surface: surface.to_string(),
-        }];
+        });
         acts.extend(self.reflow());
         acts
     }
@@ -878,19 +1046,38 @@ width = 200
 height = 90
 "#;
 
+    /// A widget with something feeding it, which the other two do not have.
+    const GAUGE: &str = r#"
+id = "gauge"
+name = "Gauge"
+description = "Show a number that changes"
+width = 250
+height = 130
+backend = "sampler"
+cadence = 500
+"#;
+
     fn catalog() -> Catalog {
-        Catalog::build(&[
-            Source {
-                directory: "note",
-                manifest: NOTE,
-                script: "export function mount() {}",
-            },
-            Source {
-                directory: "clock",
-                manifest: CLOCK,
-                script: "export function mount() {}",
-            },
-        ])
+        Catalog::build(
+            &[
+                Source {
+                    directory: "note",
+                    manifest: NOTE,
+                    script: "export function mount() {}",
+                },
+                Source {
+                    directory: "clock",
+                    manifest: CLOCK,
+                    script: "export function mount() {}",
+                },
+                Source {
+                    directory: "gauge",
+                    manifest: GAUGE,
+                    script: "export function mount() {}",
+                },
+            ],
+            &["sampler"],
+        )
         .expect("the test catalog is well formed")
     }
 
@@ -928,6 +1115,264 @@ height = 90
                 _ => None,
             })
             .expect("the open was answered with a surface")
+    }
+
+    #[test]
+    fn opening_a_widget_with_something_feeding_it_starts_reading_it() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let acts = runtime.apply(
+            &catalog,
+            Cmd::Open {
+                id: "w-1".into(),
+                surface: "widget-1".into(),
+                widget: "gauge".into(),
+                posture: Posture::Exhibit,
+                data: json!({ "every": 2 }),
+            },
+        );
+        assert!(acts.contains(&Act::Subscribe {
+            surface: "widget-1".into(),
+            backend: "sampler".into(),
+            // The payload the open carried, not a summary of it: it is half of
+            // what finds a process already answering the same question.
+            spawn: json!({ "every": 2 }),
+            cadence: Duration::from_millis(500),
+            restart: false,
+        }));
+        // And it comes after the window, so the first reading has somewhere to
+        // land.
+        let adopt = acts
+            .iter()
+            .position(|act| matches!(act, Act::Adopt { .. }))
+            .expect("the shell was adopted");
+        let subscribe = acts
+            .iter()
+            .position(|act| matches!(act, Act::Subscribe { .. }))
+            .expect("the backend was subscribed to");
+        assert!(adopt < subscribe);
+    }
+
+    #[test]
+    fn a_widget_with_nothing_feeding_it_starts_nothing() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let acts = open(&mut runtime, &catalog, "note", Posture::Exhibit);
+        assert!(!acts.iter().any(|act| matches!(act, Act::Subscribe { .. })));
+    }
+
+    #[test]
+    fn the_panel_going_away_is_what_stops_reading_its_backend() {
+        // However it goes: closed by the daemon, closed by the person, aged
+        // out, or pushed off the shelf. A process left writing to a window that
+        // is gone is the failure the supervisor exists to prevent, and the
+        // runtime is where every one of those paths meets.
+        let catalog = catalog();
+        for close in [
+            Cmd::Close {
+                id: "w-close".into(),
+                surface: "widget-1".into(),
+            },
+            Cmd::Dismissed {
+                surface: "widget-1".into(),
+            },
+            Cmd::Clear {
+                id: "w-clear".into(),
+            },
+        ] {
+            let mut runtime = Runtime::new();
+            runtime.apply(
+                &catalog,
+                Cmd::Open {
+                    id: "w-1".into(),
+                    surface: "widget-1".into(),
+                    widget: "gauge".into(),
+                    posture: Posture::Exhibit,
+                    data: json!({}),
+                },
+            );
+            let acts = runtime.apply(&catalog, close.clone());
+            let stops = acts
+                .iter()
+                .position(|act| {
+                    act == &Act::Unsubscribe {
+                        surface: "widget-1".into(),
+                    }
+                })
+                .unwrap_or_else(|| panic!("{close:?} left the backend running: {acts:?}"));
+            let retires = acts
+                .iter()
+                .position(|act| {
+                    act == &Act::Retire {
+                        surface: "widget-1".into(),
+                    }
+                })
+                .expect("the surface retired");
+            assert!(stops < retires, "the window went before its backend did");
+        }
+    }
+
+    #[test]
+    fn an_exhibit_pushed_off_the_shelf_stops_reading_too() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let first = opened(&open(&mut runtime, &catalog, "gauge", Posture::Exhibit));
+        for _ in 0..2 {
+            open(&mut runtime, &catalog, "note", Posture::Exhibit);
+        }
+        let acts = open(&mut runtime, &catalog, "note", Posture::Exhibit);
+        assert!(acts.contains(&Act::Unsubscribe {
+            surface: first.clone()
+        }));
+    }
+
+    #[test]
+    fn a_reading_is_not_a_citation() {
+        // A sampler writing its line every second says the machine is on, not
+        // that the conversation is still about the panel. An exhibit that
+        // revived itself on its own data would be the one that never ages out,
+        // and a shelf of live graphs would never make room for anything.
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let gauge = opened(&open(&mut runtime, &catalog, "gauge", Posture::Exhibit));
+        runtime.apply(&catalog, Cmd::TurnEnded);
+        assert_eq!(
+            runtime.apply(&catalog, Cmd::TurnEnded),
+            vec![Act::Life {
+                surface: gauge.clone(),
+                life: Life::Dim,
+            }]
+        );
+        let acts = runtime.apply(
+            &catalog,
+            Cmd::Feed {
+                surface: gauge.clone(),
+                data: json!({ "cpu": 12 }),
+            },
+        );
+        assert_eq!(
+            acts,
+            vec![Act::Update {
+                surface: gauge.clone(),
+                data: json!({ "cpu": 12 }),
+            }]
+        );
+        assert_eq!(
+            runtime.surface(&gauge).map(|open| open.life),
+            Some(Life::Dim)
+        );
+        // And its grace still runs out.
+        assert!(
+            runtime
+                .apply(&catalog, Cmd::Sweep { elapsed: GRACE })
+                .contains(&Act::Retire {
+                    surface: gauge.clone()
+                })
+        );
+    }
+
+    #[test]
+    fn a_reading_for_a_panel_that_is_gone_goes_nowhere() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        assert!(
+            runtime
+                .apply(
+                    &catalog,
+                    Cmd::Feed {
+                        surface: "widget-9".into(),
+                        data: json!({}),
+                    }
+                )
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_backend_in_trouble_is_said_once_and_not_on_every_beat() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let gauge = opened(&open(&mut runtime, &catalog, "gauge", Posture::Exhibit));
+        let said = |runtime: &mut Runtime, health| {
+            runtime.apply(
+                &catalog,
+                Cmd::Health {
+                    surface: gauge.clone(),
+                    health,
+                },
+            )
+        };
+        assert_eq!(
+            said(&mut runtime, Health::Stale),
+            vec![Act::Health {
+                surface: gauge.clone(),
+                health: Health::Stale,
+            }]
+        );
+        assert!(said(&mut runtime, Health::Stale).is_empty());
+        assert_eq!(
+            said(&mut runtime, Health::Dead),
+            vec![Act::Health {
+                surface: gauge.clone(),
+                health: Health::Dead,
+            }]
+        );
+    }
+
+    #[test]
+    fn the_restart_tick_answers_before_the_process_is_back() {
+        // The tick has to say something immediately. If the new process does
+        // not last, the next beat puts the panel back to saying dead on its
+        // own, which is a better order than a tick that appears to do nothing
+        // for a second.
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let gauge = opened(&open(&mut runtime, &catalog, "gauge", Posture::Exhibit));
+        runtime.apply(
+            &catalog,
+            Cmd::Health {
+                surface: gauge.clone(),
+                health: Health::Dead,
+            },
+        );
+        assert_eq!(
+            runtime.apply(
+                &catalog,
+                Cmd::Restart {
+                    surface: gauge.clone()
+                }
+            ),
+            vec![
+                Act::Health {
+                    surface: gauge.clone(),
+                    health: Health::Fresh,
+                },
+                Act::Subscribe {
+                    surface: gauge.clone(),
+                    backend: "sampler".into(),
+                    spawn: json!({}),
+                    cadence: Duration::from_millis(500),
+                    // The one that stops what is running first, for every panel
+                    // that was reading it.
+                    restart: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_restart_on_a_panel_with_nothing_feeding_it_says_so() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let note = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
+        assert!(matches!(
+            runtime
+                .apply(&catalog, Cmd::Restart {
+                    surface: note.clone()
+                })
+                .as_slice(),
+            [Act::Refuse { surface, .. }] if surface == &note
+        ));
     }
 
     #[test]

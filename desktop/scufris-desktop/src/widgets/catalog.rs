@@ -13,10 +13,17 @@
 //! find by the name the person types, and a duplicate silently shadows one
 //! root's widget with another's.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use scufris_control::CatalogEntry;
 use serde::Deserialize;
+
+/// How often a widget with a backend expects a reading, when it does not say.
+///
+/// One second. The number is only used to decide when silence has gone on long
+/// enough to mark, so a widget that samples more slowly than this and never
+/// says so is marked stale for a moment rather than being wrong.
+const DEFAULT_CADENCE: Duration = Duration::from_secs(1);
 
 /// One widget directory, as `build.rs` compiled it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +45,10 @@ struct Manifest {
     description: String,
     width: u32,
     height: u32,
+    /// Which backend feeds it, if any.
+    backend: Option<String>,
+    /// How often a reading is expected, in milliseconds.
+    cadence: Option<u64>,
 }
 
 /// One installed widget.
@@ -53,6 +64,10 @@ pub struct Widget {
     pub width: u32,
     /// Window height in logical pixels.
     pub height: u32,
+    /// Which backend feeds it, if any.
+    pub backend: Option<String>,
+    /// How often it expects a reading from that backend.
+    pub cadence: Duration,
     /// The compiled module the shell window imports.
     pub script: String,
 }
@@ -82,6 +97,14 @@ pub enum CatalogError {
         /// The identifier both directories claim.
         id: String,
     },
+    /// The manifest names a backend that is not installed.
+    #[error("widgets/{directory} names the backend {backend}, which is not installed")]
+    NoBackend {
+        /// The directory whose manifest is wrong.
+        directory: String,
+        /// The backend it asked for.
+        backend: String,
+    },
 }
 
 /// Every installed widget, by identifier.
@@ -97,7 +120,7 @@ impl Catalog {
     /// A failure here stops the companion at startup. That is the point: a
     /// widget the person asks for by name and that resolves to something else
     /// is worse than a companion that says which directory is at fault.
-    pub fn build(sources: &[Source<'_>]) -> Result<Self, CatalogError> {
+    pub fn build(sources: &[Source<'_>], backends: &[&str]) -> Result<Self, CatalogError> {
         let mut widgets = BTreeMap::new();
         for source in sources {
             let manifest: Manifest =
@@ -111,12 +134,27 @@ impl Catalog {
                     id: manifest.id,
                 });
             }
+            // A widget naming a backend nothing installs is a panel that opens
+            // and then never shows a number. Caught here rather than there, for
+            // the reason a renamed widget is.
+            if let Some(backend) = &manifest.backend
+                && !backends.contains(&backend.as_str())
+            {
+                return Err(CatalogError::NoBackend {
+                    directory: source.directory.to_string(),
+                    backend: backend.clone(),
+                });
+            }
             let widget = Widget {
                 id: manifest.id,
                 name: manifest.name,
                 description: manifest.description,
                 width: manifest.width,
                 height: manifest.height,
+                backend: manifest.backend,
+                cadence: manifest
+                    .cadence
+                    .map_or(DEFAULT_CADENCE, Duration::from_millis),
                 script: source.script.to_string(),
             };
             if widgets.insert(widget.id.clone(), widget).is_some() {
@@ -161,6 +199,9 @@ width = 250
 height = 110
 "#;
 
+    /// What the tests are told is installed.
+    const BACKENDS: &[&str] = &["system"];
+
     fn source<'a>(directory: &'a str, manifest: &'a str) -> Source<'a> {
         Source {
             directory,
@@ -171,7 +212,8 @@ height = 110
 
     #[test]
     fn a_manifest_becomes_the_widget_the_daemon_opens_by_name() {
-        let catalog = Catalog::build(&[source("note", NOTE)]).expect("the manifest is well formed");
+        let catalog =
+            Catalog::build(&[source("note", NOTE)], BACKENDS).expect("the manifest is well formed");
         let widget = catalog.get("note").expect("note is installed");
         assert_eq!(widget.name, "Note");
         assert_eq!((widget.width, widget.height), (250, 110));
@@ -180,7 +222,8 @@ height = 110
 
     #[test]
     fn the_catalog_the_daemon_reads_carries_the_names_and_not_the_code() {
-        let catalog = Catalog::build(&[source("note", NOTE)]).expect("the manifest is well formed");
+        let catalog =
+            Catalog::build(&[source("note", NOTE)], BACKENDS).expect("the manifest is well formed");
         let entries = catalog.entries();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].id, "note");
@@ -194,7 +237,7 @@ height = 110
         // filed under, and would be found only by reading its manifest.
         let renamed = NOTE.replace("\"note\"", "\"scratch\"");
         assert_eq!(
-            Catalog::build(&[source("note", &renamed)]),
+            Catalog::build(&[source("note", &renamed)], BACKENDS),
             Err(CatalogError::Renamed {
                 directory: "note".into(),
                 id: "scratch".into(),
@@ -205,7 +248,7 @@ height = 110
     #[test]
     fn two_directories_with_one_name_are_a_startup_failure_rather_than_a_shadow() {
         assert_eq!(
-            Catalog::build(&[source("note", NOTE), source("note", NOTE)]),
+            Catalog::build(&[source("note", NOTE), source("note", NOTE)], BACKENDS),
             Err(CatalogError::Duplicate { id: "note".into() })
         );
     }
@@ -213,7 +256,8 @@ height = 110
     #[test]
     fn a_manifest_that_is_missing_a_field_names_the_directory_at_fault() {
         let short = "id = \"note\"\nname = \"Note\"\n";
-        let error = Catalog::build(&[source("note", short)]).expect_err("the manifest is short");
+        let error =
+            Catalog::build(&[source("note", short)], BACKENDS).expect_err("the manifest is short");
         assert!(matches!(
             &error,
             CatalogError::Unreadable { directory, .. } if directory == "note"
@@ -228,9 +272,41 @@ height = 110
     fn a_key_nothing_reads_is_a_startup_failure_rather_than_a_setting_that_does_nothing() {
         let typo = format!("{NOTE}widht = 250\n");
         assert!(matches!(
-            Catalog::build(&[source("note", &typo)]),
+            Catalog::build(&[source("note", &typo)], BACKENDS),
             Err(CatalogError::Unreadable { .. })
         ));
+    }
+
+    #[test]
+    fn a_widget_naming_a_backend_nobody_installs_is_a_startup_failure() {
+        // Otherwise it is a panel that opens, draws nothing, and never says
+        // why - which is the one outcome the whole supervisor exists to avoid.
+        let fed = format!("{NOTE}backend = \"weather-station\"\n");
+        assert_eq!(
+            Catalog::build(&[source("note", &fed)], BACKENDS),
+            Err(CatalogError::NoBackend {
+                directory: "note".into(),
+                backend: "weather-station".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_widget_that_does_not_say_how_often_it_expects_a_reading_is_given_a_second() {
+        let fed = format!("{NOTE}backend = \"system\"\n");
+        let catalog =
+            Catalog::build(&[source("note", &fed)], BACKENDS).expect("the backend is installed");
+        let widget = catalog.get("note").expect("note is installed");
+        assert_eq!(widget.backend.as_deref(), Some("system"));
+        assert_eq!(widget.cadence, DEFAULT_CADENCE);
+
+        let quick = format!("{NOTE}backend = \"system\"\ncadence = 250\n");
+        let catalog =
+            Catalog::build(&[source("note", &quick)], BACKENDS).expect("the backend is installed");
+        assert_eq!(
+            catalog.get("note").expect("note is installed").cadence,
+            Duration::from_millis(250)
+        );
     }
 
     #[test]
@@ -238,8 +314,12 @@ height = 110
         // The generated table is what `build.rs` walked. A widget that was
         // added to the tree but cannot be installed fails here rather than on
         // the first person who asks for it.
-        let catalog = Catalog::build(super::super::INSTALLED).expect("the shipped widgets install");
+        let catalog = Catalog::build(super::super::INSTALLED, &super::super::backends::names())
+            .expect("the shipped widgets install");
         assert!(!catalog.entries().is_empty(), "no widget is shipped");
         assert!(catalog.get("note").is_some(), "the note widget is missing");
+        // And every backend a shipped widget names is a backend that shipped.
+        let cpu = catalog.get("cpu").expect("the cpu widget is missing");
+        assert_eq!(cpu.backend.as_deref(), Some("system"));
     }
 }

@@ -31,6 +31,12 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   down onto the workspace you are on and parks it in a screen-edge slot of its
   own, so nothing the shelf does afterwards lands on top of it. A pin with no
   free slot says so on the panel instead of doing nothing.
+- Widgets that show live numbers, and the `cpu` widget on the first of them.
+  A widget can name a backend, a small program that reports readings, and two
+  panels asking for the same numbers share one process. A backend that goes
+  quiet says so on the panel; one that dies turns the frame red and offers a
+  restart tick, rather than leaving a frozen number that looks live. Nothing is
+  left running when the last panel closes or when the companion exits.
 
 ### Changed
 

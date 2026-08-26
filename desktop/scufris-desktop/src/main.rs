@@ -444,6 +444,10 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
         RunEvent::Exit => {
             info!("stopping");
             handle.state::<Arc<DaemonLink>>().stop();
+            // Before the app's own shutdown, because a widget backend is its
+            // own process group and so does not die with the companion. One
+            // left behind is a sampler running until the machine is rebooted.
+            handle.state::<Arc<widgets::Widgets>>().halt();
             handle.state::<Arc<App>>().shutdown();
         }
         _ => {}
@@ -517,7 +521,7 @@ fn widget_shell_ready(
     widgets.ready(window.label().to_string(), channel);
 }
 
-/// One of the two chrome ticks, from the window it was clicked in.
+/// One chrome tick, from the window it was clicked in.
 ///
 /// The window says which surface this is; the page never does. A page that
 /// named its own surface could name another window's.
@@ -531,6 +535,7 @@ fn widget_tick(
     match kind.as_str() {
         "close" => widgets.dismissed(surface),
         "pin" => widgets.pinned(surface),
+        "restart" => widgets.restarted(surface),
         unknown => debug!(kind = %unknown, "a widget window reported an unknown tick"),
     }
 }

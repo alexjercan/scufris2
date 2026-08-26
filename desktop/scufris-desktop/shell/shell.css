@@ -98,7 +98,6 @@ body {
 /* The hit zone is the corner, not the glyph: these are 9 pixel letters, and a
  * target that small is a target the person misses. */
 .tick {
-  position: absolute;
   padding: 4px 10px;
   font-family: inherit;
   font-size: 9px;
@@ -117,13 +116,30 @@ body {
 /* Opposite corners, by review decision: the destructive tick and the
  * reversible one are never next to each other. */
 .close {
+  position: absolute;
   top: 3px;
   right: 5px;
 }
 
-.pin {
+/* The reversible ticks, as a row. A tick that only exists while something is
+ * wrong needs somewhere to appear that leaves the others where they were. */
+.ticks {
+  position: absolute;
   bottom: 3px;
   left: 5px;
+  display: flex;
+  gap: 4px;
+}
+
+/* Only while there is a backend to start again. */
+.again {
+  display: none;
+}
+
+.panel[data-health="dead"] .again {
+  display: block;
+  color: var(--sw-alarm);
+  border-color: var(--sw-alarm);
 }
 
 .badge {
@@ -131,9 +147,31 @@ body {
   right: 10px;
   bottom: 6px;
   font-size: 8.5px;
-  letter-spacing: 0.16em;
+  letter-spacing: var(--sw-track);
   text-transform: uppercase;
   color: var(--sw-accent);
+}
+
+/* A backend that is still running but has not written for a while. The number
+ * on screen is old rather than wrong, so the panel says so and keeps it up. */
+.panel[data-health="stale"] .badge {
+  color: var(--sw-warn);
+}
+
+/* A backend that is gone. The number on screen will never change again, and a
+ * frozen number that looks live is worse than an empty panel - so the frame
+ * carries the alarm colour, what the widget drew recedes behind it, and the
+ * tick that brings it back appears. */
+.panel[data-health="dead"] {
+  --sw-accent: var(--sw-alarm);
+}
+
+.panel[data-health="dead"] .badge {
+  color: var(--sw-alarm);
+}
+
+.panel[data-health="dead"] .root {
+  opacity: 0.35;
 }
 
 /* A tick that could not be carried out. The badge carries the reason for a

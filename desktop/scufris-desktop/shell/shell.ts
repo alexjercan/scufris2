@@ -47,6 +47,7 @@
   const root = element<HTMLElement>("root");
   const close = element<HTMLButtonElement>("close");
   const pin = element<HTMLButtonElement>("pin");
+  const again = element<HTMLButtonElement>("again");
 
   // The widget the window is currently holding, and the data that arrived
   // before it finished loading. A module is imported once and takes a moment;
@@ -126,10 +127,20 @@
     root.replaceChildren();
   };
 
-  // What the badge says when nothing is being refused. Set from every life
-  // change, so the refusal has something to fall back to.
-  let state = "live";
+  // The two things the panel can say about itself, and the refusal that
+  // borrows the badge from both for a moment.
+  let life = "live";
+  let health = "fresh";
   let refusing: ReturnType<typeof setTimeout> | undefined;
+
+  // A backend that stopped is the more urgent of the two, so it takes the
+  // badge while it holds. A panel whose sampler is dead saying "dim" would be
+  // answering a question nobody asked.
+  const said = (): string => (health === "fresh" ? life : health);
+
+  const say = (): void => {
+    if (refusing === undefined) badge.textContent = said();
+  };
 
   // A tick that silently does nothing reads as a tick that is broken. The
   // badge carries the reason for a moment and then goes back to saying what
@@ -140,7 +151,7 @@
     panel.dataset["refused"] = "";
     refusing = setTimeout(() => {
       refusing = undefined;
-      badge.textContent = state;
+      badge.textContent = said();
       delete panel.dataset["refused"];
     }, REFUSAL_MS);
   };
@@ -154,9 +165,17 @@
         deliver(message.data);
         break;
       case "life":
-        state = message.state;
-        panel.dataset["life"] = state;
-        if (refusing === undefined) badge.textContent = state;
+        life = message.state;
+        panel.dataset["life"] = life;
+        say();
+        break;
+      case "health":
+        health = message.state;
+        // Absent rather than "fresh", so every rule about a backend that is
+        // in trouble is a rule that only matches when one is.
+        if (health === "fresh") delete panel.dataset["health"];
+        else panel.dataset["health"] = health;
+        say();
         break;
       case "refused":
         refuse(message.detail);
@@ -176,6 +195,12 @@
 
   pin.addEventListener("click", () => {
     invoke("widget_tick", { kind: "pin" }).catch(() => {});
+  });
+
+  // Only reachable while the backend behind this panel is gone, which is when
+  // starting it again is the one thing worth offering.
+  again.addEventListener("click", () => {
+    invoke("widget_tick", { kind: "restart" }).catch(() => {});
   });
 
   // A panel somebody is reading does not age out from under them. The pointer

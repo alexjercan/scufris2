@@ -160,7 +160,8 @@ the shell unused, and it is discarded for the same reason.
 ## The shell page and the widget contract
 
 `shell/shell.html` owns the chrome: corner ticks in the accent, an uppercase
-micro-title, a close tick, a pin tick, and a badge naming the life state.
+micro-title, a close tick, a pin tick, a restart tick that exists only while a
+backend is dead, and a badge naming the life state.
 `tokens.css`
 holds the `--sw-*` palette every widget styles against. One file rethemes the
 fleet; a widget that reaches for a hex value instead stops matching the first
@@ -188,6 +189,62 @@ runs on no clock.
 manifests and compiled modules into the binary. What ships is what was built,
 and a widget whose TypeScript does not compile fails the build rather than the
 first person who asks for it.
+
+## Backends
+
+A widget that shows a number that changes needs something producing the number.
+That something is a backend: a directory under `desktop/backends/` holding a
+`backend.py` that writes one JSON line per reading to standard output. The
+directory name is the identifier, and a widget names one in its manifest:
+
+```toml
+backend = "system"
+cadence = 1000
+```
+
+`cadence` is how often the widget says a reading should arrive, in
+milliseconds. It is only used to decide when silence has gone on long enough to
+mark. A widget naming a backend nothing installs is a startup failure, for the
+reason a renamed widget is: the alternative is a panel that opens and then never
+shows anything.
+
+The first line a backend is handed on standard input is the payload the open
+carried. `desktop/backends/system/backend.py` reads one key from it, `every`,
+and reports processor load, per-core load, memory in use, and uptime.
+
+Three rules make this safe to leave running all day.
+
+- **One process per question.** A backend is found by its identifier and the
+  payload it was started with, so two panels asking for the same numbers share
+  one process and two asking for different ones do not. The payload is
+  canonicalized first, so the same question written in another order is still
+  the same question. The last panel to stop reading is what stops the process.
+- **Nothing is left behind.** Every backend is spawned into a process group of
+  its own with its leader's identifier recorded, and stopping one signals the
+  group rather than the leader - so a backend that started a child of its own
+  does not leave it running. The word is standard input closing, then `SIGTERM`,
+  then `SIGKILL` three seconds later, sent before the leader is reaped rather
+  than after, because a reaped identifier is one the kernel may reuse. The same
+  happens when the companion exits, because a process group of its own is also
+  a process group that does not die with it.
+- **Nothing is streamed straight to a window.** Readings are coalesced, latest
+  wins, and handed over four times a second. A webview given a raw tick stream
+  is the documented way to make one hold gigabytes.
+
+A reading is not a citation. Scufris naming a panel is what says the
+conversation is still about it; a sampler writing its line every second says
+only that the machine is on. A live graph that revived itself would be the one
+exhibit that never ages out.
+
+Health is separate from the life state, because the two hold at the same time
+and say different things: a panel the user pinned can still be showing numbers
+from a process that died. Silence past three of the widget's own cadences is
+`stale`, and the badge says so while the number stays up. A process that exited
+is `dead`: the accent goes to the alarm colour, what the widget drew recedes,
+and a restart tick appears beside the pin. The restart brings the process back
+for every panel that was reading it, because the tick is on one panel and the
+process may be answering several. A frozen number that looks live is the one
+outcome worse than an empty panel.
 
 ## The two config gates
 

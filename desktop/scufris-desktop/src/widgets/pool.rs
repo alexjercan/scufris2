@@ -23,7 +23,10 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager, ipc::Channel};
 use tracing::warn;
 
-use crate::widgets::{runtime::Life, windows};
+use crate::widgets::{
+    runtime::{Health, Life},
+    windows,
+};
 
 /// How many shells stay built and loaded.
 ///
@@ -67,6 +70,16 @@ pub enum ShellMsg {
     Life {
         /// What the chrome now says.
         state: Life,
+    },
+    /// Change what the chrome says about the backend behind this surface.
+    ///
+    /// The frame carries it rather than the widget, for the reason the life
+    /// state is carried there: a widget drawing its own "my numbers stopped"
+    /// notice is a widget that has to be written to draw one, and the one that
+    /// forgets is the one whose panel lies.
+    Health {
+        /// What it now is.
+        state: Health,
     },
     /// Say that a tick the person used could not be carried out.
     ///
@@ -267,6 +280,20 @@ mod tests {
             })
             .expect("the message serializes"),
             serde_json::json!({ "kind": "refused", "detail": "every slot is taken" })
+        );
+        assert_eq!(
+            serde_json::to_value(ShellMsg::Health {
+                state: Health::Dead
+            })
+            .expect("the message serializes"),
+            serde_json::json!({ "kind": "health", "state": "dead" })
+        );
+        assert_eq!(
+            serde_json::to_value(ShellMsg::Health {
+                state: Health::Stale
+            })
+            .expect("the message serializes"),
+            serde_json::json!({ "kind": "health", "state": "stale" })
         );
     }
 }

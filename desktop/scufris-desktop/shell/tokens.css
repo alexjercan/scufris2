@@ -16,6 +16,7 @@
   --sw-accent: #95a99f;
   --sw-attention: #9e95c7;
   --sw-warn: #ffdd33;
+  --sw-alarm: #f43841;
   --sw-mono:
     Iosevka, "Iosevka Nerd Font", "Iosevka Term", "JetBrains Mono",
     ui-monospace, monospace;
@@ -30,4 +31,5 @@
   --sw-size-body: 11.5px;
   --sw-size-small: 9.5px;
   --sw-lead: 1.6;
+  --sw-track: 0.16em;
 }

@@ -83,6 +83,12 @@ in
       ! grep -Fx ${lib.escapeShellArg (toString pkgs.webkitgtk_4_1)} "$voice"
       grep -Fx ${lib.escapeShellArg (toString pkgs.webkitgtk_4_1)} "$desktop"
       ! grep -Fx ${lib.escapeShellArg (toString launcher)} "$desktop"
+
+      # Widget backends are Python 3 programs the companion spawns, so the
+      # interpreter is part of the package rather than of the person's PATH.
+      grep -Fx ${lib.escapeShellArg (toString pkgs.python3)} "$desktop"
+      grep -F ${lib.escapeShellArg (toString pkgs.python3)} \
+        "$(readlink -f ${desktop}/bin/scufris-desktop)"
       test -f ${desktop}/share/applications/scufris-desktop.desktop
       test -f ${desktop}/share/icons/hicolor/scalable/apps/scufris.svg
       touch "$out"

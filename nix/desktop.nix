@@ -30,6 +30,11 @@
     env.OPENSSL_NO_VENDOR = "1";
     preFixup = ''
       gappsWrapperArgs+=(--prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath tauriLibraries})
+      # Widget backends are Python 3 programs the companion spawns. The
+      # interpreter belongs to the package: a widget whose numbers depend on
+      # what the person's PATH happens to carry is a widget that works on the
+      # machine it was written on.
+      gappsWrapperArgs+=(--prefix PATH : ${lib.makeBinPath [pkgs.python3]})
     '';
     meta = {
       description = "Scufris voice pill and tray companion";

@@ -36,6 +36,7 @@ type ShellMsg =
     }
   | { kind: "update"; data: unknown }
   | { kind: "life"; state: "live" | "dim" | "pinned" }
+  | { kind: "health"; state: "fresh" | "stale" | "dead" }
   | { kind: "refused"; detail: string }
   | { kind: "retire" };
 

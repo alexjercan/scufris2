@@ -9,6 +9,7 @@
 //! carries the decisions out. What it carries them out against is [`pool`] -
 //! warm shell windows - and the daemon link, which is where the answers go.
 
+pub mod backends;
 pub mod catalog;
 pub mod pool;
 pub mod runtime;
@@ -29,6 +30,7 @@ use crate::{
     daemon::{DaemonLink, WidgetCommand},
     display,
     widgets::{
+        backends::{Backends, News},
         catalog::{Catalog, CatalogError, Source},
         pool::{Pool, ShellMsg},
         runtime::{Act, Cmd, Runtime, Still},
@@ -49,11 +51,20 @@ include!(concat!(env!("OUT_DIR"), "/widgets.rs"));
 /// budget it has to stay inside.
 const SWEEP: Duration = Duration::from_secs(1);
 
-/// The runtime, its windows, and the way back to the daemon.
+/// How often the backends hand over what they wrote.
+///
+/// Four times a second. Slow enough that a backend writing far faster than
+/// anybody can read costs one message rather than hundreds - a webview handed
+/// a raw tick stream is the documented way to make one hold gigabytes - and
+/// fast enough that a number on screen still reads as live.
+const BEAT: Duration = Duration::from_millis(250);
+
+/// The runtime, its windows, its backends, and the way back to the daemon.
 pub struct Widgets {
     catalog: Catalog,
     pool: Pool,
     runtime: Mutex<Runtime>,
+    backends: Backends,
     link: OnceLock<Arc<DaemonLink>>,
     /// The last assistant state the daemon reported. The turn boundary is read
     /// off the change rather than off a message of its own.
@@ -68,16 +79,27 @@ impl Widgets {
     /// [`catalog::Catalog::build`] for why that is better than starting.
     pub fn start(app: AppHandle) -> Result<Arc<Self>, CatalogError> {
         let widgets = Arc::new(Self {
-            catalog: Catalog::build(INSTALLED)?,
+            catalog: Catalog::build(INSTALLED, &backends::names())?,
             pool: Pool::new(app.clone()),
             runtime: Mutex::new(Runtime::new()),
+            backends: Backends::new(),
             link: OnceLock::new(),
             assistant: Mutex::new(AssistantState::Idle),
             app,
         });
         widgets.pool.warm();
         widgets.age();
+        widgets.beat();
         Ok(widgets)
+    }
+
+    /// Stops every backend. The companion is going away.
+    ///
+    /// A backend is its own process group so that stopping one takes its
+    /// children with it, which is also what stops it from dying with the
+    /// companion on its own. Somebody has to say so, and this is that.
+    pub fn halt(&self) {
+        self.backends.halt();
     }
 
     /// Starts the clock that hands the runtime the time that has gone by.
@@ -118,6 +140,54 @@ impl Widgets {
                 }
             }
         });
+    }
+
+    /// Starts the beat that hands over what the backends wrote.
+    ///
+    /// Separate from the aging sweep because it is four times as fast and
+    /// because it reads something else, and on the event loop for the reason
+    /// the sweep is: the runtime decides under its own lock and the host
+    /// carries the decisions out after releasing it, so a thread performing its
+    /// own acts would be one more place window moves come from.
+    fn beat(self: &Arc<Self>) {
+        let waking = Arc::downgrade(self);
+        thread::spawn(move || {
+            let mut last = Instant::now();
+            loop {
+                thread::sleep(BEAT);
+                let now = Instant::now();
+                let elapsed = now.duration_since(last);
+                last = now;
+                let Some(widgets) = Weak::upgrade(&waking) else {
+                    return;
+                };
+                let news = widgets.backends.drain(elapsed);
+                if news.is_empty() {
+                    continue;
+                }
+                let carrier = Arc::clone(&widgets);
+                if let Err(error) = widgets.app.run_on_main_thread(move || carrier.hear(news)) {
+                    debug!("a widget backend could not reach the event loop: {error}");
+                }
+            }
+        });
+    }
+
+    /// Carries one beat of backend news into the runtime.
+    fn hear(&self, news: Vec<News>) {
+        for one in news {
+            match one {
+                News::Data { surface, data } => self.decide(Cmd::Feed { surface, data }),
+                News::Health { surface, health } => {
+                    self.decide(Cmd::Health { surface, health });
+                }
+            }
+        }
+    }
+
+    /// Records that the person used one surface's restart tick.
+    pub fn restarted(&self, surface: String) {
+        self.decide(Cmd::Restart { surface });
     }
 
     /// Records the assistant state the daemon reported.
@@ -343,6 +413,30 @@ impl Widgets {
                 Act::Life { surface, life } => {
                     self.pool.send(&surface, ShellMsg::Life { state: life });
                 }
+                Act::Health { surface, health } => {
+                    self.pool.send(&surface, ShellMsg::Health { state: health });
+                }
+                Act::Subscribe {
+                    surface,
+                    backend,
+                    spawn,
+                    cadence,
+                    restart,
+                } => {
+                    let Some(installed) = backends::installed(&backend) else {
+                        // The catalog refuses a widget that names a backend
+                        // nothing installs, so reaching this means the table
+                        // and the catalog disagree.
+                        warn!(surface, backend, "no such widget backend");
+                        continue;
+                    };
+                    if restart {
+                        self.backends.restart(surface, installed, &spawn, cadence);
+                    } else {
+                        self.backends.subscribe(surface, installed, &spawn, cadence);
+                    }
+                }
+                Act::Unsubscribe { surface } => self.backends.unsubscribe(&surface),
                 Act::Stick { surface, sticky } => self.stick(&surface, sticky),
                 Act::Refuse { surface, detail } => {
                     self.pool.send(&surface, ShellMsg::Refused { detail });
@@ -463,7 +557,8 @@ mod tests {
     fn a_pinned_surface_tells_its_chrome_before_anything_moves() {
         // The badge is the only feedback the person gets for the pin tick, and
         // the shelf closing up behind it is what they see next.
-        let widgets = Catalog::build(INSTALLED).expect("the shipped widgets install");
+        let widgets =
+            Catalog::build(INSTALLED, &backends::names()).expect("the shipped widgets install");
         let mut runtime = Runtime::new();
         let acts = runtime.apply(
             &widgets,

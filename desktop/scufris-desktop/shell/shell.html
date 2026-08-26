@@ -19,7 +19,20 @@
       <button id="close" class="tick close" type="button" title="Close">
         x
       </button>
-      <button id="pin" class="tick pin" type="button" title="Pin">pin</button>
+      <!-- A row rather than a corner, because the restart tick only exists
+           while the backend behind this panel is gone, and a tick that comes
+           and goes must not move the tick beside it. -->
+      <div class="ticks">
+        <button id="pin" class="tick" type="button" title="Pin">pin</button>
+        <button
+          id="again"
+          class="tick again"
+          type="button"
+          title="Start the backend again"
+        >
+          rst
+        </button>
+      </div>
       <span id="badge" class="badge">live</span>
       <div id="root" class="root"></div>
     </main>

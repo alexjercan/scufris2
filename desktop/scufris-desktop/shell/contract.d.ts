@@ -35,7 +35,8 @@ type ShellMsg =
       data: unknown;
     }
   | { kind: "update"; data: unknown }
-  | { kind: "life"; state: "live" | "pinned" }
+  | { kind: "life"; state: "live" | "dim" | "pinned" }
+  | { kind: "refused"; detail: string }
   | { kind: "retire" };
 
 /** What the shell hands a widget when it mounts it. */

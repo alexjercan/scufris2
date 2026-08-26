@@ -284,6 +284,20 @@ pub enum Act {
         /// Widget-defined payload.
         data: Value,
     },
+    /// Put one surface on every workspace, or bring it back to the current one.
+    Stick {
+        /// The surface that follows the person, or stops.
+        surface: SurfaceId,
+        /// True while it belongs on every workspace.
+        sticky: bool,
+    },
+    /// Tell one surface's chrome that a tick could not be carried out.
+    Refuse {
+        /// The surface whose tick was refused.
+        surface: SurfaceId,
+        /// What the person reads.
+        detail: String,
+    },
     /// Change what a surface's chrome says about it.
     Life {
         /// The surface whose chrome changes.
@@ -407,6 +421,10 @@ impl Runtime {
                 aging: Duration::ZERO,
             },
         );
+        let exhibit = posture == Posture::Exhibit;
+        // A widget opened while the layer is down waits behind it rather than
+        // flashing onto a desktop the person put the pill away from.
+        let hidden = self.hidden && exhibit;
         let mut acts = vec![Act::Adopt {
             surface: surface.clone(),
             widget,
@@ -414,10 +432,14 @@ impl Runtime {
             data,
             slot,
             size,
-            // A widget opened while the layer is down waits behind it rather
-            // than flashing onto a desktop the person put the pill away from.
-            hidden: self.hidden && posture == Posture::Exhibit,
+            hidden,
         }];
+        if !hidden {
+            acts.push(Act::Stick {
+                surface: surface.clone(),
+                sticky: exhibit,
+            });
+        }
         if posture == Posture::Exhibit {
             self.shelf.push_front(surface.clone());
             // The shelf is a row of three. A fourth exhibit does not shrink it;
@@ -495,16 +517,25 @@ impl Runtime {
             return Vec::new();
         }
         self.hidden = hidden;
-        self.surfaces
-            .values()
-            .filter(|surface| surface.transient())
-            .map(|surface| Act::Conceal {
+        let mut acts = Vec::new();
+        for surface in self.surfaces.values().filter(|surface| surface.transient()) {
+            acts.push(Act::Conceal {
                 surface: surface.id.clone(),
                 hidden,
                 slot: surface.slot,
                 size: surface.size,
-            })
-            .collect()
+            });
+            if !hidden {
+                // A window manager unmanages a window when it unmaps and takes
+                // its state with it, so a panel coming back has to be told
+                // again that it belongs on every workspace.
+                acts.push(Act::Stick {
+                    surface: surface.id.clone(),
+                    sticky: true,
+                });
+            }
+        }
+        acts
     }
 
     /// Ages the dim exhibits, and retires the ones whose grace ran out.
@@ -590,30 +621,90 @@ impl Runtime {
 
     /// Hands one surface to the person, or takes it back.
     ///
-    /// The tick reads both ways. Pinning takes the surface out of the runtime's
-    /// hands: it stays where it is, nothing moves it again, and the shelf closes
-    /// up behind it. Using the tick a second time gives it back, and an exhibit
-    /// that comes back is the current one - it is what the person just chose to
-    /// look at.
+    /// Pinning promotes an exhibit into an instrument. It leaves the shelf for
+    /// one of the four edge slots and stops being sticky, so it lands on the
+    /// workspace the person is on rather than following them everywhere. It has
+    /// to leave the shelf's columns and not merely leave the shelf: a column it
+    /// kept is a column the next reflow moves a live exhibit into, and two
+    /// windows in one place is the collision the slots exist to avoid.
+    ///
+    /// The tick reads both ways. Using it again gives the surface back, and an
+    /// exhibit that comes back is the current one - it is what the person just
+    /// chose to look at.
     fn pin(&mut self, surface: SurfaceId) -> Vec<Act> {
+        let Some(open) = self.surfaces.get(&surface) else {
+            return Vec::new();
+        };
+        if open.owned {
+            return self.release(surface);
+        }
+        // Only a surface still on the shelf has to be moved. An instrument the
+        // person pins is already standing in an edge slot of its own.
+        let slot = if self.shelf.contains(&surface) {
+            match self.free_edge() {
+                Some(edge) => Slot::Edge(edge),
+                None => {
+                    return vec![Act::Refuse {
+                        surface,
+                        detail: "every slot is taken".into(),
+                    }];
+                }
+            }
+        } else {
+            open.slot
+        };
         let Some(open) = self.surfaces.get_mut(&surface) else {
             return Vec::new();
         };
-        open.owned = !open.owned;
-        let exhibit = open.posture == Posture::Exhibit;
-        let life = if open.owned { Life::Pinned } else { Life::Live };
-        open.life = life;
-        // Either direction starts the minute over. A pinned surface has no
-        // clock at all, and one handed back is what the person just chose to
-        // look at.
+        open.owned = true;
+        open.life = Life::Pinned;
         open.aging = Duration::ZERO;
+        let moving = open.slot != slot;
+        open.slot = slot;
+        let size = open.size;
+        self.shelf.retain(|id| id != &surface);
         let mut acts = vec![Act::Life {
             surface: surface.clone(),
-            life,
+            life: Life::Pinned,
         }];
-        if life == Life::Pinned {
-            self.shelf.retain(|id| id != &surface);
-        } else if exhibit {
+        if moving {
+            acts.push(Act::Move {
+                surface: surface.clone(),
+                slot,
+                size,
+            });
+        }
+        acts.push(Act::Stick {
+            surface,
+            sticky: false,
+        });
+        acts.extend(self.reflow());
+        acts
+    }
+
+    /// Gives one surface back to the runtime.
+    fn release(&mut self, surface: SurfaceId) -> Vec<Act> {
+        let Some(open) = self.surfaces.get_mut(&surface) else {
+            return Vec::new();
+        };
+        open.owned = false;
+        open.life = Life::Live;
+        // Handing it back is choosing it: the minute starts over, and the turn
+        // now running has been told about it.
+        open.aging = Duration::ZERO;
+        open.cited = true;
+        let exhibit = open.posture == Posture::Exhibit;
+        let mut acts = vec![
+            Act::Life {
+                surface: surface.clone(),
+                life: Life::Live,
+            },
+            Act::Stick {
+                surface: surface.clone(),
+                sticky: exhibit,
+            },
+        ];
+        if exhibit {
             self.shelf.push_front(surface);
             acts.extend(self.crowd_out());
         }
@@ -968,7 +1059,7 @@ height = 90
     }
 
     #[test]
-    fn pinning_takes_a_widget_off_the_shelf_and_the_rest_close_up_behind_it() {
+    fn pinning_promotes_an_exhibit_out_of_the_column_the_shelf_then_closes_up() {
         let catalog = catalog();
         let mut runtime = Runtime::new();
         let older = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
@@ -987,17 +1078,78 @@ height = 90
             surface: newer.clone(),
             life: Life::Pinned
         }));
-        // The pinned one stays where the person can see it; the shelf is now
-        // one widget, which belongs at the center.
-        assert_eq!(
-            runtime.surface(&newer).map(|s| s.slot),
-            Some(Slot::Shelf(0))
-        );
-        assert_eq!(
-            runtime.surface(&older).map(|s| s.slot),
-            Some(Slot::Shelf(0))
-        );
+        // The pinned one has to leave the shelf's columns, not merely leave the
+        // shelf: the column it kept is the column the reflow behind it moves a
+        // live exhibit into, and two windows in one place is the collision the
+        // slots exist to avoid.
+        let kept = runtime.surface(&newer).expect("it is open").slot;
+        let closed_up = runtime.surface(&older).expect("it is open").slot;
+        assert_eq!(kept, Slot::Edge(EDGE_SLOTS[0]));
+        assert_eq!(closed_up, Slot::Shelf(0));
+        assert_ne!(kept, closed_up);
+        assert!(acts.contains(&Act::Move {
+            surface: newer.clone(),
+            slot: kept,
+            size: Size {
+                width: 250.0,
+                height: 110.0
+            },
+        }));
+        // And it comes down onto the workspace the person is on. Following them
+        // everywhere is what it did while it was the runtime's.
+        assert!(acts.contains(&Act::Stick {
+            surface: newer.clone(),
+            sticky: false
+        }));
         assert!(runtime.surface(&newer).expect("it is open").owned);
+    }
+
+    #[test]
+    fn a_pin_with_nowhere_to_put_the_panel_says_so_rather_than_doing_nothing() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        for _ in 0..EDGE_SLOTS.len() {
+            open(&mut runtime, &catalog, "clock", Posture::Instrument);
+        }
+        let crowded = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
+        let acts = runtime.apply(
+            &catalog,
+            Cmd::Pin {
+                surface: crowded.clone(),
+            },
+        );
+        assert!(matches!(
+            acts.as_slice(),
+            [Act::Refuse { surface, .. }] if surface == &crowded
+        ));
+        // Nothing moved and nothing changed hands. A tick that cannot be
+        // carried out is a tick that was not carried out.
+        assert!(!runtime.surface(&crowded).expect("it is open").owned);
+        assert_eq!(
+            runtime.surface(&crowded).map(|s| s.slot),
+            Some(Slot::Shelf(0))
+        );
+    }
+
+    #[test]
+    fn an_exhibit_is_on_every_workspace_and_an_instrument_is_on_this_one() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let acts = open(&mut runtime, &catalog, "note", Posture::Exhibit);
+        let exhibit = opened(&acts);
+        // The shelf is the layer that follows the person around, the way i3's
+        // own scratchpad does. Nothing here touches i3's real scratchpad.
+        assert!(acts.contains(&Act::Stick {
+            surface: exhibit,
+            sticky: true
+        }));
+
+        let acts = open(&mut runtime, &catalog, "clock", Posture::Instrument);
+        let instrument = opened(&acts);
+        assert!(acts.contains(&Act::Stick {
+            surface: instrument,
+            sticky: false
+        }));
     }
 
     #[test]
@@ -1293,15 +1445,23 @@ height = 90
         let acts = runtime.apply(&catalog, Cmd::Conceal { hidden: false });
         assert_eq!(
             acts,
-            vec![Act::Conceal {
-                surface: exhibit.clone(),
-                hidden: false,
-                slot: Slot::Shelf(0),
-                size: Size {
-                    width: 250.0,
-                    height: 110.0
+            vec![
+                Act::Conceal {
+                    surface: exhibit.clone(),
+                    hidden: false,
+                    slot: Slot::Shelf(0),
+                    size: Size {
+                        width: 250.0,
+                        height: 110.0
+                    },
                 },
-            }]
+                // A window manager unmanages a window when it unmaps, so a
+                // panel coming back has to be told again where it belongs.
+                Act::Stick {
+                    surface: exhibit.clone(),
+                    sticky: true,
+                },
+            ]
         );
         // Exactly as it was: dim, and with the half minute it had left.
         assert_eq!(runtime.surface(&exhibit).map(|s| s.life), Some(Life::Dim));

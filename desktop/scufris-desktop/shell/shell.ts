@@ -15,6 +15,10 @@
 {
   const { invoke, Channel } = window.__TAURI__.core;
 
+  // How long the badge carries a refused tick's reason. Long enough to read a
+  // few words, short enough that the panel is not left wearing an error.
+  const REFUSAL_MS = 2400;
+
   const forward = (level: string, message: string): void => {
     try {
       invoke("pill_log", { level: `widget.${level}`, message }).catch(() => {});
@@ -122,6 +126,25 @@
     root.replaceChildren();
   };
 
+  // What the badge says when nothing is being refused. Set from every life
+  // change, so the refusal has something to fall back to.
+  let state = "live";
+  let refusing: ReturnType<typeof setTimeout> | undefined;
+
+  // A tick that silently does nothing reads as a tick that is broken. The
+  // badge carries the reason for a moment and then goes back to saying what
+  // the panel is.
+  const refuse = (detail: string): void => {
+    clearTimeout(refusing);
+    badge.textContent = detail;
+    panel.dataset["refused"] = "";
+    refusing = setTimeout(() => {
+      refusing = undefined;
+      badge.textContent = state;
+      delete panel.dataset["refused"];
+    }, REFUSAL_MS);
+  };
+
   const handle = (message: ShellMsg): void => {
     switch (message.kind) {
       case "become":
@@ -131,8 +154,12 @@
         deliver(message.data);
         break;
       case "life":
-        panel.dataset["life"] = message.state;
-        badge.textContent = message.state;
+        state = message.state;
+        panel.dataset["life"] = state;
+        if (refusing === undefined) badge.textContent = state;
+        break;
+      case "refused":
+        refuse(message.detail);
         break;
       case "retire":
         retire();

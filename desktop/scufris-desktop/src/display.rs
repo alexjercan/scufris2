@@ -30,7 +30,8 @@ use std::{
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tauri::WebviewWindow;
 use x11rb::{
-    protocol::xproto::{ConnectionExt, MapState, Window},
+    connection::Connection,
+    protocol::xproto::{ClientMessageEvent, ConnectionExt, EventMask, MapState, Window},
     rust_connection::RustConnection,
 };
 
@@ -226,6 +227,26 @@ pub fn nobody_holds_the_keyboard() -> Verdict {
     }
 }
 
+/// Puts one window on every workspace, or brings it back to the current one.
+///
+/// `_NET_WM_STATE_STICKY`, asked for the way the specification says a client
+/// asks: a message to the root window rather than a property written directly,
+/// because once a window is mapped the state belongs to the window manager. i3
+/// honors it for floating windows, and a widget window is always floating.
+///
+/// The window has to be on screen. A window manager unmanages a window when it
+/// unmaps, and takes its state with it, so a window that goes down and comes
+/// back has to be asked again.
+pub fn sticky(window: &WebviewWindow, known: &AtomicU32, wanted: bool) -> Result<(), String> {
+    let Named::Known(id) = name(window, known) else {
+        return Err("the display could not name a window to keep on every workspace".into());
+    };
+    match session() {
+        Some(session) => session.sticky(id, wanted),
+        None => Err("no display answered a request to keep a window on every workspace".into()),
+    }
+}
+
 /// Waits for one window to come up, and answers what the display said.
 pub fn came_up(window: &WebviewWindow, known: &AtomicU32) -> Verdict {
     until(window, known, up, Verdict::Yes, PATIENCE)
@@ -283,12 +304,48 @@ fn session() -> Option<&'static Session> {
 /// event loop and these questions are asked from everywhere else.
 struct Session {
     connection: RustConnection,
+    /// The root window of the screen this connection opened on. A client asks
+    /// the window manager for a state by messaging the root, not the window.
+    root: Window,
 }
 
 impl Session {
     fn open() -> Option<Self> {
-        let (connection, _) = x11rb::connect(None).ok()?;
-        Some(Self { connection })
+        let (connection, screen) = x11rb::connect(None).ok()?;
+        let root = connection.setup().roots.get(screen)?.root;
+        Some(Self { connection, root })
+    }
+
+    /// Asks the window manager to put one window on every workspace, or to stop.
+    fn sticky(&self, window: Window, wanted: bool) -> Result<(), String> {
+        let state = self.atom("_NET_WM_STATE")?;
+        let flag = self.atom("_NET_WM_STATE_STICKY")?;
+        // The specification's own numbers: 0 removes a state, 1 adds one, and
+        // the fourth word says a normal application is asking rather than a
+        // pager.
+        let action = u32::from(wanted);
+        let message = ClientMessageEvent::new(32, window, state, [action, flag, 0, 1, 0]);
+        self.connection
+            .send_event(
+                false,
+                self.root,
+                EventMask::SUBSTRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_REDIRECT,
+                message,
+            )
+            .map_err(|error| format!("the window manager would not take a sticky state: {error}"))?
+            .ignore_error();
+        self.connection
+            .flush()
+            .map_err(|error| format!("a sticky state did not reach the display: {error}"))
+    }
+
+    fn atom(&self, name: &str) -> Result<u32, String> {
+        self.connection
+            .intern_atom(false, name.as_bytes())
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .map(|reply| reply.atom)
+            .ok_or_else(|| format!("the display does not know {name}"))
     }
 
     /// Answers whether the server has one window on screen.

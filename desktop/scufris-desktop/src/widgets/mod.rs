@@ -15,7 +15,7 @@ pub mod runtime;
 pub mod windows;
 
 use std::{
-    sync::{Arc, Mutex, MutexGuard, OnceLock, Weak},
+    sync::{Arc, Mutex, MutexGuard, OnceLock, Weak, atomic::AtomicU32},
     thread,
     time::{Duration, Instant},
 };
@@ -27,6 +27,7 @@ use tracing::{debug, warn};
 
 use crate::{
     daemon::{DaemonLink, WidgetCommand},
+    display,
     widgets::{
         catalog::{Catalog, CatalogError, Source},
         pool::{Pool, ShellMsg},
@@ -342,6 +343,10 @@ impl Widgets {
                 Act::Life { surface, life } => {
                     self.pool.send(&surface, ShellMsg::Life { state: life });
                 }
+                Act::Stick { surface, sticky } => self.stick(&surface, sticky),
+                Act::Refuse { surface, detail } => {
+                    self.pool.send(&surface, ShellMsg::Refused { detail });
+                }
                 Act::Retire { surface } => self.pool.discard(&surface),
                 Act::Report(body) => self.report(body),
             }
@@ -355,6 +360,25 @@ impl Widgets {
             return;
         };
         if let Err(error) = windows::fit(&window, size) {
+            warn!(surface, "{error}");
+        }
+    }
+
+    /// Puts one widget window on every workspace, or brings it back to this one.
+    ///
+    /// An exhibit belongs to the layer that follows the person around, so it is
+    /// on every workspace the way i3's own scratchpad is. Pinning it is what
+    /// brings it down onto the workspace they are looking at. Nothing here
+    /// touches i3's real scratchpad: the whole mechanism is one window state.
+    fn stick(&self, surface: &str, sticky: bool) {
+        let Some(window) = self.app.get_webview_window(surface) else {
+            warn!(surface, "a widget surface has no window");
+            return;
+        };
+        if let Err(error) = display::sticky(&window, &AtomicU32::new(0), sticky) {
+            // A desktop that will not take the state is a widget on one
+            // workspace, which is worse than on all of them and much better
+            // than not being up at all.
             warn!(surface, "{error}");
         }
     }
@@ -459,11 +483,17 @@ mod tests {
             },
         );
         assert_eq!(
-            acts,
-            vec![Act::Life {
+            acts.first(),
+            Some(&Act::Life {
                 surface: "widget-1".into(),
                 life: Life::Pinned,
-            }]
+            })
+        );
+        // And the move to the person's own slot comes after it, so the badge
+        // has already changed by the time the window travels.
+        assert!(
+            acts.iter()
+                .any(|act| matches!(act, Act::Move { surface, .. } if surface == "widget-1"))
         );
     }
 }

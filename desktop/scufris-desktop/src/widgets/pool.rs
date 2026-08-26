@@ -68,6 +68,15 @@ pub enum ShellMsg {
         /// What the chrome now says.
         state: Life,
     },
+    /// Say that a tick the person used could not be carried out.
+    ///
+    /// A tick that silently does nothing reads as a tick that is broken. This
+    /// is the chrome's only way to say otherwise, and the badge is where it
+    /// says it.
+    Refused {
+        /// What the person reads.
+        detail: String,
+    },
     /// Unmount the widget. The window closes right behind this.
     Retire,
 }
@@ -246,6 +255,18 @@ mod tests {
             })
             .expect("the message serializes"),
             serde_json::json!({ "kind": "life", "state": "pinned" })
+        );
+        assert_eq!(
+            serde_json::to_value(ShellMsg::Life { state: Life::Dim })
+                .expect("the message serializes"),
+            serde_json::json!({ "kind": "life", "state": "dim" })
+        );
+        assert_eq!(
+            serde_json::to_value(ShellMsg::Refused {
+                detail: "every slot is taken".into()
+            })
+            .expect("the message serializes"),
+            serde_json::json!({ "kind": "refused", "detail": "every slot is taken" })
         );
     }
 }

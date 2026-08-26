@@ -136,6 +136,19 @@ body {
   color: var(--sw-accent);
 }
 
+/* A tick that could not be carried out. The badge carries the reason for a
+ * moment in the attention colour, because a tick that silently does nothing
+ * reads as a tick that is broken. */
+.panel[data-refused] .badge {
+  color: var(--sw-attention);
+}
+
+/* And the panel is not dim while it is saying so, whatever its life state:
+ * a message nobody can read is not a message. */
+.panel[data-refused] {
+  opacity: 1;
+}
+
 .root {
   width: 100%;
   height: 100%;

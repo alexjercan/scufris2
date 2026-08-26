@@ -27,6 +27,10 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   takes the whole layer off the screen with their state and their remaining
   time intact. Panels you pinned and instruments stay where they are, because
   they are yours rather than the runtime's.
+- A widget Scufris opened follows you between workspaces. Pinning it brings it
+  down onto the workspace you are on and parks it in a screen-edge slot of its
+  own, so nothing the shelf does afterwards lands on top of it. A pin with no
+  free slot says so on the panel instead of doing nothing.
 
 ### Changed
 

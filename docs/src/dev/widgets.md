@@ -23,10 +23,28 @@ where it lives and how long.
   slots. An open with no free edge slot fails rather than stacking two panels
   in one place.
 
-The pin tick on a panel's chrome hands it to the user and back. A pinned
-surface leaves the shelf, nothing moves it again, and `scufris_widget_clear`
-leaves it standing. An instrument is the user's for the same reason, so neither
-the shelf's clock nor the clear verb reaches one.
+The pin tick on a panel's chrome promotes an exhibit into an instrument: it
+leaves the shelf for a free edge slot, stops aging, and `scufris_widget_clear`
+leaves it standing. It has to leave the shelf's columns and not merely leave the
+shelf, because a column it kept is the column the reflow behind it moves a live
+exhibit into. A pin with no free edge slot is refused and says so on the badge,
+rather than doing nothing. The tick reads both ways, and an exhibit handed back
+is the current one.
+
+## Workspaces
+
+An exhibit is sticky: it is on every workspace, the way i3's own scratchpad is,
+because it belongs to the layer the pill lives on and that layer follows the
+user around. Pinning drops the sticky flag, so the panel comes down onto the
+workspace they are looking at - which is what makes it theirs. Instruments are
+not sticky for the same reason.
+
+The whole mechanism is `_NET_WM_STATE_STICKY`, asked for the way the
+specification says a client asks: a message to the root window rather than a
+property written directly, because once a window is mapped the state belongs to
+the window manager. Nothing touches i3's real scratchpad. A window manager
+unmanages a window when it unmaps, so a panel that goes down with the layer is
+told again when it comes back.
 
 ## Aging
 

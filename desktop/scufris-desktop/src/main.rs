@@ -10,6 +10,7 @@ mod audio;
 mod blob;
 mod config;
 mod daemon;
+mod display;
 mod focus;
 mod logging;
 mod pending;
@@ -28,10 +29,11 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    thread,
 };
 
 use app::{
-    ACK_TIMEOUT, App, Backend, COPY_EVENT, CUES_EVENT, Executor, PRESENTATION_EVENT, Ports,
+    ACK_TIMEOUT, App, Backend, COPY_EVENT, CUES_EVENT, Executor, Hidden, PRESENTATION_EVENT, Ports,
     PresentationPayload, Shown, Surface, TICK_EVENT, ThreadExecutor, TickPayload, Transcriber,
 };
 use audio::{CpalRecorder, Recorder};
@@ -124,11 +126,11 @@ impl Surface for DesktopSurface {
         pill::show(&self.handle)
     }
 
-    fn show_pill_passive(&self) -> Result<(), String> {
+    fn show_pill_passive(&self) -> Result<Shown, String> {
         pill::show_passive(&self.handle)
     }
 
-    fn hide_pill(&self) -> Result<(), String> {
+    fn hide_pill(&self) -> Result<Hidden, String> {
         // The box belongs to the orb, so it goes first: a pill on its way down
         // must never leave a transcript hanging over the desktop behind it.
         if let Err(error) = review::hide(&self.handle) {
@@ -187,6 +189,11 @@ impl Backend for DaemonLink {
 }
 
 fn start(config: Config) -> Result<(), Box<dyn Error>> {
+    // This thread runs the event loop from here on, and the event loop is what
+    // carries every window request out. Anything asking a window about itself
+    // has to know which thread that is, because on this one a request cannot
+    // have happened yet.
+    display::runs_the_event_loop();
     // After the WebKit re-exec, so one start logs one starting line.
     info!(
         version = env!("CARGO_PKG_VERSION"),
@@ -244,7 +251,12 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                     let runtime = app.state::<Arc<App>>().inner().clone();
                     match id {
                         tray::MENU_CHAT => runtime.open_chat(),
-                        tray::MENU_VOICE => runtime.handle(Event::Activate),
+                        // Off this thread. An activation waits for the pill to
+                        // be on screen before the microphone opens, and this is
+                        // the thread that would have to put it there.
+                        tray::MENU_VOICE => {
+                            thread::spawn(move || runtime.handle(Event::Activate));
+                        }
                         tray::MENU_RESTART => runtime.restart_backend(),
                         tray::MENU_CUES => {
                             let enabled =
@@ -289,16 +301,24 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             runtime.set_backend(Arc::clone(&link) as Arc<dyn Backend>);
             tauri.manage(link);
 
-            // Recovers an accepted transcript the previous process could not
-            // deliver, then renders the first presentation.
-            runtime.start();
-
             tauri.global_shortcut().register(shortcut)?;
             Ok(())
         })
         .build(tauri::generate_context!())?;
 
     tauri_app.run(|handle, event| match event {
+        RunEvent::Ready => {
+            display::the_event_loop_is_running();
+            // Recovers an accepted transcript the previous process could not
+            // deliver, then renders the first presentation. Here rather than in
+            // `setup`, and on a thread of its own, because the recovered words
+            // go into a phase the person has to see: the decision waits for the
+            // pill to be put on screen, and this loop is what puts it there.
+            // Made from inside `setup` it asked a window that could not yet
+            // exist and threw the words away on the answer.
+            let runtime = handle.state::<Arc<App>>().inner().clone();
+            thread::spawn(move || runtime.start());
+        }
         RunEvent::ExitRequested { api, code, .. } if code.is_none() => api.prevent_exit(),
         RunEvent::Exit => {
             info!("stopping");

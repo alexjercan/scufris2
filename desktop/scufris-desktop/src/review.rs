@@ -22,11 +22,16 @@
 //! nothing on the orb can ask for them back, because a review has no further
 //! change to make and an activation does nothing in it.
 
+use std::sync::atomic::AtomicU32;
+
 use tauri::{
     AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
-use crate::pill;
+use crate::{
+    display::{self, Verdict},
+    pill,
+};
 
 /// Stable window label. `capabilities/default.json` names it too: a window the
 /// capability does not cover cannot listen for the presentation it renders.
@@ -67,6 +72,9 @@ const GAP: f64 = 24.0;
 /// this leaves them unread. Adding "retained" here and a third hint to
 /// `review.ts` is the whole change if that is wanted.
 const RAISED: [&str; 2] = ["review", "uncertain"];
+
+/// The X window the display knows the box by, once it has made one.
+static WINDOW: AtomicU32 = AtomicU32::new(0);
 
 /// Returns the physical position of the box, centered above the orb window.
 pub fn above_pill(
@@ -139,8 +147,8 @@ trait Frame {
     fn place(&self) -> Result<(), String>;
     /// Puts the box on screen.
     fn show(&self) -> Result<(), String>;
-    /// Answers whether the box is up.
-    fn visible(&self) -> Result<bool, String>;
+    /// Answers what the display says about the box being up.
+    fn seen(&self) -> Verdict;
     /// Keeps the box over the desktop.
     fn keep_on_top(&self) -> Result<(), String>;
 }
@@ -160,9 +168,8 @@ impl Frame for WebviewWindow {
             .map_err(|error| format!("the transcript box could not be shown: {error}"))
     }
 
-    fn visible(&self) -> Result<bool, String> {
-        self.is_visible()
-            .map_err(|error| format!("the transcript box could not confirm that it is up: {error}"))
+    fn seen(&self) -> Verdict {
+        display::came_up(self, &WINDOW)
     }
 
     fn keep_on_top(&self) -> Result<(), String> {
@@ -193,10 +200,12 @@ fn raise(frame: &impl Frame) -> Result<(), String> {
         tracing::warn!("{error}");
     }
     frame.show()?;
-    match frame.visible() {
-        Ok(true) => {}
-        Ok(false) => return Err("the transcript box did not come up".into()),
-        Err(error) => return Err(error),
+    match frame.seen() {
+        // Up, or asked for and not yet carried out. A request the display has
+        // not reached is not a box that refused to come up, and saying so would
+        // be the false verdict this reporting exists to avoid.
+        Verdict::Yes | Verdict::Unsure => {}
+        Verdict::No => return Err("the transcript box did not come up".into()),
     }
     if let Err(error) = frame.keep_on_top() {
         tracing::warn!("{error}");
@@ -215,12 +224,10 @@ pub fn hide(app: &AppHandle) -> Result<(), String> {
     window
         .hide()
         .map_err(|error| format!("the transcript box could not be hidden: {error}"))?;
-    match window.is_visible() {
-        Ok(false) => Ok(()),
-        Ok(true) => Err("the transcript box is still up".into()),
-        Err(error) => Err(format!(
-            "the transcript box could not confirm that it is down: {error}"
-        )),
+    match display::went_down(&window, &WINDOW) {
+        // Down, or on its way and nobody in a position to watch it go.
+        Verdict::Yes | Verdict::Unsure => Ok(()),
+        Verdict::No => Err("the transcript box is still up".into()),
     }
 }
 
@@ -252,12 +259,21 @@ mod tests {
         operations: RefCell<Vec<String>>,
         /// Operations that answer with a failure instead of doing anything.
         refuse: HashMap<&'static str, &'static str>,
+        /// What the display says about the box after it was shown.
+        seen: Option<Verdict>,
     }
 
     impl RecordedFrame {
         fn refusing(operation: &'static str, reason: &'static str) -> Self {
             Self {
                 refuse: HashMap::from([(operation, reason)]),
+                ..Self::default()
+            }
+        }
+
+        fn seeing(seen: Verdict) -> Self {
+            Self {
+                seen: Some(seen),
                 ..Self::default()
             }
         }
@@ -291,9 +307,9 @@ mod tests {
         fn show(&self) -> Result<(), String> {
             self.attempt("show")
         }
-        fn visible(&self) -> Result<bool, String> {
-            self.attempt("visible")?;
-            Ok(true)
+        fn seen(&self) -> Verdict {
+            let _ = self.attempt("seen");
+            self.seen.unwrap_or(Verdict::Yes)
         }
         fn keep_on_top(&self) -> Result<(), String> {
             self.attempt("keep-on-top")
@@ -317,12 +333,12 @@ mod tests {
                 "accept-focus false",
                 "place",
                 "show",
-                "visible",
+                "seen",
                 "keep-on-top",
                 "accept-focus false",
                 "place",
                 "show",
-                "visible",
+                "seen",
                 "keep-on-top",
             ]
         );
@@ -344,6 +360,27 @@ mod tests {
         let frame = RecordedFrame::refusing("place", "the box could not be placed");
         assert_eq!(raise(&frame), Ok(()));
         assert!(frame.operations().iter().any(|step| step == "show"));
+    }
+
+    /// A box that has been asked to come up and has not reached the display yet
+    /// is not a box that refused to. Reporting one as the other is what put
+    /// "the transcript box did not come up" in the log of every start.
+    #[test]
+    fn a_box_the_display_cannot_speak_for_is_not_reported_as_refusing() {
+        let frame = RecordedFrame::seeing(Verdict::Unsure);
+        assert_eq!(raise(&frame), Ok(()));
+        // Still kept on top: the raise carries on with everything that does not
+        // rest on the answer.
+        assert_eq!(
+            frame.operations(),
+            ["accept-focus false", "place", "show", "seen", "keep-on-top"]
+        );
+
+        let frame = RecordedFrame::seeing(Verdict::No);
+        assert_eq!(
+            raise(&frame),
+            Err("the transcript box did not come up".into())
+        );
     }
 
     #[test]

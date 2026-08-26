@@ -17,18 +17,21 @@
 //! the page pops the orb inside the frame and squashes it once as it lands.
 
 use std::{
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     thread,
     time::Duration,
 };
 
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     WindowEvent,
 };
 
-use crate::{app::Shown, blob};
+use crate::{
+    app::{Hidden, Shown},
+    blob,
+    display::{self, Verdict},
+};
 
 /// Stable window label.
 pub const LABEL: &str = "pill";
@@ -102,6 +105,9 @@ static STILLNESS: AtomicBool = AtomicBool::new(true);
 /// again.
 static SHAPED: AtomicBool = AtomicBool::new(false);
 
+/// The X window the display knows the pill by, once it has made one.
+static WINDOW: AtomicU32 = AtomicU32::new(0);
+
 /// Returns the physical bottom-center position of the pill on one monitor.
 pub fn bottom_center(
     monitor_x: i32,
@@ -167,10 +173,18 @@ pub fn ensure(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 }
 
 /// Answers whether the pill window currently holds the keyboard.
+///
+/// The display is asked, not the window: the window answers with what the
+/// toolkit last noticed, and this answer decides whether the window behind the
+/// pill is worth remembering. A stale "no" while the pill holds the keyboard is
+/// what would record the pill itself as the window to go back to, leaving the
+/// person nothing to be given back.
+///
+/// An answer nobody could give still counts as no, which is what the window's
+/// own answer already amounted to.
 pub fn focused(app: &AppHandle) -> bool {
     app.get_webview_window(LABEL)
-        .and_then(|window| window.is_focused().ok())
-        .unwrap_or(false)
+        .is_some_and(|window| display::keyboard(&window, &WINDOW) == Verdict::Yes)
 }
 
 /// Cuts the window down to its blob, once there is a window to cut.
@@ -180,12 +194,12 @@ pub fn focused(app: &AppHandle) -> bool {
 /// there was a blob at all - so a failure is said once per attempt and the pill
 /// goes up either way.
 ///
-/// Showing a window is a message to the event loop rather than an act, so at
-/// the moment a caller returns from `show` there is usually no X window yet to
-/// cut - and at startup, before the loop has run at all, there certainly is
-/// none. That is not a failure and is not said out loud: every show asks again,
-/// and so does every event the window reports, one of which is the move the
-/// window manager sends it the moment it is mapped.
+/// Showing a window is a message to the event loop rather than an act, so a
+/// window that has just been asked to come up has usually not reached the
+/// display yet - and at startup, before the loop has run at all, it certainly
+/// has not. That is not a failure and is not said out loud: every show asks
+/// again once the display has confirmed the window, and so does every event the
+/// window reports.
 fn shape(window: &WebviewWindow) {
     if SHAPED.load(Ordering::SeqCst) {
         return;
@@ -200,16 +214,13 @@ fn shape(window: &WebviewWindow) {
 /// Asks the display to cut the pill's own window down to the blob, and answers
 /// whether there was a window to cut.
 fn cut(window: &WebviewWindow) -> Result<bool, String> {
-    // No handle means the window has not reached the display yet, which every
-    // later attempt is there to catch.
-    let Ok(handle) = window.window_handle() else {
+    // No name means the display has not made the window yet, or is not an X
+    // display at all. Neither is worth saying out loud: a window that cannot be
+    // cut is the rectangle it was built as, which is what shipped before there
+    // was a blob.
+    let Some(id) = display::identify(window, &WINDOW) else {
         return Ok(false);
     };
-    let RawWindowHandle::Xlib(display) = handle.as_raw() else {
-        return Err("the pill is not on an X display".into());
-    };
-    let id = u32::try_from(display.window)
-        .map_err(|_| "the pill's window is not an X window".to_string())?;
     // The window's own size in physical pixels, which is what a mask is
     // measured in: on a scaled monitor the frame is bigger than the layout.
     let size = window
@@ -288,9 +299,10 @@ fn arrange(window: &WebviewWindow) -> tauri::Result<Option<Rise>> {
     let Some((home, scale)) = resting(window)? else {
         return Ok(None);
     };
-    // Anything but a confirmed "down" counts as up. A window that cannot say
-    // where it is is not one to start moving around.
-    if !matches!(window.is_visible(), Ok(false)) || still() {
+    // Anything but a confirmed "down" counts as up. A window that nothing can
+    // say is down is not one to start moving around, and replaying an entrance
+    // for a pill the person is already reading pulls their eye back to it.
+    if display::up(window, &WINDOW) != Verdict::No || still() {
         window.set_position(home)?;
         return Ok(None);
     }
@@ -362,22 +374,20 @@ pub fn show(app: &AppHandle) -> Result<Shown, String> {
 ///
 /// The pill is the recording privacy indicator, so the caller is told what the
 /// window is doing rather than what it was asked to do: an operation that
-/// returns without error has still only asked. What the window says about
-/// itself afterwards is the answer, and a window that cannot answer counts as
-/// not having done it.
+/// returns without error has still only asked. The display is what says
+/// otherwise, and it is given time to: a request that has not been carried out
+/// yet is not one that failed.
 fn reveal(window: &WebviewWindow, mut doubt: String) -> Result<Shown, String> {
     window
         .show()
         .map_err(|error| format!("the pill could not be shown: {error}"))?;
-    // Cutting comes before the questions below, and before any of them can
-    // return early: the window exists on the display from the moment it is
-    // shown, and a pill that answered "not up" and stayed a rectangle would be
-    // the black box this shape exists to avoid.
+    let up = display::came_up(window, &WINDOW);
+    // Cutting comes as soon as the display has a window to cut, and before any
+    // of the answers below can return early: a pill that reported trouble and
+    // stayed a rectangle would be the black box this shape exists to avoid.
     shape(window);
-    match window.is_visible() {
-        Ok(true) => {}
-        Ok(false) => return Err("the pill did not come up".into()),
-        Err(error) => return Err(format!("the pill could not confirm that it is up: {error}")),
+    if up == Verdict::No {
+        return Err("the pill did not come up".into());
     }
     if let Err(error) = window.set_always_on_top(true) {
         // A pill that may be behind another window is not something to rest a
@@ -387,19 +397,30 @@ fn reveal(window: &WebviewWindow, mut doubt: String) -> Result<Shown, String> {
     if !doubt.is_empty() {
         return Ok(Shown::Doubtful(doubt));
     }
+    if up == Verdict::Unsure {
+        // The keyboard is still asked for - the request is worth making either
+        // way - but nothing here may be recorded as achieved.
+        let _ = window.set_focus();
+        return Ok(Shown::Unsure(
+            "nothing could say whether the pill came up".into(),
+        ));
+    }
     if let Err(error) = window.set_focus() {
-        return Ok(Shown::Seen(format!(
+        return Ok(Shown::Seen(Some(format!(
             "the pill could not take the keyboard: {error}"
-        )));
+        ))));
     }
     // Asking for the keyboard is not holding it. A window manager may accept
     // the request and hand the keyboard elsewhere, or later, or never.
-    match window.is_focused() {
-        Ok(true) => Ok(Shown::Ready),
-        Ok(false) => Ok(Shown::Seen("the pill did not take the keyboard".into())),
-        Err(error) => Ok(Shown::Seen(format!(
-            "the pill could not confirm that it has the keyboard: {error}"
-        ))),
+    //
+    // Not holding it says nothing out loud. The pill is up, which is what the
+    // privacy indicator rests on, and the runtime asks for the keyboard again
+    // on its own; it is the runtime that says so, once, if it runs out of
+    // asking. A window that is being asked again is not one to interrupt
+    // anybody about.
+    match display::took_the_keyboard(window, &WINDOW) {
+        Verdict::Yes => Ok(Shown::Ready),
+        Verdict::No | Verdict::Unsure => Ok(Shown::Seen(None)),
     }
 }
 
@@ -408,7 +429,7 @@ fn reveal(window: &WebviewWindow, mut doubt: String) -> Result<Shown, String> {
 /// The passive pill only reports the turn it started, so being up is all it
 /// owes: placement or always-on-top falling short is worth a report, not a
 /// refusal, because nothing that rests on being seen rests on this posture.
-pub fn show_passive(app: &AppHandle) -> Result<(), String> {
+pub fn show_passive(app: &AppHandle) -> Result<Shown, String> {
     let window = ensure(app).map_err(|error| format!("the pill window is missing: {error}"))?;
     let rise = arrange(&window).unwrap_or_else(|error| {
         tracing::warn!("the passive pill could not be placed: {error}");
@@ -417,13 +438,12 @@ pub fn show_passive(app: &AppHandle) -> Result<(), String> {
     window
         .show()
         .map_err(|error| format!("the pill could not be shown: {error}"))?;
-    // The same reason as the active pill: shown is when the window is on the
-    // display, and that is when it has to stop being a rectangle.
+    let up = display::came_up(&window, &WINDOW);
+    // The same reason as the active pill: a window the display has is a window
+    // that has to stop being a rectangle.
     shape(&window);
-    match window.is_visible() {
-        Ok(true) => {}
-        Ok(false) => return Err("the pill did not come up".into()),
-        Err(error) => return Err(format!("the pill could not confirm that it is up: {error}")),
+    if up == Verdict::No {
+        return Err("the pill did not come up".into());
     }
     if let Err(error) = window.set_always_on_top(true) {
         tracing::warn!("the passive pill could not be kept on top: {error}");
@@ -432,27 +452,33 @@ pub fn show_passive(app: &AppHandle) -> Result<(), String> {
     if let Some(rise) = rise {
         glide(&window, rise);
     }
-    Ok(())
+    match up {
+        Verdict::Yes => Ok(Shown::Seen(None)),
+        _ => Ok(Shown::Unsure(
+            "nothing could say whether the pill came up".into(),
+        )),
+    }
 }
 
 /// Hides the pill without destroying it, and confirms that it is down.
 ///
 /// An always-on-top pill that is still up must never be recorded as down: that
-/// record is what would stop it ever being taken down again.
-pub fn hide(app: &AppHandle) -> Result<(), String> {
+/// record is what would stop it ever being taken down again. A hide nothing
+/// could speak for is not that, and is not reported as one.
+pub fn hide(app: &AppHandle) -> Result<Hidden, String> {
     let Some(window) = app.get_webview_window(LABEL) else {
-        return Ok(());
+        return Ok(Hidden::Down);
     };
     // A pill on its way down has nothing left to rise into.
     cancel_entrance();
     window
         .hide()
         .map_err(|error| format!("the pill could not be hidden: {error}"))?;
-    match window.is_visible() {
-        Ok(false) => Ok(()),
-        Ok(true) => Err("the pill is still up".into()),
-        Err(error) => Err(format!(
-            "the pill could not confirm that it is down: {error}"
+    match display::went_down(&window, &WINDOW) {
+        Verdict::Yes => Ok(Hidden::Down),
+        Verdict::No => Err("the pill is still up".into()),
+        Verdict::Unsure => Ok(Hidden::Unsure(
+            "nothing could say whether the pill went down".into(),
         )),
     }
 }

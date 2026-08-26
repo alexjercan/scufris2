@@ -100,17 +100,36 @@ pub struct TickPayload {
 /// Asking is not achieving, and the difference decides whether the microphone
 /// may open: the pill is the recording privacy indicator, so the runtime is
 /// told what the window is doing rather than what it was told to do.
+///
+/// Not achieving is not the same as failing, which is what [`Shown::Unsure`] is
+/// for. A window request is carried out somewhere else and later, so most of
+/// the time an answer read straight after one describes the moment before it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Shown {
     /// The pill is up, on top, and holds the keyboard: everything asked for.
     Ready,
-    /// The pill is up and on top, so the person can see it, but the keyboard is
-    /// somewhere else.
-    Seen(String),
+    /// The pill is up and on top, so the person can see it. `Some` when the
+    /// keyboard is provably somewhere else, which is worth saying out loud, and
+    /// `None` when nothing could say where it went, which is not.
+    Seen(Option<String>),
     /// The pill is up, but nothing proved the person can see it: it may be
     /// behind whatever they are looking at. Nothing that rests on being seen
     /// may rest on this.
     Doubtful(String),
+    /// The pill was asked to come up and nothing could say whether it did. Not
+    /// a failure and not an achievement: the phase carries on, nothing that
+    /// needs the person to see the pill may run, and the next decision asks
+    /// again.
+    Unsure(String),
+}
+
+/// What a request to take the pill off screen achieved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Hidden {
+    /// The pill is down.
+    Down,
+    /// The pill was asked to go down and nothing could say whether it did.
+    Unsure(String),
 }
 
 /// The pill window and the tray.
@@ -123,10 +142,11 @@ pub enum Shown {
 pub trait Surface: Send + Sync {
     /// Records the active window, then shows and focuses the pill.
     fn show_pill(&self) -> Result<Shown, String>;
-    /// Shows the pill without touching the keyboard, and confirms it is up.
-    fn show_pill_passive(&self) -> Result<(), String>;
-    /// Hides the pill, and confirms that it is down.
-    fn hide_pill(&self) -> Result<(), String>;
+    /// Shows the pill without touching the keyboard, and says what that
+    /// achieved. Never [`Shown::Ready`]: this posture leaves the keyboard alone.
+    fn show_pill_passive(&self) -> Result<Shown, String>;
+    /// Hides the pill, and says what that achieved.
+    fn hide_pill(&self) -> Result<Hidden, String>;
     /// Gives focus back to the window the pill covered.
     fn restore_focus(&self) -> Result<(), String>;
     /// Renders one presentation in the pill.
@@ -358,6 +378,10 @@ impl<T> Ordered<T> {
 enum Screen {
     /// The pill is down.
     Off,
+    /// Nothing is known. The window was asked for something and nothing could
+    /// say whether it happened, so every posture counts as not reached and the
+    /// repair chain asks again from a thread that can wait for the answer.
+    Unknown,
     /// The pill is up, but nothing proved the person can see it.
     Doubtful,
     /// The pill is up and on top, so the person can see it.
@@ -474,6 +498,14 @@ impl App {
     ///
     /// A record that exists but cannot be read is reported, never mistaken for
     /// an empty store: that is what would let the next save destroy it.
+    ///
+    /// Called only once the event loop is running, and from a thread that is
+    /// not the one running it. The recovered words go into a phase the person
+    /// has to see, so this waits for the pill to be put on screen before
+    /// deciding anything about them - and the loop is what puts it there. Run
+    /// before the loop, this decides about a window that has not been given the
+    /// chance to exist, which is how the recovered transcript came to be
+    /// dropped on every start.
     pub fn start(self: &Arc<Self>) {
         let loaded = self.ports.pending.load();
         let (_, decision) = self.decide(|companion| match loaded {
@@ -790,24 +822,8 @@ impl App {
             return Ok(());
         }
         match self.ports.surface.show_pill() {
-            Ok(Shown::Ready) => {
-                self.set_screen(Screen::Ready);
-                Ok(())
-            }
-            Ok(Shown::Seen(trouble)) => {
-                // The person can see the pill, which is what the privacy
-                // indicator needs. The keyboard is asked for again, because
-                // this is not recorded as the pill being ready.
-                warn!("{trouble}");
-                self.set_screen(Screen::Seen);
-                Ok(())
-            }
-            Ok(Shown::Doubtful(trouble)) => {
-                // Up, but perhaps behind what the person is looking at. The
-                // phase still has a window, so it goes on; what it does not
-                // have is anything to rest a privacy indicator on.
-                warn!("{trouble}");
-                self.set_screen(Screen::Doubtful);
+            Ok(shown) => {
+                self.record(shown);
                 Ok(())
             }
             // Nothing is recorded. What the window was doing before is still
@@ -815,6 +831,39 @@ impl App {
             // try again.
             Err(reason) => Err(reason),
         }
+    }
+
+    /// Writes down what one show proved, and says out loud only what failed.
+    ///
+    /// A window operation that came back with an error failed, and is worth a
+    /// warning. A window that has simply not got there yet is not: the runtime
+    /// asks again, and says so itself if it runs out of asking. An operator
+    /// reading this log has to be able to take every warning in it at face
+    /// value, or none of them are worth anything.
+    fn record(&self, shown: Shown) {
+        self.set_screen(match shown {
+            Shown::Ready => Screen::Ready,
+            // The person can see the pill, which is what the privacy indicator
+            // needs. The keyboard is asked for again, because this is not
+            // recorded as the pill being ready.
+            Shown::Seen(trouble) => {
+                if let Some(trouble) = trouble {
+                    warn!("{trouble}");
+                }
+                Screen::Seen
+            }
+            // Up, but perhaps behind what the person is looking at. The phase
+            // still has a window, so it goes on; what it does not have is
+            // anything to rest a privacy indicator on.
+            Shown::Doubtful(trouble) => {
+                warn!("{trouble}");
+                Screen::Doubtful
+            }
+            Shown::Unsure(reason) => {
+                debug!("{reason}");
+                Screen::Unknown
+            }
+        });
     }
 
     /// Keeps the pill on screen without the keyboard, and records only what
@@ -837,9 +886,13 @@ impl App {
                 // not happen.
                 Err(reason) => Err(reason),
             },
-            Screen::Off => match self.ports.surface.show_pill_passive() {
-                Ok(()) => {
-                    self.set_screen(Screen::Seen);
+            // A pill nothing is known about is put up the same way a pill that
+            // is down is. The keyboard is left where it is: taking it back from
+            // a window that may never have had it would take it from wherever
+            // the person moved it.
+            Screen::Off | Screen::Unknown => match self.ports.surface.show_pill_passive() {
+                Ok(shown) => {
+                    self.record(shown);
                     Ok(())
                 }
                 Err(reason) => Err(reason),
@@ -863,8 +916,16 @@ impl App {
             warn!("{reason}");
         }
         match self.ports.surface.hide_pill() {
-            Ok(()) => {
+            Ok(Hidden::Down) => {
                 self.set_screen(Screen::Off);
+                Ok(())
+            }
+            Ok(Hidden::Unsure(reason)) => {
+                // Asked, and nothing could say it happened. Writing it down as
+                // down is exactly what would stop it ever being taken down
+                // again, so nothing is claimed and the repair asks again.
+                debug!("{reason}");
+                self.set_screen(Screen::Unknown);
                 Ok(())
             }
             Err(reason) => {
@@ -897,8 +958,14 @@ impl App {
     /// runtime asks again itself, on the newest phase rather than the one that
     /// fell short, and it stops asking: a window manager that has refused three
     /// times is refusing, and the next decision asks again anyway.
+    ///
+    /// Running out of asking is the moment the shortfall is said out loud, and
+    /// the only one. Up to then the runtime is still doing something about it,
+    /// and a window that arrives one attempt late would have left a warning
+    /// behind for a failure that never happened.
     fn repair(self: &Arc<Self>, left: usize) {
         if left == 0 {
+            warn!("{}", self.shortfall());
             self.repairing.store(false, Ordering::SeqCst);
             return;
         }
@@ -921,6 +988,27 @@ impl App {
                 );
             }),
         );
+    }
+
+    /// Says what the window never reached, in the words the person's log uses.
+    ///
+    /// Read at the moment the runtime stops asking, from the newest phase and
+    /// the newest record rather than from the attempt that failed: what matters
+    /// is where the window has been left, not which try left it there.
+    fn shortfall(&self) -> String {
+        let posture = self
+            .companion
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .posture();
+        match (posture, self.screen()) {
+            (Posture::Off, _) => "the pill is still up".into(),
+            (Posture::Focused, Screen::Seen | Screen::Doubtful) => {
+                "the pill did not take the keyboard".into()
+            }
+            (Posture::Passive, Screen::Ready) => "the pill would not give the keyboard back".into(),
+            _ => "the pill did not come up".into(),
+        }
     }
 
     /// Answers whether the person can read that the microphone is open.
@@ -1325,6 +1413,12 @@ mod tests {
         /// Show attempts where the pill comes up but nothing proves the person
         /// can see it, the way a refused always-on-top leaves it.
         blind_show: AtomicU64,
+        /// Show attempts where the window is asked and nothing can say what
+        /// happened, the way a display that has not carried the request out
+        /// leaves it.
+        unsure_show: AtomicU64,
+        /// Hide attempts nothing can speak for, the same way.
+        unsure_hide: AtomicU64,
         /// Hide attempts that return an error and leave the pill up.
         refuse_hide: Refusals,
         /// Focus restorations that return an error.
@@ -1354,6 +1448,8 @@ mod tests {
                 refuse_show: Refusals::new("the pill did not come up"),
                 partial_show: AtomicU64::new(0),
                 blind_show: AtomicU64::new(0),
+                unsure_show: AtomicU64::new(0),
+                unsure_hide: AtomicU64::new(0),
                 refuse_hide: Refusals::new("the pill is still up"),
                 refuse_focus: Refusals::new("the previous window would not take focus"),
                 refuse_present: Refusals::new("the pill would not render"),
@@ -1405,6 +1501,15 @@ mod tests {
             self.refuse_show.attempt()?;
             self.on_screen.store(true, Ordering::SeqCst);
             self.shown.fetch_add(1, Ordering::Relaxed);
+            if self.unsure_show.load(Ordering::SeqCst) > 0 {
+                self.unsure_show.fetch_sub(1, Ordering::SeqCst);
+                // The request reached the window and nothing has carried it out
+                // yet, which is what every show looks like before the event
+                // loop has run.
+                return Ok(Shown::Unsure(
+                    "nothing could say whether the pill came up".into(),
+                ));
+            }
             if self.blind_show.load(Ordering::SeqCst) > 0 {
                 self.blind_show.fetch_sub(1, Ordering::SeqCst);
                 // The window is up, but it would not stay over whatever the
@@ -1413,19 +1518,27 @@ mod tests {
             }
             if self.partial_show.load(Ordering::SeqCst) > 0 {
                 self.partial_show.fetch_sub(1, Ordering::SeqCst);
-                return Ok(Shown::Seen("the pill could not take the keyboard".into()));
+                return Ok(Shown::Seen(Some(
+                    "the pill could not take the keyboard".into(),
+                )));
             }
             self.focused.store(true, Ordering::SeqCst);
             Ok(Shown::Ready)
         }
-        fn show_pill_passive(&self) -> Result<(), String> {
+        fn show_pill_passive(&self) -> Result<Shown, String> {
             self.window.lock().unwrap().push("show-passive");
             self.refuse_show.attempt()?;
             self.on_screen.store(true, Ordering::SeqCst);
             self.shown.fetch_add(1, Ordering::Relaxed);
-            Ok(())
+            if self.unsure_show.load(Ordering::SeqCst) > 0 {
+                self.unsure_show.fetch_sub(1, Ordering::SeqCst);
+                return Ok(Shown::Unsure(
+                    "nothing could say whether the pill came up".into(),
+                ));
+            }
+            Ok(Shown::Seen(None))
         }
-        fn hide_pill(&self) -> Result<(), String> {
+        fn hide_pill(&self) -> Result<Hidden, String> {
             self.window.lock().unwrap().push("hide");
             // The pill stays up when the hide fails, which is the whole reason
             // the runtime must not record it as down.
@@ -1433,7 +1546,13 @@ mod tests {
             self.on_screen.store(false, Ordering::SeqCst);
             self.focused.store(false, Ordering::SeqCst);
             self.hidden.fetch_add(1, Ordering::Relaxed);
-            Ok(())
+            if self.unsure_hide.load(Ordering::SeqCst) > 0 {
+                self.unsure_hide.fetch_sub(1, Ordering::SeqCst);
+                return Ok(Hidden::Unsure(
+                    "nothing could say whether the pill went down".into(),
+                ));
+            }
+            Ok(Hidden::Down)
         }
         fn restore_focus(&self) -> Result<(), String> {
             self.window.lock().unwrap().push("restore");
@@ -1964,6 +2083,109 @@ mod tests {
         );
     }
 
+    /// The startup show is the one show nothing has had a chance to carry out:
+    /// the pill is asked for as the companion starts, and the display is asked
+    /// about it in the same breath. A runtime that reads that as "the pill did
+    /// not come up" abandons the phase, and the phase it abandons is the one
+    /// holding words the person cannot get back - which is what happened on
+    /// every start with a transcript to recover.
+    #[test]
+    fn a_restore_nothing_can_confirm_keeps_the_words_on_screen() {
+        let store = Arc::new(MemoryStore::default());
+        *store.pending.lock().unwrap() = Some(Pending {
+            id: "pill-1".into(),
+            text: "survives the restart".into(),
+        });
+
+        // A pill that genuinely refused to come up is what abandoning is for:
+        // words nobody can see are words nobody can correct. This is the answer
+        // the startup show used to give, from a window that had simply not been
+        // put up yet.
+        let refused = harness_with(
+            FakeRecorder::default(),
+            Ok("unused".into()),
+            Arc::clone(&store),
+        );
+        refused.surface.refuse_show.fail(u64::MAX);
+        refused.app.start();
+        assert_eq!(refused.surface.last().state, "error");
+
+        let harness = harness_with(
+            FakeRecorder::default(),
+            Ok("unused".into()),
+            Arc::clone(&store),
+        );
+        harness
+            .surface
+            .unsure_show
+            .store(u64::MAX, Ordering::SeqCst);
+
+        harness.app.start();
+
+        let presentation = harness.surface.last();
+        assert_eq!(
+            presentation.state, "uncertain",
+            "the recovered transcript was abandoned by an unproved show"
+        );
+        assert_eq!(presentation.text, "survives the restart");
+        assert_eq!(
+            *store.pending.lock().unwrap(),
+            Some(Pending {
+                id: "pill-1".into(),
+                text: "survives the restart".into(),
+            }),
+        );
+        // Nothing was proved, so nothing is recorded as reached, and the
+        // runtime asks again on its own.
+        assert!(harness.app.falls_short(Posture::Focused));
+    }
+
+    /// Being asked is not being on screen. The microphone rests on the person
+    /// being able to read that it is open, and an unproved show proves nothing,
+    /// so it stays shut until a show that does.
+    #[test]
+    fn a_show_nothing_can_confirm_never_opens_the_microphone() {
+        let harness = harness(FakeRecorder::default(), Ok("unused".into()));
+        harness.surface.unsure_show.store(1, Ordering::SeqCst);
+
+        harness.app.handle(Event::Activate);
+        harness.executor.drain();
+        assert_eq!(
+            harness.recorder.captures(),
+            0,
+            "the microphone opened behind a pill nothing could see"
+        );
+        let presentation = harness.surface.last();
+        assert_eq!(presentation.state, "error");
+        assert!(!presentation.recording);
+    }
+
+    /// A hide nothing can speak for is not a hide that failed and not a hide
+    /// that happened. Writing it down as down is what would stop the pill ever
+    /// being taken down again, so the runtime asks once more instead.
+    #[test]
+    fn a_hide_nothing_can_confirm_is_asked_again_rather_than_written_down() {
+        let harness = harness(FakeRecorder::default(), Ok("unused".into()));
+        harness.app.handle(Event::Activate);
+        harness.surface.unsure_hide.store(1, Ordering::SeqCst);
+
+        harness.app.handle(Event::Escape);
+        assert_eq!(harness.surface.window(), ["show", "restore", "hide"]);
+
+        harness.executor.expire();
+        assert_eq!(
+            harness.surface.window(),
+            ["show", "restore", "hide", "hide"],
+            "an unproved hide was recorded as done"
+        );
+        // The second hide was proved, so the chain has nothing left to ask for.
+        harness.executor.expire();
+        assert_eq!(
+            harness.surface.window(),
+            ["show", "restore", "hide", "hide"]
+        );
+    }
+
     #[test]
     fn a_delivered_submission_with_no_acknowledgment_is_retried_under_one_identifier() {
         let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
@@ -2219,6 +2441,27 @@ mod tests {
             harness.surface.window(),
             ["show", "restore", "hide", "hide"]
         );
+    }
+
+    /// What the runtime says when it stops asking is the one line about a
+    /// window that anybody should have to act on, so it has to name what was
+    /// actually left behind rather than what one attempt saw.
+    #[test]
+    fn the_shortfall_names_what_the_window_never_reached() {
+        let harness = harness(FakeRecorder::default(), Ok("unused".into()));
+        harness.app.handle(Event::Activate);
+
+        harness.app.set_screen(Screen::Seen);
+        assert_eq!(
+            harness.app.shortfall(),
+            "the pill did not take the keyboard"
+        );
+        harness.app.set_screen(Screen::Unknown);
+        assert_eq!(harness.app.shortfall(), "the pill did not come up");
+
+        harness.app.handle(Event::Escape);
+        harness.app.set_screen(Screen::Seen);
+        assert_eq!(harness.app.shortfall(), "the pill is still up");
     }
 
     /// Asking again is bounded. A window manager that has refused every time

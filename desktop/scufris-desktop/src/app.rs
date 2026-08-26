@@ -2622,6 +2622,71 @@ mod tests {
         assert_eq!(harness.surface.hidden.load(Ordering::Relaxed), 1);
     }
 
+    /// The live sequence that locked the keyboard up, at the level the phases
+    /// can see it: listen, review, send, let the turn run out, then listen and
+    /// review again.
+    ///
+    /// The second review is where the person lost the keyboard, and nothing
+    /// here reproduces it. This walk passes before the fix as well as after:
+    /// the runtime presents the second review exactly like the first, asks for
+    /// the keyboard again, and is told the pill holds it. That is the finding.
+    /// The defect is one layer down, in what the transcript box tells the
+    /// window manager when it is mapped a second time, and `review::raise`
+    /// carries the regression test for it. What this walk protects is that no
+    /// later change to the phases quietly makes a second turn present less
+    /// than the first.
+    #[test]
+    fn a_second_turn_reviews_exactly_like_the_first() {
+        let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
+
+        // Turn one: the activation hotkey, some words, the hotkey again.
+        harness.app.handle(Event::Activate);
+        harness.app.handle(Event::Activate);
+        harness.executor.drain();
+        let first = harness.surface.last();
+        assert_eq!(first.state, "review");
+        assert!(first.editable);
+        assert!(harness.surface.focused());
+
+        // Enter sends, the daemon takes it, and the assistant runs the turn out.
+        harness.app.handle(Event::Enter {
+            text: Some("open the tasks widget".into()),
+        });
+        harness.executor.drain();
+        assert_eq!(harness.surface.last().state, "sent");
+        harness
+            .app
+            .observe(DaemonEvent::Acknowledged("pill-1".into()));
+        harness.executor.drain();
+        for state in [
+            scufris_control::AssistantState::Working,
+            scufris_control::AssistantState::Speaking,
+            scufris_control::AssistantState::Idle,
+        ] {
+            harness.app.set_assistant(state, String::new());
+            harness.executor.drain();
+        }
+        assert_eq!(harness.surface.last().state, "idle");
+        // The pill is resident: it stayed up and gave the keyboard back.
+        assert!(harness.surface.on_screen());
+        assert!(!harness.surface.focused());
+
+        // Turn two: the same two keys, from idle.
+        harness.app.handle(Event::Activate);
+        assert_eq!(harness.surface.last().state, "listening");
+        harness.app.handle(Event::Activate);
+        harness.executor.drain();
+
+        let second = harness.surface.last();
+        assert_eq!(second.state, first.state);
+        assert_eq!(second.editable, first.editable);
+        assert_eq!(second.text, first.text);
+        assert!(
+            harness.surface.focused(),
+            "the second review left the keyboard somewhere else"
+        );
+    }
+
     #[test]
     fn a_failed_transcription_persists_nothing() {
         let harness = harness(

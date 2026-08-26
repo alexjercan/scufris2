@@ -274,6 +274,10 @@ class Page {
 }
 
 /** The characters `from` to `to` as the fake type would have drawn them. */
+// The visual scale the measured rectangles report, as during the box's pop-in
+// transform: 1 outside the one test that sets it.
+let zoom = 1;
+
 function drawn(from: number, to: number): Rect[] {
   const rects: Rect[] = [];
   let index = from;
@@ -282,10 +286,10 @@ function drawn(from: number, to: number): Rect[] {
     const stop = Math.min(to, (line + 1) * COLUMNS);
     rects.push(
       rect(
-        FRAME.left + (index % COLUMNS) * ADVANCE,
-        FRAME.top + line * LINE,
-        (stop - index) * ADVANCE,
-        LINE,
+        FRAME.left + zoom * (index % COLUMNS) * ADVANCE,
+        FRAME.top + zoom * line * LINE,
+        zoom * (stop - index) * ADVANCE,
+        zoom * LINE,
       ),
     );
     index = stop;
@@ -421,6 +425,7 @@ function review(): Page {
   );
   const text = page.element("text");
   text.rect = rect(FRAME.left, FRAME.top, COLUMNS * ADVANCE, 3 * LINE);
+  text.offsetWidth = COLUMNS * ADVANCE;
   text.clientHeight = 3 * LINE;
   page.element("probe").rect = rect(FRAME.left, FRAME.top, ADVANCE, LINE);
   return page;
@@ -481,6 +486,40 @@ test("the caret is a block under the letter, and the words are one run", () => {
     // A block the width of a letter, not a rule between two of them.
     assert.equal(caret.style["width"], `${ADVANCE}px`);
     assert.equal(caret.style["top"], "0px");
+  }
+});
+
+test("a draft measured mid-pop still lands the marks on the letters", () => {
+  // While the box pops in, every measured rectangle is scaled by the
+  // transform; the marks are laid in the box's own coordinates, so an
+  // unscaled reading left the caret short of its letter until the next key
+  // redrew it. The regression: present during the pop and the caret must
+  // already sit at the end of the words.
+  const page = review();
+  const s = 0.94;
+  const text = page.element("text");
+  text.rect = rect(FRAME.left, FRAME.top, s * COLUMNS * ADVANCE, s * 3 * LINE);
+  page.element("probe").rect = rect(
+    FRAME.left,
+    FRAME.top,
+    s * ADVANCE,
+    s * LINE,
+  );
+  zoom = s;
+  try {
+    const words = "hello brave world";
+    present(page, "review", words, true);
+    const caret = marks(page, "caret")[0];
+    assert.ok(caret !== undefined);
+    assert.ok(
+      Math.abs(column(caret) - words.length * ADVANCE) < 0.001,
+      `the caret is drawn at ${column(caret)}, not ${words.length * ADVANCE}`,
+    );
+    const width = Number.parseFloat(String(caret.style["width"]));
+    assert.ok(Math.abs(width - ADVANCE) < 0.001);
+    assert.equal(caret.style["top"], "0px");
+  } finally {
+    zoom = 1;
   }
 });
 

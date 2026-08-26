@@ -80,11 +80,18 @@
   // A mark is placed against the text area, not the window, and against its
   // scrolled contents, not what is on screen: a long take scrolls, and a caret
   // measured on screen would then be drawn a line away from its letter.
-  const place = (rect: DOMRect, frame: DOMRect): Mark => ({
-    left: rect.left - frame.left + text.scrollLeft,
-    top: rect.top - frame.top + text.scrollTop,
-    width: rect.width,
-    height: rect.height,
+  //
+  // Measured rectangles are also visual: while the box pops in it is scaled by
+  // a transform, and the orb window mirrors a draft as soon as it renders, so
+  // the first drafts of a review are measured mid-pop. A mark laid from those
+  // unscaled distances sticks where the mid-pop frame put it - the offset
+  // caret that snapped right on the first key. Dividing by the scale lays the
+  // mark in the box's own coordinates, which ride the transform instead.
+  const place = (rect: DOMRect, frame: DOMRect, scale: number): Mark => ({
+    left: (rect.left - frame.left) / scale + text.scrollLeft,
+    top: (rect.top - frame.top) / scale + text.scrollTop,
+    width: rect.width / scale,
+    height: rect.height / scale,
   });
 
   // Where the browser actually drew a stretch of the words: one rectangle per
@@ -103,27 +110,37 @@
   // that letter rather than between two of them. Past the last letter there is
   // no box to take, so the last one's right edge carries a letter's width; on
   // an empty line there is neither, and the probe is what a letter would be.
-  const caretMark = (value: string, at: number, frame: DOMRect): Mark => {
+  const caretMark = (
+    value: string,
+    at: number,
+    frame: DOMRect,
+    scale: number,
+  ): Mark => {
     const index = within(at, value.length);
     const advance = probe.getBoundingClientRect();
     if (index < value.length) {
       const rect = drawn(index, index + 1)[0];
-      if (rect !== undefined) return place(rect, frame);
+      if (rect !== undefined) return place(rect, frame, scale);
     }
     if (value.length > 0) {
       const rects = drawn(value.length - 1, value.length);
       const rect = rects[rects.length - 1];
       if (rect !== undefined) {
-        const mark = place(rect, frame);
+        const mark = place(rect, frame, scale);
         return {
           left: mark.left + mark.width,
           top: mark.top,
-          width: advance.width || mark.width,
+          width: advance.width / scale || mark.width,
           height: mark.height,
         };
       }
     }
-    return { left: 0, top: 0, width: advance.width, height: advance.height };
+    return {
+      left: 0,
+      top: 0,
+      width: advance.width / scale,
+      height: advance.height / scale,
+    };
   };
 
   const block = (kind: string, mark: Mark): HTMLElement => {
@@ -152,13 +169,19 @@
     text.classList.toggle("overflowing", text.scrollHeight > text.clientHeight);
     if (!editable) return;
     const frame = text.getBoundingClientRect();
+    // The pop scales uniformly, so one ratio of visual width to layout width
+    // undoes it; a page that measures zero is hidden, and nothing is scaled.
+    const scale =
+      frame.width > 0 && text.offsetWidth > 0
+        ? frame.width / text.offsetWidth
+        : 1;
     const from = within(Math.min(start, end), value.length);
     const to = within(Math.max(start, end), value.length);
     for (const rect of drawn(from, to)) {
-      marks.appendChild(block("pick", place(rect, frame)));
+      marks.appendChild(block("pick", place(rect, frame, scale)));
     }
     const caret = marks.appendChild(
-      block("caret", caretMark(value, focus, frame)),
+      block("caret", caretMark(value, focus, frame, scale)),
     );
     caret.scrollIntoView({ block: "nearest" });
   };

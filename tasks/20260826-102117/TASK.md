@@ -1,6 +1,6 @@
 # Startup restore and window verdicts trust the X round trip
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 80
 - TAGS: desktop, bug
 
@@ -436,3 +436,7 @@ there, so it holds the behaviour rather than describing it.
 - Nothing here was tested on a compositor or on any window manager
   other than i3. The hint is what the ICCCM says it is, so this should
   hold anywhere, but only i3 was watched doing it.
+
+Alex confirmed the fix live (2026-08-26): "now it works it's stable".
+Closed. A remaining nit - the review caret sometimes starts offset
+from the end of the text - is tracked separately.

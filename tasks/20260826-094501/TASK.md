@@ -1,6 +1,6 @@
 # Pill dead to input after a turn ends
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 85
 - TAGS: desktop, bug
 
@@ -190,3 +190,6 @@ All run under `nix develop`.
 
 The live retry on Alex's own desktop. The headless harness runs the
 same window manager and the same policy, but it is not his session.
+
+Alex confirmed the fix live (2026-08-26): "now it works it's stable".
+Closed.

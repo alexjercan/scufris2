@@ -228,11 +228,21 @@ impl Surface for DesktopSurface {
 
 impl DesktopSurface {
     /// The windows the companion put on the display, as far as it has made any.
+    ///
+    /// Every widget window as well as the pill and the box. A widget shell is
+    /// built unfocusable and stays that way, so a capture that recorded one as
+    /// the window to give the desktop back to would hand the person's keys to
+    /// the one kind of window here that is certain to refuse them - and the
+    /// keyboard would land nowhere they can type.
     fn windows(&self) -> Vec<u32> {
-        [pill::known_window(), review::known_window()]
+        let mut mine: Vec<u32> = [pill::known_window(), review::known_window()]
             .into_iter()
             .flatten()
-            .collect()
+            .collect();
+        if let Some(widgets) = self.handle.try_state::<Arc<widgets::Widgets>>() {
+            mine.extend(widgets.windows());
+        }
+        mine
     }
 }
 

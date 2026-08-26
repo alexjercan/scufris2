@@ -14,14 +14,17 @@
 
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Condvar, Mutex, MutexGuard},
-    time::{Duration, Instant},
+    sync::{
+        Arc, Condvar, Mutex, MutexGuard,
+        atomic::{AtomicU32, Ordering},
+    },
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Manager, ipc::Channel};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::widgets::{
     runtime::{Health, Life},
@@ -41,6 +44,16 @@ pub const WARM_SHELLS: usize = 2;
 /// session, or after several opened at once. The daemon waits five seconds for
 /// its answer, so this leaves room for the answer to travel.
 const WARM_WAIT: Duration = Duration::from_secs(3);
+
+/// How long a shell that is still loading holds its place in the pool.
+///
+/// Nothing else ever gives that place back. A page that dies on its way up - a
+/// module that throws, a webview that never paints - would otherwise be counted
+/// as a shell forever, and two of them would leave the pool unable to build
+/// anything again for the life of the process. Generous, because the cost of
+/// waiting too long is one late window and the cost of not waiting long enough
+/// is one extra.
+const LOAD_PATIENCE: Duration = Duration::from_secs(10);
 
 /// One message to one shell window.
 ///
@@ -100,15 +113,36 @@ struct PoolState {
     idle: VecDeque<String>,
     /// The channel every built shell reported.
     channels: HashMap<String, Channel<ShellMsg>>,
-    /// Shells built and still loading.
-    loading: usize,
+    /// Shells built and still loading, with the moment each was built.
+    ///
+    /// Timed, because nothing else ever takes an entry out. A page that never
+    /// loads is not distinguishable from one that is about to, so the pool
+    /// stops counting on it after [`LOAD_PATIENCE`] rather than holding its
+    /// place forever.
+    loading: HashMap<String, Instant>,
     /// The last label minted. Labels only ever go up.
     minted: u32,
+    /// What the display knows each shown shell by.
+    ///
+    /// One remembered name per label, rather than one for the pool: there are
+    /// many widget windows, and a single name would answer for whichever of
+    /// them was shown first. Filled at the show, because that is when a window
+    /// has a name worth remembering, and read by the focus tracker - a shell is
+    /// built unfocusable, so it is never somewhere to give the desktop back to.
+    named: HashMap<String, Arc<AtomicU32>>,
 }
 
 /// The warm shells.
 pub struct Pool {
     app: AppHandle,
+    /// What this run of the companion stamps into every label it mints.
+    ///
+    /// The counter alone starts at one with the process, so a companion that
+    /// restarts hands out the identifiers the last one already gave the daemon.
+    /// An update written for a panel that is gone would then land on whatever
+    /// took its place, which is the one thing this module promises cannot
+    /// happen.
+    run: String,
     state: Mutex<PoolState>,
     loaded: Condvar,
 }
@@ -118,6 +152,7 @@ impl Pool {
     pub fn new(app: AppHandle) -> Self {
         Self {
             app,
+            run: stamp(),
             state: Mutex::new(PoolState::default()),
             loaded: Condvar::new(),
         }
@@ -129,34 +164,75 @@ impl Pool {
     /// this returns before any of them is usable. That is the point: the wait
     /// belongs here, where nobody is watching, rather than at the open.
     pub fn warm(&self) {
+        let now = Instant::now();
         let wanted: Vec<String> = {
             let mut state = self.lock();
-            let short = WARM_SHELLS.saturating_sub(state.idle.len() + state.loading);
+            state.loading.retain(|label, built| {
+                let loading = now.duration_since(*built) < LOAD_PATIENCE;
+                if !loading {
+                    warn!(label, "a widget shell never finished loading");
+                }
+                loading
+            });
+            let short = WARM_SHELLS.saturating_sub(state.idle.len() + state.loading.len());
             (0..short)
                 .map(|_| {
                     state.minted += 1;
-                    state.loading += 1;
-                    format!("{}{}", windows::LABEL_PREFIX, state.minted)
+                    let label = format!("{}{}-{}", windows::LABEL_PREFIX, self.run, state.minted);
+                    state.loading.insert(label.clone(), now);
+                    label
                 })
                 .collect()
         };
         for label in wanted {
             if let Err(error) = windows::build(&self.app, &label) {
                 warn!("a warm widget shell could not be built: {error}");
-                let mut state = self.lock();
-                state.loading = state.loading.saturating_sub(1);
+                self.lock().loading.remove(&label);
             }
         }
     }
 
     /// Records that one shell's page has loaded and is listening.
+    ///
+    /// A shell the pool gave up waiting for is still welcome. What it is not is
+    /// counted twice: a page that reports itself again - a reload, a second
+    /// load handler - has a label that is already in the queue or already
+    /// holding a widget, and queuing it again would hand one window to two
+    /// surfaces.
     pub fn ready(&self, label: String, channel: Channel<ShellMsg>) {
         let mut state = self.lock();
-        state.loading = state.loading.saturating_sub(1);
+        let waited_for = state.loading.remove(&label).is_some();
+        let first = waited_for && !state.channels.contains_key(&label);
+        // Kept either way. A page that loaded again has a live channel, and the
+        // one it replaces is dead.
         state.channels.insert(label.clone(), channel);
+        if !first {
+            debug!(label, "a widget shell reported itself more than once");
+            return;
+        }
         state.idle.push_back(label);
         drop(state);
         self.loaded.notify_all();
+    }
+
+    /// Returns what the display knows one shell by, remembered for this label.
+    pub fn named(&self, label: &str) -> Arc<AtomicU32> {
+        Arc::clone(self.lock().named.entry(label.to_string()).or_default())
+    }
+
+    /// Returns every shell window the display has named.
+    ///
+    /// For the focus tracker, which must refuse them alongside the pill and the
+    /// transcript box. A widget shell is built unfocusable and stays that way,
+    /// so a capture that recorded one would hand the person's keys to the one
+    /// kind of window on this desktop that is certain to refuse them.
+    pub fn shown(&self) -> Vec<u32> {
+        self.lock()
+            .named
+            .values()
+            .map(|known| known.load(Ordering::SeqCst))
+            .filter(|id| *id != 0)
+            .collect()
     }
 
     /// Takes one warm shell and answers with its label, or with nothing when
@@ -178,6 +254,11 @@ impl Pool {
                     // cannot be told anything.
                     continue;
                 }
+                drop(state);
+                // The replacement is started now rather than at the next open.
+                // A pool that only refills once it has run dry makes the third
+                // widget of a session pay the build the pool exists to remove.
+                self.warm();
                 return Some(label);
             }
             drop(state);
@@ -219,6 +300,7 @@ impl Pool {
         self.send(label, ShellMsg::Retire);
         let mut state = self.lock();
         state.channels.remove(label);
+        state.named.remove(label);
         state.idle.retain(|idle| idle != label);
         drop(state);
         if let Some(window) = self.app.get_webview_window(label)
@@ -234,9 +316,35 @@ impl Pool {
     }
 }
 
+/// Returns a token that is this run of the companion and no other.
+///
+/// Seconds since the epoch, in hex. Short enough to read in a log, and ordered,
+/// so the newer of two labels is the one that sorts later. Two runs a second
+/// apart is the resolution: a companion cannot be stopped and started again
+/// inside one, and a clock that will not answer at all gives every run the same
+/// token, which is where this started.
+fn stamp() -> String {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    format!("{seconds:x}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_label_carries_the_run_that_minted_it() {
+        // The counter restarts at one with the process. A daemon that outlives
+        // the companion still holds the identifiers the last run handed out,
+        // and an update written for a panel that is gone must not find a new
+        // one wearing its name.
+        let label = format!("{}{}-{}", windows::LABEL_PREFIX, stamp(), 1);
+        assert!(label.starts_with(windows::LABEL_PREFIX));
+        assert!(crate::widgets::is_shell(&label));
+        assert_ne!(label, format!("{}1", windows::LABEL_PREFIX));
+    }
 
     #[test]
     fn a_shell_message_names_its_kind_the_way_the_page_reads_it() {

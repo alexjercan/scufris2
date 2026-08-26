@@ -59,7 +59,11 @@ pub const HEIGHT: f64 = 140.0;
 /// Gap between the bottom of the box and the top of the orb window, in logical
 /// pixels. Twice what it was, because what it separates the box from is now
 /// two and a half times the size.
-const GAP: f64 = 24.0;
+///
+/// Public because the widget shelf stands above the box and is measured from
+/// here: the shelf and the box share this band, and a gap the shelf guessed at
+/// would put a panel over the words the person has to read.
+pub const GAP: f64 = 24.0;
 
 /// The states whose words the person has to decide about.
 ///

@@ -183,12 +183,15 @@ mod tests {
         // back to the one window that refuses them.
         let pill = 0x400010;
         let review = 0x400020;
-        assert_eq!(worth_returning_to(Some(review), &[pill, review]), None);
-        assert_eq!(worth_returning_to(Some(pill), &[pill, review]), None);
-        assert_eq!(
-            worth_returning_to(Some(0x500030), &[pill, review]),
-            Some(0x500030)
-        );
+        // And every widget window. A shell is built unfocusable and stays that
+        // way, so a capture that recorded one would send the person's keys to
+        // the one kind of window here that is certain to refuse them.
+        let widget = 0x400030;
+        let mine = [pill, review, widget];
+        assert_eq!(worth_returning_to(Some(review), &mine), None);
+        assert_eq!(worth_returning_to(Some(pill), &mine), None);
+        assert_eq!(worth_returning_to(Some(widget), &mine), None);
+        assert_eq!(worth_returning_to(Some(0x500030), &mine), Some(0x500030));
     }
 
     #[test]

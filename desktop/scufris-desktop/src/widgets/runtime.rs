@@ -22,7 +22,7 @@ use serde_json::Value;
 use tauri::PhysicalPosition;
 use tracing::warn;
 
-use crate::{pill, widgets::catalog::Catalog};
+use crate::{pill, review, widgets::catalog::Catalog};
 
 /// How many exhibits the shelf holds before the oldest one retires.
 pub const SHELF_SLOTS: usize = 3;
@@ -39,9 +39,16 @@ pub const EDGE_SLOTS: [EdgeSlot; 4] = [
 ];
 
 /// Gap between the top of the pill window and the bottom of the shelf, in
-/// logical pixels. The pill's own bottom margin, halved: the shelf belongs to
-/// the pill's layer, and reads as part of it rather than as a separate row.
-const SHELF_GAP: f64 = 36.0;
+/// logical pixels.
+///
+/// Enough to clear the transcript box, and written from the box's own numbers
+/// so the two cannot drift apart. The box sits in this same band whenever there
+/// is a transcript to decide about, and it is the thing the person has to read.
+///
+/// One height whether the box is up or not. The shelf is a row of places, and a
+/// place that moves aside when something else appears is not a place: an exhibit
+/// the person had their eye on would jump every time they spoke.
+const SHELF_GAP: f64 = review::GAP + review::HEIGHT + review::GAP;
 
 /// Distance between the centers of two shelf columns, in logical pixels.
 ///
@@ -238,6 +245,16 @@ pub enum Cmd {
         /// Surface the person closed.
         surface: SurfaceId,
     },
+    /// The window one surface was adopted into never reached the screen.
+    ///
+    /// Retires it and tells nobody. The open that asked for it is answered
+    /// where it failed, so a `surface_closed` on top of that would be a second
+    /// answer to the same question - and for a summoned widget there was no
+    /// question, only a window the display refused.
+    Lost {
+        /// Surface whose window never came up.
+        surface: SurfaceId,
+    },
     /// The person used one surface's pin tick.
     Pin {
         /// Surface whose tick the person used.
@@ -405,7 +422,12 @@ pub enum Act {
         /// What the chrome now says.
         life: Life,
     },
-    /// Unmount a surface and hand its shell back to the pool.
+    /// Unmount a surface and destroy the shell it was in.
+    ///
+    /// Destroyed rather than handed back: the shell's label was the surface
+    /// identifier the daemon was answered with, and a label reused would let a
+    /// late update land on whatever took its place. The pool builds the
+    /// replacement.
     Retire {
         /// The surface that goes away.
         surface: SurfaceId,
@@ -452,6 +474,7 @@ impl Runtime {
             Cmd::Close { id, surface } => self.close(id, surface),
             Cmd::Clear { id } => self.clear(id),
             Cmd::Dismissed { surface } => self.dismissed(surface),
+            Cmd::Lost { surface } => self.retire(&surface),
             Cmd::Pin { surface } => self.pin(surface),
             Cmd::TurnEnded => self.turn_ended(),
             Cmd::Sweep { elapsed } => self.sweep(elapsed),
@@ -811,6 +834,13 @@ impl Runtime {
 
     fn dismissed(&mut self, surface: SurfaceId) -> Vec<Act> {
         let mut acts = self.retire(&surface);
+        if acts.is_empty() {
+            // Nothing was retired, so nothing closed. The window event that
+            // brought this here reaches every shell, and one the runtime never
+            // adopted - an idle shell, a surface something else already retired
+            // - is the pool's business rather than the conversation's.
+            return acts;
+        }
         // The daemon is told rather than asked: the person has already closed
         // the window, and this is what keeps the conversation's idea of what is
         // on screen from drifting away from what is.
@@ -926,7 +956,17 @@ impl Runtime {
                     surface: oldest.clone(),
                 });
             }
-            acts.push(Act::Retire { surface: oldest });
+            acts.push(Act::Retire {
+                surface: oldest.clone(),
+            });
+            // Said out loud, the way the person's own close is. Nothing else
+            // will say it: the shell is destroyed rather than closed, so no
+            // window event follows it, and Scufris would go on updating a panel
+            // that a fourth exhibit quietly pushed off the shelf.
+            acts.push(Act::Report(ClientBody::WidgetEvent {
+                surface: oldest,
+                event: SurfaceEvent::Closed,
+            }));
         }
         acts
     }
@@ -1369,6 +1409,83 @@ cadence = 500
         assert!(acts.contains(&Act::Unsubscribe {
             surface: first.clone()
         }));
+    }
+
+    #[test]
+    fn an_exhibit_pushed_off_the_shelf_is_reported_closed_like_any_other() {
+        // Nothing else will report it. The shell is destroyed rather than
+        // closed, so no window event follows it, and Scufris would go on
+        // updating a panel a fourth exhibit quietly pushed away.
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let first = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
+        for _ in 0..2 {
+            open(&mut runtime, &catalog, "note", Posture::Exhibit);
+        }
+        let acts = open(&mut runtime, &catalog, "note", Posture::Exhibit);
+        assert!(acts.contains(&Act::Report(ClientBody::WidgetEvent {
+            surface: first.clone(),
+            event: SurfaceEvent::Closed,
+        })));
+        // And the report comes after the window is gone, so the conversation
+        // never hears about a panel that is still on screen.
+        let retired = acts
+            .iter()
+            .position(|act| {
+                act == &Act::Retire {
+                    surface: first.clone(),
+                }
+            })
+            .expect("the crowded-out exhibit retires");
+        let told = acts
+            .iter()
+            .position(|act| matches!(act, Act::Report(ClientBody::WidgetEvent { surface, .. }) if surface == &first))
+            .expect("the crowded-out exhibit is reported");
+        assert!(retired < told);
+    }
+
+    #[test]
+    fn a_window_event_for_a_surface_the_runtime_never_had_says_nothing() {
+        // The window handler routes every shell's close here, including one the
+        // runtime already retired and one that never held a widget at all. A
+        // `surface_closed` for either would be the conversation being told about
+        // a panel it was never told about.
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        assert!(
+            runtime
+                .apply(
+                    &catalog,
+                    Cmd::Dismissed {
+                        surface: "widget-never".into(),
+                    },
+                )
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_surface_the_display_refused_goes_quietly() {
+        // The open that asked for it is answered where it failed. A
+        // `surface_closed` on top of that answer would be the daemon told twice
+        // about one thing, the second time about a panel it never learned had
+        // opened.
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let surface = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
+        let acts = runtime.apply(
+            &catalog,
+            Cmd::Lost {
+                surface: surface.clone(),
+            },
+        );
+        assert!(acts.contains(&Act::Retire {
+            surface: surface.clone()
+        }));
+        assert!(!acts.iter().any(|act| matches!(act, Act::Report(_))));
+        // And it is gone, so an update written for it is refused rather than
+        // landing on a window nobody can see.
+        assert!(runtime.surface(&surface).is_none());
     }
 
     #[test]
@@ -2122,6 +2239,23 @@ cadence = 500
     }
 
     #[test]
+    fn the_shelf_stands_clear_of_the_transcript_box() {
+        // Both live in the band above the pill, and both are up at once as soon
+        // as the person speaks while a panel is open. The box is the one they
+        // have to read, so the shelf is the one that gives way - and it gives
+        // way always, rather than moving when the box appears.
+        let pill = pill::bottom_center(0, 0, 1920, 1080, 1.0);
+        let box_top = review::above_pill(0, 0, 1920, 1080, 1.0).y;
+        let card = place(Slot::Shelf(0), CARD, &MONITOR);
+        assert!(
+            card.y + CARD.height as i32 <= box_top,
+            "a shelf card at {} overlaps the transcript box at {box_top}, above a pill at {}",
+            card.y + CARD.height as i32,
+            pill.y
+        );
+    }
+
+    #[test]
     fn the_shelf_spreads_out_from_the_center_without_two_widgets_in_one_column() {
         let columns: Vec<i32> = (0..SHELF_SLOTS)
             .map(|rank| place(Slot::Shelf(rank), CARD, &MONITOR).x)
@@ -2130,7 +2264,7 @@ cadence = 500
         assert_eq!(columns[1] - columns[0], SHELF_PITCH as i32);
         assert_eq!(columns[0] - columns[2], SHELF_PITCH as i32);
         // The pitch is wider than the widest card, so neighbours never overlap.
-        const { assert!(SHELF_PITCH > 250.0) };
+        const { assert!(SHELF_PITCH > CARD.width) };
     }
 
     #[test]

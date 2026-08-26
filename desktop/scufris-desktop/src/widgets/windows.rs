@@ -88,31 +88,40 @@ pub fn fit(window: &WebviewWindow, size: Size) -> Result<(), String> {
         .map_err(|error| format!("the widget window would not take its size: {error}"))
 }
 
-/// Puts one widget window on screen at a place, and says whether it got there.
+/// Puts one widget window on screen, and says whether it got there.
 ///
-/// Position comes after the show, which is the opposite of the pill: i3 places
-/// a floating window when it maps it, so a position set before the map is a
-/// position i3 overwrites. The window refuses the keyboard throughout - it was
-/// built that way and nothing here asks otherwise.
-pub fn show(window: &WebviewWindow, at: PhysicalPosition<i32>) -> Result<(), String> {
+/// Only the mapping. Where the window then goes is [`settle`], and the two are
+/// separate because both of the questions between them need a window that has
+/// already mapped: i3 places a floating window when it maps it, so a position
+/// set before the map is a position i3 overwrites, and the display cannot say
+/// which monitor a window is on until the window is somewhere.
+///
+/// The window refuses the keyboard throughout - it was built that way and
+/// nothing here asks otherwise.
+///
+/// The name the display knows it by is the caller's to keep. The pill and the
+/// review box each hold one of their own, because each of them is one window
+/// asked about again and again; there are many widget windows, so the pool
+/// holds one per shell rather than one for all of them.
+pub fn raise(window: &WebviewWindow, known: &AtomicU32) -> Result<(), String> {
     window
         .show()
         .map_err(|error| format!("the widget window could not be shown: {error}"))?;
-    // Asked fresh rather than remembered. The pill and the review box each keep
-    // the name the display knows them by, because each of them is one window
-    // that is asked about again and again; there are many widget windows, and
-    // one remembered name shared between them would answer for the wrong one.
-    let up = display::came_up(window, &AtomicU32::new(0));
+    match display::came_up(window, known) {
+        Verdict::No => Err("the widget window did not come up".into()),
+        _ => Ok(()),
+    }
+}
+
+/// Moves one widget window that is already on screen.
+pub fn settle(window: &WebviewWindow, at: PhysicalPosition<i32>) -> Result<(), String> {
     window
         .set_position(at)
         .map_err(|error| format!("the widget window would not be placed: {error}"))?;
     if let Err(error) = window.set_always_on_top(true) {
         tracing::warn!("a widget window could not be kept on top: {error}");
     }
-    match up {
-        Verdict::No => Err("the widget window did not come up".into()),
-        _ => Ok(()),
-    }
+    Ok(())
 }
 
 /// Takes one widget window off the screen, leaving the widget mounted.
@@ -158,12 +167,23 @@ mod tests {
 
     #[test]
     fn every_widget_window_label_matches_the_capability_glob() {
-        // capabilities/default.json lists "widget-*". A label outside it is a
-        // window whose chrome ticks invoke nothing, and nothing says so.
-        let capability = include_str!("../../capabilities/default.json");
+        // capabilities/default.json lists the windows it covers. A label
+        // outside them is a window whose chrome ticks invoke nothing, and
+        // nothing says so until a tick does nothing.
+        //
+        // Read as the file it is rather than searched as text: a pattern that
+        // appeared anywhere in the file - in the description, in a comment -
+        // would pass a substring search while covering no window at all.
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../../capabilities/default.json"))
+                .expect("the default capability is JSON");
+        let windows = capability["windows"]
+            .as_array()
+            .expect("the default capability names the windows it covers");
+        let glob = format!("{LABEL_PREFIX}*");
         assert!(
-            capability.contains(&format!("\"{LABEL_PREFIX}*\"")),
-            "the default capability does not cover {LABEL_PREFIX}* windows"
+            windows.iter().any(|pattern| pattern == &glob),
+            "the default capability does not cover {glob} windows: {windows:?}"
         );
     }
 

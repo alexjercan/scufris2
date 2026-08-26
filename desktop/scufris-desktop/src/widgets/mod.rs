@@ -16,7 +16,10 @@ pub mod runtime;
 pub mod windows;
 
 use std::{
-    sync::{Arc, Mutex, MutexGuard, OnceLock, Weak, atomic::AtomicU32},
+    sync::{
+        Arc, Mutex, MutexGuard, OnceLock, Weak,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -64,8 +67,25 @@ pub struct Widgets {
     catalog: Catalog,
     pool: Pool,
     runtime: Mutex<Runtime>,
+    /// Held across one decision and everything that decision decides.
+    ///
+    /// The runtime decides under its own lock and releases it before the host
+    /// carries the decisions out, which is what keeps a window move off the
+    /// runtime's lock. Three threads arrive here - the daemon's reader, the
+    /// aging clock by way of the event loop, and Tauri's command pool - and two
+    /// of them interleaving a shelf reflow with a widget opening would put two
+    /// windows in one column. This is the queue that stops it.
+    ///
+    /// It is held across the window work, which is where the waiting is: a first
+    /// placement asks the display whether the window came up. That wait is the
+    /// same one the companion always paid; what is new is that nothing else
+    /// decides while it runs.
+    turn: Mutex<()>,
     backends: Backends,
     link: OnceLock<Arc<DaemonLink>>,
+    /// Whether a daemon welcomed this companion before there was a link to
+    /// answer on.
+    owed_catalog: AtomicBool,
     /// The last assistant state the daemon reported. The turn boundary is read
     /// off the change rather than off a message of its own.
     assistant: Mutex<AssistantState>,
@@ -91,8 +111,10 @@ impl Widgets {
             catalog,
             pool: Pool::new(app.clone()),
             runtime: Mutex::new(Runtime::new()),
+            turn: Mutex::new(()),
             backends: Backends::new(),
             link: OnceLock::new(),
+            owed_catalog: AtomicBool::new(false),
             assistant: Mutex::new(AssistantState::Idle),
             app,
         });
@@ -267,7 +289,16 @@ impl Widgets {
     /// closure that already routes commands here: one of the two has to exist
     /// first, and it is this one.
     pub fn attach(&self, link: Arc<DaemonLink>) {
-        let _ = self.link.set(link);
+        if self.link.set(link).is_err() {
+            return;
+        }
+        // The link's reader thread starts inside `DaemonLink::start`, which
+        // returns before this runs, so a welcome can arrive with nowhere to
+        // answer it. What that welcome wanted is the catalog, and this is the
+        // first moment there is a way to send it.
+        if self.owed_catalog.swap(false, Ordering::SeqCst) {
+            self.announce();
+        }
     }
 
     /// Tells the daemon what widgets are installed.
@@ -276,9 +307,26 @@ impl Widgets {
     /// daemon types its widget tool from this, so a companion that never sends
     /// it is a companion whose widgets cannot be named.
     pub fn announce(&self) {
+        if self.link.get().is_none() {
+            // The welcome beat the attach. Remembered rather than dropped: this
+            // is the one message a session cannot do without, and losing it
+            // leaves the model with no widget it is allowed to name for as long
+            // as the session lasts.
+            self.owed_catalog.store(true, Ordering::SeqCst);
+            return;
+        }
         self.report(ClientBody::Catalog {
             widgets: self.catalog.entries(),
         });
+    }
+
+    /// Returns every widget window the display has named.
+    ///
+    /// For the focus tracker. A widget shell is built unfocusable and stays
+    /// that way, so a capture that recorded one as the window to go back to
+    /// would hand the person's keys to a window that refuses them.
+    pub fn windows(&self) -> Vec<u32> {
+        self.pool.shown()
     }
 
     /// Records that one shell page has loaded and is listening.
@@ -362,6 +410,7 @@ impl Widgets {
             );
             return;
         };
+        let _turn = self.turn();
         let acts = self.runtime().apply(
             &self.catalog,
             Cmd::Open {
@@ -375,7 +424,7 @@ impl Widgets {
         let adopted = acts
             .iter()
             .any(|act| matches!(act, Act::Adopt { surface: opened, .. } if opened == &surface));
-        self.perform(acts);
+        self.settle(acts);
         if !adopted {
             self.pool.discard(&surface);
         }
@@ -397,11 +446,41 @@ impl Widgets {
     }
 
     fn decide(&self, cmd: Cmd) {
+        let _turn = self.turn();
         let acts = self.runtime().apply(&self.catalog, cmd);
-        self.perform(acts);
+        self.settle(acts);
     }
 
-    fn perform(&self, acts: Vec<Act>) {
+    /// Carries out one batch, and then whatever that batch's own failures
+    /// decide.
+    ///
+    /// Two rounds and no more. A surface whose window never came up is retired,
+    /// retiring reflows the shelf, and a reflow is only ever a move - which is
+    /// warned about rather than failed - so the second round has nothing left to
+    /// lose.
+    fn settle(&self, acts: Vec<Act>) {
+        let mut acts = acts;
+        for _ in 0..2 {
+            let lost = self.perform(acts);
+            if lost.is_empty() {
+                return;
+            }
+            acts = lost
+                .into_iter()
+                .flat_map(|surface| self.runtime().apply(&self.catalog, Cmd::Lost { surface }))
+                .collect();
+        }
+    }
+
+    /// Carries out one batch of decisions, and answers with the surfaces whose
+    /// windows never reached the screen.
+    ///
+    /// A placement that fails is not a log line. The daemon is answered from
+    /// this same batch, and a panel reported open and never shown is one Scufris
+    /// talks about and nobody can read, so the surfaces that failed come back
+    /// for the caller to retire.
+    fn perform(&self, acts: Vec<Act>) -> Vec<String> {
+        let mut lost: Vec<(String, String)> = Vec::new();
         for act in acts {
             match act {
                 Act::Adopt {
@@ -422,12 +501,15 @@ impl Widgets {
                             data,
                         },
                     );
-                    if hidden {
+                    let placed = if hidden {
                         // Sized and loaded behind the layer. It comes up with
                         // the rest of them when the pill does.
-                        self.fit(&surface, size);
+                        self.fit(&surface, size)
                     } else {
-                        self.place(&surface, slot, size, true);
+                        self.place(&surface, slot, size, true)
+                    };
+                    if let Err(detail) = placed {
+                        lost.push((surface, detail));
                     }
                 }
                 Act::Conceal {
@@ -438,19 +520,27 @@ impl Widgets {
                 } => {
                     if hidden {
                         self.take_down(&surface);
-                    } else {
+                    } else if let Err(detail) = self.place(&surface, slot, size, true) {
                         // Through the first-show path, because i3 places a
                         // floating window when it maps it: a window coming back
                         // has to be placed after the map, exactly as it was the
-                        // first time.
-                        self.place(&surface, slot, size, true);
+                        // first time. And a window that will not come back is a
+                        // widget the person cannot see, so it goes rather than
+                        // staying in the runtime as a panel nobody can read.
+                        lost.push((surface, detail));
                     }
                 }
                 Act::Move {
                     surface,
                     slot,
                     size,
-                } => self.place(&surface, slot, size, false),
+                } => {
+                    if let Err(error) = self.place(&surface, slot, size, false) {
+                        // A window in the wrong place is worse than one in the
+                        // right place and much better than one that is gone.
+                        warn!(surface, "{error}");
+                    }
+                }
                 Act::Update { surface, data } => {
                     self.pool.send(&surface, ShellMsg::Update { data });
                 }
@@ -494,20 +584,36 @@ impl Widgets {
                     self.pool.send(&surface, ShellMsg::Refused { detail });
                 }
                 Act::Retire { surface } => self.pool.discard(&surface),
+                Act::Report(ClientBody::WidgetOpened { id, surface })
+                    if lost.iter().any(|(gone, _)| gone == &surface) =>
+                {
+                    // The open is answered where it happened. A `widget_opened`
+                    // for a window the display refused would leave Scufris
+                    // talking about a panel nobody can see, and holding a
+                    // surface identifier for one that is about to be retired.
+                    let detail = lost
+                        .iter()
+                        .find(|(gone, _)| gone == &surface)
+                        .map_or_else(String::new, |(_, why)| why.clone());
+                    warn!(surface, "a widget never reached the screen: {detail}");
+                    self.report(ClientBody::WidgetFailed {
+                        id,
+                        code: "not_shown".into(),
+                        detail,
+                    });
+                }
                 Act::Report(body) => self.report(body),
             }
         }
+        lost.into_iter().map(|(surface, _)| surface).collect()
     }
 
     /// Gives one widget window the size its widget lays out, and nothing else.
-    fn fit(&self, surface: &str, size: runtime::Size) {
+    fn fit(&self, surface: &str, size: runtime::Size) -> Result<(), String> {
         let Some(window) = self.app.get_webview_window(surface) else {
-            warn!(surface, "a widget surface has no window");
-            return;
+            return Err(format!("{surface} has no window"));
         };
-        if let Err(error) = windows::fit(&window, size) {
-            warn!(surface, "{error}");
-        }
+        windows::fit(&window, size)
     }
 
     /// Puts one widget window on every workspace, or brings it back to this one.
@@ -540,33 +646,39 @@ impl Widgets {
         }
     }
 
-    /// Puts one widget window where its slot says it belongs.
-    fn place(&self, surface: &str, slot: runtime::Slot, size: runtime::Size, first: bool) {
-        if first {
-            self.fit(surface, size);
-        }
+    /// Puts one widget window where its slot says it belongs, and says whether
+    /// it got there.
+    ///
+    /// A first placement that fails is a widget nobody can see, so the failure
+    /// travels back to the caller. A later move that fails is a widget in the
+    /// wrong place, which the caller only warns about.
+    fn place(
+        &self,
+        surface: &str,
+        slot: runtime::Slot,
+        size: runtime::Size,
+        first: bool,
+    ) -> Result<(), String> {
         let Some(window) = self.app.get_webview_window(surface) else {
-            warn!(surface, "a widget surface has no window");
-            return;
+            return Err(format!("{surface} has no window"));
         };
-        let Some(monitor) = windows::monitor(&window) else {
-            // A monitor nothing will describe leaves the window where it is,
-            // which is worse than the right place and much better than not
-            // being up at all - the same call the pill makes.
-            warn!(surface, "nothing could say which monitor a widget is on");
-            return;
-        };
-        let at = runtime::place(slot, size, &monitor);
-        let placed = if first {
-            windows::show(&window, at)
-        } else {
-            window
-                .set_position(at)
-                .map_err(|error| format!("a widget window would not move: {error}"))
-        };
-        if let Err(error) = placed {
-            warn!(surface, "{error}");
+        if first {
+            // Sized before it maps, so it never appears at the placeholder's
+            // size - and because equal min and max hints are what make a tiling
+            // window manager float it. A window that will not take them is a
+            // window i3 tiles into whatever the person was doing, which is worse
+            // than no widget at all.
+            windows::fit(&window, size)?;
+            // Then shown, and only then asked which monitor it is on.
+            // `current_monitor` answers from where the window is, and a window
+            // that has never mapped is not anywhere: on more than one screen it
+            // names the primary and puts the widget where nobody is looking.
+            windows::raise(&window, &self.pool.named(surface))?;
         }
+        let Some(monitor) = windows::monitor(&window) else {
+            return Err("nothing could say which monitor a widget is on".into());
+        };
+        windows::settle(&window, runtime::place(slot, size, &monitor))
     }
 
     fn report(&self, body: ClientBody) {
@@ -583,6 +695,10 @@ impl Widgets {
         self.runtime
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+    }
+
+    fn turn(&self) -> MutexGuard<'_, ()> {
+        self.turn.lock().unwrap_or_else(|error| error.into_inner())
     }
 }
 

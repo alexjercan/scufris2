@@ -102,3 +102,49 @@ tests), `cargo clippy --all-targets` clean, `nix flake check -L
 outside the CHANGELOG entry that records its removal.
 
 Live acceptance of "show a note" is Alex's, on the desktop.
+
+## Increment 2 landed (2026-08-26)
+
+Four commits:
+
+1. `fbf8644` Age an exhibit out when the turn moves on
+2. `3466230` Take the widget layer down with the pill
+3. `3534fe5` Promote a pinned exhibit onto the person's own workspace
+4. `2448354` Feed a widget from a supervised backend process
+
+Deviations from the plan, all deliberate:
+
+- The life states and the turn boundary landed as one commit. A
+  `Cmd::TurnEnded` with no caller is dead code, and `Life::Stale` and
+  `Life::Dead` never arrived at all - health is its own field on the
+  surface rather than another life state, because the two hold at the
+  same time and say different things. A panel the person pinned can
+  still be showing numbers from a process that died.
+- Backend supervision and the `system`/`cpu` pair landed as one
+  commit rather than two. The generated backend table asserts at
+  build time that a backend exists, and a supervisor with nothing
+  using it would ship untested against a real process.
+- Two review findings were fixed in the course of the work rather
+  than deferred to the review pass: `clear` took down instruments
+  (fixed by `Surface::transient`, which now decides what ages, what a
+  clear takes, and what goes down with the pill), and pinning left two
+  windows in one shelf column (fixed by promoting to an edge slot,
+  which is what the design said a pin does).
+- The aging sweep and the backend beat both run on threads that hand
+  their measurement to the event loop rather than performing acts
+  themselves. The runtime decides under its own lock and the host
+  carries the decisions out after releasing it, so a thread performing
+  its own acts would be one more place window moves come from - and
+  the review's open finding about that path is not made worse.
+- Python 3 for the backends comes from the package rather than from
+  the person's PATH, asserted by the desktop closure check.
+
+Checks: `cargo test -p scufris-desktop` 201 passed, `cargo clippy
+--all-targets` clean, `cargo fmt --all` applied, `npm run check` (138
+tests, Prettier clean), `nix build .#checks.x86_64-linux.desktop-closure`
+green (which also runs the crate's tests in the sandbox).
+
+Live acceptance of the increment 2 verification line - "CPU is at 90
+percent" spawning the live graph, dimming on topic change, reviving on
+citation, pinning into an instrument, and a killed backend showing the
+red accent - is Alex's, on the desktop.

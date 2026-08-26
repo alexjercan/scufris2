@@ -603,6 +603,13 @@ impl App {
                 debug!(id = %id, detail = %detail, "submission uncertain");
                 self.handle(Event::SubmissionUncertain { id, reason: detail })
             }
+            // Widget commands belong to the widgets runtime, which is a
+            // sibling of this state machine rather than a part of it. The
+            // wiring routes them there before they reach the pill, so a
+            // command that arrives here is one nothing is listening for.
+            DaemonEvent::Widget(command) => {
+                debug!(id = %command.id(), "widget command reached the pill")
+            }
         }
     }
 

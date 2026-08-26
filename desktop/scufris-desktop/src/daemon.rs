@@ -17,8 +17,8 @@ use std::{
 };
 
 use scufris_control::{
-    AssistantState, ClientBody, ClientMessage, DaemonBody, MessageError, read_daemon_message,
-    write_message,
+    AssistantState, ClientBody, ClientMessage, DaemonBody, MessageError, Posture,
+    read_daemon_message, write_message,
 };
 
 /// Shortest wait before reconnecting.
@@ -30,8 +30,61 @@ pub const MAX_BACKOFF: Duration = Duration::from_secs(5);
 /// Interval between liveness probes on an open connection.
 pub const PING_INTERVAL: Duration = Duration::from_secs(15);
 
+/// One widget command the daemon asked for.
+///
+/// Every variant carries the correlation identifier its answer must echo. The
+/// daemon may have several commands in flight, and an answer nobody can match
+/// is an answer that can act on the wrong surface.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WidgetCommand {
+    /// Open one widget from the announced catalog.
+    Open {
+        /// Correlation identifier the answer echoes.
+        id: String,
+        /// Widget to open.
+        widget: String,
+        /// Where the surface lives once it is open.
+        posture: Posture,
+        /// Widget-defined spawn payload.
+        data: serde_json::Value,
+    },
+    /// Send new data to one open surface.
+    Update {
+        /// Correlation identifier the answer echoes.
+        id: String,
+        /// Surface to update.
+        surface: String,
+        /// Widget-defined payload.
+        data: serde_json::Value,
+    },
+    /// Close one open surface.
+    Close {
+        /// Correlation identifier the answer echoes.
+        id: String,
+        /// Surface to close.
+        surface: String,
+    },
+    /// Close every surface the runtime owns.
+    Clear {
+        /// Correlation identifier the answer echoes.
+        id: String,
+    },
+}
+
+impl WidgetCommand {
+    /// Returns the correlation identifier the answer must echo.
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Open { id, .. }
+            | Self::Update { id, .. }
+            | Self::Close { id, .. }
+            | Self::Clear { id } => id,
+        }
+    }
+}
+
 /// One thing the daemon link observed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DaemonEvent {
     /// The daemon answered `hello` and named its session.
     Connected(String),
@@ -47,6 +100,9 @@ pub enum DaemonEvent {
     Refused(String, String),
     /// The daemon reported an assistant state.
     State(AssistantState, String),
+    /// The daemon asked the widgets runtime to do something. Widget traffic
+    /// never reaches the pill's state machine.
+    Widget(WidgetCommand),
 }
 
 /// Returns the next backoff after one failed connection attempt.
@@ -109,6 +165,14 @@ impl DaemonLink {
         send(&self.writer, ClientBody::Submit { id, text, force })
     }
 
+    /// Sends one companion message that is not a submission.
+    ///
+    /// Widget answers, surface events, and the catalog all travel this way, on
+    /// the same connection and through the same writer the submissions use.
+    pub fn report(&self, body: ClientBody) -> Result<(), String> {
+        send(&self.writer, body)
+    }
+
     /// Stops the supervisor and closes any open connection.
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::Relaxed);
@@ -163,12 +227,31 @@ fn serve(
             DaemonBody::State { state, detail } => observe(DaemonEvent::State(state, detail)),
             DaemonBody::Pong => {}
             // Widget commands belong to the widgets runtime, never to the
-            // pill's state machine. The link drops them until that module
-            // owns them.
-            DaemonBody::WidgetOpen { .. }
-            | DaemonBody::WidgetUpdate { .. }
-            | DaemonBody::WidgetClose { .. }
-            | DaemonBody::WidgetClear { .. } => {}
+            // pill's state machine.
+            DaemonBody::WidgetOpen {
+                id,
+                widget,
+                posture,
+                data,
+            } => observe(DaemonEvent::Widget(WidgetCommand::Open {
+                id,
+                widget,
+                posture,
+                data,
+            })),
+            DaemonBody::WidgetUpdate { id, surface, data } => {
+                observe(DaemonEvent::Widget(WidgetCommand::Update {
+                    id,
+                    surface,
+                    data,
+                }))
+            }
+            DaemonBody::WidgetClose { id, surface } => {
+                observe(DaemonEvent::Widget(WidgetCommand::Close { id, surface }))
+            }
+            DaemonBody::WidgetClear { id } => {
+                observe(DaemonEvent::Widget(WidgetCommand::Clear { id }))
+            }
         }
     }
 }
@@ -280,6 +363,85 @@ mod tests {
         assert_eq!(
             received.recv_timeout(Duration::from_secs(5)).unwrap(),
             DaemonEvent::Uncertain("pill-3".into(), "unknown".into())
+        );
+
+        link.stop();
+        drop(writer);
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn widget_commands_are_routed_away_from_the_pill_and_answered_by_their_id() {
+        let directory = std::env::temp_dir().join(format!(
+            "scufris-wg-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let socket = directory.join("daemon.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+
+        let (events, received) = mpsc::channel();
+        let link = DaemonLink::start(socket.clone(), move |event| {
+            let _ = events.send(event);
+        });
+
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(line.trim_end(), "{\"v\":2,\"type\":\"hello\"}");
+
+        let mut writer = stream;
+        writer
+            .write_all(
+                b"{\"v\":2,\"type\":\"widget_open\",\"id\":\"w-1\",\"widget\":\"note\",\
+                  \"posture\":\"exhibit\",\"data\":{\"text\":\"hi\"}}\n",
+            )
+            .unwrap();
+        assert_eq!(
+            received.recv_timeout(Duration::from_secs(5)).unwrap(),
+            DaemonEvent::Widget(WidgetCommand::Open {
+                id: "w-1".into(),
+                widget: "note".into(),
+                posture: Posture::Exhibit,
+                data: serde_json::json!({ "text": "hi" }),
+            })
+        );
+
+        // The answer goes back through the connection the command arrived on,
+        // carrying the identifier the daemon is waiting for.
+        link.report(ClientBody::WidgetOpened {
+            id: "w-1".into(),
+            surface: "widget-3".into(),
+        })
+        .unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(
+            line.trim_end(),
+            "{\"v\":2,\"type\":\"widget_opened\",\"id\":\"w-1\",\"surface\":\"widget-3\"}"
+        );
+
+        writer
+            .write_all(b"{\"v\":2,\"type\":\"widget_clear\",\"id\":\"w-2\"}\n")
+            .unwrap();
+        assert_eq!(
+            received.recv_timeout(Duration::from_secs(5)).unwrap(),
+            DaemonEvent::Widget(WidgetCommand::Clear { id: "w-2".into() })
+        );
+        link.report(ClientBody::WidgetFailed {
+            id: "w-2".into(),
+            code: "no_runtime".into(),
+            detail: "the widgets runtime is not started".into(),
+        })
+        .unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(
+            line.trim_end(),
+            "{\"v\":2,\"type\":\"widget_failed\",\"id\":\"w-2\",\"code\":\"no_runtime\",\
+             \"detail\":\"the widgets runtime is not started\"}"
         );
 
         link.stop();

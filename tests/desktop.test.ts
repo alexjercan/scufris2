@@ -34,11 +34,14 @@ import {
   OwnershipLock,
   SocketBusyError,
   SubmissionUncertainError,
+  WidgetCommandError,
   canonicalSocketPath,
   ownershipLockFile,
   submissionDigest,
   type AcceptedSubmission,
   type ControlHost,
+  type ControlServerOptions,
+  type WidgetNotice,
 } from "../extensions/scufris/desktop/server.ts";
 import {
   ACCEPTED_ENTRY,
@@ -287,6 +290,7 @@ function companion(socketPath: string): Promise<Companion> {
 async function withServer(
   host: Partial<ControlHost>,
   body: (socketPath: string, server: ControlServer) => Promise<void>,
+  options: ControlServerOptions = {},
 ): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "scufris-desktop-"));
   const socketPath = join(directory, "scufris", "daemon.sock");
@@ -298,6 +302,7 @@ async function withServer(
       accepted: host.accepted ?? (() => []),
     },
     () => {},
+    options,
   );
   try {
     await server.start();
@@ -703,6 +708,159 @@ test("the widget commands carry a correlation id and a bounded payload", () => {
       ),
     ProtocolError,
   );
+});
+
+test("a widget command is settled by the answer that carries its id", async () => {
+  await withServer({}, async (socketPath, server) => {
+    const client = await companion(socketPath);
+    const opened = server.request({
+      type: "widget_open",
+      widget: "note",
+      posture: "exhibit",
+      data: { text: "hi" },
+    });
+    const command = (await client.next()) as { id: string };
+    assert.deepEqual(command, {
+      v: 2,
+      type: "widget_open",
+      id: command.id,
+      widget: "note",
+      posture: "exhibit",
+      data: { text: "hi" },
+    });
+    client.send(
+      `${JSON.stringify({ v: 2, type: "widget_opened", id: command.id, surface: "widget-3" })}\n`,
+    );
+    assert.deepEqual(await opened, { surface: "widget-3" });
+
+    // An update names no new surface, so it is answered by widget_done.
+    const updated = server.request({
+      type: "widget_update",
+      surface: "widget-3",
+      data: { text: "there" },
+    });
+    const second = (await client.next()) as { id: string };
+    assert.notEqual(second.id, command.id, "correlation ids were reused");
+    client.send(
+      `${JSON.stringify({ v: 2, type: "widget_done", id: second.id })}\n`,
+    );
+    assert.deepEqual(await updated, {});
+
+    const refused = server.request({ type: "widget_close", surface: "gone" });
+    const third = (await client.next()) as { id: string };
+    client.send(
+      `${JSON.stringify({
+        v: 2,
+        type: "widget_failed",
+        id: third.id,
+        code: "surface_not_found",
+        detail: "no surface named gone",
+      })}\n`,
+    );
+    const error = await refused.then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    assert.ok(error instanceof WidgetCommandError);
+    assert.equal(error.code, "surface_not_found");
+    assert.equal(error.message, "no surface named gone");
+    client.socket.destroy();
+  });
+});
+
+test("each widget command waits for its own answer, whatever order they arrive in", async () => {
+  await withServer({}, async (socketPath, server) => {
+    const client = await companion(socketPath);
+    const first = server.request({ type: "widget_close", surface: "widget-1" });
+    const second = server.request({ type: "widget_clear" });
+    const one = (await client.next()) as { id: string };
+    const two = (await client.next()) as { id: string };
+
+    // Answered back to front: a command settles on the identifier it carries
+    // and never on whichever answer happens to arrive first.
+    client.send(
+      `${JSON.stringify({ v: 2, type: "widget_done", id: two.id })}\n`,
+    );
+    assert.deepEqual(await second, {});
+    client.send(
+      `${JSON.stringify({
+        v: 2,
+        type: "widget_failed",
+        id: one.id,
+        code: "surface_not_found",
+        detail: "",
+      })}\n`,
+    );
+    await assert.rejects(first, WidgetCommandError);
+    client.socket.destroy();
+  });
+});
+
+test("a widget command nothing can answer fails instead of hanging the turn", async () => {
+  await withServer(
+    {},
+    async (socketPath, server) => {
+      // Nothing is connected to ask.
+      const unreachable = await server.request({ type: "widget_clear" }).then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+      assert.ok(unreachable instanceof WidgetCommandError);
+      assert.equal(unreachable.code, "companion_unavailable");
+
+      // A companion that leaves takes its commands with it, rather than
+      // leaving the caller to wait out a timeout that can teach it nothing.
+      const leaving = await companion(socketPath);
+      const abandoned = server.request({ type: "widget_clear" });
+      await leaving.next();
+      leaving.socket.destroy();
+      const gone = await abandoned.then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+      assert.ok(gone instanceof WidgetCommandError);
+      assert.equal(gone.code, "companion_unavailable");
+
+      // A companion that stays but never answers is the timeout case.
+      const silent = await companion(socketPath);
+      const unanswered = server.request({ type: "widget_clear" });
+      await silent.next();
+      const timed = await unanswered.then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+      assert.ok(timed instanceof WidgetCommandError);
+      assert.equal(timed.code, "timeout");
+      silent.socket.destroy();
+    },
+    { widgetTimeoutMs: 60 },
+  );
+});
+
+test("surface events and the catalog reach the widget listener, not a caller", async () => {
+  await withServer({}, async (socketPath, server) => {
+    const seen: WidgetNotice[] = [];
+    server.watchWidgets((notice) => seen.push(notice));
+    const client = await companion(socketPath);
+    client.send(
+      '{"v":2,"type":"catalog","widgets":[{"id":"note","name":"Note","description":"A short note."}]}\n',
+    );
+    client.send(
+      '{"v":2,"type":"widget_event","surface":"widget-3","event":"closed"}\n',
+    );
+    // An answer to a command nobody sent is dropped rather than acted on.
+    client.send('{"v":2,"type":"widget_done","id":"w-99"}\n');
+    client.send('{"v":2,"type":"ping"}\n');
+    assert.deepEqual(await client.next(), { v: 2, type: "pong" });
+    assert.deepEqual(seen, [
+      {
+        type: "catalog",
+        widgets: [{ id: "note", name: "Note", description: "A short note." }],
+      },
+      { type: "widget_event", surface: "widget-3", event: "closed" },
+    ]);
+    client.socket.destroy();
+  });
 });
 
 test("a version 1 peer is refused instead of half understood", () => {

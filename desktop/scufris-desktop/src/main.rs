@@ -26,7 +26,7 @@ use std::{
     os::unix::process::CommandExt,
     process::ExitCode,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
     thread,
@@ -38,9 +38,10 @@ use app::{
 };
 use audio::{CpalRecorder, Recorder};
 use config::Config;
-use daemon::DaemonLink;
+use daemon::{DaemonEvent, DaemonLink};
 use focus::FocusTracker;
 use pending::{FilePendingStore, PendingStore};
+use scufris_control::ClientBody;
 use state::Event;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, menu::Menu};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -323,9 +324,32 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             tauri.manage(Arc::clone(&runtime));
 
             let observer = Arc::clone(&runtime);
-            let link = Arc::new(DaemonLink::start(config.socket.clone(), move |event| {
-                observer.observe(event)
-            }));
+            // The link answers widget commands through the same connection it
+            // reads them from, so the closure needs the link the closure is
+            // built for. The cell is filled the moment the link exists, before
+            // the first command can arrive.
+            let answers: Arc<OnceLock<Arc<DaemonLink>>> = Arc::new(OnceLock::new());
+            let sink = Arc::clone(&answers);
+            let link = Arc::new(DaemonLink::start(
+                config.socket.clone(),
+                move |event| match event {
+                    // No widgets runtime in this build. Refusing is what keeps
+                    // the daemon's turn moving: an unanswered command costs it
+                    // the whole request timeout and tells it nothing.
+                    DaemonEvent::Widget(command) => {
+                        let Some(link) = sink.get() else { return };
+                        if let Err(error) = link.report(ClientBody::WidgetFailed {
+                            id: command.id().to_string(),
+                            code: "no_runtime".into(),
+                            detail: "the companion has no widgets runtime".into(),
+                        }) {
+                            debug!(%error, "widget command went unanswered");
+                        }
+                    }
+                    event => observer.observe(event),
+                },
+            ));
+            let _ = answers.set(Arc::clone(&link));
             runtime.set_backend(Arc::clone(&link) as Arc<dyn Backend>);
             tauri.manage(link);
 

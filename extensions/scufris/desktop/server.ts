@@ -10,8 +10,11 @@ import {
   decodeClientMessage,
   encodeDaemonMessage,
   takeLines,
+  type CatalogEntry,
   type ClientMessage,
   type DaemonMessage,
+  type Posture,
+  type SurfaceEvent,
 } from "./protocol.ts";
 
 /** How long a starter waits for another starter's ownership lock. */
@@ -115,6 +118,88 @@ export class SubmissionUncertainError extends Error {
 }
 
 export class SocketBusyError extends Error {}
+
+/**
+ * How long one widget command waits for the companion's answer.
+ *
+ * A command is a tool call the person is waiting behind, so it fails as a tool
+ * result rather than hanging the turn. The companion answers from a warm
+ * window pool, so this is generous, not tight.
+ */
+export const WIDGET_ANSWER_TIMEOUT_MS = 5_000;
+
+/**
+ * One widget command the companion could not carry out.
+ *
+ * `code` is the companion's own stable reason, or one of this daemon's two:
+ * `companion_unavailable` when nothing is connected to ask, and `timeout` when
+ * a connected companion never answered.
+ */
+export class WidgetCommandError extends Error {
+  readonly code: string;
+
+  constructor(code: string, detail: string) {
+    super(detail === "" ? code : detail);
+    this.code = code;
+  }
+}
+
+/** One widget command, without the correlation id this server assigns. */
+export type WidgetCommand =
+  | { type: "widget_open"; widget: string; posture: Posture; data: unknown }
+  | { type: "widget_update"; surface: string; data: unknown }
+  | { type: "widget_close"; surface: string }
+  | { type: "widget_clear" };
+
+/** What one carried-out widget command produced. */
+export interface WidgetAnswer {
+  /** Surface an open created. Absent from update, close, and clear. */
+  surface?: string;
+}
+
+/** One companion message about widgets that answers no command. */
+export type WidgetNotice =
+  | { type: "widget_event"; surface: string; event: SurfaceEvent }
+  | { type: "catalog"; widgets: CatalogEntry[] };
+
+/** One widget command waiting for its answer. */
+interface PendingWidget {
+  resolve: (answer: WidgetAnswer) => void;
+  reject: (error: WidgetCommandError) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+/** Builds the wire message for one command under its correlation id. */
+function widgetMessage(id: string, command: WidgetCommand): DaemonMessage {
+  switch (command.type) {
+    case "widget_open":
+      return {
+        v: PROTOCOL_VERSION,
+        type: "widget_open",
+        id,
+        widget: command.widget,
+        posture: command.posture,
+        data: command.data,
+      };
+    case "widget_update":
+      return {
+        v: PROTOCOL_VERSION,
+        type: "widget_update",
+        id,
+        surface: command.surface,
+        data: command.data,
+      };
+    case "widget_close":
+      return {
+        v: PROTOCOL_VERSION,
+        type: "widget_close",
+        id,
+        surface: command.surface,
+      };
+    case "widget_clear":
+      return { v: PROTOCOL_VERSION, type: "widget_clear", id };
+  }
+}
 
 /** Identity of the exact socket file this server created. */
 interface Owned {
@@ -367,6 +452,8 @@ export interface ControlServerOptions {
   lockTimeoutMs?: number;
   /** How long a shutdown waits for the ownership lock. */
   releaseTimeoutMs?: number;
+  /** How long one widget command waits for the companion's answer. */
+  widgetTimeoutMs?: number;
   /**
    * Runs after the last ownership check and before each mutation of the socket
    * pathname, which is where a lock that could be lost would do damage.
@@ -403,7 +490,14 @@ export class ControlServer {
   private readonly harden: (path: string) => void;
   private readonly lockTimeoutMs: number;
   private readonly releaseTimeoutMs: number;
+  private readonly widgetTimeoutMs: number;
   private readonly beforeMutate: () => void | Promise<void>;
+  /** Widget commands waiting for their answers, keyed by correlation id. */
+  private readonly pendingWidgets = new Map<string, PendingWidget>();
+  /** Source of correlation ids. Unique for the life of this daemon. */
+  private widgetCommands = 0;
+  /** The one listener for companion messages that answer no command. */
+  private widgetNotices?: (notice: WidgetNotice) => void;
   /** The one name this daemon uses for the socket, whatever name it was given. */
   private resolved: string;
 
@@ -421,6 +515,7 @@ export class ControlServer {
     this.lockTimeoutMs = options.lockTimeoutMs ?? OWNERSHIP_LOCK_TIMEOUT_MS;
     this.releaseTimeoutMs =
       options.releaseTimeoutMs ?? OWNERSHIP_RELEASE_TIMEOUT_MS;
+    this.widgetTimeoutMs = options.widgetTimeoutMs ?? WIDGET_ANSWER_TIMEOUT_MS;
     this.beforeMutate = options.beforeMutate ?? (() => {});
   }
 
@@ -545,6 +640,10 @@ export class ControlServer {
     this.owned = undefined;
     for (const client of this.clients) client.destroy();
     this.clients.clear();
+    this.abandonWidgets(
+      "companion_unavailable",
+      "The Scufris daemon stopped serving the control socket.",
+    );
     // Nothing may still be waiting to acknowledge into a socket that is gone.
     // The host settles the deliveries themselves; this drops the reservations
     // so a restarted server starts from the session, not from stale promises.
@@ -572,6 +671,103 @@ export class ControlServer {
       state: report.state,
       detail: report.detail,
     });
+  }
+
+  /**
+   * Registers the one listener for companion messages that answer no command.
+   *
+   * Surface events and the catalog arrive unasked, so they belong to whoever
+   * owns widgets rather than to the caller of a command.
+   */
+  watchWidgets(listener: (notice: WidgetNotice) => void): void {
+    this.widgetNotices = listener;
+  }
+
+  /**
+   * Sends one widget command to the connected companion and resolves with what
+   * it produced.
+   *
+   * This is the only place the daemon originates a request rather than
+   * answering one. Each command carries a correlation id the companion echoes,
+   * so an answer settles the command that asked for it and no other. A command
+   * nothing can carry - no companion, no answer, or a companion that says no -
+   * rejects with a [`WidgetCommandError`] the caller reports as a tool result.
+   */
+  request(command: WidgetCommand): Promise<WidgetAnswer> {
+    const socket = this.companion();
+    if (!socket) {
+      return Promise.reject(
+        new WidgetCommandError(
+          "companion_unavailable",
+          "The Scufris desktop companion is not connected.",
+        ),
+      );
+    }
+    this.widgetCommands += 1;
+    const id = `w-${this.widgetCommands}`;
+    let line: string;
+    try {
+      line = encodeDaemonMessage(widgetMessage(id, command));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return Promise.reject(new WidgetCommandError("invalid_command", detail));
+    }
+    return new Promise<WidgetAnswer>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingWidgets.delete(id);
+        reject(
+          new WidgetCommandError(
+            "timeout",
+            "The companion did not answer the widget command.",
+          ),
+        );
+      }, this.widgetTimeoutMs);
+      // A waiting command must never be the reason this process stays alive.
+      timer.unref?.();
+      this.pendingWidgets.set(id, { resolve, reject, timer });
+      socket.write(line);
+    });
+  }
+
+  /** Returns the companion to ask, which is the most recent one connected. */
+  private companion(): Socket | undefined {
+    let chosen: Socket | undefined;
+    for (const client of this.clients) if (client.writable) chosen = client;
+    return chosen;
+  }
+
+  /** Settles one waiting widget command with the answer that names it. */
+  private settleWidget(
+    answer: Extract<
+      ClientMessage,
+      { type: "widget_opened" | "widget_done" | "widget_failed" }
+    >,
+  ): void {
+    const pending = this.pendingWidgets.get(answer.id);
+    if (!pending) {
+      // Late, duplicated, or from a companion this daemon never asked. It is
+      // reported and dropped: applying it would act on nothing.
+      this.log(`no widget command is waiting for ${answer.id}`, "info");
+      return;
+    }
+    this.pendingWidgets.delete(answer.id);
+    clearTimeout(pending.timer);
+    if (answer.type === "widget_failed") {
+      pending.reject(new WidgetCommandError(answer.code, answer.detail ?? ""));
+      return;
+    }
+    pending.resolve(
+      answer.type === "widget_opened" ? { surface: answer.surface } : {},
+    );
+  }
+
+  /** Fails every waiting widget command, because none of them can be answered. */
+  private abandonWidgets(code: string, detail: string): void {
+    for (const [, pending] of this.pendingWidgets) {
+      clearTimeout(pending.timer);
+      pending.reject(new WidgetCommandError(code, detail));
+    }
+    this.pendingWidgets.clear();
   }
 
   private send(message: DaemonMessage, only?: Socket): void {
@@ -625,7 +821,17 @@ export class ControlServer {
       }
     });
     socket.on("error", () => socket.destroy());
-    socket.on("close", () => this.clients.delete(socket));
+    socket.on("close", () => {
+      this.clients.delete(socket);
+      // Nothing is left to answer the commands in flight, and a caller waiting
+      // out a timeout learns nothing a disconnection has not already said.
+      if (this.clients.size === 0) {
+        this.abandonWidgets(
+          "companion_unavailable",
+          "The Scufris desktop companion disconnected.",
+        );
+      }
+    });
   }
 
   private async dispatch(
@@ -652,10 +858,26 @@ export class ControlServer {
       );
       return;
     }
-    if (message.type !== "submit") {
-      // A widget answer, event, or catalog. Nothing here asked for one yet, so
-      // it is reported and dropped rather than closing a healthy connection.
-      this.log(`unexpected companion message: ${message.type}`, "info");
+    if (
+      message.type === "widget_opened" ||
+      message.type === "widget_done" ||
+      message.type === "widget_failed"
+    ) {
+      this.settleWidget(message);
+      return;
+    }
+    if (message.type === "widget_event" || message.type === "catalog") {
+      // Unasked for, so it belongs to whoever owns widgets rather than to the
+      // caller of a command. A daemon with no such owner drops it.
+      this.widgetNotices?.(
+        message.type === "catalog"
+          ? { type: "catalog", widgets: message.widgets }
+          : {
+              type: "widget_event",
+              surface: message.surface,
+              event: message.event,
+            },
+      );
       return;
     }
 

@@ -25,6 +25,19 @@ pub const MENU_RESTART: &str = "restart";
 pub const MENU_CUES: &str = "cues";
 pub const MENU_QUIT: &str = "quit";
 
+/// What a summon item's identifier starts with, before the widget identifier.
+///
+/// One namespace rather than one constant per widget: what the submenu offers
+/// is read off the catalog at startup, so the identifiers cannot be a fixed
+/// list. A widget identifier is already a protocol identifier, so it cannot
+/// carry the separator and collide with a menu item of its own.
+pub const MENU_SUMMON: &str = "summon:";
+
+/// Returns the widget one summon item is for, or nothing if it is not one.
+pub fn summoned(id: &str) -> Option<&str> {
+    id.strip_prefix(MENU_SUMMON)
+}
+
 /// Returns the opaque colour that identifies one tray state.
 ///
 /// The gruber state grammar the pill uses: yellow listening, brown
@@ -105,12 +118,22 @@ pub fn cues_label(enabled: bool) -> &'static str {
 }
 
 /// Builds the tray status menu.
+///
+/// `summonable` is the widgets the person can put on the desktop themselves,
+/// as `(identifier, name)`. They get a submenu of their own rather than a row
+/// each, because the menu's first job is still the four things that act on the
+/// conversation and a fleet of widgets would bury them.
 pub fn build_menu(
     app: &AppHandle,
     chat_available: bool,
     restart_available: bool,
     status: &str,
+    summonable: &[(String, String)],
 ) -> tauri::Result<Menu<tauri::Wry>> {
+    let mut widgets = tauri::menu::SubmenuBuilder::new(app, "Open a widget");
+    for (id, name) in summonable {
+        widgets = widgets.text(format!("{MENU_SUMMON}{id}"), name);
+    }
     MenuBuilder::new(app)
         .text(MENU_STATUS, status)
         .separator()
@@ -126,6 +149,10 @@ pub fn build_menu(
                 .build(app)?,
         )
         .text(MENU_CUES, cues_label(true))
+        .separator()
+        // Enabled only when there is something in it: an empty submenu that
+        // opens onto nothing is worse than one that says it has nothing.
+        .item(&widgets.enabled(!summonable.is_empty()).build()?)
         .separator()
         .text(MENU_QUIT, "Quit Scufris desktop")
         .build()
@@ -262,6 +289,21 @@ mod tests {
             if state != "error" {
                 assert_ne!(state_color(state), state_color("error"), "{state}");
             }
+        }
+    }
+
+    #[test]
+    fn a_summon_item_names_its_widget_and_nothing_else_does() {
+        assert_eq!(summoned(&format!("{MENU_SUMMON}timer")), Some("timer"));
+        for id in [
+            MENU_CHAT,
+            MENU_VOICE,
+            MENU_STATUS,
+            MENU_RESTART,
+            MENU_CUES,
+            MENU_QUIT,
+        ] {
+            assert_eq!(summoned(id), None, "{id}");
         }
     }
 

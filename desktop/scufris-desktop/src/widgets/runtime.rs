@@ -20,6 +20,7 @@ use scufris_control::{ClientBody, Posture, SurfaceEvent};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::PhysicalPosition;
+use tracing::warn;
 
 use crate::{pill, widgets::catalog::Catalog};
 
@@ -196,8 +197,12 @@ impl Surface {
 pub enum Cmd {
     /// Open one widget. The daemon asked.
     Open {
-        /// Correlation identifier the answer echoes.
-        id: String,
+        /// Correlation identifier the answer echoes, when a request is waiting
+        /// on one. A summon from the tray is the person acting on their own
+        /// desktop rather than an answer the daemon asked for, so it carries
+        /// none and nothing is reported: a `widget_opened` for a request that
+        /// was never made is a reply to a question nobody asked.
+        id: Option<String>,
         /// The shell the host reserved, whose label the surface takes.
         surface: SurfaceId,
         /// Widget to open.
@@ -470,18 +475,14 @@ impl Runtime {
     fn open(
         &mut self,
         catalog: &Catalog,
-        id: String,
+        id: Option<String>,
         surface: SurfaceId,
         widget: String,
         posture: Posture,
         data: Value,
     ) -> Vec<Act> {
         let Some(installed) = catalog.get(&widget) else {
-            return vec![failed(
-                id,
-                "widget_not_found",
-                format!("no widget named {widget}"),
-            )];
+            return refused(id, "widget_not_found", format!("no widget named {widget}"));
         };
         let size = Size {
             width: f64::from(installed.width),
@@ -495,11 +496,11 @@ impl Runtime {
             Posture::Instrument => match self.free_edge() {
                 Some(edge) => Slot::Edge(edge),
                 None => {
-                    return vec![failed(
+                    return refused(
                         id,
                         "no_free_slot",
                         "every instrument slot is taken".to_string(),
-                    )];
+                    );
                 }
             },
         };
@@ -567,7 +568,9 @@ impl Runtime {
             acts.extend(self.crowd_out());
             acts.extend(self.reflow());
         }
-        acts.push(Act::Report(ClientBody::WidgetOpened { id, surface }));
+        if let Some(id) = id {
+            acts.push(Act::Report(ClientBody::WidgetOpened { id, surface }));
+        }
         acts
     }
 
@@ -990,6 +993,21 @@ fn failed(id: String, code: &str, detail: String) -> Act {
     })
 }
 
+/// Refuses one open, and says so only when somebody asked for it.
+///
+/// A summon from the tray that cannot land leaves the log line and nothing
+/// else. The person is looking at their own desktop, so the four full edge
+/// slots that refused it are already on screen in front of them.
+fn refused(id: Option<String>, code: &str, detail: String) -> Vec<Act> {
+    match id {
+        Some(id) => vec![failed(id, code, detail)],
+        None => {
+            warn!(code, "a summoned widget was refused: {detail}");
+            Vec::new()
+        }
+    }
+}
+
 /// One monitor, as the placement math sees it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Monitor {
@@ -1138,10 +1156,29 @@ cadence = 500
         runtime.apply(
             catalog,
             Cmd::Open {
-                id: format!("w-{taken}"),
+                id: Some(format!("w-{taken}")),
                 surface: format!("widget-{taken}"),
                 widget: widget.to_string(),
                 posture,
+                data: json!({}),
+            },
+        )
+    }
+
+    /// Opens one widget the way the tray does: with nobody waiting on an answer.
+    fn summon(runtime: &mut Runtime, catalog: &Catalog, widget: &str) -> Vec<Act> {
+        let taken = SHELLS.with(|next| {
+            let mut next = next.borrow_mut();
+            *next += 1;
+            *next
+        });
+        runtime.apply(
+            catalog,
+            Cmd::Open {
+                id: None,
+                surface: format!("widget-{taken}"),
+                widget: widget.to_string(),
+                posture: Posture::Instrument,
                 data: json!({}),
             },
         )
@@ -1159,6 +1196,28 @@ cadence = 500
                 _ => None,
             })
             .expect("the open was answered with a surface")
+    }
+
+    #[test]
+    fn a_widget_the_person_summoned_answers_nobody() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let acts = summon(&mut runtime, &catalog, "gauge");
+        // It opened for real: the window is adopted and its backend subscribed.
+        assert!(acts.iter().any(|act| matches!(act, Act::Adopt { .. })));
+        assert!(acts.iter().any(|act| matches!(act, Act::Subscribe { .. })));
+        // And said nothing to the daemon, which never asked for it.
+        assert!(!acts.iter().any(|act| matches!(act, Act::Report(_))));
+    }
+
+    #[test]
+    fn a_summon_that_cannot_land_says_nothing_either() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        for _ in 0..EDGE_SLOTS.len() {
+            open(&mut runtime, &catalog, "gauge", Posture::Instrument);
+        }
+        assert_eq!(summon(&mut runtime, &catalog, "gauge"), Vec::new());
     }
 
     #[test]
@@ -1209,7 +1268,7 @@ cadence = 500
         let acts = runtime.apply(
             &catalog,
             Cmd::Open {
-                id: "w-1".into(),
+                id: Some("w-1".into()),
                 surface: "widget-1".into(),
                 widget: "gauge".into(),
                 posture: Posture::Exhibit,
@@ -1270,7 +1329,7 @@ cadence = 500
             runtime.apply(
                 &catalog,
                 Cmd::Open {
-                    id: "w-1".into(),
+                    id: Some("w-1".into()),
                     surface: "widget-1".into(),
                     widget: "gauge".into(),
                     posture: Posture::Exhibit,

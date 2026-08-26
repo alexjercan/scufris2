@@ -22,9 +22,9 @@ use std::{
 };
 
 use scufris_control::{AssistantState, ClientBody, Posture};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, ipc::Channel};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
     daemon::{DaemonLink, WidgetCommand},
@@ -78,8 +78,17 @@ impl Widgets {
     /// A catalog that will not build stops the companion here. See
     /// [`catalog::Catalog::build`] for why that is better than starting.
     pub fn start(app: AppHandle) -> Result<Arc<Self>, CatalogError> {
+        let names = backends::names();
+        let mut catalog = Catalog::build(INSTALLED, &names)?;
+        // After the shipped ones, because they are the ones that win. A root on
+        // the search path adds to the fleet; it does not replace part of it.
+        if let Ok(path) = std::env::var(catalog::WIDGET_PATH) {
+            let found = catalog::search(&path);
+            let sources: Vec<_> = found.iter().map(catalog::External::source).collect();
+            catalog.extend(&sources, &names);
+        }
         let widgets = Arc::new(Self {
-            catalog: Catalog::build(INSTALLED, &backends::names())?,
+            catalog,
             pool: Pool::new(app.clone()),
             runtime: Mutex::new(Runtime::new()),
             backends: Backends::new(),
@@ -295,7 +304,7 @@ impl Widgets {
                 widget,
                 posture,
                 data,
-            } => self.open(id, widget, posture, data),
+            } => self.open(Some(id), widget, posture, data),
             WidgetCommand::Update { id, surface, data } => {
                 self.decide(Cmd::Update { id, surface, data });
             }
@@ -314,6 +323,25 @@ impl Widgets {
         self.decide(Cmd::Pin { surface });
     }
 
+    /// Returns the widgets the tray offers, as `(identifier, name)`.
+    pub fn summonable(&self) -> Vec<(String, String)> {
+        self.catalog.summonable()
+    }
+
+    /// Opens one instrument because the person asked the tray for it.
+    ///
+    /// Nothing about it goes back to the daemon. Scufris finds out the way it
+    /// finds out about a widget the person closed: by being told, if it ever
+    /// asks. The desktop is the person's, and a panel they put up themselves
+    /// is not a turn in the conversation.
+    ///
+    /// It carries no payload, which is why only a widget with a backend behind
+    /// it can be summoned: that backend has to stand up on its own defaults.
+    pub fn summon(&self, widget: String) {
+        info!(widget, "summoned from the tray");
+        self.open(None, widget, Posture::Instrument, json!({}));
+    }
+
     /// Reserves a shell, then asks the runtime what to do with it.
     ///
     /// The shell is reserved first because its label is the surface identifier:
@@ -321,21 +349,17 @@ impl Widgets {
     /// daemon has been told about can never be confused with a later one. A
     /// runtime that then refuses the open leaves the shell unused, and it is
     /// discarded rather than kept, for the same reason.
-    fn open(&self, id: String, widget: String, posture: Posture, data: Value) {
+    fn open(&self, id: Option<String>, widget: String, posture: Posture, data: Value) {
         if self.catalog.get(&widget).is_none() {
-            self.report(ClientBody::WidgetFailed {
-                id,
-                code: "widget_not_found".into(),
-                detail: format!("no widget named {widget}"),
-            });
+            self.refuse(id, "widget_not_found", format!("no widget named {widget}"));
             return;
         }
         let Some(surface) = self.pool.take() else {
-            self.report(ClientBody::WidgetFailed {
+            self.refuse(
                 id,
-                code: "no_shell".into(),
-                detail: "no widget window could be made ready".into(),
-            });
+                "no_shell",
+                "no widget window could be made ready".into(),
+            );
             return;
         };
         let acts = self.runtime().apply(
@@ -354,6 +378,21 @@ impl Widgets {
         self.perform(acts);
         if !adopted {
             self.pool.discard(&surface);
+        }
+    }
+
+    /// Answers a refused open, when there is a request waiting on an answer.
+    ///
+    /// The runtime's own refusals go the same way; this is the pair of them
+    /// that happen before the runtime is ever asked.
+    fn refuse(&self, id: Option<String>, code: &str, detail: String) {
+        match id {
+            Some(id) => self.report(ClientBody::WidgetFailed {
+                id,
+                code: code.into(),
+                detail,
+            }),
+            None => warn!(code, "a summoned widget was refused: {detail}"),
         }
     }
 
@@ -576,7 +615,7 @@ mod tests {
         let acts = runtime.apply(
             &widgets,
             Cmd::Open {
-                id: "w-1".into(),
+                id: Some("w-1".into()),
                 surface: "widget-1".into(),
                 widget: "note".into(),
                 posture: Posture::Exhibit,

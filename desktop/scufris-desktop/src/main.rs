@@ -322,11 +322,17 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             pill::ensure(&handle)?;
             review::ensure(&handle)?;
 
+            // Before the menu, because the menu offers what is installed: the
+            // catalog is what the summon submenu is built from.
+            let widgets = widgets::Widgets::start(handle.clone())?;
+            tauri.manage(Arc::clone(&widgets));
+
             let menu = tray::build_menu(
                 &handle,
                 chat_available,
                 restart_available,
                 &app::status_line("disconnected", "The Scufris backend is unavailable."),
+                &widgets.summonable(),
             )?;
             tauri.manage(CueSwitch(AtomicBool::new(true)));
             let cue_menu = menu.clone();
@@ -354,7 +360,12 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                             info!(enabled, "sound cues");
                         }
                         tray::MENU_QUIT => app.exit(0),
-                        _ => {}
+                        other => {
+                            if let Some(widget) = tray::summoned(other) {
+                                app.state::<Arc<widgets::Widgets>>()
+                                    .summon(widget.to_string());
+                            }
+                        }
                     }
                 },
                 |app| app.state::<Arc<App>>().open_chat(),
@@ -379,9 +390,6 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                 ack_timeout: ACK_TIMEOUT,
             }));
             tauri.manage(Arc::clone(&runtime));
-
-            let widgets = widgets::Widgets::start(handle.clone())?;
-            tauri.manage(Arc::clone(&widgets));
 
             let observer = Arc::clone(&runtime);
             let surfaces = Arc::clone(&widgets);

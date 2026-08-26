@@ -42,6 +42,13 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   reading, so what the panel shows is always what the backend knows. Ask for a
   timer and it counts down on the desktop, with ticks to pause, resume, add a
   minute, and start over. Two timers of the same length are two timers.
+- Put a widget up yourself. The tray menu offers the widgets that fill
+  themselves, and one you open from there is yours: it goes in an edge slot,
+  stays until you close it, and Scufris is not told about it.
+- `SCUFRIS_WIDGET_PATH` names extra widget roots, separated the way `PATH` is,
+  so another project can ship a widget for the desktop. Widgets that shipped
+  with Scufris always win, and one that will not install is reported in the log
+  rather than stopping the companion.
 
 ### Changed
 

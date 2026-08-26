@@ -121,6 +121,43 @@ regardless, and `surface_not_found` is what corrects the drift. A surface the
 user closes with its own tick arrives as a `scufris-widget-event` follow-up
 message, which `calm.ts` hides from the transcript.
 
+## Summoning one yourself
+
+The tray carries a submenu of the widgets the person can put up without saying
+anything to Scufris. It opens an instrument, with no payload, and answers
+nobody: a `widget_opened` for a request the daemon never made would be a reply
+to a question nobody asked. The desktop is the person's, and a panel they put
+there themselves is not a turn in the conversation.
+
+What the submenu offers is the widgets with a backend behind them. A summon
+carries no payload, so the widget has to be able to fill itself, and a backend
+standing up on its own defaults is what does that. A widget that only ever shows
+what Scufris handed it would summon as an empty panel.
+
+A summon that cannot land - every instrument slot taken - leaves a log line and
+nothing else. The four full edges are already on the screen in front of the
+person who clicked.
+
+## Widgets from elsewhere
+
+`SCUFRIS_WIDGET_PATH` names extra widget roots, separated the way `PATH` is.
+Each root is walked at startup for `<id>/widget.toml` and `<id>/widget.js` - the
+compiled module, because nothing compiles anything at startup and the
+companion's closure has no compiler in it. A project that ships a widget ships
+what its own build produced.
+
+External roots are additive and never override. A widget that shipped wins over
+one on the search path, and an earlier root wins over a later one, so a name
+always resolves to what it always did.
+
+A widget that will not install is reported and passed over rather than stopping
+the companion, which is where the search path parts from the shipped widgets. A
+shipped widget that is wrong is a build failure and the developer sees it
+immediately; one on the search path is a project on the person's own machine
+that may be half-installed or gone, and a login session with no companion in it
+is the worse of the two outcomes. The name it would have answered to simply
+resolves to nothing.
+
 ## Windows
 
 A widget window is the pill's recipe with one deliberate difference. It is

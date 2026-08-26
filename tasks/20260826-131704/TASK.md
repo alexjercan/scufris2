@@ -1,6 +1,6 @@
 # First review of a fresh process loses the keyboard
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 85
 - TAGS: desktop, bug
 
@@ -181,3 +181,8 @@ page fix, both failing before it).
 ### Unverified
 
 Alex's live rerun of his exact flow on his own desktop.
+
+Alex confirmed the fix live (2026-08-26): the first review of a fresh
+process holds the keyboard, "now it works fine". Closed. The
+mid-review focus-predator hole stays open on its own terms, recorded
+above and in the review skill's red-team lane.

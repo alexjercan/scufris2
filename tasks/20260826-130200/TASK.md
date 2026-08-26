@@ -1,6 +1,6 @@
 # Review caret starts offset from the end of the text
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 50
 - TAGS: desktop, ux
 
@@ -43,3 +43,6 @@ of freezing a mid-pop frame.
 typecheck` clean; prettier clean on both touched files.
 - The live look - the caret starting at the end with no snap - is
   Alex's.
+
+Confirmed in the same live runs (2026-08-26): the caret starts at the
+end of the text with no snap. Closed.

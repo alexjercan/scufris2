@@ -159,6 +159,12 @@ class Stub {
     if (this.page !== null) this.page.activeElement = this;
   }
 
+  blur(): void {
+    if (this.page !== null && this.page.activeElement === this) {
+      this.page.activeElement = null;
+    }
+  }
+
   setSelectionRange(start: number, end: number): void {
     this.selectionStart = start;
     this.selectionEnd = end;
@@ -331,9 +337,6 @@ function run(page: Page, ids: string[], scripts: string[]): void {
       },
       execCommand: (command: string): boolean =>
         page.execCommand === null ? false : page.execCommand(command),
-      get activeElement(): Stub | null {
-        return page.activeElement;
-      },
       hidden: false,
     }),
     matchMedia: () => ({
@@ -374,6 +377,13 @@ function run(page: Page, ids: string[], scripts: string[]): void {
       resume = (): Promise<void> => Promise.resolve();
     },
   };
+  // Which element holds the focus is read while the page runs, so the document
+  // has to answer from the page and not from a copy of it: `Object.assign`
+  // reads a getter once and keeps the one answer, which for a page that has
+  // not started is that nothing is focused, forever.
+  Object.defineProperty(page.document, "activeElement", {
+    get: (): Stub | null => page.activeElement,
+  });
   const context = createContext(global);
   const win = Object.assign(page.window, {
     __TAURI__: {
@@ -594,6 +604,47 @@ function press(page: Page, key: string, control: boolean): void {
     preventDefault: () => {},
   });
 }
+
+test("a click on the pill leaves the field the focus the keys need", () => {
+  // A click is how a person brings this window back, and a click's default is
+  // to move the focus to whatever lies under it. Enter and Escape are read
+  // from the window and would live through that; the arrows, Backspace, and
+  // every letter are read from the field, so a review recovered by a click
+  // could only be sent or thrown away, never edited.
+  const page = pill();
+  editing(page, "hello world");
+  let refused = 0;
+  const click = {
+    preventDefault: (): void => {
+      refused += 1;
+    },
+  };
+
+  page.document.dispatch("mousedown", click);
+  assert.equal(refused, 1);
+
+  // Nothing is being edited, so the click is the person's to spend as they like.
+  present(page, "listening", "", false);
+  page.document.dispatch("mousedown", click);
+  assert.equal(refused, 1);
+});
+
+test("a window that gets the keyboard back takes the field again", () => {
+  // The desktop can move the focus off the field on its own, and the window
+  // comes back with the keyboard and nothing to type into.
+  const page = pill();
+  const transcript = editing(page, "hello world");
+  transcript.selectionStart = 5;
+  transcript.selectionEnd = 5;
+  transcript.blur();
+
+  page.window.dispatch("focus", {});
+
+  assert.equal(page.activeElement, transcript);
+  assert.equal(transcript.selectionStart, 5);
+  press(page, "Backspace", true);
+  assert.equal(transcript.value, " world");
+});
 
 test("ctrl-backspace deletes a word and mirrors what is left", () => {
   const page = pill();

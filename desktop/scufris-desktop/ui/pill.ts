@@ -531,6 +531,34 @@ void listen("scufris://presentation", (event) => {
   render(event.payload as Presentation);
 });
 
+// A click on this window is how a person brings it back to the front, and the
+// click's own default is to move the page's focus to whatever lies under the
+// pointer. On a window whose review is read in the box next door, that is
+// anything but the field the keys are meant for. Enter and Escape live through
+// it, because they are read from the window; the arrows, Backspace, and every
+// letter the person types are read from the field, and a field the focus has
+// left reads nothing. So the click that was meant to give the window back
+// gives back half of it, and the missing half is the editing this window
+// exists for.
+document.addEventListener("mousedown", (event) => {
+  if (editing()) event.preventDefault();
+});
+
+// The focus can still be moved off the field by a desktop that hands this
+// window the keyboard on its own, so a window that comes back editable takes
+// the field again and puts the caret where the person left it. The box next
+// door is redrawn from the offsets, because it has been showing a caret in a
+// window that could not move it.
+window.addEventListener("focus", () => {
+  if (!editing()) return;
+  if (document.activeElement === transcript) return;
+  const start = transcript.selectionStart ?? transcript.value.length;
+  const end = transcript.selectionEnd ?? start;
+  transcript.focus();
+  transcript.setSelectionRange(start, end);
+  mirror();
+});
+
 void listen("scufris://copy", (event) => {
   // Copying is the safe choice offered for a transcript whose outcome nobody
   // knows, so a clipboard that refuses must not look like anything happened.

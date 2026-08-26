@@ -40,16 +40,31 @@ impl FocusTracker {
         }
     }
 
-    /// Records the currently active window.
-    pub fn capture(&self) {
+    /// Records the currently active window, unless it is one of `mine`.
+    ///
+    /// A window of the companion's own is never somewhere to give the desktop
+    /// back to. The window manager names the transcript box as the active
+    /// window for as long as the box is up - it is the container i3 believes is
+    /// focused, whatever the box says about the keyboard - so a capture taken
+    /// while a review is on screen would record the box and hand the person's
+    /// keys to a window that refuses them.
+    ///
+    /// What cannot be bettered is left alone. A display with no active window
+    /// to name, and a window that turns out to be the companion's, both leave
+    /// the last window worth returning to exactly where it was: the pill
+    /// promised to give the desktop back, and forgetting where it came from is
+    /// not a way to keep that promise.
+    pub fn capture(&self, mine: &[Window]) {
         let Some(session) = &self.connection else {
             return;
         };
-        let active = session.active_window();
+        let Some(active) = worth_returning_to(session.active_window(), mine) else {
+            return;
+        };
         *self
             .previous
             .lock()
-            .unwrap_or_else(|error| error.into_inner()) = active;
+            .unwrap_or_else(|error| error.into_inner()) = Some(active);
     }
 
     /// Activates the window recorded by the last [`FocusTracker::capture`].
@@ -73,6 +88,14 @@ impl FocusTracker {
         };
         session.activate(window)
     }
+}
+
+/// Answers which of the display's answers is a window to go back to.
+///
+/// Separate from the connection so the one rule that matters - never the
+/// companion's own windows - can be checked without a display.
+fn worth_returning_to(active: Option<Window>, mine: &[Window]) -> Option<Window> {
+    active.filter(|window| !mine.contains(window))
 }
 
 impl Default for FocusTracker {
@@ -149,7 +172,32 @@ mod tests {
             previous: Mutex::new(None),
         };
         assert!(tracker.connection.is_none());
-        tracker.capture();
+        tracker.capture(&[]);
         assert_eq!(tracker.restore(), Ok(()));
+    }
+
+    #[test]
+    fn a_window_of_the_companions_own_is_never_somewhere_to_go_back_to() {
+        // The window manager names the transcript box as the active window for
+        // as long as the box is up. Recording it would send the person's keys
+        // back to the one window that refuses them.
+        let pill = 0x400010;
+        let review = 0x400020;
+        assert_eq!(worth_returning_to(Some(review), &[pill, review]), None);
+        assert_eq!(worth_returning_to(Some(pill), &[pill, review]), None);
+        assert_eq!(
+            worth_returning_to(Some(0x500030), &[pill, review]),
+            Some(0x500030)
+        );
+    }
+
+    #[test]
+    fn a_display_with_nothing_active_leaves_the_last_window_alone() {
+        // A window that took the keyboard and died leaves the display with no
+        // active window to name. That is the moment the pill most needs to
+        // remember where the person was, and nothing here is worth overwriting
+        // it with: a capture only ever records a window.
+        assert_eq!(worth_returning_to(None, &[]), None);
+        assert_eq!(worth_returning_to(None, &[0x400010]), None);
     }
 }

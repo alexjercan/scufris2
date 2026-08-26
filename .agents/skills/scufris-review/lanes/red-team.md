@@ -31,9 +31,10 @@ each attempt, state the sequence, what should happen, and what does.
 - The transcriber: the whisper endpoint down mid-transcribe, slow, or
   answering garbage.
 - Focus predators: a window that maps, takes focus, and dies while a
-  review is up (the known hole - `xmessage` reproduces it); a click on
-  each window in each phase; `focus_follows_mouse` with the pointer
-  parked over the pill's spot.
+  review is up (`xmessage` reproduces it; the pill must take the
+  keyboard back on its own) and one that maps and stays (it must keep
+  the keyboard); a click on each window in each phase;
+  `focus_follows_mouse` with the pointer parked over the pill's spot.
 - Motion: reduced motion toggled between turns; a hide during the
   entrance; a resize or scale change between two shows (the shape mask
   must be re-cut).

@@ -194,6 +194,17 @@ pub fn focused(app: &AppHandle) -> bool {
         .is_some_and(|window| display::keyboard(&window, &WINDOW) == Verdict::Yes)
 }
 
+/// Answers what the display knows the pill by, once it has made a window.
+///
+/// Nothing before the first show, which is also the first moment anything could
+/// mistake this window for the person's.
+pub fn known_window() -> Option<u32> {
+    match WINDOW.load(Ordering::SeqCst) {
+        0 => None,
+        id => Some(id),
+    }
+}
+
 /// The two window operations whose order is the keyboard contract.
 ///
 /// A trait so the order they run in is testable without a display, for the same

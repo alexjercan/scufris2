@@ -22,7 +22,7 @@
 //! nothing on the orb can ask for them back, because a review has no further
 //! change to make and an activation does nothing in it.
 
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use tauri::{
     AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
@@ -128,6 +128,28 @@ pub fn ensure(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         // and the refusal below is the only thing that ever speaks for it.
         .focusable(false)
         .build()
+}
+
+/// Answers what the display knows the box by, once it has made a window.
+///
+/// Nothing before the first raise, which is also the first moment a window
+/// manager could hand this window anything.
+pub fn known_window() -> Option<u32> {
+    match WINDOW.load(Ordering::SeqCst) {
+        0 => None,
+        id => Some(id),
+    }
+}
+
+/// Answers whether the box itself is holding the keyboard.
+///
+/// It never should. The box refuses the keyboard before every raise and has no
+/// key handlers at all, so keys that land here are keys the person has lost: a
+/// window manager that forces focus on it rather than offering it is the case
+/// this answers for.
+pub fn holds_the_keyboard(app: &AppHandle) -> bool {
+    app.get_webview_window(LABEL)
+        .is_some_and(|window| display::keyboard(&window, &WINDOW) == Verdict::Yes)
 }
 
 /// Puts the box where the state wants it: up for the states that carry a

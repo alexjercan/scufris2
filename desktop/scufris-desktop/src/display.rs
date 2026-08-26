@@ -206,6 +206,26 @@ pub fn keyboard(window: &WebviewWindow, known: &AtomicU32) -> Verdict {
     }
 }
 
+/// Answers whether the keyboard is on no window at all, right now.
+///
+/// The X server answers a focus of `None` or `PointerRoot` when no client holds
+/// the keyboard: the first drops every key on the floor, and the second sends
+/// them wherever the pointer happens to rest. Either way nobody was given them
+/// and nobody can be typing, which is what makes this worth asking - a keyboard
+/// no window holds can be taken without taking it from anyone.
+///
+/// A display nothing can be asked of answers `Unsure`, and `Unsure` is never a
+/// reason to take anything.
+pub fn nobody_holds_the_keyboard() -> Verdict {
+    if !reachable() {
+        return Verdict::Unsure;
+    }
+    match session() {
+        Some(session) => session.unheld(),
+        None => Verdict::Unsure,
+    }
+}
+
 /// Waits for one window to come up, and answers what the display said.
 pub fn came_up(window: &WebviewWindow, known: &AtomicU32) -> Verdict {
     until(window, known, up, Verdict::Yes, PATIENCE)
@@ -305,6 +325,23 @@ impl Session {
         }
     }
 
+    /// Answers whether the keyboard is on no window at all.
+    fn unheld(&self) -> Verdict {
+        let Some(reply) = self
+            .connection
+            .get_input_focus()
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+        else {
+            return Verdict::Unsure;
+        };
+        if unheld(reply.focus) {
+            Verdict::Yes
+        } else {
+            Verdict::No
+        }
+    }
+
     fn parent(&self, window: Window) -> Option<Window> {
         let reply = self.connection.query_tree(window).ok()?.reply().ok()?;
         if reply.parent == 0 || reply.parent == reply.root {
@@ -312,6 +349,17 @@ impl Session {
         }
         Some(reply.parent)
     }
+}
+
+/// Answers whether one focus reply names no window at all.
+///
+/// `XGetInputFocus` answers 0 for `None` and 1 for `PointerRoot`. Both are
+/// answers about the screen rather than about a window, and neither is a client
+/// that was given the keyboard.
+///
+/// Separate from the connection so it can be checked without a display.
+fn unheld(focus: Window) -> bool {
+    focus <= 1
 }
 
 /// Answers whether the keyboard is inside one window: on the window itself, or
@@ -375,6 +423,18 @@ mod tests {
         // headless session with nothing focused answers exactly that.
         assert!(!holds(0, 0x400010, tree(&[])));
         assert!(!holds(1, 0x400010, tree(&[])));
+    }
+
+    #[test]
+    fn a_keyboard_no_client_was_given_is_held_by_nobody() {
+        // The two answers about the screen. A window manager that focuses a
+        // window which refuses the keyboard, and then loses that window, leaves
+        // the server on one of them, and every key the person presses goes
+        // nowhere.
+        assert!(unheld(0));
+        assert!(unheld(1));
+        // Any window, ours or anybody's, is somebody holding it.
+        assert!(!unheld(0x400010));
     }
 
     #[test]

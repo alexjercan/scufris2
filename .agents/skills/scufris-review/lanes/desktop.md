@@ -35,10 +35,12 @@ you work.
   are window-level, typing is field-level, and a mousedown's default
   steals the field (refused while a review is editable). A recovery
   that restores the window must restore the field too.
-- Known open hole, not yet closed: a transient window that takes focus
-  and dies mid-review leaves i3 restoring focus to the box, which
-  refuses, and the keyboard lands nowhere until the next raise. A
-  change that touches focus must not widen it.
+- A phase that needs the keyboard watches it. Nothing outside the
+  runtime can report a keyboard that landed nowhere, because the keys
+  that would report it are the ones that have gone. The watch takes
+  the keyboard back only when no window holds it - `PointerRoot` or
+  `None` - and leaves a window the person moved to alone. A capture
+  never records a window of the companion's own.
 
 ## Running
 

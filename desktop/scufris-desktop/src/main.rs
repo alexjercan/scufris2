@@ -121,7 +121,12 @@ impl Surface for DesktopSurface {
         // pill that is up but passive is fine to capture over: the active
         // window is the person's own, and that is where focus must return.
         if !pill::focused(&self.handle) {
-            self.focus.capture();
+            // Never a window of the companion's own. The window manager names
+            // the transcript box as the active window for as long as the box is
+            // up, and the pill can be shown again with the box on screen: the
+            // watch does exactly that when something takes the keyboard away
+            // mid-review.
+            self.focus.capture(&self.windows());
         }
         pill::show(&self.handle)
     }
@@ -141,6 +146,15 @@ impl Surface for DesktopSurface {
 
     fn pill_has_keyboard(&self) -> bool {
         pill::focused(&self.handle)
+    }
+
+    fn nobody_has_the_keyboard(&self) -> bool {
+        // The display's own answer, or the one window of ours that would be a
+        // dead end for every key: the box refuses the keyboard and has no key
+        // handlers, so a window manager that forces focus onto it has taken the
+        // keys as surely as a window manager that focused nothing.
+        display::nobody_holds_the_keyboard() == display::Verdict::Yes
+            || review::holds_the_keyboard(&self.handle)
     }
 
     fn restore_focus(&self) -> Result<(), String> {
@@ -172,6 +186,16 @@ impl Surface for DesktopSurface {
     fn copy(&self, text: String) {
         // The webview owns the clipboard.
         let _ = self.handle.emit(COPY_EVENT, text);
+    }
+}
+
+impl DesktopSurface {
+    /// The windows the companion put on the display, as far as it has made any.
+    fn windows(&self) -> Vec<u32> {
+        [pill::known_window(), review::known_window()]
+            .into_iter()
+            .flatten()
+            .collect()
     }
 }
 

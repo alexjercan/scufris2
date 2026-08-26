@@ -471,6 +471,13 @@ height = 110
         // And every backend a shipped widget names is a backend that shipped.
         let cpu = catalog.get("cpu").expect("the cpu widget is missing");
         assert_eq!(cpu.backend.as_deref(), Some("system"));
+        // The tray offers the ones that fill themselves and not the note,
+        // which would summon as an empty panel.
+        let offered: Vec<_> = catalog.summonable().into_iter().map(|(id, _)| id).collect();
+        for id in ["cpu", "tasks", "timer"] {
+            assert!(offered.contains(&id.to_string()), "{id} is not offered");
+        }
+        assert!(!offered.contains(&"note".to_string()));
     }
 
     #[test]

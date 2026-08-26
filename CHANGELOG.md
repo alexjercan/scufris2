@@ -45,6 +45,11 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - Put a widget up yourself. The tray menu offers the widgets that fill
   themselves, and one you open from there is yours: it goes in an edge slot,
   stays until you close it, and Scufris is not told about it.
+- The `tasks` widget. It shows a plain-text list - one task per line, `x ` in
+  front of a finished one - from your own data directory, and its ticks mark a
+  task done or take it off the list. The file is the truth, so a task you add
+  in an editor appears on the panel on its own. Typing a new one into the panel
+  waits for keyboard routing.
 - `SCUFRIS_WIDGET_PATH` names extra widget roots, separated the way `PATH` is,
   so another project can ship a widget for the desktop. Widgets that shipped
   with Scufris always win, and one that will not install is reported in the log

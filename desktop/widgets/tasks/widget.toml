@@ -1,0 +1,7 @@
+id = "tasks"
+name = "Tasks"
+description = "Show the task list and let it be ticked off. The spawn payload is { file: string }, which is optional and names the list; the default is the one in the person's own data directory. Opened as an instrument it stays until it is closed. It shows what the file says, so anything that writes the file appears on it."
+width = 300
+height = 240
+backend = "tasks"
+cadence = 1000

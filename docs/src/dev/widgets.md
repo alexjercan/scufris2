@@ -294,6 +294,24 @@ Three rules make this safe to leave running all day.
   wins, and handed over four times a second. A webview given a raw tick stream
   is the documented way to make one hold gigabytes.
 
+A backend that owns something writable answers an action by changing it and
+then reporting what it says. The `tasks` backend owns a plain-text list, one
+task per line with `x ` in front of a finished one, at the path the spawn
+payload names or in the person's own data directory. It watches the file rather
+than holding a copy, so a task an editor added and a task the panel ticked off
+arrive on the panel the same way.
+
+An action on that list carries the line and the text the panel is showing, and
+is refused when the two no longer agree. The file can change under an open
+panel, and a click on a line that now says something else is a click on the
+wrong task.
+
+Writing a new task is not the panel's job yet. The window is unfocusable so that
+one landing mid-sentence never takes the keyboard, which also means nothing
+typed can land in it. Until keyboard routing is settled - the i3 binding mode
+task - the panel acts on what is already on the list, and anything that writes
+the file puts things there.
+
 A reading is not a citation. Scufris naming a panel is what says the
 conversation is still about it; a sampler writing its line every second says
 only that the machine is on. A live graph that revived itself would be the one

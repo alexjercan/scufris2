@@ -37,6 +37,11 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   quiet says so on the panel; one that dies turns the frame red and offers a
   restart tick, rather than leaving a frozen number that looks live. Nothing is
   left running when the last panel closes or when the companion exits.
+- Widgets you can act on, and the `timer` widget on the first of them. A panel's
+  own buttons write back to its backend, which answers with the refreshed
+  reading, so what the panel shows is always what the backend knows. Ask for a
+  timer and it counts down on the desktop, with ticks to pause, resume, add a
+  minute, and start over. Two timers of the same length are two timers.
 
 ### Changed
 

@@ -18,6 +18,7 @@ is a difference between two samples and there is nothing to subtract from yet.
 """
 
 import json
+import os
 import sys
 import time
 
@@ -26,6 +27,18 @@ import time
 #: would look alive.
 FLOOR = 0.25
 CEILING = 60.0
+
+
+def deaf() -> None:
+    """Points standard output at nothing.
+
+    Catching the broken pipe is not enough on its own: the interpreter flushes
+    standard output again on the way out and raises there too, past any handler,
+    and prints the complaint on standard error - which the companion is reading
+    and logging. Redirecting the descriptor makes the last flush a no-op.
+    """
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(devnull, sys.stdout.fileno())
 
 
 def cpu_samples() -> list[tuple[int, int]]:
@@ -98,6 +111,7 @@ def main() -> None:
             print(json.dumps(reading), flush=True)
         except BrokenPipeError:
             # The companion took the panel down. There is nobody to write to.
+            deaf()
             return
 
 

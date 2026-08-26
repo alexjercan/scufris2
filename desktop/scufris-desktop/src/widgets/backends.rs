@@ -84,6 +84,38 @@ pub fn names() -> Vec<&'static str> {
     INSTALLED.iter().map(|backend| backend.id).collect()
 }
 
+/// Everything one surface's subscription is made of.
+#[derive(Debug, Clone, Copy)]
+pub struct Order<'a> {
+    /// Which backend.
+    pub backend: Backend<'a>,
+    /// The payload it is started with.
+    pub spawn: &'a Value,
+    /// How often the widget expects a reading.
+    pub cadence: Duration,
+    /// True while this widget is content to share a process with another one
+    /// asking the same question.
+    pub shared: bool,
+}
+
+impl Order<'_> {
+    /// What the running process is found by.
+    ///
+    /// The backend and the payload, so two panels asking for the same numbers
+    /// meet on one process. A widget that says it does not share puts its own
+    /// surface in as well, which is what keeps two timers of the same length
+    /// from becoming one timer counted twice.
+    fn key(&self, surface: &str) -> Key {
+        let question = canonical(self.spawn);
+        let question = if self.shared {
+            question
+        } else {
+            format!("{surface}\u{1f}{question}")
+        };
+        (self.backend.id.to_string(), question)
+    }
+}
+
 /// One thing a backend has to say, on the beat the coalescer hands it over.
 #[derive(Debug, Clone, PartialEq)]
 pub enum News {
@@ -170,14 +202,8 @@ impl Backends {
 
     /// Starts reading one backend for one surface, sharing a process that is
     /// already answering the same question.
-    pub fn subscribe(
-        &self,
-        surface: SurfaceId,
-        backend: Backend<'_>,
-        spawn: &Value,
-        cadence: Duration,
-    ) {
-        let key = (backend.id.to_string(), canonical(spawn));
+    pub fn subscribe(&self, surface: SurfaceId, order: Order<'_>) {
+        let key = order.key(&surface);
         let mut held = self.state();
         held.readers.insert(surface.clone(), key.clone());
         if let Some(running) = held.running.get_mut(&key) {
@@ -185,7 +211,7 @@ impl Backends {
             return;
         }
         let refs = BTreeSet::from([surface]);
-        self.raise(&mut held, key, refs, backend, spawn, cadence);
+        self.raise(&mut held, key, refs, order);
     }
 
     /// Stops reading for one surface, and stops the process if it was the last.
@@ -211,14 +237,8 @@ impl Backends {
     /// The restart tick is on one panel, but the process behind it may be
     /// answering several. Bringing it back for the one that asked and leaving
     /// the others on a dead one would be the worst of both.
-    pub fn restart(
-        &self,
-        surface: SurfaceId,
-        backend: Backend<'_>,
-        spawn: &Value,
-        cadence: Duration,
-    ) {
-        let key = (backend.id.to_string(), canonical(spawn));
+    pub fn restart(&self, surface: SurfaceId, order: Order<'_>) {
+        let key = order.key(&surface);
         let mut held = self.state();
         if let Some(running) = held.running.remove(&key) {
             stop(running);
@@ -230,7 +250,29 @@ impl Backends {
             .filter(|(_, reading)| *reading == &key)
             .map(|(id, _)| id.clone())
             .collect();
-        self.raise(&mut held, key, refs, backend, spawn, cadence);
+        self.raise(&mut held, key, refs, order);
+    }
+
+    /// Writes one action onto the backend a surface is reading.
+    ///
+    /// The mirror of a reading, and the same line format going the other way.
+    /// A backend that owns something writable answers by reporting the new
+    /// state, which fans out to every panel reading it - so an entry the person
+    /// makes and one Scufris makes travel the same loop.
+    pub fn send(&self, surface: &str, action: &Value) {
+        let mut held = self.state();
+        let Some(key) = held.readers.get(surface).cloned() else {
+            return;
+        };
+        let Some(running) = held.running.get_mut(&key) else {
+            return;
+        };
+        let Some(stdin) = running.stdin.as_mut() else {
+            return;
+        };
+        if let Err(error) = writeln!(stdin, "{action}") {
+            debug!(surface, "an action did not reach its backend: {error}");
+        }
     }
 
     /// Stops every backend. The companion is going away.
@@ -299,15 +341,13 @@ impl Backends {
         news
     }
 
-    fn raise(
-        &self,
-        held: &mut State,
-        key: Key,
-        refs: BTreeSet<SurfaceId>,
-        backend: Backend<'_>,
-        spawn: &Value,
-        cadence: Duration,
-    ) {
+    fn raise(&self, held: &mut State, key: Key, refs: BTreeSet<SurfaceId>, order: Order<'_>) {
+        let Order {
+            backend,
+            spawn,
+            cadence,
+            ..
+        } = order;
         let mut child = match (self.launch)(backend) {
             Ok(child) => child,
             Err(error) => {
@@ -543,14 +583,22 @@ mod tests {
         }
     }
 
+    /// One subscription, with sharing allowed and the usual cadence.
+    fn order<'a>(backend: Backend<'a>, spawn: &'a Value) -> Order<'a> {
+        Order {
+            backend,
+            spawn,
+            cadence: CADENCE,
+            shared: true,
+        }
+    }
+
     #[test]
     fn a_line_a_backend_writes_reaches_the_surface_reading_it() {
         let backends = Backends::with_launch(shell());
         backends.subscribe(
             "widget-1".into(),
-            source("echo '{\"load\":3}'; sleep 30"),
-            &Value::Null,
-            CADENCE,
+            order(source("echo '{\"load\":3}'; sleep 30"), &Value::Null),
         );
         assert_eq!(
             hear(&backends),
@@ -568,10 +616,10 @@ mod tests {
         let backends = Backends::with_launch(shell());
         let script = source("echo '{\"load\":1}'; sleep 30");
         let spawn = serde_json::json!({ "every": 1, "what": "cpu" });
-        backends.subscribe("widget-1".into(), script, &spawn, CADENCE);
+        backends.subscribe("widget-1".into(), order(script, &spawn));
         // The same question, written the other way round.
         let reordered = serde_json::json!({ "what": "cpu", "every": 1 });
-        backends.subscribe("widget-2".into(), script, &reordered, CADENCE);
+        backends.subscribe("widget-2".into(), order(script, &reordered));
         assert_eq!(backends.state().running.len(), 1);
         // And both panels are handed the reading.
         let news = hear(&backends);
@@ -591,15 +639,11 @@ mod tests {
         let script = source("sleep 30");
         backends.subscribe(
             "widget-1".into(),
-            script,
-            &serde_json::json!({ "what": "cpu" }),
-            CADENCE,
+            order(script, &serde_json::json!({ "what": "cpu" })),
         );
         backends.subscribe(
             "widget-2".into(),
-            script,
-            &serde_json::json!({ "what": "memory" }),
-            CADENCE,
+            order(script, &serde_json::json!({ "what": "memory" })),
         );
         assert_eq!(backends.state().running.len(), 2);
     }
@@ -608,8 +652,8 @@ mod tests {
     fn the_last_reader_leaving_is_what_stops_the_process() {
         let backends = Backends::with_launch(shell());
         let script = source("sleep 30");
-        backends.subscribe("widget-1".into(), script, &Value::Null, CADENCE);
-        backends.subscribe("widget-2".into(), script, &Value::Null, CADENCE);
+        backends.subscribe("widget-1".into(), order(script, &Value::Null));
+        backends.subscribe("widget-2".into(), order(script, &Value::Null));
         backends.unsubscribe("widget-1");
         assert_eq!(
             backends.state().running.len(),
@@ -628,9 +672,10 @@ mod tests {
         let backends = Backends::with_launch(shell());
         backends.subscribe(
             "widget-1".into(),
-            source("echo '{\"n\":1}'; echo '{\"n\":2}'; echo '{\"n\":3}'; sleep 30"),
-            &Value::Null,
-            CADENCE,
+            order(
+                source("echo '{\"n\":1}'; echo '{\"n\":2}'; echo '{\"n\":3}'; sleep 30"),
+                &Value::Null,
+            ),
         );
         thread::sleep(Duration::from_millis(200));
         assert_eq!(
@@ -646,7 +691,7 @@ mod tests {
     #[test]
     fn a_backend_that_exits_says_so_rather_than_leaving_its_last_number_up() {
         let backends = Backends::with_launch(shell());
-        backends.subscribe("widget-1".into(), source("exit 1"), &Value::Null, CADENCE);
+        backends.subscribe("widget-1".into(), order(source("exit 1"), &Value::Null));
         let mut seen = Vec::new();
         for _ in 0..100 {
             seen.extend(backends.drain(Duration::ZERO));
@@ -666,7 +711,7 @@ mod tests {
         // Still running, just not writing. The panel says the number is old,
         // which is a different thing from saying the panel is broken.
         let backends = Backends::with_launch(shell());
-        backends.subscribe("widget-1".into(), source("sleep 30"), &Value::Null, CADENCE);
+        backends.subscribe("widget-1".into(), order(source("sleep 30"), &Value::Null));
         // Three cadences of measured silence, handed over in one beat.
         let news = backends.drain(CADENCE * SILENCE + Duration::from_millis(1));
         assert_eq!(
@@ -685,7 +730,7 @@ mod tests {
         let backends = Backends::with_launch(Box::new(|_| {
             Err(std::io::Error::from(std::io::ErrorKind::NotFound))
         }));
-        backends.subscribe("widget-1".into(), source("whatever"), &Value::Null, CADENCE);
+        backends.subscribe("widget-1".into(), order(source("whatever"), &Value::Null));
         assert_eq!(
             backends.drain(Duration::ZERO),
             vec![News::Health {
@@ -702,10 +747,10 @@ mod tests {
         // number that has stopped.
         let backends = Backends::with_launch(shell());
         let script = source("echo '{\"n\":1}'; sleep 30");
-        backends.subscribe("widget-1".into(), script, &Value::Null, CADENCE);
-        backends.subscribe("widget-2".into(), script, &Value::Null, CADENCE);
+        backends.subscribe("widget-1".into(), order(script, &Value::Null));
+        backends.subscribe("widget-2".into(), order(script, &Value::Null));
         let first = backends.state().running.values().next().map(|one| one.pid);
-        backends.restart("widget-1".into(), script, &Value::Null, CADENCE);
+        backends.restart("widget-1".into(), order(script, &Value::Null));
         let state = backends.state();
         assert_eq!(state.running.len(), 1);
         let running = state.running.values().next().expect("one backend runs");
@@ -721,9 +766,10 @@ mod tests {
         let backends = Backends::with_launch(shell());
         backends.subscribe(
             "widget-1".into(),
-            source("sleep 0.4; echo '{\"n\":1}'; sleep 30"),
-            &Value::Null,
-            CADENCE,
+            order(
+                source("sleep 0.4; echo '{\"n\":1}'; sleep 30"),
+                &Value::Null,
+            ),
         );
         let quiet = backends.drain(CADENCE * SILENCE + Duration::from_millis(1));
         assert_eq!(
@@ -745,6 +791,51 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
         }
         panic!("a backend that started writing again never said so: {seen:?}");
+    }
+
+    #[test]
+    fn a_widget_that_says_it_does_not_share_gets_a_process_of_its_own() {
+        // Two timers of the same length are two timers, not one counted twice.
+        let backends = Backends::with_launch(shell());
+        let alone = |backend| Order {
+            backend,
+            spawn: &Value::Null,
+            cadence: CADENCE,
+            shared: false,
+        };
+        backends.subscribe("widget-1".into(), alone(source("sleep 30")));
+        backends.subscribe("widget-2".into(), alone(source("sleep 30")));
+        assert_eq!(backends.state().running.len(), 2);
+    }
+
+    #[test]
+    fn an_action_a_widget_sends_reaches_its_backend() {
+        // The mirror of a reading. A backend that owns something writable
+        // answers by reporting the new state, so an entry the person makes and
+        // one Scufris makes travel the same loop.
+        let backends = Backends::with_launch(shell());
+        backends.subscribe(
+            "widget-1".into(),
+            order(
+                source("while read -r line; do echo \"$line\"; done"),
+                &Value::Null,
+            ),
+        );
+        backends.send("widget-1", &serde_json::json!({ "add": "milk" }));
+        assert_eq!(
+            hear(&backends),
+            vec![News::Data {
+                surface: "widget-1".into(),
+                data: serde_json::json!({ "add": "milk" }),
+            }]
+        );
+    }
+
+    #[test]
+    fn an_action_for_a_panel_with_no_backend_goes_nowhere_rather_than_anywhere() {
+        let backends = Backends::with_launch(shell());
+        backends.send("widget-9", &serde_json::json!({ "add": "milk" }));
+        assert!(backends.drain(Duration::ZERO).is_empty());
     }
 
     #[test]

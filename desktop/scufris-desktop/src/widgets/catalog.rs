@@ -49,6 +49,9 @@ struct Manifest {
     backend: Option<String>,
     /// How often a reading is expected, in milliseconds.
     cadence: Option<u64>,
+    /// False when two panels asking the same question must still each get a
+    /// process of their own.
+    shared: Option<bool>,
 }
 
 /// One installed widget.
@@ -68,6 +71,13 @@ pub struct Widget {
     pub backend: Option<String>,
     /// How often it expects a reading from that backend.
     pub cadence: Duration,
+    /// True while two panels asking the same question may share one process.
+    ///
+    /// The default, because a sampler answering the same question twice is one
+    /// process doing the same work twice. A widget whose backend carries state
+    /// of its own says otherwise: two timers of the same length are two
+    /// timers, not one counted twice.
+    pub shared: bool,
     /// The compiled module the shell window imports.
     pub script: String,
 }
@@ -155,6 +165,7 @@ impl Catalog {
                 cadence: manifest
                     .cadence
                     .map_or(DEFAULT_CADENCE, Duration::from_millis),
+                shared: manifest.shared.unwrap_or(true),
                 script: source.script.to_string(),
             };
             if widgets.insert(widget.id.clone(), widget).is_some() {

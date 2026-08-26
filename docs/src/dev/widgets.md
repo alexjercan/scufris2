@@ -180,10 +180,16 @@ function:
 export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView;
 ```
 
-`ctx.spawn` is the payload the open carried. The returned view is driven with
-`update(data)` and released with `destroy()`. A widget renders into the element
-it is handed and nothing else: it draws no chrome, asks who sent nothing, and
-runs on no clock.
+`ctx.spawn` is the payload the open carried, and `ctx.send(action)` writes one
+line back to the backend. The returned view is driven with `update(data)` and
+released with `destroy()`. A widget renders into the element it is handed and
+nothing else: it draws no chrome, asks who sent nothing, and runs on no clock.
+
+A widget that offers its own buttons gives them the chrome's own `tick` class.
+That is the one class a widget may wear: a widget's controls and the chrome's
+ticks are the same affordance, and a widget that styled its own would be the one
+that stops matching. Clicks only, never keys - the window is built unfocusable,
+and a click has never needed focus.
 
 `build.rs` compiles every widget as one tsc project and writes a table of
 manifests and compiled modules into the binary. What ships is what was built,
@@ -211,6 +217,26 @@ shows anything.
 The first line a backend is handed on standard input is the payload the open
 carried. `desktop/backends/system/backend.py` reads one key from it, `every`,
 and reports processor load, per-core load, memory in use, and uptime.
+
+A panel can also write back. `ctx.send(action)` puts one JSON line on the
+backend's standard input, the mirror of the lines the backend writes, and the
+backend answers with the refreshed reading the ordinary way. So a timer paused
+from its panel and a timer paused by something else look identical from the
+widget's side, and the widget never has to hold a copy of what the backend
+knows. The host names the surface from the window the call came from, so nothing
+the page sends says which panel it is. A panel with no backend behind it is
+refused on the badge rather than left believing the action landed.
+
+A widget whose readings are personal to it declares so:
+
+```toml
+shared = false
+```
+
+Two panels asking the same question share one process by default, which is what
+a machine sampler wants. Two five-minute timers are not one timer counted twice,
+so `shared = false` folds the surface into the key and each panel gets a process
+of its own.
 
 Three rules make this safe to leave running all day.
 

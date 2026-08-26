@@ -100,11 +100,11 @@
         const ctx: WidgetContext = {
           spawn: message.data,
           send: (action: unknown): void => {
-            // An action travels to the widget's backend, over its stdin.
-            // There are no backends yet, so there is nowhere for it to go -
-            // and a widget that sends one is told so rather than left
-            // believing it landed.
-            forward("warn", `${message.widget} sent ${String(action)} nowhere`);
+            // One line onto the backend's input, the mirror of the lines it
+            // writes. The host names the surface from the window, so nothing
+            // here says which panel this is. A widget with no backend behind
+            // it is refused on the badge rather than left believing it landed.
+            invoke("widget_send", { action }).catch(() => {});
           },
         };
         view = mount(root, ctx);

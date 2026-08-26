@@ -173,6 +173,9 @@ pub struct Surface {
     pub spawn: Value,
     /// How often its widget says a reading should arrive.
     pub cadence: Duration,
+    /// True while its widget is content to share a backend process with
+    /// another one asking the same question.
+    pub shared: bool,
     /// What its backend is doing, if it has one.
     pub health: Health,
 }
@@ -281,6 +284,13 @@ pub enum Cmd {
         /// Surface whose tick the person used.
         surface: SurfaceId,
     },
+    /// One widget sent an action toward whatever feeds it.
+    Sent {
+        /// Surface the widget is mounted in.
+        surface: SurfaceId,
+        /// What the widget sent.
+        action: Value,
+    },
 }
 
 /// One thing the host has to carry out.
@@ -356,6 +366,9 @@ pub enum Act {
         spawn: Value,
         /// How often the widget says a reading should arrive.
         cadence: Duration,
+        /// True while this widget is content to share a process with another
+        /// one asking the same question.
+        shared: bool,
         /// True when whatever is running has to be stopped first. The person
         /// used the restart tick, and a shared process comes back for every
         /// panel that was reading it.
@@ -365,6 +378,13 @@ pub enum Act {
     Unsubscribe {
         /// The surface that stops reading.
         surface: SurfaceId,
+    },
+    /// Write one action onto a backend's input.
+    Send {
+        /// The surface whose backend it goes to.
+        surface: SurfaceId,
+        /// What the widget sent.
+        action: Value,
     },
     /// Change what a surface's chrome says about its backend.
     Health {
@@ -443,6 +463,7 @@ impl Runtime {
             Cmd::Feed { surface, data } => self.feed(surface, data),
             Cmd::Health { surface, health } => self.health(surface, health),
             Cmd::Restart { surface } => self.restart(surface),
+            Cmd::Sent { surface, action } => self.sent(surface, action),
         }
     }
 
@@ -504,6 +525,7 @@ impl Runtime {
                 backend: installed.backend.clone(),
                 spawn: spawn.clone(),
                 cadence: installed.cadence,
+                shared: installed.shared,
                 health: Health::Fresh,
             },
         );
@@ -534,6 +556,7 @@ impl Runtime {
                 backend,
                 spawn,
                 cadence: installed.cadence,
+                shared: installed.shared,
                 restart: false,
             });
         }
@@ -590,6 +613,25 @@ impl Runtime {
         vec![Act::Update { surface, data }]
     }
 
+    /// Sends one widget's action to whatever feeds it.
+    ///
+    /// Routed through here rather than straight from the window, because this
+    /// is what knows which surfaces exist and which of them have anything
+    /// behind them. An action from a widget with no backend has nowhere to go,
+    /// and the panel is told so rather than left believing it landed.
+    fn sent(&mut self, surface: SurfaceId, action: Value) -> Vec<Act> {
+        let Some(open) = self.surfaces.get(&surface) else {
+            return Vec::new();
+        };
+        if open.backend.is_none() {
+            return vec![Act::Refuse {
+                surface,
+                detail: "nothing to send to".into(),
+            }];
+        }
+        vec![Act::Send { surface, action }]
+    }
+
     /// Records what a surface's backend is doing.
     fn health(&mut self, surface: SurfaceId, health: Health) -> Vec<Act> {
         let Some(open) = self.surfaces.get_mut(&surface) else {
@@ -619,6 +661,7 @@ impl Runtime {
         open.health = Health::Fresh;
         let spawn = open.spawn.clone();
         let cadence = open.cadence;
+        let shared = open.shared;
         vec![
             Act::Health {
                 surface: surface.clone(),
@@ -629,6 +672,7 @@ impl Runtime {
                 backend,
                 spawn,
                 cadence,
+                shared,
                 restart: true,
             },
         ]
@@ -1118,6 +1162,47 @@ cadence = 500
     }
 
     #[test]
+    fn an_action_from_a_widget_goes_to_what_feeds_it() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let gauge = opened(&open(&mut runtime, &catalog, "gauge", Posture::Instrument));
+        assert_eq!(
+            runtime.apply(
+                &catalog,
+                Cmd::Sent {
+                    surface: gauge.clone(),
+                    action: json!({ "add": "milk" }),
+                }
+            ),
+            vec![Act::Send {
+                surface: gauge,
+                action: json!({ "add": "milk" }),
+            }]
+        );
+    }
+
+    #[test]
+    fn an_action_from_a_widget_with_nothing_behind_it_says_so_rather_than_vanishing() {
+        // A widget that sent one and heard nothing has no way to tell the
+        // difference between an action that landed and an action that did not.
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let note = opened(&open(&mut runtime, &catalog, "note", Posture::Instrument));
+        assert!(matches!(
+            runtime
+                .apply(
+                    &catalog,
+                    Cmd::Sent {
+                        surface: note.clone(),
+                        action: json!({ "add": "milk" }),
+                    }
+                )
+                .as_slice(),
+            [Act::Refuse { surface, .. }] if surface == &note
+        ));
+    }
+
+    #[test]
     fn opening_a_widget_with_something_feeding_it_starts_reading_it() {
         let catalog = catalog();
         let mut runtime = Runtime::new();
@@ -1138,6 +1223,7 @@ cadence = 500
             // what finds a process already answering the same question.
             spawn: json!({ "every": 2 }),
             cadence: Duration::from_millis(500),
+            shared: true,
             restart: false,
         }));
         // And it comes after the window, so the first reading has somewhere to
@@ -1352,6 +1438,7 @@ cadence = 500
                     backend: "sampler".into(),
                     spawn: json!({}),
                     cadence: Duration::from_millis(500),
+                    shared: true,
                     // The one that stops what is running first, for every panel
                     // that was reading it.
                     restart: true,

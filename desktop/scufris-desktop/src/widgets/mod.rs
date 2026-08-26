@@ -30,7 +30,7 @@ use crate::{
     daemon::{DaemonLink, WidgetCommand},
     display,
     widgets::{
-        backends::{Backends, News},
+        backends::{Backends, News, Order},
         catalog::{Catalog, CatalogError, Source},
         pool::{Pool, ShellMsg},
         runtime::{Act, Cmd, Runtime, Still},
@@ -188,6 +188,11 @@ impl Widgets {
     /// Records that the person used one surface's restart tick.
     pub fn restarted(&self, surface: String) {
         self.decide(Cmd::Restart { surface });
+    }
+
+    /// Carries one widget's action toward whatever feeds it.
+    pub fn sent(&self, surface: String, action: Value) {
+        self.decide(Cmd::Sent { surface, action });
     }
 
     /// Records the assistant state the daemon reported.
@@ -421,6 +426,7 @@ impl Widgets {
                     backend,
                     spawn,
                     cadence,
+                    shared,
                     restart,
                 } => {
                     let Some(installed) = backends::installed(&backend) else {
@@ -430,13 +436,20 @@ impl Widgets {
                         warn!(surface, backend, "no such widget backend");
                         continue;
                     };
+                    let order = Order {
+                        backend: installed,
+                        spawn: &spawn,
+                        cadence,
+                        shared,
+                    };
                     if restart {
-                        self.backends.restart(surface, installed, &spawn, cadence);
+                        self.backends.restart(surface, order);
                     } else {
-                        self.backends.subscribe(surface, installed, &spawn, cadence);
+                        self.backends.subscribe(surface, order);
                     }
                 }
                 Act::Unsubscribe { surface } => self.backends.unsubscribe(&surface),
+                Act::Send { surface, action } => self.backends.send(&surface, &action),
                 Act::Stick { surface, sticky } => self.stick(&surface, sticky),
                 Act::Refuse { surface, detail } => {
                     self.pool.send(&surface, ShellMsg::Refused { detail });

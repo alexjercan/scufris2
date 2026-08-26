@@ -1,0 +1,8 @@
+id = "timer"
+name = "Timer"
+description = "Count down and say when the time is up. The spawn payload is { seconds: number }, the length. Opened as an instrument it stays until it is closed, so it outlives the conversation that started it. Its own ticks pause, resume, reset, and add a minute."
+width = 220
+height = 120
+backend = "timer"
+cadence = 200
+shared = false

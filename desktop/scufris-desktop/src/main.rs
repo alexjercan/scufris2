@@ -314,7 +314,8 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             pill_log,
             widget_shell_ready,
             widget_tick,
-            widget_hover
+            widget_hover,
+            widget_send
         ])
         .setup(move |tauri| {
             let handle = tauri.handle().clone();
@@ -538,6 +539,20 @@ fn widget_tick(
         "restart" => widgets.restarted(surface),
         unknown => debug!(kind = %unknown, "a widget window reported an unknown tick"),
     }
+}
+
+/// One action a widget sent toward whatever feeds it.
+///
+/// The window says which surface this is, for the reason the chrome ticks do:
+/// a page that named its own surface could name another window's, and this one
+/// writes to a process.
+#[tauri::command]
+fn widget_send(
+    widgets: tauri::State<'_, Arc<widgets::Widgets>>,
+    window: tauri::Window,
+    action: serde_json::Value,
+) {
+    widgets.sent(window.label().to_string(), action);
 }
 
 /// The pointer arriving over one widget window, or leaving it.

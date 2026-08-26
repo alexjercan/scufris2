@@ -150,6 +150,13 @@ pub fn ensure(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .shadow(false)
         .visible(false)
         .focused(false)
+        // The same reason as the box, from the other side. The toolkit's
+        // one-shot restore would hand this window its right to the keyboard
+        // back after its first paint, whenever that lands and whatever posture
+        // the pill is in - including the handoff posture, whose whole point is
+        // that the person's keys are their own. Built unfocusable, what this
+        // window says about the keyboard is only ever what `open` last said.
+        .focusable(false)
         .build()?;
     // The blob is cut from the event loop, because that is where the window
     // starts existing on the display: a window that has just been mapped

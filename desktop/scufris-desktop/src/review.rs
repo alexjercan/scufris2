@@ -117,6 +117,16 @@ pub fn ensure(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .shadow(false)
         .visible(false)
         .focused(false)
+        // Built unfocusable, which is not the same as built unfocused and is
+        // the only one of the two that lasts. A window built merely unfocused
+        // is given its right to the keyboard back by the toolkit after its
+        // first paint, from a one-shot draw handler installed at build time.
+        // For this window that paint lands in the middle of the process's
+        // first review, while the window manager is already holding an offer of
+        // the keyboard out to it, and the box answers an offer it should have
+        // let lapse. Built unfocusable, the toolkit installs no handler at all
+        // and the refusal below is the only thing that ever speaks for it.
+        .focusable(false)
         .build()
 }
 

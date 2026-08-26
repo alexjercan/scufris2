@@ -202,3 +202,50 @@ is nowhere for a typed character to land.
 Raised with Alex rather than resolved here. The natural home for it is
 the i3 binding mode task `20260825-153746`, which is the task about
 keyboard routing.
+
+## Review findings fixed (2026-08-27)
+
+`REVIEW.md` in this directory, adjudicated from five lanes: one blocker,
+sixteen majors, thirteen minors, three dropped as refuted, two already
+fixed in the range. All thirty are fixed, in three commits.
+
+`1ee5330` "Never report a widget the display refused" - B1, M1-M7,
+M11, M12, M14, M15 and five minors. The subject is the one the verdict
+turned on: five defects let the companion answer `widget_opened` for a
+panel that never appeared. `perform` now returns the surfaces the
+display refused, `settle` feeds them back as `Cmd::Lost`, and the
+report becomes `widget_failed` with `not_shown`. A `turn` mutex
+serializes decide-and-perform across the three threads that reach it.
+Shell labels carry a stamp of the run that minted them.
+
+`a9fecc4` "Refuse a widget payload the companion cannot read" - M8, M9
+and four minors. A lone surrogate in a model-supplied payload is
+refused by the encoder rather than tearing down the control link, and
+a `widget_opened` that arrives after its command was given up on is
+closed again rather than left on screen with no identifier.
+
+`88a5026` "One widget contract, and one place the modules are served
+from" - M10, M13, M16 and four minors, plus the user guide section.
+
+Two things worth Alex's eye:
+
+- **M11 was a visual decision, made without asking.** `SHELF_GAP` was
+  36, which put a card's bottom inside the transcript box. It is now
+  `review::GAP + review::HEIGHT + review::GAP`, 188 logical pixels, so
+  the shelf stands clear of the box whether or not the box is up. The
+  alternative was a shelf that moves when the box appears, rejected
+  because the runtime's own rule is that the shelf is a row of places
+  and a place that shifts is not a place. The cost is that the shelf
+  now sits 152 pixels further from the pill at all times. One constant
+  to flip.
+- **The review mis-stated the double-render minor.** It read as though
+  the widgets were at fault for calling `view.update(ctx.spawn)` in
+  `mount`. The opposite is true: `ctx.spawn` and update data are
+  different shapes for half the fleet, so the shell is what stops
+  delivering the spawn payload, and the widgets keep drawing their
+  first frame from it.
+
+Checks: `cargo test` 233 passed, `cargo clippy --all-targets` clean,
+`cargo fmt --check` clean, `npm run check` 140 tests with Prettier
+clean, `nix build .#scufris-desktop` and `.#docs` green, `nix flake
+check` all checks passed.

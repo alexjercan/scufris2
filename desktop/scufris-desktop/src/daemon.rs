@@ -162,6 +162,13 @@ fn serve(
             DaemonBody::Refused { id, detail } => observe(DaemonEvent::Refused(id, detail)),
             DaemonBody::State { state, detail } => observe(DaemonEvent::State(state, detail)),
             DaemonBody::Pong => {}
+            // Widget commands belong to the widgets runtime, never to the
+            // pill's state machine. The link drops them until that module
+            // owns them.
+            DaemonBody::WidgetOpen { .. }
+            | DaemonBody::WidgetUpdate { .. }
+            | DaemonBody::WidgetClose { .. }
+            | DaemonBody::WidgetClear { .. } => {}
         }
     }
 }
@@ -218,14 +225,14 @@ mod tests {
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut line = String::new();
         reader.read_line(&mut line).unwrap();
-        assert_eq!(line.trim_end(), "{\"v\":1,\"type\":\"hello\"}");
+        assert_eq!(line.trim_end(), "{\"v\":2,\"type\":\"hello\"}");
 
         let mut writer = stream;
         writer
-            .write_all(b"{\"v\":1,\"type\":\"welcome\",\"session\":\"popup-1\"}\n")
+            .write_all(b"{\"v\":2,\"type\":\"welcome\",\"session\":\"popup-1\"}\n")
             .unwrap();
         writer
-            .write_all(b"{\"v\":1,\"type\":\"state\",\"state\":\"working\",\"detail\":\"\"}\n")
+            .write_all(b"{\"v\":2,\"type\":\"state\",\"state\":\"working\",\"detail\":\"\"}\n")
             .unwrap();
         assert_eq!(
             received.recv_timeout(Duration::from_secs(5)).unwrap(),
@@ -242,11 +249,11 @@ mod tests {
         reader.read_line(&mut line).unwrap();
         assert_eq!(
             line.trim_end(),
-            "{\"v\":1,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"hello there\"}"
+            "{\"v\":2,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"hello there\"}"
         );
 
         writer
-            .write_all(b"{\"v\":1,\"type\":\"ack\",\"id\":\"pill-1\"}\n")
+            .write_all(b"{\"v\":2,\"type\":\"ack\",\"id\":\"pill-1\"}\n")
             .unwrap();
         assert_eq!(
             received.recv_timeout(Duration::from_secs(5)).unwrap(),
@@ -258,7 +265,7 @@ mod tests {
         // and must not apply an answer to the wrong one.
         writer
             .write_all(
-                b"{\"v\":1,\"type\":\"refused\",\"id\":\"pill-2\",\"detail\":\"no session\"}\n",
+                b"{\"v\":2,\"type\":\"refused\",\"id\":\"pill-2\",\"detail\":\"no session\"}\n",
             )
             .unwrap();
         assert_eq!(
@@ -267,7 +274,7 @@ mod tests {
         );
         writer
             .write_all(
-                b"{\"v\":1,\"type\":\"uncertain\",\"id\":\"pill-3\",\"detail\":\"unknown\"}\n",
+                b"{\"v\":2,\"type\":\"uncertain\",\"id\":\"pill-3\",\"detail\":\"unknown\"}\n",
             )
             .unwrap();
         assert_eq!(

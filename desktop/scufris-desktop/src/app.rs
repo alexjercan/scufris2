@@ -3179,7 +3179,7 @@ mod tests {
         assert_eq!(prefixes.len(), 64, "prefixes repeated");
         for prefix in &prefixes {
             assert_eq!(prefix.len(), 32);
-            assert!(scufris_control::is_submission_id(&format!("{prefix}-1")));
+            assert!(scufris_control::is_identifier(&format!("{prefix}-1")));
         }
     }
 

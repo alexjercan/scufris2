@@ -1,0 +1,77 @@
+{
+  "comment": "Shared wire fixtures for desktop control protocol v2. The protocol is implemented once per side, so both suites read these exact lines: desktop/scufris-control/src/lib.rs and tests/desktop.test.ts.",
+  "canonical": {
+    "companion": [
+      "{\"v\":2,\"type\":\"hello\"}",
+      "{\"v\":2,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"show me a note\"}",
+      "{\"v\":2,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"show me a note\",\"force\":true}",
+      "{\"v\":2,\"type\":\"ping\"}",
+      "{\"v\":2,\"type\":\"widget_opened\",\"id\":\"w-1\",\"surface\":\"widget-3\"}",
+      "{\"v\":2,\"type\":\"widget_done\",\"id\":\"w-4\"}",
+      "{\"v\":2,\"type\":\"widget_failed\",\"id\":\"w-1\",\"code\":\"widget_not_found\",\"detail\":\"no widget named cpu\"}",
+      "{\"v\":2,\"type\":\"widget_event\",\"surface\":\"widget-3\",\"event\":\"closed\"}",
+      "{\"v\":2,\"type\":\"catalog\",\"widgets\":[{\"id\":\"note\",\"name\":\"Note\",\"description\":\"A short note beside the pill.\"}]}"
+    ],
+    "daemon": [
+      "{\"v\":2,\"type\":\"welcome\",\"session\":\"popup-1\"}",
+      "{\"v\":2,\"type\":\"ack\",\"id\":\"pill-1\"}",
+      "{\"v\":2,\"type\":\"uncertain\",\"id\":\"pill-1\",\"detail\":\"the outcome is unknown\"}",
+      "{\"v\":2,\"type\":\"refused\",\"id\":\"pill-1\",\"detail\":\"the Scufris session is not ready\"}",
+      "{\"v\":2,\"type\":\"state\",\"state\":\"idle\",\"detail\":\"\"}",
+      "{\"v\":2,\"type\":\"state\",\"state\":\"working\",\"detail\":\"\"}",
+      "{\"v\":2,\"type\":\"state\",\"state\":\"speaking\",\"detail\":\"\"}",
+      "{\"v\":2,\"type\":\"state\",\"state\":\"attention\",\"detail\":\"job 1 is blocked\"}",
+      "{\"v\":2,\"type\":\"state\",\"state\":\"error\",\"detail\":\"the session is not ready\"}",
+      "{\"v\":2,\"type\":\"pong\"}",
+      "{\"v\":2,\"type\":\"widget_open\",\"id\":\"w-1\",\"widget\":\"note\",\"posture\":\"exhibit\",\"data\":{\"text\":\"the harness is green\"}}",
+      "{\"v\":2,\"type\":\"widget_open\",\"id\":\"w-2\",\"widget\":\"note\",\"posture\":\"instrument\",\"data\":{}}",
+      "{\"v\":2,\"type\":\"widget_update\",\"id\":\"w-3\",\"surface\":\"widget-3\",\"data\":{\"text\":\"141 tests pass\"}}",
+      "{\"v\":2,\"type\":\"widget_close\",\"id\":\"w-4\",\"surface\":\"widget-3\"}",
+      "{\"v\":2,\"type\":\"widget_clear\",\"id\":\"w-5\"}"
+    ]
+  },
+  "tolerated": {
+    "companion": [
+      "{\"type\":\"ping\",\"v\":2}",
+      "{\"v\":2,\"type\":\"hello\",\"client\":\"scufris-desktop\"}",
+      "{\"v\":2,\"type\":\"widget_failed\",\"id\":\"w-1\",\"code\":\"widget_not_found\"}",
+      "{\"v\":2,\"type\":\"catalog\",\"widgets\":[]}"
+    ],
+    "daemon": [
+      "{\"v\":2,\"type\":\"state\",\"state\":\"idle\"}",
+      "{\"v\":2,\"type\":\"pong\",\"at\":\"later\"}",
+      "{\"v\":2,\"type\":\"refused\",\"id\":\"pill-1\"}",
+      "{\"v\":2,\"type\":\"widget_open\",\"id\":\"w-1\",\"widget\":\"note\",\"posture\":\"exhibit\"}",
+      "{\"v\":2,\"type\":\"widget_update\",\"id\":\"w-2\",\"surface\":\"widget-3\"}"
+    ]
+  },
+  "rejected": {
+    "companion": [
+      "{\"v\":1,\"type\":\"hello\"}",
+      "{\"v\":3,\"type\":\"ping\"}",
+      "{\"type\":\"hello\"}",
+      "{\"v\":2,\"type\":\"mirror\",\"entries\":[]}",
+      "{\"v\":2,\"type\":\"welcome\",\"session\":\"popup-1\"}",
+      "{\"v\":2,\"type\":\"submit\",\"id\":\"pill 1\",\"text\":\"x\"}",
+      "{\"v\":2,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"   \"}",
+      "{\"v\":2,\"type\":\"submit\",\"id\":\"\",\"text\":\"x\"}",
+      "{\"v\":2,\"type\":\"widget_opened\",\"id\":\"w 1\",\"surface\":\"widget-3\"}",
+      "{\"v\":2,\"type\":\"widget_opened\",\"id\":\"w-1\",\"surface\":\"\"}",
+      "{\"v\":2,\"type\":\"widget_failed\",\"id\":\"w-1\",\"code\":\"not found\",\"detail\":\"\"}",
+      "{\"v\":2,\"type\":\"widget_event\",\"surface\":\"widget-3\",\"event\":\"exploded\"}",
+      "{\"v\":2,\"type\":\"catalog\",\"widgets\":[{\"id\":\"a b\",\"name\":\"A\",\"description\":\"x\"}]}",
+      "[]",
+      "not json"
+    ],
+    "daemon": [
+      "{\"v\":1,\"type\":\"pong\"}",
+      "{\"v\":2,\"type\":\"transcript\",\"text\":\"x\"}",
+      "{\"v\":2,\"type\":\"state\",\"state\":\"listening\",\"detail\":\"\"}",
+      "{\"v\":2,\"type\":\"hello\"}",
+      "{\"v\":2,\"type\":\"widget_open\",\"id\":\"w-1\",\"widget\":\"\",\"posture\":\"exhibit\",\"data\":{}}",
+      "{\"v\":2,\"type\":\"widget_open\",\"id\":\"w-1\",\"widget\":\"note\",\"posture\":\"hovering\",\"data\":{}}",
+      "{\"v\":2,\"type\":\"widget_close\",\"id\":\"w-1\",\"surface\":\"widget 3\"}",
+      "{}"
+    ]
+  }
+}

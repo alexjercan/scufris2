@@ -22,6 +22,7 @@ import {
 import {
   MAX_MESSAGE_BYTES,
   MAX_SUBMISSION_TEXT_BYTES,
+  MAX_WIDGET_DATA_BYTES,
   ProtocolError,
   decodeClientMessage,
   encodeDaemonMessage,
@@ -337,14 +338,14 @@ test("hello answers with the authoritative session and the current state", async
   await withServer({ session: () => "popup-1" }, async (socketPath, server) => {
     server.broadcast({ state: "working", detail: "indexing" });
     const client = await companion(socketPath);
-    client.send('{"v":1,"type":"hello"}\n');
+    client.send('{"v":2,"type":"hello"}\n');
     assert.deepEqual(await client.next(), {
-      v: 1,
+      v: 2,
       type: "welcome",
       session: "popup-1",
     });
     assert.deepEqual(await client.next(), {
-      v: 1,
+      v: 2,
       type: "state",
       state: "working",
       detail: "indexing",
@@ -356,8 +357,8 @@ test("hello answers with the authoritative session and the current state", async
 test("ping answers with pong", async () => {
   await withServer({}, async (socketPath) => {
     const client = await companion(socketPath);
-    client.send('{"v":1,"type":"ping"}\n');
-    assert.deepEqual(await client.next(), { v: 1, type: "pong" });
+    client.send('{"v":2,"type":"ping"}\n');
+    assert.deepEqual(await client.next(), { v: 2, type: "pong" });
     client.socket.destroy();
   });
 });
@@ -373,10 +374,10 @@ test("an accepted transcript enters the conversation and is acknowledged", async
     async (socketPath) => {
       const client = await companion(socketPath);
       client.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
@@ -398,18 +399,18 @@ test("a transcript delivered before a lost acknowledgment is not delivered twice
       // The daemon accepts the text, then the connection drops before the
       // companion sees the acknowledgment.
       const first = await companion(socketPath);
-      first.send('{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n');
-      assert.deepEqual(await first.next(), { v: 1, type: "ack", id: "pill-1" });
+      first.send('{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n');
+      assert.deepEqual(await first.next(), { v: 2, type: "ack", id: "pill-1" });
       first.socket.destroy();
       await first.closed();
 
       // The companion reconnects and retries under the same identifier.
       const second = await companion(socketPath);
       second.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       assert.deepEqual(await second.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
@@ -420,9 +421,9 @@ test("a transcript delivered before a lost acknowledgment is not delivered twice
       );
 
       // A genuinely new identifier is still delivered.
-      second.send('{"v":1,"type":"submit","id":"pill-2","text":"and again"}\n');
+      second.send('{"v":2,"type":"submit","id":"pill-2","text":"and again"}\n');
       assert.deepEqual(await second.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-2",
       });
@@ -445,10 +446,10 @@ test("a submission that was never delivered is retried rather than suppressed", 
     async (socketPath) => {
       const client = await companion(socketPath);
       client.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "uncertain",
         id: "pill-1",
         detail: "the session is not ready",
@@ -456,11 +457,11 @@ test("a submission that was never delivered is retried rather than suppressed", 
 
       refuse = false;
       client.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       let answered = await client.next();
       while (answered.type !== "ack") answered = await client.next();
-      assert.deepEqual(answered, { v: 1, type: "ack", id: "pill-1" });
+      assert.deepEqual(answered, { v: 2, type: "ack", id: "pill-1" });
       assert.deepEqual(submitted, ["open tasks"]);
       client.socket.destroy();
     },
@@ -480,7 +481,7 @@ test("the remembered submission set stays bounded", async () => {
       const total = MAX_REMEMBERED_SUBMISSIONS + 1;
       for (let index = 0; index < total; index += 1) {
         client.send(
-          `{"v":1,"type":"submit","id":"pill-${index}","text":"x"}\n`,
+          `{"v":2,"type":"submit","id":"pill-${index}","text":"x"}\n`,
         );
         await client.next();
       }
@@ -489,13 +490,13 @@ test("the remembered submission set stays bounded", async () => {
       // The oldest identifier has been evicted, so it is delivered again. That
       // is the deliberate cost of a bounded set, and it only bites after
       // hundreds of newer submissions.
-      client.send('{"v":1,"type":"submit","id":"pill-0","text":"x"}\n');
+      client.send('{"v":2,"type":"submit","id":"pill-0","text":"x"}\n');
       await client.next();
       assert.equal(submitted.length, total + 1);
 
       // The newest identifier is still suppressed.
       client.send(
-        `{"v":1,"type":"submit","id":"pill-${total - 1}","text":"x"}\n`,
+        `{"v":2,"type":"submit","id":"pill-${total - 1}","text":"x"}\n`,
       );
       await client.next();
       assert.equal(submitted.length, total + 1);
@@ -514,18 +515,18 @@ test("an undelivered submission reports an error state instead of an acknowledgm
     async (socketPath) => {
       const client = await companion(socketPath);
       client.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       // A failure this daemon cannot classify may have left words behind, so
       // the peer is told the honest thing and the tray shows the fault.
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "uncertain",
         id: "pill-1",
         detail: "the session is not ready",
       });
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "state",
         state: "error",
         detail: "the session is not ready",
@@ -538,15 +539,16 @@ test("an undelivered submission reports an error state instead of an acknowledgm
 test("unknown message types and other protocol versions close the connection", async () => {
   await withServer({}, async (socketPath) => {
     const unknown = await companion(socketPath);
-    unknown.send('{"v":1,"type":"mirror"}\n');
+    unknown.send('{"v":2,"type":"mirror"}\n');
     await unknown.closed();
 
+    // A version 1 companion is refused at hello rather than half understood.
     const versioned = await companion(socketPath);
-    versioned.send('{"v":2,"type":"hello"}\n');
+    versioned.send('{"v":1,"type":"hello"}\n');
     await versioned.closed();
 
     const malformed = await companion(socketPath);
-    malformed.send('{"v":1,"type":"submit","id":"a b","text":"x"}\n');
+    malformed.send('{"v":2,"type":"submit","id":"a b","text":"x"}\n');
     await malformed.closed();
   });
 });
@@ -565,7 +567,7 @@ test("state broadcasts reach every connected companion", async () => {
     const second = await companion(socketPath);
     server.broadcast({ state: "attention", detail: "job 1 is blocked" });
     const expected = {
-      v: 1,
+      v: 2,
       type: "state",
       state: "attention",
       detail: "job 1 is blocked",
@@ -601,12 +603,12 @@ test("the socket is private to its owner and removed on shutdown", async () => {
 });
 
 test("the protocol codec bounds every field it accepts", () => {
-  assert.deepEqual(decodeClientMessage('{"v":1,"type":"hello"}'), {
-    v: 1,
+  assert.deepEqual(decodeClientMessage('{"v":2,"type":"hello"}'), {
+    v: 2,
     type: "hello",
   });
   assert.throws(
-    () => decodeClientMessage('{"v":1,"type":"hello"}\r'),
+    () => decodeClientMessage('{"v":2,"type":"hello"}\r'),
     ProtocolError,
   );
   assert.throws(() => decodeClientMessage("not json"), ProtocolError);
@@ -615,7 +617,7 @@ test("the protocol codec bounds every field it accepts", () => {
     () =>
       decodeClientMessage(
         JSON.stringify({
-          v: 1,
+          v: 2,
           type: "submit",
           id: "pill-1",
           text: "x".repeat(MAX_SUBMISSION_TEXT_BYTES + 1),
@@ -624,13 +626,13 @@ test("the protocol codec bounds every field it accepts", () => {
     ProtocolError,
   );
   assert.equal(
-    encodeDaemonMessage({ v: 1, type: "pong" }),
-    '{"v":1,"type":"pong"}\n',
+    encodeDaemonMessage({ v: 2, type: "pong" }),
+    '{"v":2,"type":"pong"}\n',
   );
   assert.throws(
     () =>
       encodeDaemonMessage({
-        v: 1,
+        v: 2,
         type: "welcome",
         session: "x".repeat(MAX_MESSAGE_BYTES),
       }),
@@ -641,6 +643,78 @@ test("the protocol codec bounds every field it accepts", () => {
     rest: '{"c',
   });
   assert.throws(() => takeLines("x".repeat(MAX_MESSAGE_BYTES)), ProtocolError);
+});
+
+test("the widget commands carry a correlation id and a bounded payload", () => {
+  assert.equal(
+    encodeDaemonMessage({
+      v: 2,
+      type: "widget_open",
+      id: "w-1",
+      widget: "note",
+      posture: "exhibit",
+      data: { text: "the harness is green" },
+    }),
+    '{"v":2,"type":"widget_open","id":"w-1","widget":"note",' +
+      '"posture":"exhibit","data":{"text":"the harness is green"}}\n',
+  );
+  // The payload cap is smaller than the message cap on purpose: the same
+  // bytes cross the companion's per-window channel afterwards.
+  assert.throws(
+    () =>
+      encodeDaemonMessage({
+        v: 2,
+        type: "widget_update",
+        id: "w-2",
+        surface: "widget-3",
+        data: { text: "x".repeat(MAX_WIDGET_DATA_BYTES) },
+      }),
+    ProtocolError,
+  );
+
+  assert.deepEqual(
+    decodeClientMessage(
+      '{"v":2,"type":"widget_opened","id":"w-1","surface":"widget-3"}',
+    ),
+    { v: 2, type: "widget_opened", id: "w-1", surface: "widget-3" },
+  );
+  assert.deepEqual(
+    decodeClientMessage(
+      '{"v":2,"type":"catalog","widgets":[{"id":"note","name":"Note","description":"A short note."}]}',
+    ),
+    {
+      v: 2,
+      type: "catalog",
+      widgets: [{ id: "note", name: "Note", description: "A short note." }],
+    },
+  );
+  // An answer nobody can match is an answer that can act on the wrong surface.
+  assert.throws(
+    () =>
+      decodeClientMessage(
+        '{"v":2,"type":"widget_opened","id":"w 1","surface":"widget-3"}',
+      ),
+    ProtocolError,
+  );
+  assert.throws(
+    () =>
+      decodeClientMessage(
+        '{"v":2,"type":"widget_event","surface":"widget-3","event":"exploded"}',
+      ),
+    ProtocolError,
+  );
+});
+
+test("a version 1 peer is refused instead of half understood", () => {
+  assert.throws(
+    () => decodeClientMessage('{"v":1,"type":"hello"}'),
+    ProtocolError,
+  );
+  assert.throws(
+    () =>
+      decodeClientMessage('{"v":1,"type":"submit","id":"pill-1","text":"x"}'),
+    ProtocolError,
+  );
 });
 
 test("assistant state prefers the active run, then speech, then unattended work", () => {
@@ -713,7 +787,7 @@ test("both protocol implementations agree on the same wire fixtures", async () =
   // these exact lines so the two implementations cannot drift.
   const fixtures = JSON.parse(
     await readFile(
-      new URL("../desktop/control-protocol-v1.json", import.meta.url),
+      new URL("../desktop/control-protocol-v2.json", import.meta.url),
       "utf8",
     ),
   );
@@ -750,12 +824,12 @@ test("concurrent retries of one identifier share a single delivery", async () =>
       // the window where an unsynchronised check would deliver twice.
       const client = await companion(socketPath);
       client.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n' +
-          '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n' +
+          '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       const second = await companion(socketPath);
       second.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
 
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -767,17 +841,17 @@ test("concurrent retries of one identifier share a single delivery", async () =>
 
       release?.();
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
       assert.deepEqual(await second.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
@@ -801,17 +875,17 @@ test("a failed delivery leaves no reservation, so the next retry is delivered", 
     async (socketPath) => {
       const client = await companion(socketPath);
       client.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       assert.equal((await client.next()).type, "uncertain");
 
       refuse = false;
       client.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       let answered = await client.next();
       while (answered.type !== "ack") answered = await client.next();
-      assert.deepEqual(answered, { v: 1, type: "ack", id: "pill-1" });
+      assert.deepEqual(answered, { v: 2, type: "ack", id: "pill-1" });
       assert.deepEqual(started, ["pill-1", "pill-1"]);
       client.socket.destroy();
     },
@@ -828,16 +902,16 @@ test("a reused identifier carrying different text is refused, not acknowledged",
     },
     async (socketPath) => {
       const client = await companion(socketPath);
-      client.send('{"v":1,"type":"submit","id":"pill-1","text":"first"}\n');
+      client.send('{"v":2,"type":"submit","id":"pill-1","text":"first"}\n');
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
 
       // Acknowledging this would tell the pill that "second" landed, when only
       // "first" is in the conversation.
-      client.send('{"v":1,"type":"submit","id":"pill-1","text":"second"}\n');
+      client.send('{"v":2,"type":"submit","id":"pill-1","text":"second"}\n');
       const answer = await client.next();
       // Answered to the peer that asked, naming the submission it refuses:
       // those words never left the daemon, so they are still the pill's.
@@ -867,10 +941,10 @@ test("idempotency survives a daemon restart that resumes the session", async () 
   const first = new ControlServer(socketPath, host(), () => {});
   await first.start();
   const before = await companion(socketPath);
-  before.send('{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n');
+  before.send('{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n');
   await new Promise((resolve) => setTimeout(resolve, 20));
   session.land("pill-1");
-  assert.deepEqual(await before.next(), { v: 1, type: "ack", id: "pill-1" });
+  assert.deepEqual(await before.next(), { v: 2, type: "ack", id: "pill-1" });
   // The acknowledgment is lost: the daemon dies before the companion sees it.
   before.socket.destroy();
   await first.stop();
@@ -878,8 +952,8 @@ test("idempotency survives a daemon restart that resumes the session", async () 
   const second = new ControlServer(socketPath, host(), () => {});
   await second.start();
   const after = await companion(socketPath);
-  after.send('{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n');
-  assert.deepEqual(await after.next(), { v: 1, type: "ack", id: "pill-1" });
+  after.send('{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n');
+  assert.deepEqual(await after.next(), { v: 2, type: "ack", id: "pill-1" });
   assert.equal(
     session.queued.length,
     0,
@@ -923,8 +997,8 @@ test("only one of two daemons racing to start owns the socket", async () => {
 
   // The winner is still serving, and no loser removed its socket.
   const client = await companion(socketPath);
-  client.send('{"v":1,"type":"ping"}\n');
-  assert.deepEqual(await client.next(), { v: 1, type: "pong" });
+  client.send('{"v":2,"type":"ping"}\n');
+  assert.deepEqual(await client.next(), { v: 2, type: "pong" });
   client.socket.destroy();
 
   for (const server of servers) await server.stop();
@@ -954,8 +1028,8 @@ test("a stale socket left by a dead daemon is replaced", async () => {
   );
   await second.start();
   const client = await companion(socketPath);
-  client.send('{"v":1,"type":"ping"}\n');
-  assert.deepEqual(await client.next(), { v: 1, type: "pong" });
+  client.send('{"v":2,"type":"ping"}\n');
+  assert.deepEqual(await client.next(), { v: 2, type: "pong" });
   client.socket.destroy();
 
   await second.stop();
@@ -986,8 +1060,8 @@ test("a failure after the listener exists leaves no unreachable server behind", 
   );
   await healthy.start();
   const client = await companion(socketPath);
-  client.send('{"v":1,"type":"ping"}\n');
-  assert.deepEqual(await client.next(), { v: 1, type: "pong" });
+  client.send('{"v":2,"type":"ping"}\n');
+  assert.deepEqual(await client.next(), { v: 2, type: "pong" });
   client.socket.destroy();
 
   await healthy.stop();
@@ -1017,13 +1091,13 @@ test("concurrent different bodies under one identifier are not both acknowledged
     },
     async (socketPath) => {
       const first = await companion(socketPath);
-      first.send('{"v":1,"type":"submit","id":"pill-1","text":"first"}\n');
+      first.send('{"v":2,"type":"submit","id":"pill-1","text":"first"}\n');
       await new Promise((resolve) => setTimeout(resolve, 20));
 
       // A second client retries the same identifier with different words while
       // the first delivery is still running.
       const second = await companion(socketPath);
-      second.send('{"v":1,"type":"submit","id":"pill-1","text":"second"}\n');
+      second.send('{"v":2,"type":"submit","id":"pill-1","text":"second"}\n');
       const answer = await second.next();
       assert.equal(answer.type, "refused", JSON.stringify(answer));
       assert.equal(answer.id, "pill-1");
@@ -1037,7 +1111,7 @@ test("concurrent different bodies under one identifier are not both acknowledged
       // first client sees only the acknowledgment it is owed.
       let answered = await first.next();
       while (answered.type !== "ack") answered = await first.next();
-      assert.deepEqual(answered, { v: 1, type: "ack", id: "pill-1" });
+      assert.deepEqual(answered, { v: 2, type: "ack", id: "pill-1" });
       assert.deepEqual(delivered, ["first"]);
       first.socket.destroy();
       second.socket.destroy();
@@ -1082,8 +1156,8 @@ test("a stale socket is replaced by exactly one of several racing daemons", asyn
   );
 
   const client = await companion(socketPath);
-  client.send('{"v":1,"type":"ping"}\n');
-  assert.deepEqual(await client.next(), { v: 1, type: "pong" });
+  client.send('{"v":2,"type":"ping"}\n');
+  assert.deepEqual(await client.next(), { v: 2, type: "pong" });
   client.socket.destroy();
 
   for (const server of servers) await server.stop();
@@ -1123,8 +1197,8 @@ test("a failure after the public socket is claimed gives the pathname back", asy
   );
   await healthy.start();
   const client = await companion(socketPath);
-  client.send('{"v":1,"type":"ping"}\n');
-  assert.deepEqual(await client.next(), { v: 1, type: "pong" });
+  client.send('{"v":2,"type":"ping"}\n');
+  assert.deepEqual(await client.next(), { v: 2, type: "pong" });
   client.socket.destroy();
   await healthy.stop();
   await rm(directory, { recursive: true, force: true });
@@ -1140,7 +1214,7 @@ test("nothing is acknowledged until the session actually holds the transcript", 
     async (socketPath) => {
       const client = await companion(socketPath);
       client.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       await new Promise((resolve) => setTimeout(resolve, 40));
 
@@ -1151,7 +1225,7 @@ test("nothing is acknowledged until the session actually holds the transcript", 
 
       session.land("pill-1");
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
@@ -1172,13 +1246,13 @@ test("a send the session refuses leaves nothing uncertain behind", async () => {
     async (socketPath) => {
       const client = await companion(socketPath);
       client.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       const answer = await client.next();
       // Nothing was dispatched and nothing was recorded, so this is refused
       // rather than uncertain: the pill may edit these words and retry them.
       assert.deepEqual(answer, {
-        v: 1,
+        v: 2,
         type: "refused",
         id: "pill-1",
         detail: "submission pill-1 was not sent: the session is not ready",
@@ -1187,12 +1261,12 @@ test("a send the session refuses leaves nothing uncertain behind", async () => {
       // The retry succeeds once the send works, under the same identifier.
       session.refuseSend = undefined;
       client.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       await new Promise((resolve) => setTimeout(resolve, 40));
       session.land("pill-1");
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
@@ -1212,7 +1286,7 @@ test("neither the user nor another extension can acknowledge the pill", async ()
     async (socketPath) => {
       const client = await companion(socketPath);
       client.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       await new Promise((resolve) => setTimeout(resolve, 40));
 
@@ -1231,7 +1305,7 @@ test("neither the user nor another extension can acknowledge the pill", async ()
 
       session.land("pill-1");
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
@@ -1284,13 +1358,13 @@ test("a retry while the first send is still queued does not send twice", async (
     async (socketPath) => {
       const client = await companion(socketPath);
       client.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       await new Promise((resolve) => setTimeout(resolve, 40));
 
       const second = await companion(socketPath);
       second.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       await new Promise((resolve) => setTimeout(resolve, 40));
       assert.equal(
@@ -1301,7 +1375,7 @@ test("a retry while the first send is still queued does not send twice", async (
 
       session.land("pill-1");
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
@@ -1322,7 +1396,7 @@ test("a landing is observed even when no further Pi event follows", async () => 
     async (socketPath) => {
       const client = await companion(socketPath);
       client.send(
-        '{"v":1,"type":"submit","id":"pill-1","text":"open tasks"}\n',
+        '{"v":2,"type":"submit","id":"pill-1","text":"open tasks"}\n',
       );
       await new Promise((resolve) => setTimeout(resolve, 40));
 
@@ -1331,7 +1405,7 @@ test("a landing is observed even when no further Pi event follows", async () => 
       session.queued.length = 0;
       session.seed("pill-1", "open tasks", submissionDigest("open tasks"));
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
@@ -1511,7 +1585,7 @@ test("a conflicting retry is refused even after it left the daemon's cache", asy
     session.seed(`pill-${index}`, `later ${index}`);
   }
   const submit = (text: string) =>
-    `${JSON.stringify({ v: 1, type: "submit", id: "pill-old", text })}\n`;
+    `${JSON.stringify({ v: 2, type: "submit", id: "pill-old", text })}\n`;
 
   await withServer(
     {
@@ -1532,7 +1606,7 @@ test("a conflicting retry is refused even after it left the daemon's cache", asy
       client.send(submit("read my mail"));
       let answer = await client.next();
       while (answer.type !== "ack") answer = await client.next();
-      assert.deepEqual(answer, { v: 1, type: "ack", id: "pill-old" });
+      assert.deepEqual(answer, { v: 2, type: "ack", id: "pill-old" });
       assert.equal(session.queued.length, 0);
       client.socket.destroy();
     },
@@ -1546,7 +1620,7 @@ test("every body a reused identifier landed is acknowledged and nothing else", a
   session.seed("pill-1", "read my mail");
   session.seed("pill-1", "send my mail");
   const submit = (text: string) =>
-    `${JSON.stringify({ v: 1, type: "submit", id: "pill-1", text })}\n`;
+    `${JSON.stringify({ v: 2, type: "submit", id: "pill-1", text })}\n`;
 
   await withServer(
     {
@@ -1559,7 +1633,7 @@ test("every body a reused identifier landed is acknowledged and nothing else", a
         client.send(submit(text));
         let answer = await client.next();
         while (answer.type !== "ack") answer = await client.next();
-        assert.deepEqual(answer, { v: 1, type: "ack", id: "pill-1" }, text);
+        assert.deepEqual(answer, { v: 2, type: "ack", id: "pill-1" }, text);
       }
 
       client.send(submit("delete my mail"));
@@ -1894,7 +1968,7 @@ async function withDesktop(
 }
 
 const submitLine = (id: string, text: string, force = false) =>
-  `${JSON.stringify(force ? { v: 1, type: "submit", id, text, force } : { v: 1, type: "submit", id, text })}\n`;
+  `${JSON.stringify(force ? { v: 2, type: "submit", id, text, force } : { v: 2, type: "submit", id, text })}\n`;
 
 /** Reads until the daemon answers this submission, or reports silence. */
 async function answer(
@@ -1942,7 +2016,7 @@ test("a transcript starts the same turn a typed prompt starts", async () => {
       const client = await companion(socketPath);
       client.send(submitLine("pill-1", "open tasks"));
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
@@ -2023,7 +2097,7 @@ test("another extension's identical prompt is never taken for the pill's", async
       const client = await companion(socketPath);
       client.send(submitLine("pill-1", "open tasks"));
       assert.deepEqual(await client.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
@@ -2219,7 +2293,7 @@ test("only the person's own decision sends an uncertain request again", async ()
       const deciding = await companion(socketPath);
       deciding.send(submitLine("pill-1", "book the flight", true));
       const acknowledged = await answer(deciding);
-      assert.deepEqual(acknowledged, { v: 1, type: "ack", id: "pill-1" });
+      assert.deepEqual(acknowledged, { v: 2, type: "ack", id: "pill-1" });
       assert.deepEqual(acceptedSubmissions(pi.entries, 10), [
         { id: "pill-1", digest: submissionDigest("book the flight") },
       ]);
@@ -2282,7 +2356,7 @@ test("a restart is acknowledged from the session, not sent again", async () => {
     async (socketPath, pi) => {
       const first = await companion(socketPath);
       first.send(submitLine("pill-1", "open tasks"));
-      assert.deepEqual(await first.next(), { v: 1, type: "ack", id: "pill-1" });
+      assert.deepEqual(await first.next(), { v: 2, type: "ack", id: "pill-1" });
       // The acknowledgment is lost: the daemon dies before the pill sees it.
       first.socket.destroy();
       await pi.emit("session_shutdown", { type: "session_shutdown" });
@@ -2292,7 +2366,7 @@ test("a restart is acknowledged from the session, not sent again", async () => {
       const second = await companion(socketPath);
       second.send(submitLine("pill-1", "open tasks"));
       assert.deepEqual(await second.next(), {
-        v: 1,
+        v: 2,
         type: "ack",
         id: "pill-1",
       });
@@ -2333,7 +2407,7 @@ test("a transcript at the byte bound is accepted and one past it is not", () => 
   assert.equal(cjk.length, 2);
   const filled = cjk.repeat(MAX_SUBMISSION_TEXT_BYTES / 6);
   const line = (text: string) =>
-    JSON.stringify({ v: 1, type: "submit", id: "pill-1", text });
+    JSON.stringify({ v: 2, type: "submit", id: "pill-1", text });
 
   assert.equal(decodeClientMessage(line(filled)).type, "submit");
   assert.throws(() => decodeClientMessage(line(filled + cjk)), ProtocolError);
@@ -2524,8 +2598,8 @@ test("the ownership lock is released the moment its holder stops existing", asyn
   );
   await successor.start();
   const client = await companion(socketPath);
-  client.send('{"v":1,"type":"ping"}\n');
-  assert.deepEqual(await client.next(), { v: 1, type: "pong" });
+  client.send('{"v":2,"type":"ping"}\n');
+  assert.deepEqual(await client.next(), { v: 2, type: "pong" });
   client.socket.destroy();
 
   await successor.stop();
@@ -2574,8 +2648,8 @@ test("no starter can interleave with the unlink of a stale socket", async () => 
 
   // The daemon that held the lock owns the socket, and it is the one serving.
   const client = await companion(socketPath);
-  client.send('{"v":1,"type":"ping"}\n');
-  assert.deepEqual(await client.next(), { v: 1, type: "pong" });
+  client.send('{"v":2,"type":"ping"}\n');
+  assert.deepEqual(await client.next(), { v: 2, type: "pong" });
   client.socket.destroy();
 
   child.kill("SIGTERM");
@@ -2625,8 +2699,8 @@ test("no starter can interleave with the unlink a departing daemon performs", as
   );
   await successor.start();
   const client = await companion(socketPath);
-  client.send('{"v":1,"type":"ping"}\n');
-  assert.deepEqual(await client.next(), { v: 1, type: "pong" });
+  client.send('{"v":2,"type":"ping"}\n');
+  assert.deepEqual(await client.next(), { v: 2, type: "pong" });
   client.socket.destroy();
   await successor.stop();
   await rm(directory, { recursive: true, force: true });
@@ -2688,16 +2762,16 @@ test("a successor takes over from a daemon whose lock helper died", async () => 
   );
   await successor.start();
   const client = await companion(socketPath);
-  client.send('{"v":1,"type":"ping"}\n');
-  assert.deepEqual(await client.next(), { v: 1, type: "pong" });
+  client.send('{"v":2,"type":"ping"}\n');
+  assert.deepEqual(await client.next(), { v: 2, type: "pong" });
   client.socket.destroy();
 
   // The old daemon now shuts down. It no longer owns this pathname, and its
   // shutdown must leave the successor serving.
   await stale.stop();
   const still = await companion(socketPath);
-  still.send('{"v":1,"type":"ping"}\n');
-  assert.deepEqual(await still.next(), { v: 1, type: "pong" });
+  still.send('{"v":2,"type":"ping"}\n');
+  assert.deepEqual(await still.next(), { v: 2, type: "pong" });
   still.socket.destroy();
 
   await successor.stop();
@@ -2719,8 +2793,8 @@ test("a socket path with spaces in it is claimed and given back", async () => {
   );
   await owner.start();
   const client = await companion(socketPath);
-  client.send('{"v":1,"type":"ping"}\n');
-  assert.deepEqual(await client.next(), { v: 1, type: "pong" });
+  client.send('{"v":2,"type":"ping"}\n');
+  assert.deepEqual(await client.next(), { v: 2, type: "pong" });
   client.socket.destroy();
 
   // A second daemon must still be refused: the lock guards the same pathname.
@@ -2780,8 +2854,8 @@ test("one daemon owns a socket whatever name reaches it", async () => {
   }
 
   const client = await companion(socketPath);
-  client.send('{"v":1,"type":"ping"}\n');
-  assert.deepEqual(await client.next(), { v: 1, type: "pong" });
+  client.send('{"v":2,"type":"ping"}\n');
+  assert.deepEqual(await client.next(), { v: 2, type: "pong" });
   client.socket.destroy();
   await owner.stop();
   await rm(directory, { recursive: true, force: true });

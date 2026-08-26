@@ -411,7 +411,7 @@ impossible the record is replaced by a tombstone, which still stops the text
 being restored, and only when neither can happen does the pill reopen to say the
 words are still on disk.
 
-## Control protocol v1
+## Control protocol v2
 
 The daemon serves one same-user Unix socket at
 `$XDG_RUNTIME_DIR/scufris/daemon.sock`, created inside a `0700` directory and
@@ -466,10 +466,15 @@ an explicit `v` field.
 Companion to daemon:
 
 ```json
-{"v":1,"type":"hello"}
-{"v":1,"type":"submit","id":"pill-1","text":"open the tasks widget"}
-{"v":1,"type":"submit","id":"pill-1","text":"open the tasks widget","force":true}
-{"v":1,"type":"ping"}
+{"v":2,"type":"hello"}
+{"v":2,"type":"submit","id":"pill-1","text":"show me a note"}
+{"v":2,"type":"submit","id":"pill-1","text":"show me a note","force":true}
+{"v":2,"type":"ping"}
+{"v":2,"type":"widget_opened","id":"w-1","surface":"widget-3"}
+{"v":2,"type":"widget_done","id":"w-4"}
+{"v":2,"type":"widget_failed","id":"w-1","code":"widget_not_found","detail":"no widget named cpu"}
+{"v":2,"type":"widget_event","surface":"widget-3","event":"closed"}
+{"v":2,"type":"catalog","widgets":[{"id":"note","name":"Note","description":"A short note beside the pill."}]}
 ```
 
 `force` is the person's own decision to send words that may already be in the
@@ -479,12 +484,16 @@ reconnection, or restart ever sets it.
 Daemon to companion:
 
 ```json
-{"v":1,"type":"welcome","session":"2026-08-24"}
-{"v":1,"type":"ack","id":"pill-1"}
-{"v":1,"type":"uncertain","id":"pill-1","detail":"the outcome is unknown"}
-{"v":1,"type":"refused","id":"pill-1","detail":"the Scufris session is not ready"}
-{"v":1,"type":"state","state":"idle","detail":""}
-{"v":1,"type":"pong"}
+{"v":2,"type":"welcome","session":"2026-08-24"}
+{"v":2,"type":"ack","id":"pill-1"}
+{"v":2,"type":"uncertain","id":"pill-1","detail":"the outcome is unknown"}
+{"v":2,"type":"refused","id":"pill-1","detail":"the Scufris session is not ready"}
+{"v":2,"type":"state","state":"idle","detail":""}
+{"v":2,"type":"pong"}
+{"v":2,"type":"widget_open","id":"w-1","widget":"note","posture":"exhibit","data":{"text":"the harness is green"}}
+{"v":2,"type":"widget_update","id":"w-2","surface":"widget-3","data":{"text":"141 tests pass"}}
+{"v":2,"type":"widget_close","id":"w-3","surface":"widget-3"}
+{"v":2,"type":"widget_clear","id":"w-4"}
 ```
 
 Every answer about a submission names the submission it answers, and the
@@ -502,8 +511,18 @@ holds the transcript, and only the person using it can decide what happens next.
 A failure the daemon cannot classify is answered as `uncertain`, which is the
 safe reading, and is also reported as a daemon error state because it is one.
 
-Both peers reject unknown message types and any version other than `1`; they do
-not ignore them. Submission identifiers and transcripts are bounded and
+The widget commands are the first messages the daemon originates. Each carries
+a correlation `id` that the companion echoes in its answer, so a caller waits
+for its own command and never for another's. `widget_opened` answers an open
+and names the surface it created; `widget_done` answers an update, a close, or
+a clear, which name no new surface; `widget_failed` answers any of them with a
+stable code. `widget_event` and `catalog` are unsolicited: the catalog is sent once per
+connection, right after the welcome, so the daemon can type its tools from what
+this companion actually has.
+
+Both peers reject unknown message types and any version other than `2`; they do
+not ignore them. A version 1 peer is refused at hello rather than half
+understood. Submission identifiers and transcripts are bounded and
 validated before a submission reaches the conversation. The transcript bound is
 8 KiB measured in **UTF-8 bytes** on both sides: measuring UTF-16 code units on
 one side would let non-ASCII text be accepted that the other cannot store or
@@ -513,13 +532,19 @@ stale socket file is replaced.
 
 Listening and transcribing are companion-local. The daemon never sees audio.
 
-Version 2 extends this protocol with session mirroring for the full-screen
-conversation mode. The version 1 messages above must stay valid unchanged.
+Correlation, widget, and surface identifiers follow the submission identifier
+rule: bounded ASCII that is also safe as a window label. Widget payloads are
+capped at 8 KiB, well below the line cap, because the same bytes cross the
+companion's per-window channel afterwards.
 
 The protocol is implemented twice, once per side, and each side owns its tests:
 
 - `desktop/scufris-control/src/lib.rs` for the companion.
 - `extensions/scufris/desktop/protocol.ts` and `server.ts` for the daemon.
+
+Neither implementation is the reference. `desktop/control-protocol-v2.json`
+holds canonical, tolerated, and rejected lines for both directions, and both
+suites read that same file, so the two sides cannot drift apart.
 
 ## Assistant state
 

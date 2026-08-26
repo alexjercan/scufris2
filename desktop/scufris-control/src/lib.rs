@@ -1,9 +1,14 @@
-//! Control protocol version 1 between scufris-desktop and the Scufris daemon.
+//! Control protocol version 2 between scufris-desktop and the Scufris daemon.
 //!
 //! The daemon is the popup Pi process. It serves one same-user Unix socket and
 //! owns the authoritative conversation. The companion never writes session
 //! files; it submits accepted transcripts as ordinary user messages and follows
 //! the assistant state the daemon reports.
+//!
+//! Version 2 adds the widget commands. They are the first daemon-originated
+//! requests: each carries a correlation `id` that the companion echoes in the
+//! answer, so a caller can wait for its own command. The companion also reports
+//! its widget catalog and unsolicited surface events.
 //!
 //! Every message is one LF-terminated JSON line bounded by
 //! [`MAX_MESSAGE_BYTES`]. Both peers reject unknown message types and any
@@ -19,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Wire protocol version accepted by both peers.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Maximum encoded message size, including its LF terminator.
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
@@ -30,8 +35,17 @@ pub const SOCKET_DIRECTORY_NAME: &str = "scufris";
 /// Socket name below [`SOCKET_DIRECTORY_NAME`].
 pub const SOCKET_FILE_NAME: &str = "daemon.sock";
 
-/// Maximum accepted length of one submission identifier.
-pub const MAX_SUBMISSION_ID_LENGTH: usize = 64;
+/// Maximum accepted length of one protocol identifier.
+///
+/// Submission, correlation, widget, and surface identifiers share one rule, so
+/// a peer that can read one can read them all.
+pub const MAX_IDENTIFIER_LENGTH: usize = 64;
+
+/// Maximum accepted size of one encoded widget payload, in UTF-8 bytes.
+///
+/// Well below [`MAX_MESSAGE_BYTES`]: the same payload crosses the companion's
+/// per-window channel, where small ordered messages are the contract.
+pub const MAX_WIDGET_DATA_BYTES: usize = 8 * 1024;
 
 /// Maximum accepted size of one submitted transcript, in UTF-8 bytes.
 ///
@@ -83,7 +97,7 @@ impl ClientMessage {
     }
 }
 
-/// Companion messages defined by protocol version 1.
+/// Companion messages defined by protocol version 2.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientBody {
@@ -103,6 +117,42 @@ pub enum ClientBody {
     },
     /// Liveness probe answered with [`DaemonBody::Pong`].
     Ping,
+    /// Answers [`DaemonBody::WidgetOpen`] with the surface that was created.
+    WidgetOpened {
+        /// Correlation identifier copied from the command.
+        id: String,
+        /// Surface the runtime created. It doubles as the window label.
+        surface: String,
+    },
+    /// Answers every widget command that names no new surface: update, close,
+    /// and clear. The command was carried out.
+    WidgetDone {
+        /// Correlation identifier copied from the command.
+        id: String,
+    },
+    /// Answers any widget command that the runtime could not carry out.
+    WidgetFailed {
+        /// Correlation identifier copied from the command.
+        id: String,
+        /// Stable machine-readable reason, shaped like an identifier.
+        code: String,
+        /// Short human-readable explanation.
+        #[serde(default)]
+        detail: String,
+    },
+    /// Reports a change to one surface that the daemon did not ask for.
+    WidgetEvent {
+        /// Surface the event is about.
+        surface: String,
+        /// What happened to it.
+        event: SurfaceEvent,
+    },
+    /// Announces the widgets this companion can open. Sent once per connection,
+    /// right after the daemon's welcome, so the daemon can type its tools.
+    Catalog {
+        /// Every installed widget, ordered by identifier.
+        widgets: Vec<CatalogEntry>,
+    },
 }
 
 impl ClientBody {
@@ -112,12 +162,46 @@ impl ClientBody {
             Self::Hello => "hello",
             Self::Submit { .. } => "submit",
             Self::Ping => "ping",
+            Self::WidgetOpened { .. } => "widget_opened",
+            Self::WidgetDone { .. } => "widget_done",
+            Self::WidgetFailed { .. } => "widget_failed",
+            Self::WidgetEvent { .. } => "widget_event",
+            Self::Catalog { .. } => "catalog",
         }
     }
 }
 
-/// One versioned message sent by the daemon to the companion.
+/// One installed widget, as the companion announces it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogEntry {
+    /// Widget identifier, equal to its directory name.
+    pub id: String,
+    /// Short display name shown in the window chrome.
+    pub name: String,
+    /// One line telling the model what the widget is for.
+    pub description: String,
+}
+
+/// A change to one surface that the daemon did not ask for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceEvent {
+    /// The surface is gone. The daemon forgets it and never reopens it unasked.
+    Closed,
+}
+
+/// Where a surface lives once it is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Posture {
+    /// Scufris opened it to show something. It ages and retires on its own.
+    Exhibit,
+    /// The person owns it. It stays until they close it.
+    Instrument,
+}
+
+/// One versioned message sent by the daemon to the companion.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DaemonMessage {
     /// Wire protocol version used to encode the message.
     pub v: u32,
@@ -136,8 +220,8 @@ impl DaemonMessage {
     }
 }
 
-/// Daemon messages defined by protocol version 1.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Daemon messages defined by protocol version 2.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DaemonBody {
     /// Answers [`ClientBody::Hello`] with the authoritative session identity.
@@ -178,6 +262,42 @@ pub enum DaemonBody {
     },
     /// Answers [`ClientBody::Ping`].
     Pong,
+    /// Asks the companion to open one widget. Answered with
+    /// [`ClientBody::WidgetOpened`] or [`ClientBody::WidgetFailed`].
+    WidgetOpen {
+        /// Correlation identifier the answer echoes.
+        id: String,
+        /// Widget to open, from the announced catalog.
+        widget: String,
+        /// Where the surface lives once it is open.
+        posture: Posture,
+        /// Widget-defined spawn payload, bounded by [`MAX_WIDGET_DATA_BYTES`].
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+    /// Sends new data to one open surface. Citing a surface is updating it.
+    WidgetUpdate {
+        /// Correlation identifier the answer echoes.
+        id: String,
+        /// Surface to update.
+        surface: String,
+        /// Widget-defined payload, bounded by [`MAX_WIDGET_DATA_BYTES`].
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+    /// Closes one open surface.
+    WidgetClose {
+        /// Correlation identifier the answer echoes.
+        id: String,
+        /// Surface to close.
+        surface: String,
+    },
+    /// Closes every surface the runtime owns and leaves the person's own
+    /// widgets standing.
+    WidgetClear {
+        /// Correlation identifier the answer echoes.
+        id: String,
+    },
 }
 
 /// Assistant states the daemon reports.
@@ -232,18 +352,29 @@ pub enum MessageError {
     /// A submission field was outside its accepted bounds.
     #[error("invalid submission: {0}")]
     InvalidSubmission(&'static str),
+    /// A widget field was outside its accepted bounds.
+    #[error("invalid widget message: {0}")]
+    InvalidWidget(&'static str),
     /// The underlying local transport failed.
     #[error("control transport failed: {0}")]
     Io(#[from] io::Error),
 }
 
-/// Returns true when the identifier is a safe bounded submission identifier.
-pub fn is_submission_id(value: &str) -> bool {
+/// Returns true when the value is a safe bounded protocol identifier.
+///
+/// One rule for submission, correlation, widget, and surface identifiers: a
+/// bounded ASCII shape that is also safe as a window label and a file name.
+pub fn is_identifier(value: &str) -> bool {
     !value.is_empty()
-        && value.len() <= MAX_SUBMISSION_ID_LENGTH
+        && value.len() <= MAX_IDENTIFIER_LENGTH
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+/// Returns true when the payload encodes within [`MAX_WIDGET_DATA_BYTES`].
+pub fn is_widget_data(value: &serde_json::Value) -> bool {
+    serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= MAX_WIDGET_DATA_BYTES)
 }
 
 /// Returns true when the transcript is a bounded single submission payload.
@@ -292,28 +423,82 @@ pub fn write_message<T: Serialize>(
     Ok(())
 }
 
+/// Returns an error unless every named identifier is well formed.
+fn check_identifiers(fields: &[(&'static str, &str)]) -> Result<(), MessageError> {
+    for (field, value) in fields {
+        if !is_identifier(value) {
+            return Err(MessageError::InvalidWidget(field));
+        }
+    }
+    Ok(())
+}
+
 /// Reads one companion message and rejects unsupported versions and payloads.
 pub fn read_client_message(reader: &mut impl BufRead) -> Result<ClientMessage, MessageError> {
     let message: ClientMessage = read_message(reader)?;
     if message.v != PROTOCOL_VERSION {
         return Err(MessageError::UnsupportedVersion(message.v));
     }
-    if let ClientBody::Submit { id, text, .. } = &message.body {
-        if !is_submission_id(id) {
-            return Err(MessageError::InvalidSubmission("id"));
+    match &message.body {
+        ClientBody::Submit { id, text, .. } => {
+            if !is_identifier(id) {
+                return Err(MessageError::InvalidSubmission("id"));
+            }
+            if !is_submission_text(text) {
+                return Err(MessageError::InvalidSubmission("text"));
+            }
         }
-        if !is_submission_text(text) {
-            return Err(MessageError::InvalidSubmission("text"));
+        ClientBody::WidgetOpened { id, surface } => {
+            check_identifiers(&[("id", id), ("surface", surface)])?;
         }
+        ClientBody::WidgetDone { id } => check_identifiers(&[("id", id)])?,
+        ClientBody::WidgetFailed { id, code, .. } => {
+            check_identifiers(&[("id", id), ("code", code)])?;
+        }
+        ClientBody::WidgetEvent { surface, .. } => {
+            check_identifiers(&[("surface", surface)])?;
+        }
+        ClientBody::Catalog { widgets } => {
+            for widget in widgets {
+                check_identifiers(&[("widget", &widget.id)])?;
+            }
+        }
+        ClientBody::Hello | ClientBody::Ping => {}
     }
     Ok(message)
 }
 
-/// Reads one daemon message and rejects unsupported versions.
+/// Reads one daemon message and rejects unsupported versions and payloads.
 pub fn read_daemon_message(reader: &mut impl BufRead) -> Result<DaemonMessage, MessageError> {
     let message: DaemonMessage = read_message(reader)?;
     if message.v != PROTOCOL_VERSION {
         return Err(MessageError::UnsupportedVersion(message.v));
+    }
+    match &message.body {
+        DaemonBody::WidgetOpen {
+            id, widget, data, ..
+        } => {
+            check_identifiers(&[("id", id), ("widget", widget)])?;
+            if !is_widget_data(data) {
+                return Err(MessageError::InvalidWidget("data"));
+            }
+        }
+        DaemonBody::WidgetUpdate { id, surface, data } => {
+            check_identifiers(&[("id", id), ("surface", surface)])?;
+            if !is_widget_data(data) {
+                return Err(MessageError::InvalidWidget("data"));
+            }
+        }
+        DaemonBody::WidgetClose { id, surface } => {
+            check_identifiers(&[("id", id), ("surface", surface)])?;
+        }
+        DaemonBody::WidgetClear { id } => check_identifiers(&[("id", id)])?,
+        DaemonBody::Welcome { .. }
+        | DaemonBody::Ack { .. }
+        | DaemonBody::Uncertain { .. }
+        | DaemonBody::Refused { .. }
+        | DaemonBody::State { .. }
+        | DaemonBody::Pong => {}
     }
     Ok(message)
 }
@@ -343,7 +528,7 @@ mod tests {
         // where nothing was decided.
         assert_eq!(
             encoded(&submit),
-            "{\"v\":1,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"open the tasks widget\"}\n"
+            "{\"v\":2,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"open the tasks widget\"}\n"
         );
         let forced = ClientMessage::new(ClientBody::Submit {
             id: "pill-1".into(),
@@ -352,7 +537,7 @@ mod tests {
         });
         assert_eq!(
             encoded(&forced),
-            "{\"v\":1,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"open the tasks widget\",\"force\":true}\n"
+            "{\"v\":2,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"open the tasks widget\",\"force\":true}\n"
         );
         assert_eq!(
             read_client_message(&mut Cursor::new(encoded(&forced))).unwrap(),
@@ -364,11 +549,11 @@ mod tests {
         );
         assert_eq!(
             encoded(&ClientMessage::new(ClientBody::Hello)),
-            "{\"v\":1,\"type\":\"hello\"}\n"
+            "{\"v\":2,\"type\":\"hello\"}\n"
         );
         assert_eq!(
             encoded(&ClientMessage::new(ClientBody::Ping)),
-            "{\"v\":1,\"type\":\"ping\"}\n"
+            "{\"v\":2,\"type\":\"ping\"}\n"
         );
     }
 
@@ -379,14 +564,14 @@ mod tests {
                 session: "popup-1".into()
             }))
             .unwrap(),
-            json!({ "v": 1, "type": "welcome", "session": "popup-1" })
+            json!({ "v": 2, "type": "welcome", "session": "popup-1" })
         );
         assert_eq!(
             serde_json::to_value(DaemonMessage::new(DaemonBody::Ack {
                 id: "pill-1".into()
             }))
             .unwrap(),
-            json!({ "v": 1, "type": "ack", "id": "pill-1" })
+            json!({ "v": 2, "type": "ack", "id": "pill-1" })
         );
         assert_eq!(
             serde_json::to_value(DaemonMessage::new(DaemonBody::Refused {
@@ -395,7 +580,7 @@ mod tests {
             }))
             .unwrap(),
             json!({
-                "v": 1,
+                "v": 2,
                 "type": "refused",
                 "id": "pill-1",
                 "detail": "the Scufris session is not ready",
@@ -407,17 +592,17 @@ mod tests {
                 detail: "job 1 is blocked".into(),
             }))
             .unwrap(),
-            json!({ "v": 1, "type": "state", "state": "attention", "detail": "job 1 is blocked" })
+            json!({ "v": 2, "type": "state", "state": "attention", "detail": "job 1 is blocked" })
         );
         assert_eq!(
             serde_json::to_value(DaemonMessage::new(DaemonBody::Pong)).unwrap(),
-            json!({ "v": 1, "type": "pong" })
+            json!({ "v": 2, "type": "pong" })
         );
     }
 
     #[test]
     fn state_messages_accept_an_absent_detail() {
-        let mut line = Cursor::new("{\"v\":1,\"type\":\"state\",\"state\":\"idle\"}\n");
+        let mut line = Cursor::new("{\"v\":2,\"type\":\"state\",\"state\":\"idle\"}\n");
         assert_eq!(
             read_daemon_message(&mut line).unwrap().body,
             DaemonBody::State {
@@ -429,12 +614,12 @@ mod tests {
 
     #[test]
     fn unknown_message_types_are_rejected() {
-        let mut line = Cursor::new("{\"v\":1,\"type\":\"mirror\",\"entries\":[]}\n");
+        let mut line = Cursor::new("{\"v\":2,\"type\":\"mirror\",\"entries\":[]}\n");
         assert!(matches!(
             read_client_message(&mut line),
             Err(MessageError::InvalidJson(_))
         ));
-        let mut line = Cursor::new("{\"v\":1,\"type\":\"transcript\"}\n");
+        let mut line = Cursor::new("{\"v\":2,\"type\":\"transcript\"}\n");
         assert!(matches!(
             read_daemon_message(&mut line),
             Err(MessageError::InvalidJson(_))
@@ -443,10 +628,17 @@ mod tests {
 
     #[test]
     fn other_protocol_versions_are_rejected() {
-        let mut line = Cursor::new("{\"v\":2,\"type\":\"hello\"}\n");
+        // A version 1 peer is refused at hello. Nothing in the tree speaks it
+        // any more, and half a protocol is worse than no connection.
+        let mut line = Cursor::new("{\"v\":1,\"type\":\"hello\"}\n");
         assert!(matches!(
             read_client_message(&mut line),
-            Err(MessageError::UnsupportedVersion(2))
+            Err(MessageError::UnsupportedVersion(1))
+        ));
+        let mut line = Cursor::new("{\"v\":3,\"type\":\"ping\"}\n");
+        assert!(matches!(
+            read_client_message(&mut line),
+            Err(MessageError::UnsupportedVersion(3))
         ));
         let mut line = Cursor::new("{\"v\":0,\"type\":\"pong\"}\n");
         assert!(matches!(
@@ -456,21 +648,123 @@ mod tests {
     }
 
     #[test]
+    fn widget_commands_and_answers_use_the_documented_shapes() {
+        assert_eq!(
+            encoded(&DaemonMessage::new(DaemonBody::WidgetOpen {
+                id: "w-1".into(),
+                widget: "note".into(),
+                posture: Posture::Exhibit,
+                data: json!({ "text": "the harness is green" }),
+            })),
+            "{\"v\":2,\"type\":\"widget_open\",\"id\":\"w-1\",\"widget\":\"note\",\
+             \"posture\":\"exhibit\",\"data\":{\"text\":\"the harness is green\"}}\n"
+        );
+        assert_eq!(
+            encoded(&DaemonMessage::new(DaemonBody::WidgetClear {
+                id: "w-5".into()
+            })),
+            "{\"v\":2,\"type\":\"widget_clear\",\"id\":\"w-5\"}\n"
+        );
+        assert_eq!(
+            encoded(&ClientMessage::new(ClientBody::WidgetOpened {
+                id: "w-1".into(),
+                surface: "widget-3".into(),
+            })),
+            "{\"v\":2,\"type\":\"widget_opened\",\"id\":\"w-1\",\"surface\":\"widget-3\"}\n"
+        );
+        assert_eq!(
+            encoded(&ClientMessage::new(ClientBody::WidgetDone {
+                id: "w-4".into()
+            })),
+            "{\"v\":2,\"type\":\"widget_done\",\"id\":\"w-4\"}\n"
+        );
+        assert_eq!(
+            encoded(&ClientMessage::new(ClientBody::WidgetEvent {
+                surface: "widget-3".into(),
+                event: SurfaceEvent::Closed,
+            })),
+            "{\"v\":2,\"type\":\"widget_event\",\"surface\":\"widget-3\",\"event\":\"closed\"}\n"
+        );
+        assert_eq!(
+            encoded(&ClientMessage::new(ClientBody::Catalog {
+                widgets: vec![CatalogEntry {
+                    id: "note".into(),
+                    name: "Note".into(),
+                    description: "A short note beside the pill.".into(),
+                }],
+            })),
+            "{\"v\":2,\"type\":\"catalog\",\"widgets\":[{\"id\":\"note\",\"name\":\"Note\",\
+             \"description\":\"A short note beside the pill.\"}]}\n"
+        );
+        // An omitted payload is the empty payload, so a command that carries
+        // nothing does not have to say so.
+        let mut line = Cursor::new(
+            "{\"v\":2,\"type\":\"widget_update\",\"id\":\"w-2\",\"surface\":\"widget-3\"}\n",
+        );
+        assert_eq!(
+            read_daemon_message(&mut line).unwrap().body,
+            DaemonBody::WidgetUpdate {
+                id: "w-2".into(),
+                surface: "widget-3".into(),
+                data: serde_json::Value::Null,
+            }
+        );
+    }
+
+    #[test]
+    fn widget_messages_are_bounded_and_identified() {
+        let mut line = Cursor::new(
+            "{\"v\":2,\"type\":\"widget_close\",\"id\":\"w-1\",\"surface\":\"widget 3\"}\n",
+        );
+        assert!(matches!(
+            read_daemon_message(&mut line),
+            Err(MessageError::InvalidWidget("surface"))
+        ));
+        let mut line =
+            Cursor::new("{\"v\":2,\"type\":\"widget_opened\",\"id\":\"w 1\",\"surface\":\"s\"}\n");
+        assert!(matches!(
+            read_client_message(&mut line),
+            Err(MessageError::InvalidWidget("id"))
+        ));
+        let mut line = Cursor::new(
+            "{\"v\":2,\"type\":\"catalog\",\"widgets\":[{\"id\":\"a b\",\"name\":\"A\",\"description\":\"x\"}]}\n",
+        );
+        assert!(matches!(
+            read_client_message(&mut line),
+            Err(MessageError::InvalidWidget("widget"))
+        ));
+
+        // The payload cap is smaller than the line cap on purpose: the same
+        // bytes cross the companion's per-window channel afterwards.
+        let oversized = DaemonMessage::new(DaemonBody::WidgetUpdate {
+            id: "w-1".into(),
+            surface: "widget-3".into(),
+            data: json!({ "text": "x".repeat(MAX_WIDGET_DATA_BYTES) }),
+        });
+        let mut line = Cursor::new(encoded(&oversized));
+        assert!(matches!(
+            read_daemon_message(&mut line),
+            Err(MessageError::InvalidWidget("data"))
+        ));
+        assert!(is_widget_data(&json!({ "text": "x".repeat(1024) })));
+    }
+
+    #[test]
     fn submissions_are_bounded_and_identified() {
         let mut line =
-            Cursor::new("{\"v\":1,\"type\":\"submit\",\"id\":\"a b\",\"text\":\"hi\"}\n");
+            Cursor::new("{\"v\":2,\"type\":\"submit\",\"id\":\"a b\",\"text\":\"hi\"}\n");
         assert!(matches!(
             read_client_message(&mut line),
             Err(MessageError::InvalidSubmission("id"))
         ));
         let mut line =
-            Cursor::new("{\"v\":1,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"  \"}\n");
+            Cursor::new("{\"v\":2,\"type\":\"submit\",\"id\":\"pill-1\",\"text\":\"  \"}\n");
         assert!(matches!(
             read_client_message(&mut line),
             Err(MessageError::InvalidSubmission("text"))
         ));
-        assert!(is_submission_id("pill-1.2_3"));
-        assert!(!is_submission_id(&"x".repeat(MAX_SUBMISSION_ID_LENGTH + 1)));
+        assert!(is_identifier("pill-1.2_3"));
+        assert!(!is_identifier(&"x".repeat(MAX_IDENTIFIER_LENGTH + 1)));
         assert!(!is_submission_text(
             &"x".repeat(MAX_SUBMISSION_TEXT_BYTES + 1)
         ));
@@ -504,11 +798,11 @@ mod tests {
     #[test]
     fn framing_rejects_missing_terminators_and_oversized_lines() {
         assert!(matches!(
-            read_message::<ClientMessage>(&mut Cursor::new(b"{\"v\":1,\"type\":\"ping\"}")),
+            read_message::<ClientMessage>(&mut Cursor::new(b"{\"v\":2,\"type\":\"ping\"}")),
             Err(MessageError::MissingTerminator)
         ));
         assert!(matches!(
-            read_message::<ClientMessage>(&mut Cursor::new(b"{\"v\":1,\"type\":\"ping\"}\r\n")),
+            read_message::<ClientMessage>(&mut Cursor::new(b"{\"v\":2,\"type\":\"ping\"}\r\n")),
             Err(MessageError::MissingTerminator)
         ));
         assert!(matches!(
@@ -526,7 +820,7 @@ mod tests {
         // The daemon implements this protocol separately in TypeScript. Both
         // suites read these exact lines so the two implementations cannot drift.
         let fixtures: serde_json::Value =
-            serde_json::from_str(include_str!("../../control-protocol-v1.json")).unwrap();
+            serde_json::from_str(include_str!("../../control-protocol-v2.json")).unwrap();
         let lines = |group: &str, side: &str| -> Vec<String> {
             fixtures[group][side]
                 .as_array()

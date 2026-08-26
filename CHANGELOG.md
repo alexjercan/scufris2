@@ -9,6 +9,13 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Changed
+
+- Control protocol version 2. It adds the widget commands, the first messages
+  the daemon originates, plus the companion's answers, surface events, and
+  widget catalog. A version 1 peer is refused at hello, so the companion and
+  the Scufris package must be updated together.
+
 ### Removed
 
 - Dashboardd widget control. The `dashboard` extension, its skill, the

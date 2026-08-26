@@ -652,6 +652,12 @@ export class ControlServer {
       );
       return;
     }
+    if (message.type !== "submit") {
+      // A widget answer, event, or catalog. Nothing here asked for one yet, so
+      // it is reported and dropped rather than closing a healthy connection.
+      this.log(`unexpected companion message: ${message.type}`, "info");
+      return;
+    }
 
     try {
       await this.deliver(

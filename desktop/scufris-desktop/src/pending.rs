@@ -134,7 +134,7 @@ impl PendingStore for FilePendingStore {
             return Err(PendingError::Corrupt);
         }
         let record: Record = serde_json::from_slice(&encoded).map_err(|_| PendingError::Corrupt)?;
-        if record.version != VERSION || !scufris_control::is_submission_id(&record.id) {
+        if record.version != VERSION || !scufris_control::is_identifier(&record.id) {
             return Err(PendingError::Corrupt);
         }
         // A tombstone is a complete answer: there is nothing to restore.
@@ -153,7 +153,7 @@ impl PendingStore for FilePendingStore {
     fn save(&self, pending: &Pending) -> Result<(), PendingError> {
         // Refuse what `load` would later call corrupt. Writing it would lose
         // the transcript at exactly the moment it is needed.
-        if !scufris_control::is_submission_id(&pending.id)
+        if !scufris_control::is_identifier(&pending.id)
             || !scufris_control::is_submission_text(&pending.text)
         {
             return Err(PendingError::Unbounded);

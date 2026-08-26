@@ -96,7 +96,7 @@ Scufris can neither update nor close it. Only the person can.
 disconnect. Reconnect with backoff, a "backend unavailable" flash, and an
 in-flight submission that can go uncertain.
 
-*Not raised to BLOCKER:* it self-heals on the next connection and no
+_Not raised to BLOCKER:_ it self-heals on the next connection and no
 words are lost. The red team ranked it BLOCKER on the tear-down alone.
 
 **M10. The per-surface module gate does not hold.**

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { AssistantStateReport } from "../shared/assistant-state.ts";
 import {
   PROTOCOL_VERSION,
+  ProtocolError,
   decodeClientMessage,
   encodeDaemonMessage,
   takeLines,
@@ -191,6 +192,14 @@ interface PendingWidget {
   resolve: (answer: WidgetAnswer) => void;
   reject: (error: WidgetCommandError) => void;
   timer: ReturnType<typeof setTimeout>;
+  /**
+   * The companion this command was sent to.
+   *
+   * Correlation ids restart at `w-1` with the daemon and are not unique across
+   * companions, so an id is only half of an answer's address. A second
+   * companion answering its own `w-1` must not settle this one.
+   */
+  asked: Socket;
 }
 
 /** Builds the wire message for one command under its correlation id. */
@@ -733,6 +742,14 @@ export class ControlServer {
     try {
       line = encodeDaemonMessage(widgetMessage(id, command));
     } catch (error) {
+      // The protocol's own code, where it has one. "Too large" and "not text"
+      // are different things for the model to do something about, and both are
+      // different from a message this daemon could not build at all.
+      if (error instanceof ProtocolError) {
+        return Promise.reject(
+          new WidgetCommandError(error.code, error.message),
+        );
+      }
       const detail = error instanceof Error ? error.message : String(error);
       return Promise.reject(new WidgetCommandError("invalid_command", detail));
     }
@@ -748,7 +765,7 @@ export class ControlServer {
       }, this.widgetTimeoutMs);
       // A waiting command must never be the reason this process stays alive.
       timer.unref?.();
-      this.pendingWidgets.set(id, { resolve, reject, timer });
+      this.pendingWidgets.set(id, { resolve, reject, timer, asked: socket });
       socket.write(line);
     });
   }
@@ -762,13 +779,30 @@ export class ControlServer {
 
   /** Settles one waiting widget command with the answer that names it. */
   private settleWidget(
+    from: Socket,
     answer: Extract<
       ClientMessage,
       { type: "widget_opened" | "widget_done" | "widget_failed" }
     >,
   ): void {
     const pending = this.pendingWidgets.get(answer.id);
-    if (!pending) {
+    if (!pending || pending.asked !== from) {
+      if (answer.type === "widget_opened") {
+        // The open was given up on and the panel arrived anyway. Nothing holds
+        // its surface identifier now, so nobody but the person could ever put
+        // it away, and Scufris cannot even name it to say what it shows.
+        // Closing it is the only honest end to a tool call that has already
+        // failed.
+        this.log(
+          `closing ${answer.surface}, whose open was already given up on`,
+          "info",
+        );
+        void this.request({
+          type: "widget_close",
+          surface: answer.surface,
+        }).catch(() => {});
+        return;
+      }
       // Late, duplicated, or from a companion this daemon never asked. It is
       // reported and dropped: applying it would act on nothing.
       this.log(`no widget command is waiting for ${answer.id}`, "info");
@@ -887,7 +921,7 @@ export class ControlServer {
       message.type === "widget_done" ||
       message.type === "widget_failed"
     ) {
-      this.settleWidget(message);
+      this.settleWidget(socket, message);
       return;
     }
     if (message.type === "widget_event" || message.type === "catalog") {

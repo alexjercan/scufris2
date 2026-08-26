@@ -157,6 +157,44 @@ export class ProtocolError extends Error {
   }
 }
 
+/**
+ * Answers whether one string carries a surrogate that is not half of a pair.
+ *
+ * A lone surrogate is not text. `JSON.stringify` writes it out as an escape
+ * that no strict decoder will read back, and the decoder at the far end of this
+ * socket rejects the connection rather than the message: the companion drops
+ * the link, backs off, and flashes "backend unavailable" at the person.
+ */
+function lonely(text: string): boolean {
+  for (let index = 0; index < text.length; index += 1) {
+    const unit = text.charCodeAt(index);
+    if (unit < 0xd800 || unit > 0xdfff) continue;
+    // A trailing half with no leading half in front of it.
+    if (unit >= 0xdc00) return true;
+    const next = text.charCodeAt(index + 1);
+    if (!(next >= 0xdc00 && next <= 0xdfff)) return true;
+    index += 1;
+  }
+  return false;
+}
+
+/**
+ * Refuses any key or string in a message that is not text a decoder reads back.
+ *
+ * A replacer rather than a walk of our own: it reaches every string
+ * `JSON.stringify` would write, including the ones inside a model-supplied
+ * widget payload, which is where an unpaired surrogate comes from.
+ */
+function wellFormed(key: string, value: unknown): unknown {
+  if (lonely(key) || (typeof value === "string" && lonely(value))) {
+    throw new ProtocolError(
+      "a message carries an unpaired surrogate",
+      "not_well_formed",
+    );
+  }
+  return value;
+}
+
 /** Encodes one daemon message as a bounded LF-terminated JSON line. */
 export function encodeDaemonMessage(message: DaemonMessage): string {
   // Checked before the line is written, not after the companion rejects it: an
@@ -171,7 +209,14 @@ export function encodeDaemonMessage(message: DaemonMessage): string {
       "widget_data_too_large",
     );
   }
-  const line = `${JSON.stringify(message)}\n`;
+  // The same rule the decoder applies, applied here. A widget name or a surface
+  // this daemon cannot write is one the companion would refuse, and refusing it
+  // here answers the tool call instead of spending a round trip on it.
+  if (message.type === "widget_open") identifier(message.widget, "widget");
+  if (message.type === "widget_update" || message.type === "widget_close") {
+    identifier(message.surface, "surface");
+  }
+  const line = `${JSON.stringify(message, wellFormed)}\n`;
   if (Buffer.byteLength(line, "utf8") > MAX_MESSAGE_BYTES) {
     throw new ProtocolError(
       "control message is too large",

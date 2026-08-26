@@ -21,14 +21,6 @@ import {
 /** The custom message type a surface the person closed arrives as. */
 export const WIDGET_EVENT_MESSAGE = "scufris-widget-event";
 
-/** What this daemon remembers about one surface it opened. */
-interface OpenSurface {
-  /** Widget the surface is showing. */
-  widget: string;
-  /** Where it lives. */
-  posture: "exhibit" | "instrument";
-}
-
 /** Renders the installed widgets as the line the open tool's description carries. */
 export function catalogSummary(widgets: CatalogEntry[]): string {
   return widgets
@@ -71,16 +63,6 @@ export default function widgets(pi: ExtensionAPI): void {
   let context: ExtensionContext | undefined;
   /** The widget names the tools were registered with, once they have been. */
   let installed: string[] | undefined;
-  /**
-   * Surfaces this session opened, as far as it knows.
-   *
-   * Not authoritative, and not treated as such. The shelf ages exhibits out on
-   * its own and `clear` leaves whatever the person kept, so this set drifts
-   * ahead of the screen by design. Every command is sent regardless, and the
-   * companion's `surface_not_found` is what corrects the drift.
-   */
-  const surfaces = new Map<string, OpenSurface>();
-
   const notify = (message: string, level: "info" | "error") => {
     if (context?.hasUI) context.ui.notify(`Scufris widgets: ${message}`, level);
     else if (level === "error") console.error(`scufris widgets: ${message}`);
@@ -103,16 +85,6 @@ export default function widgets(pi: ExtensionAPI): void {
   const dataSchema = {
     description:
       "The widget's own payload. Each widget's description says what it takes.",
-  };
-
-  /** Drops one surface the companion says it does not have. */
-  const forget = (error: unknown, surface: string) => {
-    if (
-      error instanceof WidgetCommandError &&
-      error.code === "surface_not_found"
-    ) {
-      surfaces.delete(surface);
-    }
   };
 
   const register = (catalog: CatalogEntry[]) => {
@@ -158,7 +130,6 @@ export default function widgets(pi: ExtensionAPI): void {
                 "The companion opened a widget and did not name its surface.",
               );
             }
-            surfaces.set(surface, { widget: params.widget, posture });
             return toolResult(
               { widget: params.widget, posture, surface },
               false,
@@ -194,7 +165,6 @@ export default function widgets(pi: ExtensionAPI): void {
               `Updated ${params.surface}.`,
             );
           } catch (error) {
-            forget(error, params.surface);
             return failure(error);
           }
         },
@@ -214,14 +184,12 @@ export default function widgets(pi: ExtensionAPI): void {
         async execute(_id, params) {
           try {
             await ask({ type: "widget_close", surface: params.surface });
-            surfaces.delete(params.surface);
             return toolResult(
               { surface: params.surface, state: "closed" },
               false,
               `Closed ${params.surface}.`,
             );
           } catch (error) {
-            forget(error, params.surface);
             return failure(error);
           }
         },
@@ -238,9 +206,6 @@ export default function widgets(pi: ExtensionAPI): void {
         async execute() {
           try {
             await ask({ type: "widget_clear" });
-            // Including whatever the person kept: those surfaces are theirs
-            // now, and this session has no business updating them.
-            surfaces.clear();
             return toolResult({ state: "cleared" }, false, "Cleared widgets.");
           } catch (error) {
             return failure(error);
@@ -278,10 +243,10 @@ export default function widgets(pi: ExtensionAPI): void {
       adopt(notice.widgets);
       return;
     }
-    // The person closed the window with its own tick. The conversation is told
-    // so its idea of what is on screen does not drift from what is, and so
-    // nothing reopens what was just put away.
-    surfaces.delete(notice.surface);
+    // A surface went away: the person closed it with its own tick, or a fourth
+    // exhibit pushed it off the shelf. The conversation is told so its idea of
+    // what is on screen does not drift from what is, and so nothing reopens
+    // what was just put away.
     pi.sendMessage(
       {
         customType: WIDGET_EVENT_MESSAGE,
@@ -295,9 +260,6 @@ export default function widgets(pi: ExtensionAPI): void {
 
   pi.events.on(WIDGET_CONTROL_EVENT, (value: unknown) => {
     control = (value as Partial<WidgetControlSignal> | undefined)?.control;
-    // Nothing this session opened survives its socket, so nothing it opened is
-    // still nameable once the socket changes.
-    surfaces.clear();
     // The listener belongs to the control, and a control is one session's. It
     // is registered again with each one, which is what keeps the catalog and
     // the person's own closes arriving across a restart.
@@ -311,6 +273,5 @@ export default function widgets(pi: ExtensionAPI): void {
   pi.on("session_shutdown", () => {
     control = undefined;
     context = undefined;
-    surfaces.clear();
   });
 }

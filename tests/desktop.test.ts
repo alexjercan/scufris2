@@ -710,6 +710,66 @@ test("the widget commands carry a correlation id and a bounded payload", () => {
   );
 });
 
+test("a widget payload that is not text is refused here, not by the companion", () => {
+  // The model writes this payload. An unpaired surrogate survives
+  // JSON.stringify as an escape no strict decoder reads back, and the decoder
+  // at the far end of this socket rejects the connection rather than the
+  // message: the companion drops the link, backs off, and tells the person the
+  // backend is unavailable. It has to fail as a tool result instead.
+  const lone = "half a character: \ud800";
+  assert.throws(
+    () =>
+      encodeDaemonMessage({
+        v: 2,
+        type: "widget_open",
+        id: "w-1",
+        widget: "note",
+        posture: "exhibit",
+        data: { text: lone },
+      }),
+    (error: unknown) =>
+      error instanceof ProtocolError && error.code === "not_well_formed",
+  );
+  // A key is as much of the payload as a value is.
+  assert.throws(
+    () =>
+      encodeDaemonMessage({
+        v: 2,
+        type: "widget_update",
+        id: "w-2",
+        surface: "widget-3",
+        data: { ["\udfff"]: "whole" },
+      }),
+    ProtocolError,
+  );
+  // A pair is a character, and characters outside the basic plane are text.
+  assert.equal(
+    encodeDaemonMessage({
+      v: 2,
+      type: "widget_update",
+      id: "w-3",
+      surface: "widget-3",
+      data: { text: "\u{1f600} and é" },
+    }),
+    '{"v":2,"type":"widget_update","id":"w-3","surface":"widget-3",' +
+      '"data":{"text":"\u{1f600} and é"}}\n',
+  );
+  // And an identifier this daemon cannot write is refused before the round
+  // trip that would have refused it anyway.
+  assert.throws(
+    () =>
+      encodeDaemonMessage({
+        v: 2,
+        type: "widget_open",
+        id: "w-4",
+        widget: "no such widget",
+        posture: "exhibit",
+        data: {},
+      }),
+    ProtocolError,
+  );
+});
+
 test("a widget command is settled by the answer that carries its id", async () => {
   await withServer({}, async (socketPath, server) => {
     const client = await companion(socketPath);
@@ -832,6 +892,42 @@ test("a widget command nothing can answer fails instead of hanging the turn", as
       assert.ok(timed instanceof WidgetCommandError);
       assert.equal(timed.code, "timeout");
       silent.socket.destroy();
+    },
+    { widgetTimeoutMs: 60 },
+  );
+});
+
+test("a widget that opens after its command was given up on is closed again", async () => {
+  await withServer(
+    {},
+    async (socketPath, server) => {
+      const client = await companion(socketPath);
+      const abandoned = server.request({
+        type: "widget_open",
+        widget: "note",
+        posture: "exhibit",
+        data: {},
+      });
+      const asked = await client.next();
+      assert.equal(asked.type, "widget_open");
+      const timed = await abandoned.then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+      assert.ok(timed instanceof WidgetCommandError);
+      assert.equal(timed.code, "timeout");
+
+      // The panel arrives anyway. Nothing holds its surface identifier now, so
+      // nobody but the person could ever put it away and Scufris cannot even
+      // name it. Closing it is the only honest end to a tool call that has
+      // already failed.
+      client.send(
+        '{"v":2,"type":"widget_opened","id":"w-1","surface":"widget-3"}\n',
+      );
+      const closing = await client.next();
+      assert.equal(closing.type, "widget_close");
+      assert.equal(closing.surface, "widget-3");
+      client.socket.destroy();
     },
     { widgetTimeoutMs: 60 },
   );

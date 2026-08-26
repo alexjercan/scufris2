@@ -12,7 +12,7 @@
 //! collision to solve.
 
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     time::Duration,
 };
 
@@ -107,6 +107,19 @@ pub enum Life {
     Dim,
     /// The person took it out of the runtime's hands.
     Pinned,
+}
+
+/// Why the runtime's clocks are stopped, if they are.
+///
+/// A set rather than a flag, because the reasons overlap and each one is lifted
+/// by the thing that raised it. A microphone closing while Scufris is already
+/// answering must not start a grace that the answer is still stopping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Still {
+    /// Scufris is speaking. The person is listening rather than reading.
+    Speech,
+    /// The microphone is open. The person is talking rather than reading.
+    Microphone,
 }
 
 /// One open surface.
@@ -208,10 +221,18 @@ pub enum Cmd {
         /// True when it moved on, false when it moved off.
         over: bool,
     },
-    /// Stop or start every clock the runtime keeps.
+    /// Stop or start every clock the runtime keeps, for one reason.
     Freeze {
-        /// True when the clocks stop.
+        /// What is stopping them, or letting them run again.
+        reason: Still,
+        /// True when this reason now holds.
         stopped: bool,
+    },
+    /// Take the runtime's own widgets off the screen with the pill, or bring
+    /// them back.
+    Conceal {
+        /// True when the layer goes down.
+        hidden: bool,
     },
 }
 
@@ -229,6 +250,20 @@ pub enum Act {
         /// Widget-defined spawn payload.
         data: Value,
         /// Where the window goes.
+        slot: Slot,
+        /// How big the window is.
+        size: Size,
+        /// True when the layer is down, so the window is sized and loaded and
+        /// waits off the screen instead of coming up.
+        hidden: bool,
+    },
+    /// Take an open surface off the screen without retiring it, or put it back.
+    Conceal {
+        /// The surface that goes down or comes back.
+        surface: SurfaceId,
+        /// True when it goes down.
+        hidden: bool,
+        /// Where it stands when it comes back.
         slot: Slot,
         /// How big the window is.
         size: Size,
@@ -271,10 +306,11 @@ pub struct Runtime {
     surfaces: BTreeMap<SurfaceId, Surface>,
     /// The shelf, newest first. Only surfaces the runtime still owns are on it.
     shelf: VecDeque<SurfaceId>,
-    /// True while every clock is stopped: the microphone is open, or Scufris is
-    /// speaking, or the whole layer is off screen. Time the person is not
-    /// looking at a panel is not time the panel has been up.
-    frozen: bool,
+    /// Why the clocks are stopped, if they are. Time the person is not looking
+    /// at a panel is not time the panel has been up.
+    frozen: BTreeSet<Still>,
+    /// True while the layer is off the screen with the pill.
+    hidden: bool,
 }
 
 impl Runtime {
@@ -306,10 +342,15 @@ impl Runtime {
             Cmd::TurnEnded => self.turn_ended(),
             Cmd::Sweep { elapsed } => self.sweep(elapsed),
             Cmd::Hover { surface, over } => self.hover(surface, over),
-            Cmd::Freeze { stopped } => {
-                self.frozen = stopped;
+            Cmd::Freeze { reason, stopped } => {
+                if stopped {
+                    self.frozen.insert(reason);
+                } else {
+                    self.frozen.remove(&reason);
+                }
                 Vec::new()
             }
+            Cmd::Conceal { hidden } => self.conceal(hidden),
         }
     }
 
@@ -373,6 +414,9 @@ impl Runtime {
             data,
             slot,
             size,
+            // A widget opened while the layer is down waits behind it rather
+            // than flashing onto a desktop the person put the pill away from.
+            hidden: self.hidden && posture == Posture::Exhibit,
         }];
         if posture == Posture::Exhibit {
             self.shelf.push_front(surface.clone());
@@ -439,9 +483,33 @@ impl Runtime {
         acts
     }
 
+    /// Takes the runtime's own widgets down with the pill, or brings them back.
+    ///
+    /// One layer, one gesture. The pill and everything the runtime put beside
+    /// it go down together and come back exactly as they were: nothing is
+    /// retired, no widget is unmounted, and the clocks stop for as long as the
+    /// layer is off the screen. What the person kept is not on this layer any
+    /// more, which is what the pin tick did to it.
+    fn conceal(&mut self, hidden: bool) -> Vec<Act> {
+        if self.hidden == hidden {
+            return Vec::new();
+        }
+        self.hidden = hidden;
+        self.surfaces
+            .values()
+            .filter(|surface| surface.transient())
+            .map(|surface| Act::Conceal {
+                surface: surface.id.clone(),
+                hidden,
+                slot: surface.slot,
+                size: surface.size,
+            })
+            .collect()
+    }
+
     /// Ages the dim exhibits, and retires the ones whose grace ran out.
     fn sweep(&mut self, elapsed: Duration) -> Vec<Act> {
-        if self.frozen {
+        if self.hidden || !self.frozen.is_empty() {
             return Vec::new();
         }
         let mut spent = Vec::new();
@@ -1130,8 +1198,16 @@ height = 90
         wait(&mut runtime, &catalog, Duration::ZERO);
         runtime.apply(&catalog, Cmd::TurnEnded);
 
-        runtime.apply(&catalog, Cmd::Freeze { stopped: true });
-        // A microphone that is open, or Scufris talking: the person is not
+        for reason in [Still::Speech, Still::Microphone] {
+            runtime.apply(
+                &catalog,
+                Cmd::Freeze {
+                    reason,
+                    stopped: true,
+                },
+            );
+        }
+        // Scufris talking, or a microphone that is open: the person is not
         // reading the screen, so this is not time the panel has been up.
         assert!(
             runtime
@@ -1140,12 +1216,109 @@ height = 90
         );
         assert!(runtime.surface(&surface).is_some());
 
-        runtime.apply(&catalog, Cmd::Freeze { stopped: false });
+        // One reason lifting is not every reason lifting. A microphone closing
+        // while Scufris is still answering must not start a grace the answer
+        // is still stopping.
+        runtime.apply(
+            &catalog,
+            Cmd::Freeze {
+                reason: Still::Microphone,
+                stopped: false,
+            },
+        );
+        assert!(
+            runtime
+                .apply(&catalog, Cmd::Sweep { elapsed: GRACE * 4 })
+                .is_empty()
+        );
+
+        runtime.apply(
+            &catalog,
+            Cmd::Freeze {
+                reason: Still::Speech,
+                stopped: false,
+            },
+        );
         assert!(
             !runtime
                 .apply(&catalog, Cmd::Sweep { elapsed: GRACE })
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn the_layer_goes_down_with_the_pill_and_comes_back_the_way_it_was() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let exhibit = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
+        let kept = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
+        let instrument = opened(&open(&mut runtime, &catalog, "clock", Posture::Instrument));
+        runtime.apply(
+            &catalog,
+            Cmd::Pin {
+                surface: kept.clone(),
+            },
+        );
+        // Halfway through its grace when the pill goes down.
+        wait(&mut runtime, &catalog, Duration::ZERO);
+        wait(&mut runtime, &catalog, GRACE / 2);
+
+        let acts = runtime.apply(&catalog, Cmd::Conceal { hidden: true });
+        // Only what the runtime still owns. A pinned panel and an instrument
+        // left this layer when the person took them.
+        assert_eq!(
+            acts.iter()
+                .filter_map(|act| match act {
+                    Act::Conceal {
+                        surface,
+                        hidden: true,
+                        ..
+                    } => Some(surface.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            vec![exhibit.clone()]
+        );
+        assert!(runtime.surface(&kept).is_some());
+        assert!(runtime.surface(&instrument).is_some());
+
+        // Nothing ages behind the layer, however long it is down.
+        assert!(
+            runtime
+                .apply(&catalog, Cmd::Sweep { elapsed: GRACE * 4 })
+                .is_empty()
+        );
+        assert!(runtime.surface(&exhibit).is_some());
+
+        let acts = runtime.apply(&catalog, Cmd::Conceal { hidden: false });
+        assert_eq!(
+            acts,
+            vec![Act::Conceal {
+                surface: exhibit.clone(),
+                hidden: false,
+                slot: Slot::Shelf(0),
+                size: Size {
+                    width: 250.0,
+                    height: 110.0
+                },
+            }]
+        );
+        // Exactly as it was: dim, and with the half minute it had left.
+        assert_eq!(runtime.surface(&exhibit).map(|s| s.life), Some(Life::Dim));
+        runtime.apply(&catalog, Cmd::Sweep { elapsed: GRACE / 2 });
+        assert!(runtime.surface(&exhibit).is_none());
+    }
+
+    #[test]
+    fn a_widget_opened_behind_the_layer_waits_there_instead_of_flashing_up() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        runtime.apply(&catalog, Cmd::Conceal { hidden: true });
+        let acts = open(&mut runtime, &catalog, "note", Posture::Exhibit);
+        assert!(matches!(
+            acts.first(),
+            Some(Act::Adopt { hidden: true, .. })
+        ));
     }
 
     #[test]

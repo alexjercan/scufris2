@@ -23,6 +23,10 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   and retires a minute later, and an update or the pointer over it brings it
   back. Clocks stop while Scufris speaks and while you are reading the panel.
   Instruments and pinned panels are yours and never age.
+- Widgets go away with the pill and come back with it. Putting the pill down
+  takes the whole layer off the screen with their state and their remaining
+  time intact. Panels you pinned and instruments stay where they are, because
+  they are yours rather than the runtime's.
 
 ### Changed
 

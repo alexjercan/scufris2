@@ -30,7 +30,7 @@ use crate::{
     widgets::{
         catalog::{Catalog, CatalogError, Source},
         pool::{Pool, ShellMsg},
-        runtime::{Act, Cmd, Runtime},
+        runtime::{Act, Cmd, Runtime, Still},
     },
 };
 
@@ -140,6 +140,7 @@ impl Widgets {
             return;
         }
         self.decide(Cmd::Freeze {
+            reason: Still::Speech,
             stopped: state == AssistantState::Speaking,
         });
         let turned = matches!(previous, AssistantState::Working | AssistantState::Speaking)
@@ -152,6 +153,27 @@ impl Widgets {
     /// Records the pointer arriving over one surface, or leaving it.
     pub fn hover(&self, surface: String, over: bool) {
         self.decide(Cmd::Hover { surface, over });
+    }
+
+    /// Records the microphone opening or closing.
+    ///
+    /// A person who is talking is not reading the screen, so the grace an
+    /// exhibit has left is not spent while they do.
+    pub fn recording(&self, recording: bool) {
+        self.decide(Cmd::Freeze {
+            reason: Still::Microphone,
+            stopped: recording,
+        });
+    }
+
+    /// Takes the runtime's own widgets down with the pill, or brings them back.
+    ///
+    /// The pill and everything the runtime put beside it are one layer, and the
+    /// gesture that puts the pill away puts the layer away. Nothing is retired
+    /// and no widget is unmounted: the panels come back exactly as they were,
+    /// and the grace they had left is the grace they still have.
+    pub fn conceal(&self, hidden: bool) {
+        self.decide(Cmd::Conceal { hidden });
     }
 
     /// Gives the runtime the link its answers travel on.
@@ -274,6 +296,7 @@ impl Widgets {
                     data,
                     slot,
                     size,
+                    hidden,
                 } => {
                     self.pool.send(
                         &surface,
@@ -284,7 +307,29 @@ impl Widgets {
                             data,
                         },
                     );
-                    self.place(&surface, slot, size, true);
+                    if hidden {
+                        // Sized and loaded behind the layer. It comes up with
+                        // the rest of them when the pill does.
+                        self.fit(&surface, size);
+                    } else {
+                        self.place(&surface, slot, size, true);
+                    }
+                }
+                Act::Conceal {
+                    surface,
+                    hidden,
+                    slot,
+                    size,
+                } => {
+                    if hidden {
+                        self.take_down(&surface);
+                    } else {
+                        // Through the first-show path, because i3 places a
+                        // floating window when it maps it: a window coming back
+                        // has to be placed after the map, exactly as it was the
+                        // first time.
+                        self.place(&surface, slot, size, true);
+                    }
                 }
                 Act::Move {
                     surface,
@@ -303,15 +348,37 @@ impl Widgets {
         }
     }
 
-    /// Puts one widget window where its slot says it belongs.
-    fn place(&self, surface: &str, slot: runtime::Slot, size: runtime::Size, first: bool) {
+    /// Gives one widget window the size its widget lays out, and nothing else.
+    fn fit(&self, surface: &str, size: runtime::Size) {
         let Some(window) = self.app.get_webview_window(surface) else {
             warn!(surface, "a widget surface has no window");
             return;
         };
-        if first && let Err(error) = windows::fit(&window, size) {
+        if let Err(error) = windows::fit(&window, size) {
             warn!(surface, "{error}");
         }
+    }
+
+    /// Takes one widget window off the screen, leaving the widget mounted.
+    fn take_down(&self, surface: &str) {
+        let Some(window) = self.app.get_webview_window(surface) else {
+            warn!(surface, "a widget surface has no window");
+            return;
+        };
+        if let Err(error) = windows::conceal(&window) {
+            warn!(surface, "{error}");
+        }
+    }
+
+    /// Puts one widget window where its slot says it belongs.
+    fn place(&self, surface: &str, slot: runtime::Slot, size: runtime::Size, first: bool) {
+        if first {
+            self.fit(surface, size);
+        }
+        let Some(window) = self.app.get_webview_window(surface) else {
+            warn!(surface, "a widget surface has no window");
+            return;
+        };
         let Some(monitor) = windows::monitor(&window) else {
             // A monitor nothing will describe leaves the window where it is,
             // which is worse than the right place and much better than not

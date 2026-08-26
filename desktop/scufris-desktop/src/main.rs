@@ -115,6 +115,21 @@ struct DesktopSurface {
     focus: FocusTracker,
 }
 
+impl DesktopSurface {
+    /// Takes the widget layer down with the pill, or brings it back up.
+    ///
+    /// The pill and everything the runtime put beside it are one layer: a panel
+    /// left over a bare desktop after the pill went down is a widget with
+    /// nothing to belong to. Asked for by handle rather than held, because the
+    /// runtime is built after this surface is and the layer is nothing this
+    /// surface owns.
+    fn layer(&self, hidden: bool) {
+        if let Some(widgets) = self.handle.try_state::<Arc<widgets::Widgets>>() {
+            widgets.conceal(hidden);
+        }
+    }
+}
+
 impl Surface for DesktopSurface {
     fn show_pill(&self) -> Result<Shown, String> {
         // Only when the pill does not already hold the keyboard. Capturing
@@ -129,11 +144,18 @@ impl Surface for DesktopSurface {
             // mid-review.
             self.focus.capture(&self.windows());
         }
-        pill::show(&self.handle)
+        let shown = pill::show(&self.handle)?;
+        // After the pill, and only if it came up: the shelf stands above the
+        // pill, and panels over a desktop with no pill under them are panels
+        // belonging to nothing.
+        self.layer(false);
+        Ok(shown)
     }
 
     fn show_pill_passive(&self) -> Result<Shown, String> {
-        pill::show_passive(&self.handle)
+        let shown = pill::show_passive(&self.handle)?;
+        self.layer(false);
+        Ok(shown)
     }
 
     fn hide_pill(&self) -> Result<Hidden, String> {
@@ -142,6 +164,10 @@ impl Surface for DesktopSurface {
         if let Err(error) = review::hide(&self.handle) {
             warn!("{error}");
         }
+        // And so does the shelf, for the same reason. State intact, widgets
+        // mounted, clocks stopped: this is the layer going away, not the
+        // panels going away.
+        self.layer(true);
         pill::hide(&self.handle)
     }
 
@@ -170,6 +196,12 @@ impl Surface for DesktopSurface {
         // it too.
         if let Err(error) = review::follow(&self.handle, payload.state) {
             warn!("{error}");
+        }
+        // A person who is talking is not reading the screen. The pill already
+        // knows the microphone is open, and this is the only place that says so
+        // on every presentation rather than on one transition.
+        if let Some(widgets) = self.handle.try_state::<Arc<widgets::Widgets>>() {
+            widgets.recording(payload.recording);
         }
         self.handle
             .emit(PRESENTATION_EVENT, payload)

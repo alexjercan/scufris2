@@ -47,13 +47,36 @@ rules do, and all three live in the pure runtime.
   moves it: the shelf is a row of places, and one that reshuffled under a
   sentence would be harder to follow than one that brightened.
 
-Every clock is stopped while Scufris speaks and while the pointer is over the
-panel. Time the user is not reading the screen is not time the panel has been
-up. The runtime is handed elapsed time rather than reading a clock, so the whole
+Every clock is stopped while Scufris speaks, while the microphone is open,
+while the pointer is over the panel, and while the layer is down. Time the user
+is not reading the screen is not time the panel has been up. The reasons are a
+set rather than a flag, so a microphone closing mid-answer does not start a
+grace the answer is still stopping.
+
+The runtime is handed elapsed time rather than reading a clock, so the whole
 lifecycle is a unit test and a stopped clock is a field rather than an
 arithmetic correction. The reading is done by one thread that sweeps once a
 second and hands its measurement to the event loop, which is where the chrome
 ticks already reach the runtime from.
+
+## One layer
+
+The pill and everything the runtime put beside it are one layer. The gesture
+that puts the pill away puts the layer away: the shelf goes down with it, and
+comes back with it exactly as it was. Nothing is retired, no widget is
+unmounted, no backend is stopped, and the grace a panel had left is the grace it
+still has. A widget opened while the layer is down is sized and loaded behind
+it rather than flashing onto a desktop the user put the pill away from.
+
+Pinned panels and instruments are exempt, because they are not on this layer.
+That is what the pin tick does to a panel: it takes it out of the runtime's
+hands, and out of the layer along with them. The same rule decides three things
+at once - what ages, what `scufris_widget_clear` takes, and what goes down with
+the pill - and it is one predicate in the runtime.
+
+`DesktopSurface` carries this out where it already carries the transcript box
+down with the pill. A window that comes back comes back through the first-show
+path, because i3 places a floating window when it maps it.
 
 ## The tools
 

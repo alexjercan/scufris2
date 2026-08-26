@@ -115,6 +115,18 @@ pub fn show(window: &WebviewWindow, at: PhysicalPosition<i32>) -> Result<(), Str
     }
 }
 
+/// Takes one widget window off the screen, leaving the widget mounted.
+///
+/// The page keeps its DOM and the widget keeps its state: this is a window
+/// unmapped, not a widget destroyed. What it costs is the placement, which i3
+/// decides again the next time the window maps - so a window that comes back
+/// comes back through [`show`].
+pub fn conceal(window: &WebviewWindow) -> Result<(), String> {
+    window
+        .hide()
+        .map_err(|error| format!("the widget window would not go down: {error}"))
+}
+
 /// Takes one widget window off the screen for good.
 pub fn close(window: &WebviewWindow) -> Result<(), String> {
     window

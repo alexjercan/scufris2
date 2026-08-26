@@ -19,6 +19,10 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   `scufris_widget_clear`, typed from what the companion says it has installed,
   and ships with the `note` widget. See the
   [widgets](docs/src/dev/widgets.md) chapter.
+- Exhibits age out on their own. A panel the conversation has moved past dims
+  and retires a minute later, and an update or the pointer over it brings it
+  back. Clocks stop while Scufris speaks and while you are reading the panel.
+  Instruments and pinned panels are yours and never age.
 
 ### Changed
 

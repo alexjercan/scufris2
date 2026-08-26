@@ -25,7 +25,35 @@ where it lives and how long.
 
 The pin tick on a panel's chrome hands it to the user and back. A pinned
 surface leaves the shelf, nothing moves it again, and `scufris_widget_clear`
-leaves it standing.
+leaves it standing. An instrument is the user's for the same reason, so neither
+the shelf's clock nor the clear verb reaches one.
+
+## Aging
+
+An exhibit needs no closing, which means something has to take it away. Three
+rules do, and all three live in the pure runtime.
+
+- **The turn boundary dims it.** The assistant state falling back to idle after
+  working or speaking is one turn of the conversation ending. Every exhibit that
+  turn neither opened nor updated is from a subject that is over: it drops to
+  forty percent and starts its grace. The signal costs no message of its own -
+  the daemon already reports assistant state, and the companion already listens.
+- **Sixty seconds of grace retires it.** Silently. A report for every panel that
+  went quiet would turn the thing that needs no closing into the thing that
+  reports itself.
+- **A citation or the pointer brings it back.** An update revives a dim exhibit
+  even when the data is unchanged, and so does the pointer arriving over it -
+  somebody reading a panel is the same signal as Scufris naming one. Neither
+  moves it: the shelf is a row of places, and one that reshuffled under a
+  sentence would be harder to follow than one that brightened.
+
+Every clock is stopped while Scufris speaks and while the pointer is over the
+panel. Time the user is not reading the screen is not time the panel has been
+up. The runtime is handed elapsed time rather than reading a clock, so the whole
+lifecycle is a unit test and a stopped clock is a field rather than an
+arithmetic correction. The reading is done by one thread that sweeps once a
+second and hands its measurement to the event loop, which is where the chrome
+ticks already reach the runtime from.
 
 ## The tools
 
@@ -91,7 +119,8 @@ the shell unused, and it is discarded for the same reason.
 ## The shell page and the widget contract
 
 `shell/shell.html` owns the chrome: corner ticks in the accent, an uppercase
-micro-title, a close tick, a pin tick, and a live or pinned badge. `tokens.css`
+micro-title, a close tick, a pin tick, and a badge naming the life state.
+`tokens.css`
 holds the `--sw-*` palette every widget styles against. One file rethemes the
 fleet; a widget that reaches for a hex value instead stops matching the first
 time the palette moves.

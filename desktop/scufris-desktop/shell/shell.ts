@@ -151,6 +151,16 @@
     invoke("widget_tick", { kind: "pin" }).catch(() => {});
   });
 
+  // A panel somebody is reading does not age out from under them. The pointer
+  // is the only thing that says so - the window never takes the keyboard - and
+  // only this page can see it, so it is this page that reports it.
+  const hover = (over: boolean) => (): void => {
+    invoke("widget_hover", { over }).catch(() => {});
+  };
+
+  panel.addEventListener("mouseenter", hover(true));
+  panel.addEventListener("mouseleave", hover(false));
+
   const channel = new Channel<ShellMsg>();
   channel.onmessage = handle;
   // Last, and only once the page can act on what comes back: the host treats

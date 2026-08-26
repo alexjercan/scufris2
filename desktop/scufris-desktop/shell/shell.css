@@ -34,6 +34,9 @@ body {
   padding: var(--sw-pad-top) var(--sw-pad-x) var(--sw-pad-bottom);
   background: var(--sw-panel);
   border: 1px solid var(--sw-line);
+  /* Here rather than on the dim rule, so the panel fades back in on the way
+   * out of dim as well as into it. */
+  transition: opacity 240ms ease;
 }
 
 /* Two corners rather than four: the frame is a bracket the panel sits in, not
@@ -61,10 +64,25 @@ body {
   border-bottom: 2px solid var(--sw-accent);
 }
 
+/* An exhibit the conversation has moved past. It recedes rather than going,
+ * so one glance separates what Scufris is talking about now from what it said
+ * before - and so the panel that is about to retire says so first. The whole
+ * panel fades against a background of the same near-black, which is a fade
+ * that needs no compositor. */
+.panel[data-life="dim"] {
+  opacity: 0.4;
+}
+
 /* A widget the person took over drops to a quieter frame: it is theirs now,
  * and the accent is what says the runtime is still looking after it. */
 .panel[data-life="pinned"] {
   --sw-accent: var(--sw-line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    transition: none;
+  }
 }
 
 .title {

@@ -281,7 +281,8 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             pill_cues,
             pill_log,
             widget_shell_ready,
-            widget_tick
+            widget_tick,
+            widget_hover
         ])
         .setup(move |tauri| {
             let handle = tauri.handle().clone();
@@ -364,6 +365,13 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                     DaemonEvent::Connected(session) => {
                         surfaces.announce();
                         observer.observe(DaemonEvent::Connected(session));
+                    }
+                    // Both siblings read this one. The pill shows the state;
+                    // the widgets runtime reads the turn boundary off it, which
+                    // is what ages an exhibit out when the subject changes.
+                    DaemonEvent::State(state, detail) => {
+                        surfaces.assistant(state);
+                        observer.observe(DaemonEvent::State(state, detail));
                     }
                     event => observer.observe(event),
                 },
@@ -493,6 +501,20 @@ fn widget_tick(
         "pin" => widgets.pinned(surface),
         unknown => debug!(kind = %unknown, "a widget window reported an unknown tick"),
     }
+}
+
+/// The pointer arriving over one widget window, or leaving it.
+///
+/// A panel somebody is reading does not age out from under them. Only the page
+/// can see this: the window is built unfocusable and never takes a pointer
+/// grab, so the host has no other way to know the pointer is there.
+#[tauri::command]
+fn widget_hover(
+    widgets: tauri::State<'_, Arc<widgets::Widgets>>,
+    window: tauri::Window,
+    over: bool,
+) {
+    widgets.hover(window.label().to_string(), over);
 }
 
 /// The answer for a widget module request nothing can serve.

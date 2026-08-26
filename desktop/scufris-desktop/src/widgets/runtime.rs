@@ -11,7 +11,10 @@
 //! slot, so every move is a step between two known places rather than a
 //! collision to solve.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    time::Duration,
+};
 
 use scufris_control::{ClientBody, Posture, SurfaceEvent};
 use serde::Serialize;
@@ -49,6 +52,14 @@ const SHELF_PITCH: f64 = 268.0;
 /// Distance from a screen edge to an instrument parked against it, in logical
 /// pixels.
 const EDGE_MARGIN: f64 = 24.0;
+
+/// How long a dim exhibit stays up before it retires.
+///
+/// Counted only while its clock runs, which is what makes a minute here a
+/// minute of the conversation having moved on rather than a minute of wall
+/// time. Long enough to read a panel the sentence that opened it has already
+/// passed; short enough that an afternoon does not leave a wall of them.
+pub const GRACE: Duration = Duration::from_secs(60);
 
 /// A surface identifier, which doubles as the window label.
 pub type SurfaceId = String;
@@ -89,8 +100,11 @@ pub struct Size {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Life {
-    /// The runtime owns it and it is current.
+    /// The runtime owns it and the conversation is still about it.
     Live,
+    /// The runtime owns it and the conversation has moved on. It retires when
+    /// its grace runs out.
+    Dim,
     /// The person took it out of the runtime's hands.
     Pinned,
 }
@@ -111,6 +125,26 @@ pub struct Surface {
     /// True once the person pinned it. A pinned surface has left the runtime's
     /// hands: it is never moved, never retired to make room, and never cleared.
     pub owned: bool,
+    /// What its chrome says about it.
+    pub life: Life,
+    /// True once Scufris opened or updated it during the turn now running.
+    pub cited: bool,
+    /// True while the pointer is over it. A panel somebody is reading does not
+    /// age, and does not dim under them when a turn ends.
+    pub hovered: bool,
+    /// How long it has been dim, counting only the time its clock ran.
+    pub aging: Duration,
+}
+
+impl Surface {
+    /// True while the runtime still ages this surface out and clears it.
+    ///
+    /// An exhibit is Scufris showing something, and what Scufris put up it also
+    /// takes away. An instrument is a panel the person asked to keep, and so is
+    /// an exhibit they pinned: neither one is the runtime's to retire.
+    fn transient(&self) -> bool {
+        self.posture == Posture::Exhibit && !self.owned
+    }
 }
 
 /// One thing the runtime is asked to do.
@@ -159,6 +193,25 @@ pub enum Cmd {
     Pin {
         /// Surface whose tick the person used.
         surface: SurfaceId,
+    },
+    /// One turn of the conversation ended.
+    TurnEnded,
+    /// Time passed. Only the runtime's own clocks care.
+    Sweep {
+        /// How long since the last sweep.
+        elapsed: Duration,
+    },
+    /// The pointer moved onto one surface, or off it.
+    Hover {
+        /// Surface the pointer moved over or off.
+        surface: SurfaceId,
+        /// True when it moved on, false when it moved off.
+        over: bool,
+    },
+    /// Stop or start every clock the runtime keeps.
+    Freeze {
+        /// True when the clocks stop.
+        stopped: bool,
     },
 }
 
@@ -218,6 +271,10 @@ pub struct Runtime {
     surfaces: BTreeMap<SurfaceId, Surface>,
     /// The shelf, newest first. Only surfaces the runtime still owns are on it.
     shelf: VecDeque<SurfaceId>,
+    /// True while every clock is stopped: the microphone is open, or Scufris is
+    /// speaking, or the whole layer is off screen. Time the person is not
+    /// looking at a panel is not time the panel has been up.
+    frozen: bool,
 }
 
 impl Runtime {
@@ -246,6 +303,13 @@ impl Runtime {
             Cmd::Clear { id } => self.clear(id),
             Cmd::Dismissed { surface } => self.dismissed(surface),
             Cmd::Pin { surface } => self.pin(surface),
+            Cmd::TurnEnded => self.turn_ended(),
+            Cmd::Sweep { elapsed } => self.sweep(elapsed),
+            Cmd::Hover { surface, over } => self.hover(surface, over),
+            Cmd::Freeze { stopped } => {
+                self.frozen = stopped;
+                Vec::new()
+            }
         }
     }
 
@@ -294,6 +358,12 @@ impl Runtime {
                 slot,
                 size,
                 owned: false,
+                life: Life::Live,
+                // Opening one is the strongest citation there is. It survives
+                // the end of the turn that opened it and dims at the next.
+                cited: true,
+                hovered: false,
+                aging: Duration::ZERO,
             },
         );
         let mut acts = vec![Act::Adopt {
@@ -316,17 +386,102 @@ impl Runtime {
     }
 
     fn update(&mut self, id: String, surface: SurfaceId, data: Value) -> Vec<Act> {
-        if !self.surfaces.contains_key(&surface) {
+        let Some(open) = self.surfaces.get_mut(&surface) else {
             return vec![failed(
                 id,
                 "surface_not_found",
                 format!("{surface} is not open"),
             )];
+        };
+        open.cited = true;
+        // Scufris speaking about a panel again is what brings it back, even
+        // when the data it hands over is the data already on it. Where the
+        // panel sits does not change: the shelf is a row of places, and one
+        // that reshuffled itself under a sentence would be harder to follow
+        // than one that simply brightened.
+        let mut acts = Vec::new();
+        if open.life == Life::Dim {
+            open.life = Life::Live;
+            open.aging = Duration::ZERO;
+            acts.push(Act::Life {
+                surface: surface.clone(),
+                life: Life::Live,
+            });
         }
-        vec![
-            Act::Update { surface, data },
-            Act::Report(ClientBody::WidgetDone { id }),
-        ]
+        acts.push(Act::Update { surface, data });
+        acts.push(Act::Report(ClientBody::WidgetDone { id }));
+        acts
+    }
+
+    /// Dims every exhibit the turn that just ended never mentioned.
+    ///
+    /// The turn boundary is what stands in for "the conversation moved on".
+    /// Everything Scufris opened or updated while the turn ran is the turn's
+    /// subject and stays bright; everything else is from a subject that is over.
+    fn turn_ended(&mut self) -> Vec<Act> {
+        let mut acts = Vec::new();
+        for surface in self.surfaces.values_mut() {
+            let dimming = surface.transient()
+                && !surface.cited
+                && !surface.hovered
+                && surface.life == Life::Live;
+            surface.cited = false;
+            if !dimming {
+                continue;
+            }
+            surface.life = Life::Dim;
+            surface.aging = Duration::ZERO;
+            acts.push(Act::Life {
+                surface: surface.id.clone(),
+                life: Life::Dim,
+            });
+        }
+        acts
+    }
+
+    /// Ages the dim exhibits, and retires the ones whose grace ran out.
+    fn sweep(&mut self, elapsed: Duration) -> Vec<Act> {
+        if self.frozen {
+            return Vec::new();
+        }
+        let mut spent = Vec::new();
+        for surface in self.surfaces.values_mut() {
+            if surface.life != Life::Dim || surface.hovered {
+                continue;
+            }
+            surface.aging = surface.aging.saturating_add(elapsed);
+            if surface.aging >= GRACE {
+                spent.push(surface.id.clone());
+            }
+        }
+        let mut acts = Vec::new();
+        for surface in spent {
+            // Silently. An exhibit needs no closing - that is what makes it an
+            // exhibit - and a line in the transcript for every panel that went
+            // quiet would turn the thing that needs no closing into the thing
+            // that reports itself.
+            acts.extend(self.retire(&surface));
+        }
+        acts
+    }
+
+    /// Records the pointer arriving over one surface, or leaving it.
+    fn hover(&mut self, surface: SurfaceId, over: bool) -> Vec<Act> {
+        let Some(open) = self.surfaces.get_mut(&surface) else {
+            return Vec::new();
+        };
+        open.hovered = over;
+        if !over || open.life != Life::Dim {
+            return Vec::new();
+        }
+        // Somebody is reading it, which says the same thing a citation says:
+        // this panel is current again.
+        open.life = Life::Live;
+        open.aging = Duration::ZERO;
+        vec![Act::Life {
+            surface,
+            life: Life::Live,
+        }]
     }
 
     fn close(&mut self, id: String, surface: SurfaceId) -> Vec<Act> {
@@ -339,14 +494,14 @@ impl Runtime {
     }
 
     fn clear(&mut self, id: String) -> Vec<Act> {
-        let owned: Vec<SurfaceId> = self
+        let ours: Vec<SurfaceId> = self
             .surfaces
             .values()
-            .filter(|surface| !surface.owned)
+            .filter(|surface| surface.transient())
             .map(|surface| surface.id.clone())
             .collect();
         let mut acts = Vec::new();
-        for surface in owned {
+        for surface in ours {
             acts.extend(self.retire(&surface));
         }
         acts.push(Act::Report(ClientBody::WidgetDone { id }));
@@ -379,6 +534,11 @@ impl Runtime {
         open.owned = !open.owned;
         let exhibit = open.posture == Posture::Exhibit;
         let life = if open.owned { Life::Pinned } else { Life::Live };
+        open.life = life;
+        // Either direction starts the minute over. A pinned surface has no
+        // clock at all, and one handed back is what the person just chose to
+        // look at.
+        open.aging = Duration::ZERO;
         let mut acts = vec![Act::Life {
             surface: surface.clone(),
             life,
@@ -823,6 +983,197 @@ height = 90
             runtime.surface(&older).map(|s| s.slot),
             Some(Slot::Shelf(1))
         );
+    }
+
+    /// Ends a turn, then lets `elapsed` pass in one sweep.
+    fn wait(runtime: &mut Runtime, catalog: &Catalog, elapsed: Duration) -> Vec<Act> {
+        let mut acts = runtime.apply(catalog, Cmd::TurnEnded);
+        acts.extend(runtime.apply(catalog, Cmd::Sweep { elapsed }));
+        acts
+    }
+
+    #[test]
+    fn an_exhibit_the_turn_never_mentioned_dims_and_retires_when_its_grace_runs_out() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let surface = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
+
+        // The turn that opened it is the turn it belongs to, so it survives
+        // that one bright. It is the turn after that says the subject changed.
+        assert!(runtime.apply(&catalog, Cmd::TurnEnded).is_empty());
+        assert_eq!(runtime.surface(&surface).map(|s| s.life), Some(Life::Live));
+
+        let acts = runtime.apply(&catalog, Cmd::TurnEnded);
+        assert_eq!(
+            acts,
+            vec![Act::Life {
+                surface: surface.clone(),
+                life: Life::Dim
+            }]
+        );
+
+        assert!(
+            runtime
+                .apply(&catalog, Cmd::Sweep { elapsed: GRACE / 2 })
+                .is_empty()
+        );
+        assert!(runtime.surface(&surface).is_some());
+        let acts = runtime.apply(&catalog, Cmd::Sweep { elapsed: GRACE / 2 });
+        // Silently: the daemon is told nothing, because an exhibit needs no
+        // closing and a report for every one of them would be a transcript full
+        // of panels going quiet.
+        assert_eq!(
+            acts,
+            vec![Act::Retire {
+                surface: surface.clone()
+            }]
+        );
+        assert!(runtime.surface(&surface).is_none());
+    }
+
+    #[test]
+    fn an_update_brings_a_dim_exhibit_back_without_moving_it() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let older = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
+        open(&mut runtime, &catalog, "note", Posture::Exhibit);
+        wait(&mut runtime, &catalog, Duration::ZERO);
+        wait(&mut runtime, &catalog, GRACE / 2);
+        assert_eq!(runtime.surface(&older).map(|s| s.life), Some(Life::Dim));
+
+        let acts = runtime.apply(
+            &catalog,
+            Cmd::Update {
+                id: "w-9".into(),
+                surface: older.clone(),
+                data: json!({ "text": "still here" }),
+            },
+        );
+        assert_eq!(
+            acts.first(),
+            Some(&Act::Life {
+                surface: older.clone(),
+                life: Life::Live
+            }),
+            "the chrome brightens before the data lands"
+        );
+        assert!(!acts.iter().any(|act| matches!(act, Act::Move { .. })));
+        assert_eq!(
+            runtime.surface(&older).map(|s| s.slot),
+            Some(Slot::Shelf(1))
+        );
+        // The minute starts over, so the half of the grace it had already spent
+        // does not take it away.
+        wait(&mut runtime, &catalog, GRACE / 2);
+        assert!(runtime.surface(&older).is_some());
+    }
+
+    #[test]
+    fn a_panel_under_the_pointer_neither_dims_nor_ages() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let read = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
+        runtime.apply(
+            &catalog,
+            Cmd::Hover {
+                surface: read.clone(),
+                over: true,
+            },
+        );
+        // Two turns and a full grace with the pointer on it: the person is
+        // reading, and reading is not the conversation moving on.
+        wait(&mut runtime, &catalog, GRACE);
+        wait(&mut runtime, &catalog, GRACE);
+        assert_eq!(runtime.surface(&read).map(|s| s.life), Some(Life::Live));
+
+        runtime.apply(
+            &catalog,
+            Cmd::Hover {
+                surface: read.clone(),
+                over: false,
+            },
+        );
+        wait(&mut runtime, &catalog, GRACE);
+        assert!(runtime.surface(&read).is_none());
+    }
+
+    #[test]
+    fn the_pointer_arriving_on_a_dim_panel_brings_it_back() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let surface = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
+        wait(&mut runtime, &catalog, Duration::ZERO);
+        wait(&mut runtime, &catalog, Duration::ZERO);
+        assert_eq!(runtime.surface(&surface).map(|s| s.life), Some(Life::Dim));
+
+        let acts = runtime.apply(
+            &catalog,
+            Cmd::Hover {
+                surface: surface.clone(),
+                over: true,
+            },
+        );
+        assert_eq!(
+            acts,
+            vec![Act::Life {
+                surface,
+                life: Life::Live
+            }]
+        );
+    }
+
+    #[test]
+    fn a_frozen_clock_spends_no_grace() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let surface = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
+        wait(&mut runtime, &catalog, Duration::ZERO);
+        runtime.apply(&catalog, Cmd::TurnEnded);
+
+        runtime.apply(&catalog, Cmd::Freeze { stopped: true });
+        // A microphone that is open, or Scufris talking: the person is not
+        // reading the screen, so this is not time the panel has been up.
+        assert!(
+            runtime
+                .apply(&catalog, Cmd::Sweep { elapsed: GRACE * 4 })
+                .is_empty()
+        );
+        assert!(runtime.surface(&surface).is_some());
+
+        runtime.apply(&catalog, Cmd::Freeze { stopped: false });
+        assert!(
+            !runtime
+                .apply(&catalog, Cmd::Sweep { elapsed: GRACE })
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn what_the_person_keeps_never_ages_out_from_under_them() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let pinned = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
+        let instrument = opened(&open(&mut runtime, &catalog, "clock", Posture::Instrument));
+        runtime.apply(
+            &catalog,
+            Cmd::Pin {
+                surface: pinned.clone(),
+            },
+        );
+
+        for _ in 0..3 {
+            wait(&mut runtime, &catalog, GRACE);
+        }
+        assert_eq!(runtime.surface(&pinned).map(|s| s.life), Some(Life::Pinned));
+        // An instrument is a panel the person asked to keep. The shelf's clock
+        // was never about it, and neither is the clear verb.
+        assert_eq!(
+            runtime.surface(&instrument).map(|s| s.life),
+            Some(Life::Live)
+        );
+        runtime.apply(&catalog, Cmd::Clear { id: "w-9".into() });
+        assert!(runtime.surface(&pinned).is_some());
+        assert!(runtime.surface(&instrument).is_some());
     }
 
     const MONITOR: Monitor = Monitor {

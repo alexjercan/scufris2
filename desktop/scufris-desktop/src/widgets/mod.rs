@@ -14,9 +14,13 @@ pub mod pool;
 pub mod runtime;
 pub mod windows;
 
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::{
+    sync::{Arc, Mutex, MutexGuard, OnceLock, Weak},
+    thread,
+    time::{Duration, Instant},
+};
 
-use scufris_control::{ClientBody, Posture};
+use scufris_control::{AssistantState, ClientBody, Posture};
 use serde_json::Value;
 use tauri::{AppHandle, Manager, ipc::Channel};
 use tracing::{debug, warn};
@@ -36,12 +40,23 @@ use crate::{
 // companion that is missing one.
 include!(concat!(env!("OUT_DIR"), "/widgets.rs"));
 
+/// How often the aging clock is asked how much time has gone by.
+///
+/// A second is far finer than the grace it measures, and a widget retiring one
+/// second late is a widget nobody saw retire late. What the cadence must not be
+/// is finer: this wakes a thread forever, and the pill's own idle cost is the
+/// budget it has to stay inside.
+const SWEEP: Duration = Duration::from_secs(1);
+
 /// The runtime, its windows, and the way back to the daemon.
 pub struct Widgets {
     catalog: Catalog,
     pool: Pool,
     runtime: Mutex<Runtime>,
     link: OnceLock<Arc<DaemonLink>>,
+    /// The last assistant state the daemon reported. The turn boundary is read
+    /// off the change rather than off a message of its own.
+    assistant: Mutex<AssistantState>,
     app: AppHandle,
 }
 
@@ -56,10 +71,87 @@ impl Widgets {
             pool: Pool::new(app.clone()),
             runtime: Mutex::new(Runtime::new()),
             link: OnceLock::new(),
+            assistant: Mutex::new(AssistantState::Idle),
             app,
         });
         widgets.pool.warm();
+        widgets.age();
         Ok(widgets)
+    }
+
+    /// Starts the clock that hands the runtime the time that has gone by.
+    ///
+    /// The runtime counts elapsed time rather than reading a clock, which is
+    /// what lets the whole grace be a unit test and what lets a stopped clock
+    /// be a field rather than an arithmetic correction. Somebody has to do the
+    /// reading, and it is this thread. It holds a weak handle so that it ends
+    /// with the runtime rather than keeping it alive.
+    ///
+    /// The sweep itself runs on the event loop rather than here. The runtime
+    /// decides under its own lock and the host carries the decisions out after
+    /// releasing it, so a thread that performed its own acts could interleave a
+    /// shelf reflow with a widget opening. The chrome ticks already reach the
+    /// runtime from the event loop; the clock joins them rather than becoming a
+    /// third place that window moves come from.
+    fn age(self: &Arc<Self>) {
+        let waking = Arc::downgrade(self);
+        thread::spawn(move || {
+            let mut last = Instant::now();
+            loop {
+                thread::sleep(SWEEP);
+                let now = Instant::now();
+                // Measured rather than assumed: a machine that was asleep, or
+                // busy, did not spend one second per wake-up, and the grace is
+                // a promise about time rather than about wake-ups.
+                let elapsed = now.duration_since(last);
+                last = now;
+                let Some(widgets) = Weak::upgrade(&waking) else {
+                    return;
+                };
+                let clock = Arc::clone(&widgets);
+                if let Err(error) = widgets
+                    .app
+                    .run_on_main_thread(move || clock.decide(Cmd::Sweep { elapsed }))
+                {
+                    debug!("the widget clock could not reach the event loop: {error}");
+                }
+            }
+        });
+    }
+
+    /// Records the assistant state the daemon reported.
+    ///
+    /// Two things are read off it. Falling back to idle after working or
+    /// speaking is one turn of the conversation ending, which is what tells an
+    /// exhibit the subject has moved on: it costs no message of its own, and
+    /// the daemon already sends this one. And time spent speaking is time the
+    /// person is listening rather than reading, so the grace does not run.
+    pub fn assistant(&self, state: AssistantState) {
+        let previous = {
+            let mut held = self
+                .assistant
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let previous = *held;
+            *held = state;
+            previous
+        };
+        if state == previous {
+            return;
+        }
+        self.decide(Cmd::Freeze {
+            stopped: state == AssistantState::Speaking,
+        });
+        let turned = matches!(previous, AssistantState::Working | AssistantState::Speaking)
+            && state == AssistantState::Idle;
+        if turned {
+            self.decide(Cmd::TurnEnded);
+        }
+    }
+
+    /// Records the pointer arriving over one surface, or leaving it.
+    pub fn hover(&self, surface: String, over: bool) {
+        self.decide(Cmd::Hover { surface, over });
     }
 
     /// Gives the runtime the link its answers travel on.

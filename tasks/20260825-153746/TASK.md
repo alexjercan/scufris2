@@ -35,3 +35,8 @@ cancel|accept; mode "default"`. Bare keys are the review verdict;
 
 Decided in `tasks/20260822-132001/RESEARCH.md` section 3 and the design
 review decisions.
+
+This is also what settles the focus contest recorded in task
+`20260826-143950`: today the pill takes the keyboard back only when no
+window holds it, and a window that takes it and stays keeps it. Keys
+that never need focus remove the contest instead of deciding it.

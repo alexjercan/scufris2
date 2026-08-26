@@ -1,6 +1,6 @@
 # A window that takes focus and dies mid-review strands the keyboard
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 80
 - TAGS: desktop, bug
 
@@ -29,9 +29,9 @@ until the next raise, which needs a decision, which needs a key.
   there; that stays the existing behaviour, where the next decision
   raises the pill again.
 - The recovery must not poison the handoff. `_NET_ACTIVE_WINDOW` names
-  the transcript box while the box is up, so a capture on the recovery
-  path would record a window of the companion's own as the one to give
-  the desktop back to.
+  a window of the companion's own while the box is up - measured as the
+  pill, see below - so a capture on the recovery path would record the
+  companion as the window to give the desktop back to.
 
 ## Diagnosis and fix (2026-08-26)
 
@@ -118,5 +118,24 @@ Checks: `cargo fmt --check`, `cargo clippy --all-targets`, `cargo test
 `build.rs` tsc, `npm run typecheck`, `npm run format:check`,
 `TMPDIR=/tmp npm test` (126).
 
-Unverified: Alex's live rerun on his own desktop, which is the
-sign-off.
+Alex confirmed it live (2026-08-26): a window that takes the keyboard
+and dies gives it back to the box on its own - closing the terminal
+that had ended up with his keys put them straight back in the
+transcript field.
+
+## Where the boundary sits, and why it stays there
+
+Reviewed with Alex on the same day, after he hit the other side of it:
+a window that takes the keyboard and stays keeps it, and Super+D is
+the way back to the box. He was offered a wider rule - the box owning
+the keyboard for as long as it is up, taking it back from any window
+inside about half a second - and kept the narrow one: a keyboard
+nobody holds is taken from nobody, and anything more is the pill
+fighting the person for their own desktop.
+
+The wider question is not answered here at all. Task `20260825-153746`
+makes the pill's keys work without focus, through an i3 binding mode
+and a `no_focus` rule, which removes the contest rather than deciding
+it. Real use before then is what would justify revisiting this sooner.
+
+Closed.

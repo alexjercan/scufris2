@@ -148,3 +148,57 @@ Live acceptance of the increment 2 verification line - "CPU is at 90
 percent" spawning the live graph, dimming on topic change, reviving on
 citation, pinning into an instrument, and a killed backend showing the
 red accent - is Alex's, on the desktop.
+
+## Increment 3, two of three parts landed (2026-08-26)
+
+Two commits:
+
+1. `e8e3c9e` Let a widget act on its backend, and add the timer
+2. `66039f4` Let the person put a widget up, and take widgets from
+   elsewhere
+
+What landed: `ctx.send` actions onto the backend's standard input, the
+`timer` widget and backend on it, the `shared = false` manifest key, the
+tray summon submenu, and `SCUFRIS_WIDGET_PATH` external roots.
+
+Deviations from the plan, all deliberate:
+
+- `shared = false` is a new manifest key the plan did not have. Keying a
+  backend on its identifier and its payload alone would make two
+  five-minute timers one timer counted twice, which the plan's "every
+  timer carries its duration and start" does not prevent.
+- `Cmd::Open` carries an optional correlation identifier rather than a
+  required one. A summon from the tray has nobody waiting on an answer,
+  and a `widget_opened` for a request the daemon never made is a reply
+  to a question nobody asked.
+- The tray submenu offers the widgets with a backend rather than every
+  installed widget. A summon carries no payload, so the widget has to
+  fill itself; `note` would summon as an empty panel.
+- External roots are additive and never override, and a widget on the
+  search path that will not install is reported and passed over rather
+  than stopping the companion. A shipped widget that is wrong is a build
+  failure the developer sees; a search-path widget is a project on the
+  person's machine that may be half-installed, and a login session with
+  no companion in it is the worse outcome.
+- Both backends redirect standard output to `/dev/null` when the pipe
+  breaks. Catching the error is not enough on its own: the interpreter
+  flushes again on the way out and complains on standard error, which
+  the companion reads and logs.
+
+Checks: `cargo test -p scufris-desktop` 214 passed, `cargo clippy
+--all-targets` clean, `cargo fmt --all` applied, `npm run check` (138
+tests, Prettier clean), `nix build .#checks.x86_64-linux.desktop-closure`
+green. The timer backend was exercised standalone for the countdown, the
+done state, pause, add, and reset.
+
+### The `tasks` widget is blocked on a design question
+
+Design question 3 says typing a task by hand must work without going
+through Scufris. The widget window law is `.focusable(false)`, and the
+design's own posture table says an instrument is "clickable; still never
+steals" focus. An unfocusable window cannot receive keystrokes, so there
+is nowhere for a typed character to land.
+
+Raised with Alex rather than resolved here. The natural home for it is
+the i3 binding mode task `20260825-153746`, which is the task about
+keyboard routing.

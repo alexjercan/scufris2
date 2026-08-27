@@ -18,6 +18,7 @@ pub const ICON_SIZE: u32 = 32;
 pub const TRAY_ID: &str = "scufris-desktop";
 
 /// Menu item identifiers the tray reports.
+pub const MENU_HUD: &str = "hud";
 pub const MENU_CHAT: &str = "chat";
 pub const MENU_VOICE: &str = "voice";
 pub const MENU_STATUS: &str = "status";
@@ -156,12 +157,17 @@ pub fn build_menu(
     MenuBuilder::new(app)
         .text(MENU_STATUS, status)
         .separator()
+        .text(MENU_HUD, "Show conversation")
+        .text(MENU_VOICE, "Start voice input")
+        // Not a fallback for the window above it. The terminal runs a whole Pi
+        // session - tools, thinking, the lot - and the conversation window will
+        // not be one for a long time. They are two tools, and this one needs a
+        // terminal command configured before there is anything to open.
         .item(
-            &tauri::menu::MenuItemBuilder::with_id(MENU_CHAT, "Open chat")
+            &tauri::menu::MenuItemBuilder::with_id(MENU_CHAT, "Open in terminal")
                 .enabled(chat_available)
                 .build(app)?,
         )
-        .text(MENU_VOICE, "Start voice input")
         .item(
             &tauri::menu::MenuItemBuilder::with_id(MENU_RESTART, "Restart backend")
                 .enabled(restart_available)
@@ -327,6 +333,7 @@ mod tests {
     fn a_summon_item_names_its_widget_and_nothing_else_does() {
         assert_eq!(summoned(&format!("{MENU_SUMMON}timer")), Some("timer"));
         for id in [
+            MENU_HUD,
             MENU_CHAT,
             MENU_VOICE,
             MENU_STATUS,

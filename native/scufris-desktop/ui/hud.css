@@ -1,0 +1,232 @@
+/* The conversation window: what was said, and a line to say more on.
+ *
+ * The same gruber grammar as the pill, the transcript box, and the widget
+ * panels - near-black ground, one hairline, quartz for the person and wisteria
+ * for Scufris - and the same square, flat chrome. Nothing here is rounded and
+ * nothing is shaded: this window sits in a tiling desktop, and a card with soft
+ * corners floating over i3 reads as somebody else's application.
+ *
+ * The window is exactly what this file lays out. Bare X11 without a compositor
+ * discards per-pixel alpha, so a margin around the frame would render black
+ * anyway; painting the window in the frame's own colour is what keeps a black
+ * rectangle from arriving first. src/hud.rs pins it to 760 by 560. */
+
+:root {
+  --bg: #101010;
+  --line: #33302e;
+  --fg: #e4e4ef;
+  --fg-strong: #f4f4ff;
+  --muted: #6c7772;
+  --quartz: #95a99f;
+  --wisteria: #9e95c7;
+  --yellow: #ffdd33;
+  --red: #f43841;
+  --mono:
+    Iosevka, "Iosevka Nerd Font", "Iosevka Term", "JetBrains Mono",
+    ui-monospace, monospace;
+  /* The gutter the speaker labels sit in. One width for both of them, so the
+   * words start on the same column whoever said them and the eye reads a
+   * single left edge down the whole conversation. */
+  --gutter: 74px;
+  --step: 14px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--fg);
+  user-select: none;
+}
+
+.hud {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  border: 1px solid var(--quartz);
+}
+
+/* ---------- the chrome strip ---------- */
+
+.crown {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--step);
+  padding: 9px var(--step);
+  border-bottom: 1px solid var(--line);
+}
+
+.mark {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--quartz);
+}
+
+/* What the window is waiting for, and what went wrong when something did. One
+ * line, in the corner, because it is never the thing the person came to read. */
+.notice {
+  overflow: hidden;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+
+.notice[data-tone="sending"] {
+  color: var(--quartz);
+}
+
+.notice[data-tone="trouble"] {
+  color: var(--red);
+}
+
+/* ---------- the conversation ---------- */
+
+.lines {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  padding: var(--step);
+  overflow-y: auto;
+  list-style: none;
+  /* The words are the one thing in this window worth copying out of it. */
+  user-select: text;
+}
+
+/* A short conversation hangs above the field rather than floating at the top
+ * of an empty window, the way a terminal does: the newest line is always the
+ * one nearest the place the next one is typed.
+ *
+ * On the first child rather than justify-content, which pushes the overflow off
+ * the top of the scroller and out of reach once the conversation is longer than
+ * the window. An automatic margin collapses to nothing the moment there is no
+ * spare room, which is exactly when the anchoring has to stop. */
+.line:first-child {
+  margin-top: auto;
+}
+
+/* No scrollbar furniture. The window is 760 wide and every pixel of it is the
+ * measure the prose is set to; a gutter of chrome down the side would take
+ * from that and say nothing the position of the text does not. */
+.lines::-webkit-scrollbar {
+  width: 0;
+}
+
+.line {
+  display: flex;
+  gap: var(--step);
+  align-items: baseline;
+}
+
+.who {
+  flex: 0 0 var(--gutter);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: right;
+  /* The label is a marker rather than a word to read, so it stays out of the
+   * way of the line it marks. */
+  color: var(--muted);
+}
+
+.line[data-speaker="user"] .who {
+  color: var(--quartz);
+}
+
+.line[data-speaker="assistant"] .who {
+  color: var(--wisteria);
+}
+
+.what {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* A URL or a path is one word and longer than the window. Breaking inside it
+   * is better than a line that runs off the edge. */
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* Scufris is what the person opened this window to read, so it is the brighter
+ * of the two. Their own words are there for the context they give. */
+.line[data-speaker="assistant"] .what {
+  color: var(--fg-strong);
+}
+
+.line[data-speaker="user"] .what {
+  color: var(--fg);
+}
+
+/* An empty conversation says so rather than showing an empty box: a window with
+ * nothing in it looks broken, and this one is often opened before anything has
+ * been said. */
+.lines:empty::after {
+  content: "nothing said yet";
+  align-self: center;
+  margin: auto;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ---------- the typing line ---------- */
+
+.ask {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 11px var(--step);
+  border-top: 1px solid var(--line);
+}
+
+.caret {
+  flex: 0 0 auto;
+  color: var(--quartz);
+}
+
+/* An ordinary field, stripped of everything that would make it look like one.
+ * The window is the chrome; the caret is the only mark that has to read as a
+ * control. */
+.words {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 84px;
+  border: none;
+  padding: 0;
+  resize: none;
+  background: transparent;
+  color: var(--fg-strong);
+  font: inherit;
+  caret-color: var(--yellow);
+  outline: none;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.words::-webkit-scrollbar {
+  width: 0;
+}
+
+::selection {
+  background: rgba(149, 169, 159, 0.26);
+}

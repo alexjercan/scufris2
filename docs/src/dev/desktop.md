@@ -8,10 +8,12 @@ flake package, so consumers who never enable it never build Tauri.
 
 scufris-desktop owns:
 
-- Activation, the pill window, the textbox window, and the tray.
+- Activation, the pill window, the textbox window, the conversation window,
+  and the tray.
 - Microphone recording and cancellation.
 - Local transcription against the configured endpoint.
 - Transcript editing, in the textbox.
+- Drawing the conversation, in the conversation window, and typing into it.
 - Backend health presentation and bounded restart requests.
 - Focus restoration.
 
@@ -48,7 +50,13 @@ does not stop the conversation.
   being edited stays where it is - and the pill goes on reporting `working`
   until the service says the run ended, because the service is what knows.
   With no run to end it does nothing.
-- The pill is a resident HUD. The first activation brings it up and it then
+- `scufris-ctl hud` puts the conversation window up, and puts it away again.
+  It draws the transcript stream the service pushes to every frontend and
+  types back on the same socket. `Enter` sends, `Shift+Enter` is a newline,
+  and `Escape` closes it - ordinary keys in a focused window, the way the
+  textbox's are. It has no accelerator of its own; see the command socket
+  below for why.
+- The pill is resident. The first activation brings it up and it then
   stays on screen, resting between interactions and showing what the
   assistant is doing - idle, working, speaking, attention, disconnected.
   `Super+Escape` is the only thing that puts it away, and the next activation
@@ -94,18 +102,30 @@ each way, one verb per connection, and the connection closes:
 
 ```
 {"v":1,"verb":"open"}  ->  {"v":1,"answer":"taken"}
-                       ->  {"v":1,"answer":"refused","detail":"..."}
+{"v":1,"verb":"hud"}   ->  {"v":1,"answer":"refused","detail":"..."}
 ```
 
-`scufris-ctl open` is the client. It is its own flake package, installed by
+`scufris-ctl open` and `scufris-ctl hud` are the clients. They are their own
+flake package, installed by
 whichever half of Scufris is enabled, because a window manager binding runs it
 by name and a terminal reaches the background service with it. Its exit status
 is what a binding can branch on: 0 the verb reached the pill, 1 it did not, 2
 the run was wrong. See [Background service](service.md) for its other verbs.
 
 `open` goes straight to the state machine as `Activate`, which is the whole of
-the activation key: it starts a take, and it stops one that is running. The
-socket is the person's alone, in their own runtime directory under a private
+the activation key: it starts a take, and it stops one that is running. `hud`
+puts the conversation window up if it is down and down if it is up, and it is
+reported rather than assumed: the caller can see whether a window came up, so a
+window that refused is worth saying out loud in their terminal.
+
+Both are windows and neither carries words. Everything that carries words goes
+to the service socket, where `send` and `abort` already live.
+
+This socket is also why the conversation window has no accelerator. The
+companion grabs the activation key for the whole session already, and every
+further grab is a key no other program on the desktop can use again; a binding
+the person writes in their own window manager configuration costs it nothing.
+The socket is the person's alone, in their own runtime directory under a private
 one; anything that can open it can already act as them. A session with no
 runtime directory gets no command socket and starts anyway.
 
@@ -313,6 +333,49 @@ destroy it silently.
 On startup the companion loads that file and reopens the pill on the recovered
 transcript, keeping its original identifier. Whether the previous process
 delivered it is unknowable, so the recovered text is frozen - see below.
+
+## The conversation window
+
+`native/scufris-desktop/src/conversation.rs` holds every decision the window
+makes and `src/hud.rs` runs them, the way `state.rs` and `pill.rs` split the
+pill. It is a sibling of the pill's state machine rather than a phase of it:
+the pill machine is about one take and ends with it, and the conversation
+outlives every take. Typing here never raises the textbox, never ends a
+recording, and never moves the pill off whatever it is showing.
+
+Two rules follow, and they are the whole of the design.
+
+**Two senders, one verb.** The textbox sends a transcription and this window
+sends a typed line; both are a `submit` on the same socket, and both are the
+same message to the service. They share the process prefix, because that is
+what makes an identifier this companion's, and they cannot share the counter:
+the service suppresses duplicates by identifier, so a `-h` goes in the HUD's.
+
+**No durable copy.** The pill persists an accepted transcript because spoken
+words cannot be typed again, and this window persists nothing: the line is
+still in the field until the service takes it. Nothing is appended locally on
+the way out either. The line comes back as a transcript entry, which is what
+puts it on screen - so what the window shows is the conversation rather than
+this process's hopes about it.
+
+The window holds a copy of the service's own 200-entry transcript ring and
+never a longer history. A frontend that connects is replayed the whole ring, so
+a reconnection would otherwise show every line twice; the window empties itself
+on `Connected` and lets the replay refill it. The two then hold exactly the
+same lines. A line typed in a terminal with `scufris-ctl send` appears here the
+same way one typed into the window does, because both arrive as the same push.
+
+One line is in flight at a time. A second `Enter` on an unanswered line would
+put two questions in the conversation from one intention, and the words are
+still in the field either way. A disconnection gives up on whatever is in
+flight: no reconnection brings that answer, and a window that kept waiting
+would refuse every line after it for the rest of the session.
+
+What it draws is text. Not markdown, not tool calls, not thinking - the
+service's transcript is what was said, and the session file and
+`scufris-ctl debug` are where the rest of a run lives. The terminal is not a
+fallback for this window; it is a whole Pi session, and this will not be one
+for a long time.
 
 ## One identifier per transcript
 

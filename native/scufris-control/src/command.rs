@@ -5,11 +5,17 @@
 //! what was said. This one is the desktop: a key binding, a script, or a
 //! terminal asking the companion to listen.
 //!
-//! One verb, because the pill has no keys of its own. The textbox holds the
-//! keyboard while there are words in it, so Enter and Escape are ordinary keys
-//! in a focused window and need nothing from outside. What is left is the way
-//! in: a window manager binding that opens the pill and starts the microphone
-//! without the companion having to grab the key itself.
+//! Two verbs, and both of them are a way in. The companion's windows hold their
+//! own keys once they are up - the textbox and the HUD are focused windows, so
+//! Enter and Escape are ordinary keys in them and need nothing from outside.
+//! What is left is getting them up: a window manager binding that opens the
+//! pill and starts the microphone, or one that shows the conversation, without
+//! the companion having to grab a key for either.
+//!
+//! Grabbing is what this socket exists to avoid. The companion holds one
+//! accelerator for the whole session already; every further one is a key no
+//! other program on the desktop can ever use again, and a binding the person
+//! writes in their own window manager configuration costs it nothing.
 //!
 //! One LF-terminated JSON line each way, bounded the way the service protocol
 //! is. The answer is written before the connection closes, so a caller that
@@ -58,14 +64,21 @@ impl Command {
 
 /// What the desktop can ask the companion to do.
 ///
-/// One thing, and nothing else. This socket is the activation key arriving
-/// from a window manager rather than from a grab; it is not a second way to
-/// drive the companion.
+/// Two windows, and nothing else. These are the companion's keys arriving from
+/// a window manager rather than from a grab; this is not a second way to drive
+/// the conversation. Everything that carries words goes to the service socket,
+/// where `send` and `abort` already live.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "verb", rename_all = "snake_case")]
 pub enum Verb {
     /// Bring the pill up and start recording. The activation hotkey.
     Open,
+    /// Show the conversation, or put it away if it is already showing.
+    ///
+    /// One verb rather than a show and a hide, because what sends it is one key
+    /// binding: a person who pressed it to read the last answer presses it again
+    /// to go back to what they were doing.
+    Hud,
 }
 
 impl Verb {
@@ -73,6 +86,7 @@ impl Verb {
     pub fn named(word: &str) -> Option<Self> {
         match word {
             "open" => Some(Self::Open),
+            "hud" => Some(Self::Hud),
             _ => None,
         }
     }
@@ -81,6 +95,7 @@ impl Verb {
     pub fn name(self) -> &'static str {
         match self {
             Self::Open => "open",
+            Self::Hud => "hud",
         }
     }
 }
@@ -128,13 +143,17 @@ mod tests {
 
     #[test]
     fn every_verb_survives_the_round_trip_by_the_name_it_is_typed_with() {
-        let word = "open";
-        let verb = Verb::named(word).expect("the word names a verb");
-        assert_eq!(verb.name(), word);
-        let line = serde_json::to_string(&Command::new(verb)).expect("it encodes");
-        let read: Command = serde_json::from_str(&line).expect("it decodes");
-        assert_eq!(read, Command::new(verb));
-        assert!(line.contains(&format!("\"verb\":\"{word}\"")), "{line}");
+        for word in ["open", "hud"] {
+            let verb = Verb::named(word).expect("the word names a verb");
+            assert_eq!(verb.name(), word);
+            let line = serde_json::to_string(&Command::new(verb)).expect("it encodes");
+            let read: Command = serde_json::from_str(&line).expect("it decodes");
+            assert_eq!(read, Command::new(verb));
+            assert!(line.contains(&format!("\"verb\":\"{word}\"")), "{line}");
+        }
+        // Two verbs and two windows. A binding that sends one must never get
+        // the other: the pill opens the microphone and the HUD does not.
+        assert_ne!(Verb::Open, Verb::Hud);
 
         assert_eq!(Verb::named("quit"), None);
         // The two the textbox took over. A caller that still types them is

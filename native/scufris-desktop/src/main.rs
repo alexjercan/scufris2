@@ -11,8 +11,10 @@ mod audio;
 mod blob;
 mod command;
 mod config;
+mod conversation;
 mod display;
 mod focus;
+mod hud;
 mod keys;
 mod link;
 mod logging;
@@ -45,6 +47,7 @@ use app::{
 use audio::{CpalRecorder, Recorder};
 use config::Config;
 use focus::FocusTracker;
+use hud::Hud;
 use link::{LinkEvent, ServiceLink};
 use pending::{FilePendingStore, PendingStore};
 use scufris_control::command::{Outcome, Verb};
@@ -346,12 +349,22 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             widget_shell_ready,
             widget_tick,
             widget_hover,
-            widget_send
+            widget_send,
+            hud_ready,
+            hud_submit,
+            hud_close
         ])
         .setup(move |tauri| {
             let handle = tauri.handle().clone();
             pill::ensure(&handle)?;
             textbox::ensure(&handle)?;
+
+            // One prefix for the whole process, shared by both senders. It is
+            // what makes an identifier this companion's rather than another's;
+            // keeping the two counters apart is the HUD's own job.
+            let prefix = App::process_prefix();
+            let conversation = Hud::start(handle.clone(), prefix.clone())?;
+            tauri.manage(Arc::clone(&conversation));
 
             // Before the menu, because the menu offers what is installed: the
             // catalog is what the summon submenu is built from.
@@ -373,6 +386,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                 move |app, id| {
                     let runtime = app.state::<Arc<App>>().inner().clone();
                     match id {
+                        tray::MENU_HUD => show_conversation(app),
                         tray::MENU_CHAT => runtime.open_chat(),
                         // Off this thread. An activation waits for the pill to
                         // be on screen before the microphone opens, and this is
@@ -407,7 +421,11 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                         }
                     }
                 },
-                |app| app.state::<Arc<App>>().open_chat(),
+                // A left click on the tray shows the conversation. It is the
+                // one thing here that always works: the window ships with the
+                // companion, where the terminal command is something the person
+                // has to have configured.
+                show_conversation,
             )?;
 
             // Managed as well as held by the runtime: the accelerator handler
@@ -434,7 +452,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                     endpoint: config.stt_endpoint.clone(),
                 }) as Arc<dyn Transcriber>,
                 executor: Arc::new(ThreadExecutor) as Arc<dyn Executor>,
-                prefix: App::process_prefix(),
+                prefix,
                 chat_command: config.chat_command.clone(),
                 restart_command: config.restart_command.clone(),
                 ack_timeout: ACK_TIMEOUT,
@@ -455,6 +473,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             let observer = Arc::clone(&runtime);
             let surfaces = Arc::clone(&widgets);
             let voice = Arc::clone(&speaker);
+            let said = Arc::clone(&conversation);
             let link = Arc::new(ServiceLink::start(
                 config.socket.clone(),
                 move |event| match event {
@@ -466,12 +485,37 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                     // becomes of it is the companion's: it owns the speaker,
                     // and a deployment with no synthesiser configured drops it.
                     LinkEvent::Speak(text) => voice.say(text),
+                    // What was said, whoever said it and whatever sent it. The
+                    // pill shows one take at a time and has nothing to do with
+                    // this; the HUD is the surface that shows the conversation.
+                    LinkEvent::Transcript(entry) => said.said(entry),
                     // The catalog goes out once per connection, as soon as
                     // there is a service to relay it: it is what the agent
-                    // types its widget tools from.
+                    // types its widget tools from. The HUD empties itself for
+                    // the same reason: what follows a welcome is the service
+                    // replaying its whole transcript ring.
                     LinkEvent::Connected => {
                         surfaces.announce();
+                        said.reconnected();
                         observer.observe(LinkEvent::Connected);
+                    }
+                    // Both senders are told. Each holds one identifier and
+                    // ignores answers for anything else, so the one this
+                    // answers is the one it reaches.
+                    LinkEvent::Accepted(id) => {
+                        said.accepted(&id);
+                        observer.observe(LinkEvent::Accepted(id));
+                    }
+                    LinkEvent::Refused(id, detail) => {
+                        said.refused(&id, detail.clone());
+                        observer.observe(LinkEvent::Refused(id, detail));
+                    }
+                    // No reconnection brings an answer for a line that was in
+                    // flight, so the HUD gives up on it here rather than
+                    // waiting for one that is never coming.
+                    LinkEvent::Disconnected => {
+                        said.dropped(link::UNAVAILABLE);
+                        observer.observe(LinkEvent::Disconnected);
                     }
                     // Both siblings read this one. The pill shows the state;
                     // the widgets runtime reads the turn boundary off it, which
@@ -480,10 +524,10 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                         observer.observe(LinkEvent::State(state, detail));
                         surfaces.assistant(observer.shown_assistant());
                     }
-                    event => observer.observe(event),
                 },
             ));
             widgets.attach(Arc::clone(&link));
+            conversation.attach(Arc::clone(&link) as Arc<dyn Backend>);
             runtime.set_backend(Arc::clone(&link) as Arc<dyn Backend>);
             tauri.manage(link);
 
@@ -542,6 +586,21 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
         } if widgets::is_shell(&label) => {
             handle.state::<Arc<widgets::Widgets>>().dismissed(label);
         }
+        // An i3 kill on the conversation window means put it away, not destroy
+        // it. The window is built at startup and filled whether it is on screen
+        // or not, and a destroyed one would have to be built and refilled the
+        // next time somebody asked for it. Hidden, it is already what the next
+        // toggle wants.
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::CloseRequested { api, .. },
+            ..
+        } if label == hud::LABEL => {
+            api.prevent_close();
+            if let Err(error) = handle.state::<Arc<Hud>>().hide() {
+                warn!("{error}");
+            }
+        }
         RunEvent::ExitRequested { api, code, .. } if code.is_none() => api.prevent_exit(),
         RunEvent::Exit => {
             info!("stopping");
@@ -568,10 +627,20 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
 /// Where the command socket is, so the exit can take it away again.
 struct CommandSocket(std::path::PathBuf);
 
-/// Carries out the one verb the desktop can send.
+/// Puts the conversation window up, or away if it is already up.
 ///
-/// Straight to the state machine, because it carries no words. Everything that
-/// does carry words is typed into the textbox, which is focused and reads its
+/// The tray calls this from the event loop, so it does its own reporting: there
+/// is no caller in a terminal to hand a refusal to.
+fn show_conversation(app: &AppHandle) {
+    if let Err(error) = app.state::<Arc<Hud>>().toggle() {
+        warn!("{error}");
+    }
+}
+
+/// Carries out one verb the desktop sent.
+///
+/// Both of them are a window. Neither carries words: what carries words is
+/// typed into the textbox or the HUD, which are focused windows that read their
 /// own keys.
 fn perform(handle: &AppHandle, verb: Verb) -> Outcome {
     match verb {
@@ -583,6 +652,13 @@ fn perform(handle: &AppHandle, verb: Verb) -> Outcome {
                 .handle(Event::Activate);
             Outcome::Taken
         }
+        // Reported rather than assumed, unlike an activation: this verb is a
+        // window going up or down and the caller can see whether it did, so a
+        // window that refused is worth saying out loud in their terminal.
+        Verb::Hud => match handle.state::<Arc<Hud>>().toggle() {
+            Ok(()) => Outcome::Taken,
+            Err(detail) => Outcome::Refused { detail },
+        },
     }
 }
 
@@ -627,6 +703,30 @@ fn textbox_cancel(runtime: tauri::State<'_, Arc<App>>) {
 #[tauri::command]
 fn textbox_copy(runtime: tauri::State<'_, Arc<App>>) {
     runtime.inner().clone().handle(Event::Copy);
+}
+
+/// The HUD page saying hello, and asking for everything it has missed.
+///
+/// The window is built at startup and the conversation fills it whether it is
+/// on screen or not, so by the time a person opens it there is usually a
+/// backlog. The page renders what comes back and appends from there.
+#[tauri::command]
+fn hud_ready(conversation: tauri::State<'_, Arc<Hud>>) -> hud::Backlog {
+    conversation.backlog()
+}
+
+/// Enter in the HUD, carrying what is in the field.
+#[tauri::command]
+fn hud_submit(conversation: tauri::State<'_, Arc<Hud>>, text: String) {
+    conversation.typed(text);
+}
+
+/// Escape in the HUD.
+#[tauri::command]
+fn hud_close(conversation: tauri::State<'_, Arc<Hud>>) {
+    if let Err(error) = conversation.hide() {
+        warn!("{error}");
+    }
 }
 
 /// The current sound cue enablement, asked for once when the webview loads.

@@ -151,12 +151,37 @@ Once i3 owns `$mod+d`, the companion cannot also take it, and it says so in the
 log at startup. That is expected here - your binding opens the pill, and it
 opens the same pill. Sway runs the same configuration.
 
+## Reading and typing
+
+The pill says what Scufris is doing. It cannot say what was said, and the
+conversation window can:
+
+```
+bindsym $mod+s exec --no-startup-id "scufris-ctl hud"
+```
+
+That key puts the window up, and puts it away again. It shows what has been
+said, oldest at the top, with a line at the bottom to type on. `Enter` sends,
+`Shift+Enter` starts a new line, and `Escape` closes the window. Everything is
+there whoever said it and however it was sent, so a question you typed in a
+terminal and its answer are in the window too.
+
+It is a window you work in rather than an indicator, so it does not stay over
+what you move to. Press the key again to bring it back. There is no scrollback
+beyond the last two hundred lines, which is what the service itself keeps.
+
+`scufris-ctl debug` in a terminal is the deeper tool and is not a fallback for
+this. It is a whole Pi session - the tools, the thinking, the lot - and this
+window is the last few lines and a place to answer them.
+
 The tray icon carries the state: idle, recording, transcribing, working,
 speaking, needs you, and backend unavailable. Recording always shows the red
-privacy ring. Left-click opens the full chat. Right-click opens a menu that can
-start voice input, show what went wrong, restart an unavailable backend, and
-quit the companion. A backend crash leaves the tray running with an error
-state; a companion crash leaves the conversation running.
+privacy ring. Left-click shows the conversation window - it is the one thing
+in the menu that always works, because it ships with the companion. Right-click
+opens a menu that can show the conversation window, start voice input, open the
+conversation in a terminal, show what went wrong, restart an unavailable
+backend, and quit the companion. A backend crash leaves the tray running with
+an error state; a companion crash leaves the conversation running.
 
 ## Panels on the desktop
 

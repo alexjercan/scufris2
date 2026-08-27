@@ -153,8 +153,11 @@ A configured endpoint turns the bundled server off, because
 already run rather than a second copy of the same model. Setting both
 `stt.endpoint` and `stt.whisper.enable` is an error.
 
-Scufris ships no window manager, so the tray cannot open the full chat by
-itself. Give it the command your desktop session already uses:
+The conversation window ships with the companion and needs no configuration;
+bind `scufris-ctl hud` in your window manager to reach it. The terminal
+session is the deeper tool and is not a fallback for it, and Scufris ships no
+window manager, so the tray cannot open a terminal by itself. Give it the
+command your desktop session already uses:
 
 ```nix
 programs.scufris.desktop.chatCommand = pkgs.writeShellScriptBin "scufris-chat" ''

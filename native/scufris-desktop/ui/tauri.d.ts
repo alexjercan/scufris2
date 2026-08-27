@@ -1,7 +1,7 @@
-// The slice of the Tauri global both pages use. Declared here rather than in
-// either page because pill.ts and textbox.ts are separate classic scripts in
-// one tsc project: a global declaration in one of them is a global
-// declaration for the other, which is confusing to read and easy to break.
+// The slice of the Tauri global the pages use. Declared here rather than in any
+// one of them because pill.ts, textbox.ts, and hud.ts are separate classic
+// scripts in one tsc project: a global declaration in one of them is a global
+// declaration for the others, which is confusing to read and easy to break.
 
 interface TauriCore {
   invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -31,4 +31,22 @@ interface Presentation {
 interface Tick {
   seconds: number;
   level: number;
+}
+
+// The conversation window's shapes. TranscriptEntry is the service's own,
+// relayed by src/hud.rs without being reshaped; the other two are src/hud.rs
+// and src/conversation.rs.
+interface TranscriptEntry {
+  speaker: string;
+  text: string;
+}
+
+interface Notice {
+  sending: boolean;
+  trouble: string;
+}
+
+interface Backlog {
+  lines: TranscriptEntry[];
+  notice: Notice;
 }

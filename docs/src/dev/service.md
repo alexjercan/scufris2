@@ -134,11 +134,14 @@ scufris-ctl state             print what Scufris is doing
 scufris-ctl watch             follow the state and the conversation
 scufris-ctl abort             end the run that is in progress
 scufris-ctl debug             take the agent and open its session here
+scufris-ctl open              bring the pill up and start recording
+scufris-ctl hud               show the conversation window, or put it away
 ```
 
-`open`, `cancel` and `accept` go to the companion's own `desktop.sock`, which
-is a different socket with a different protocol. That is how a window manager
-binding reaches the pill. See [Desktop companion](desktop.md).
+`open` and `hud` go to the companion's own `desktop.sock`, which is a different
+socket with a different protocol. They are the companion's windows rather than
+the conversation, and that is how a window manager binding reaches them without
+the companion having to grab a key. See [Desktop companion](desktop.md).
 
 Exit status is what a binding branches on without parsing anything: 0 it
 worked, 1 it did not, 2 the run was wrong. `debug` exits with whatever `pi`

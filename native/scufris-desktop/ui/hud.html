@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Scufris</title>
+    <link rel="stylesheet" href="hud.css" />
+  </head>
+  <body>
+    <main class="hud">
+      <!-- The window is undecorated, so this strip is the whole of its
+           chrome: what the window is on the left, and what the keys do on
+           the right. -->
+      <header class="crown">
+        <span class="mark">scufris</span>
+        <span id="notice" class="notice"></span>
+      </header>
+      <!-- Every line said, oldest at the top. The host pushes them as they
+           are said and hands over the backlog when this page loads. -->
+      <ol id="lines" class="lines" aria-label="Conversation"></ol>
+      <!-- The typing line. An ordinary field in a focused window, so the
+           caret, the selection, and every editing key are the browser's. -->
+      <form id="ask" class="ask">
+        <span class="caret" aria-hidden="true">&gt;</span>
+        <textarea
+          id="words"
+          class="words"
+          rows="1"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          aria-label="Say something to Scufris"
+        ></textarea>
+      </form>
+    </main>
+    <script src="hud.js"></script>
+  </body>
+</html>

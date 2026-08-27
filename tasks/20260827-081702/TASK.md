@@ -158,7 +158,7 @@ The rest is bookkeeping the verb does:
 5. The extension keeps only what must run inside Pi. `voice/speech.ts`
    deleted, mute moves to the companion, `SCUFRIS_SPEECH` and
    `SCUFRIS_VOICE_AVAILABLE` deleted. See "D5 reversed" below.
-6. The HUD, when we want it.
+6. The HUD, when we want it. Done; see "Increment 6 done" below.
 
 ## D5 reversed (2026-08-27)
 
@@ -688,3 +688,87 @@ itself.
 
 `tests/*.py` are not run by any check. They pass, and this adds to them, but
 nothing in CI or `nix flake check` calls them. Worth wiring up separately.
+
+## Increment 6 done: the conversation window (2026-08-27)
+
+The last surface. `scufris-ctl hud` puts it up and puts it away; the tray
+shows it on a left click and from a new "Show conversation" entry. It draws
+the transcript stream every frontend is pushed and types back on the same
+socket. 760 by 560, centered, gruber, square, Iosevka - the widget grammar.
+
+### Decisions
+
+- **D-HUD-1 A sibling, not a phase.** `conversation.rs` is its own state
+  machine beside `state.rs` rather than a posture inside it. The pill machine
+  is about one take and ends with it; the conversation outlives every take.
+  Typing here never raises the textbox, never ends a recording, and never
+  moves the pill off what it is showing.
+- **D-HUD-2 Two senders, one verb.** The textbox sends a transcription and
+  the window sends a typed line; both are a `submit`. They share the process
+  prefix and not the counter - identifiers are what the service suppresses
+  duplicates by - so the window's are `{prefix}-h{n}`.
+- **D-HUD-3 No durable copy.** The pill persists an accepted transcript
+  because spoken words cannot be typed again. A typed line is still in the
+  field until the service takes it, so `pending.rs` stays the textbox's alone.
+  Nothing is appended locally either: the line comes back as a transcript
+  entry, so the window shows the conversation rather than its own hopes.
+- **D-HUD-4 No accelerator. The command socket instead.** The reversal of the
+  plan, and the better answer. `keys.rs` grabs only while the pill is up
+  because an accelerator held all session is a key no other program can use;
+  a third permanent grab would have broken that rule for a window. So
+  `Verb::Hud` joins `Verb::Open` on `desktop.sock` and the person binds it in
+  their own window manager, which costs the desktop nothing. `desktop.sock`
+  is now two verbs and both are windows.
+- **D-HUD-5 A copy of the service's ring, and nothing longer.** 200 lines,
+  the same bound. A frontend that connects is replayed the whole ring, so the
+  window empties itself on `Connected` and lets the replay refill it; keeping
+  what it had would show every line twice. `get_entries` for deeper history
+  stays deferred - the ring is what the service has, and a window that showed
+  more would be showing something nothing can refill after a reconnection.
+- **D-HUD-6 Not on top, and focusable.** The pill and the textbox are
+  indicators that must be seen over what is under them. This is a window the
+  person works in, and one they have moved away from belongs behind what they
+  moved to. Toggling it is cheaper than fighting it for the screen. Built
+  unfocusable and hidden, raised with `set_focusable` before `show` - the
+  ordering `textbox.rs` documents, because i3 reads the hints at map time.
+- **D-HUD-7 Text only.** `TranscriptEntry` and nothing else. No markdown, no
+  tool calls, no thinking. The session file and `scufris-ctl debug` are where
+  the rest of a run lives.
+- **D-HUD-8 The terminal is not a fallback.** "Open chat" became "Open in
+  terminal" and stays, under the new entry rather than replaced by it.
+  `scufris-ctl debug` is a whole Pi session and this window will not be one
+  for a long time. Two tools.
+- **D-HUD-9 One line in flight.** A second Enter on an unanswered line would
+  put two questions in the conversation from one intention, and the words are
+  in the field either way. A disconnection gives up on what is in flight: no
+  reconnection brings that answer, and a window that kept waiting would refuse
+  every line after it for the session.
+
+### Files
+
+`src/conversation.rs` (pure state, 13 tests), `src/hud.rs` (window and
+wiring), `ui/hud.{html,css,ts}`, `Verb::Hud` in `scufris-control`, the
+`scufris-ctl hud` subcommand, `tray::MENU_HUD`, `"hud"` in
+`capabilities/default.json`, and the routing in `main.rs`:
+`Transcript` to the window, `Accepted`/`Refused`/`Disconnected` to both
+senders, `Connected` to both.
+
+An `open` flag on `Conversation` was written and then deleted: nothing read
+it. `hud::up` asks the toolkit, which is the truth. An i3 kill on the window
+is answered with `prevent_close` and a hide, so the window is never destroyed
+and never has to be rebuilt and refilled.
+
+### Verification
+
+- `cargo test --workspace` - 323 pass, 258 of them `scufris-desktop`, 12 of
+  them new in `conversation.rs` and `hud.rs`.
+- `cargo clippy --workspace --all-targets` - clean.
+- `npm run check` - pass, including `prettier --check .`.
+- `tsc -p ui/tsconfig.json --noEmit` - clean.
+- `nix flake check --offline` - pass.
+- The page rendered headlessly at 760x560 in four states - short, long,
+  overflowing, empty and disconnected - and screenshotted. That is what
+  caught the conversation floating at the top of an empty window; it hangs at
+  the bottom now, on `margin-top: auto` on the first line rather than
+  `justify-content`, which would push the overflow out of reach. Not seen on
+  the i3 desktop yet.

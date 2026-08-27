@@ -11,6 +11,15 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Added
 
+- The conversation window. The pill says what Scufris is doing and could never
+  say what was said; this draws it, and gives you a line to type on. Bind
+  `scufris-ctl hud` to a key - it puts the window up, and puts it away again.
+  `Enter` sends, `Shift+Enter` starts a new line, `Escape` closes it. The tray
+  shows it too, on a left click and from the menu. It holds the same last two
+  hundred lines the service keeps, so everything said is there whoever said it
+  and however it was sent. `scufris-ctl debug` in a terminal is still the
+  deeper tool and is not a fallback for this: it is a whole Pi session, and the
+  window is the last few lines and a place to answer them.
 - `scufris-service`, the headless half of Scufris. It supervises one
   `pi --mode rpc` agent, owns the session directory, and serves one socket that
   every surface connects to. It builds and runs with no graphical dependency,
@@ -107,6 +116,10 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   one.
 - `programs.scufris.desktop.enable` requires `programs.scufris.service.enable`.
   The tray's restart hook restarts `scufris-service.service`.
+- The tray's "Open chat" is now "Open in terminal", under the new "Show
+  conversation" entry, and a left click on the tray icon shows the conversation
+  window rather than opening a terminal. `chatCommand` is unchanged and still
+  optional; the terminal is a different tool, not a fallback.
 - Control protocol version 3, which replaces version 2 outright. It adds the
   `agent` role, so the Pi process reports what it said, the paragraph it wants
   spoken, and the widgets it asks for, and it carries stable refusal codes a

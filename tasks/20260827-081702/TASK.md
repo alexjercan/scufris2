@@ -1,6 +1,6 @@
 # Scufris as a service: the architecture inversion
 
-- STATUS: OPEN
+- STATUS: IN_PROGRESS
 - PRIORITY: 90
 - TAGS: architecture, desktop
 
@@ -39,26 +39,84 @@ service that does not answer them hangs the agent. Scufris extensions
 currently use only `notify`, so the exposure is small, but the service
 must answer every type.
 
-## Open decisions, awaiting Alex
+## Revision 2 (2026-08-27)
 
-- **D1** Does the service spawn the frontend, or is the frontend its own
-  systemd unit wanted by `graphical-session.target`? Recommended: its own
-  unit. Ownership by protocol, not by process parentage.
-- **D2** Rust, TypeScript, or TypeScript embedding `AgentSession`?
-  Recommended: Rust, in the existing workspace, driving `pi --mode rpc`.
-  Couples to Pi's protocol rather than Pi's internals.
-- **D3** Rename `desktop/` to `native/` with three crates? Recommended:
-  yes, once, before there are two things to move.
-- **D4** Does the Kitty popup survive as a detach target? Recommended:
-  yes, and retire it only when the HUD earns it.
-- **D5** Does shaped speech travel as a `say` command or as a field on a
-  transcript entry? Recommended: a command, because speaking has a
-  lifetime and the frontend must be able to refuse it.
+Alex reviewed revision 1 on the page: fifteen comment threads. All five
+decisions settled, and four laws added that bound the rest.
 
-## Biggest risk
+- **L1** Exactly one `pi --mode rpc`, forever. No pool, no registry, no
+  session routing.
+- **L2** Nothing is migrated. No backwards compatibility in any
+  direction. Protocol v3 replaces v2 rather than coexisting. Stale state
+  on disk, including the job tree under `$XDG_STATE_HOME/scufris/`, is
+  deleted rather than converted.
+- **L3** The agent keeps working exactly as it does now. Jobs, tmux,
+  delegation, skills, Calm, response shaping all stay inside `pi`. Only
+  the desktop extension changes, from server to client.
+- **L4** One job, one agent, no pipeline. Assumed from task
+  `20260826-183008`; separate work, but it bounds this design.
 
-The Pi TUI has no replacement. RPC mode has no terminal interface, and
-the HUD will not match model cycling, slash commands, forking, and
-scrollback for a long time. The mitigation is `scufris-ctl detach`: stop
-the service's agent child, run an ordinary `pi --continue` against the
-same session directory, then `attach`. Never two writers.
+Decisions, as settled by Alex:
+
+- **D1** Two systemd units, one Home Manager surface. The flake exposes a
+  single output for configuring Scufris and wires the units underneath.
+- **D2** Rust for the service and everything native. TypeScript only
+  where the code must run inside Pi as an extension.
+- **D3** `desktop/` becomes `native/` with three crates.
+- **D4** Nothing is kept as a fallback. The popup unit is retired
+  outright. The HUD is built when we want it; the pill is the priority.
+- **D5** Speech shaping does not move. The agent decides what to say
+  aloud and its prose rules are unconditional; the frontend synthesises
+  what it is handed and may refuse it.
+
+Design changes from the feedback:
+
+- The service maps RPC events onto one small `ScufrisState` enum. The
+  frontend never parses a Pi event.
+- Speaking and listening are frontend-local and never cross the socket.
+  The pill, the tray and the widget clocks are all in the process that
+  owns the speaker, so nothing outside it needs to know. There is no
+  `speaking` or `voice` field on the wire.
+- The activation key always means listen. Barge-in falls out of it:
+  pressing it while Scufris speaks cuts the playback and reopens the
+  microphone, and what is said then lands as a steer rather than a
+  prompt.
+- The textbox is voice-only. It is where a transcription is read before
+  it is sent. Typing belongs in the HUD, and until the HUD exists typed
+  input is `scufris-ctl send`.
+- The HUD is what `Super+S` opens today, rebuilt as our own window.
+- Fixed a broken arrow in the first figure: the ctl line pointed into
+  the gap between two boxes instead of at the service.
+
+## Answered: can a TUI attach to `pi --mode rpc`?
+
+No. Checked against the installed package: no attach verb on the CLI, no
+socket or multi-client mode in `docs/rpc.md`, nothing in `dist`
+implementing session sharing. RPC mode is bound to the stdin and stdout
+of whoever spawned it, one client, for its lifetime. A second `pi` on the
+same session file would be a second writer.
+
+Two things are possible instead, and both are in the design:
+
+- `scufris-ctl detach` stops the agent child and frees the session
+  directory, so an ordinary `pi --continue` in any terminal takes over
+  with the full TUI. `attach` restarts the child. The service reports
+  `detached` as a state. No unit and no popup required.
+- Pi appends the session as JSONL and publishes the path as
+  `PI_SESSION_FILE`, so `tail -f` is a raw live transcript with no second
+  writer.
+
+## Increments
+
+1. The service, headless. Rename the workspace to `native/`. Rust crate
+   supervising one `pi --mode rpc`, owning the session directory, mapping
+   events to `ScufrisState`, holding the transcript ring, answering
+   extension UI requests, serving v3 with three roles. `scufris-ctl send
+| state | abort | detach | attach`. Nothing graphical changes.
+2. The switch, one commit. Extension becomes a client, frontend becomes a
+   client, piper moves into the frontend, and `desktop.sock`,
+   `command.rs`, `keys.rs`, the socket lock, `SCUFRIS_DAEMON`, protocol
+   v2, the popup unit and its options are deleted.
+3. The textbox. Review state and Enter-while-recording deleted with it.
+4. Listening is one rule: barge-in, steer, and a key for abort.
+5. The HUD, when we want it.

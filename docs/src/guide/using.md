@@ -111,8 +111,11 @@ usable and visible around it.
 
 The pill is an indicator and nothing else. It never takes the keyboard, so
 those three keys are the only ones that reach it, and they are built from
-whatever modifier your activation hotkey uses. The textbox is an ordinary
-focused window, so the caret, the selection, and every editing key are its own.
+whatever modifier your activation hotkey uses. Name them yourself with
+`cancelKey` and `stopKey` if your desktop already means something by them, or
+set either to `"none"` to leave the key alone; see
+[Installation](installation.md). The textbox is an ordinary focused window, so
+the caret, the selection, and every editing key are its own.
 
 `Super+D` always listens, so interrupting needs no second gesture. Press it
 while Scufris is talking and the sentence stops and the microphone opens;
@@ -154,7 +157,10 @@ opens the same pill. Sway runs the same configuration.
 ## Reading and typing
 
 The pill says what Scufris is doing. It cannot say what was said, and the
-conversation window can:
+conversation window can. Click the pill to put the window up, and click it
+again to put it away. It is the one thing the pill does when you click it.
+
+For a key instead, bind the same verb:
 
 ```
 bindsym $mod+s exec --no-startup-id "scufris-ctl hud"

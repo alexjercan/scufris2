@@ -50,6 +50,8 @@
       desktop = {
         enable = true;
         package = desktop;
+        cancelKey = "Control+Alt+Q";
+        stopKey = "none";
         stt.endpoint = "http://127.0.0.1:10301/inference";
       };
     };
@@ -108,6 +110,8 @@ in
       state_file=/home/scufris-test/.local/state/scufris-desktop/pending.json
       stt_endpoint=http://127.0.0.1:10301/inference
       hotkey=Super+D
+      cancel_key=derived
+      stop_key=derived
       chat_command=none
       restart_command=none
       speak_command=none
@@ -120,6 +124,8 @@ in
 
       SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10302/inference \
         SCUFRIS_DESKTOP_HOTKEY=Super+G \
+        SCUFRIS_DESKTOP_CANCEL_KEY=Control+Alt+Q \
+        SCUFRIS_DESKTOP_STOP_KEY=none \
         SCUFRIS_DESKTOP_COMMAND_SOCKET=/run/user/1000/scufris/desktop.sock \
         SCUFRIS_DESKTOP_STATE_FILE=/run/user/1000/scufris-desktop/pending.json \
         SCUFRIS_DESKTOP_CHAT_COMMAND=/nix/store/fake/bin/scufris-chat \
@@ -132,6 +138,8 @@ in
       state_file=/run/user/1000/scufris-desktop/pending.json
       stt_endpoint=http://127.0.0.1:10302/inference
       hotkey=Super+G
+      cancel_key=Control+Alt+Q
+      stop_key=none
       chat_command=/nix/store/fake/bin/scufris-chat
       restart_command=/nix/store/fake/bin/scufris-restart-backend
       speak_command=/nix/store/fake/bin/scufris-speak
@@ -174,6 +182,13 @@ in
     assert lib.elem "SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10302/inference" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_HOTKEY=Super+D" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe testChat}" desktopUnit.Service.Environment;
+    # The two keys beside the hotkey are the deployment's to name. A module
+    # that named neither writes neither, because absent means derived and the
+    # companion is the one that derives them.
+    assert !(lib.any (lib.hasPrefix "SCUFRIS_DESKTOP_CANCEL_KEY=") desktopUnit.Service.Environment);
+    assert !(lib.any (lib.hasPrefix "SCUFRIS_DESKTOP_STOP_KEY=") desktopUnit.Service.Environment);
+    assert lib.elem "SCUFRIS_DESKTOP_CANCEL_KEY=Control+Alt+Q" configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment;
+    assert lib.elem "SCUFRIS_DESKTOP_STOP_KEY=none" configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment;
     # The speaker is the companion's. Voice hands it a synthesiser, and a
     # deployment without voice hands it nothing and it stays silent.
     assert lib.any (lib.hasPrefix "SCUFRIS_DESKTOP_SPEAK_COMMAND=") desktopUnit.Service.Environment;

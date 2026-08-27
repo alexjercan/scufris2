@@ -352,7 +352,8 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             widget_send,
             hud_ready,
             hud_submit,
-            hud_close
+            hud_close,
+            hud_toggle
         ])
         .setup(move |tauri| {
             let handle = tauri.handle().clone();
@@ -430,7 +431,14 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
 
             // Managed as well as held by the runtime: the accelerator handler
             // has only the app to ask which key it was given.
-            let pill_keys = Arc::new(keys::PillKeys::new(handle.clone(), &config.hotkey));
+            let pill_keys = Arc::new(keys::PillKeys::new(
+                handle.clone(),
+                &config.hotkey,
+                keys::Wanted {
+                    cancel: config.cancel_key.as_deref(),
+                    stop: config.stop_key.as_deref(),
+                },
+            ));
             tauri.manage(Arc::clone(&pill_keys));
 
             // Before the runtime, because the runtime holds the surface that
@@ -725,6 +733,19 @@ fn hud_submit(conversation: tauri::State<'_, Arc<Hud>>, text: String) {
 #[tauri::command]
 fn hud_close(conversation: tauri::State<'_, Arc<Hud>>) {
     if let Err(error) = conversation.hide() {
+        warn!("{error}");
+    }
+}
+
+/// A click on the pill.
+///
+/// The orb is the one window that refuses the keyboard, so it has no key to
+/// answer with; a pointer reaches it anyway, because pointer input has nothing
+/// to do with focus. This is the whole of what the pill does when it is
+/// clicked, and it is the same toggle the tray and `scufris-ctl hud` ask for.
+#[tauri::command]
+fn hud_toggle(conversation: tauri::State<'_, Arc<Hud>>) {
+    if let Err(error) = conversation.toggle() {
         warn!("{error}");
     }
 }

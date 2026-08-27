@@ -158,6 +158,32 @@ in {
         description = "Accelerator that opens the pill and starts recording.";
       };
 
+      cancelKey = lib.mkOption {
+        type = lib.types.nullOr (lib.types.strMatching "[A-Za-z0-9+]+|none");
+        default = null;
+        description = ''
+          Accelerator that puts the pill away and throws away the take. When
+          null it is derived from the hotkey's own modifiers, so `Super+D`
+          gives `Super+Escape`. Set it to `"none"` to leave the key to the
+          desktop; the tray puts the pill away without it.
+
+          The companion holds this key only while the pill is on screen.
+        '';
+      };
+
+      stopKey = lib.mkOption {
+        type = lib.types.nullOr (lib.types.strMatching "[A-Za-z0-9+]+|none");
+        default = null;
+        description = ''
+          Accelerator that stops what Scufris is doing. When null it is derived
+          from the hotkey's own modifiers, so `Super+D` gives `Super+Period`.
+          Set it to `"none"` to leave the key to the desktop; `scufris-ctl
+          abort` stops a run without it.
+
+          The companion holds this key only while the pill is on screen.
+        '';
+      };
+
       chatCommand = lib.mkOption {
         type = lib.types.nullOr lib.types.package;
         default = null;
@@ -336,6 +362,10 @@ in {
               "SCUFRIS_DESKTOP_HOTKEY=${desktopCfg.hotkey}"
               "SCUFRIS_DESKTOP_RESTART_COMMAND=${lib.getExe backendRestart}"
             ]
+            ++ lib.optional (desktopCfg.cancelKey != null)
+            "SCUFRIS_DESKTOP_CANCEL_KEY=${desktopCfg.cancelKey}"
+            ++ lib.optional (desktopCfg.stopKey != null)
+            "SCUFRIS_DESKTOP_STOP_KEY=${desktopCfg.stopKey}"
             ++ lib.optional (desktopCfg.chatCommand != null)
             "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe desktopCfg.chatCommand}"
             ++ lib.optional cfg.voice.enable

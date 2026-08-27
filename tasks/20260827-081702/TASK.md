@@ -772,3 +772,67 @@ and never has to be rebuilt and refilled.
   the bottom now, on `margin-top: auto` on the first line rather than
   `justify-content`, which would push the overflow out of reach. Not seen on
   the i3 desktop yet.
+
+## Increment 7 done: the click, and the keys are the deployment's (2026-08-27)
+
+Two things asked for after increment 6 went up: a click on the pill should
+show the conversation, and the keybinds should be configurable.
+
+### The click
+
+`pill.ts` listens for a left click on `.pill` and invokes `hud_toggle`, which
+is `Hud::toggle` - the same call `Verb::Hud` and the tray make. Three ways in
+and all three toggle.
+
+- **D-HUD-10 Pointer input is not focus.** The pill is built unfocusable and
+  stays that way. An unfocusable window still receives pointer events, which
+  is already how the widget panels take their chrome ticks, so nothing about
+  the click touches the keyboard or the raise ordering.
+- The cursor becomes a pointer. The orb carries no label and never will, so
+  the cursor is the only way the window can say the click does something.
+- Left button only. The right button belongs to the window manager's menu.
+
+### The keys
+
+`cancelKey` and `stopKey` in the module, `SCUFRIS_DESKTOP_CANCEL_KEY` and
+`SCUFRIS_DESKTOP_STOP_KEY` in the environment.
+
+- **D-KEY-1 Deriving is the default, not the rule.** Unset still means
+  `Super+Escape` and `Super+Period` beside a `Super+D` hotkey: one modifier to
+  remember is the right thing to ship. A desktop that already means something
+  by `Super+Escape` is a reason to move the key, not to lose it.
+- **D-KEY-2 `"none"` turns a key off.** A real answer and not a missing one,
+  which is why `--print-config` says `derived` for unset rather than reusing
+  `none`. The tray puts the pill away without the cancel key and
+  `scufris-ctl abort` stops a run without the stop key, so neither is load
+  bearing.
+- **D-KEY-3 A bad accelerator leaves no key.** Warned about and dropped rather
+  than quietly derived. A working key on an accelerator the person did not ask
+  for is harder to notice than a key that does nothing and says why in the log.
+- **D-KEY-4 No `hudKey`.** The conversation window still has no accelerator of
+  its own, for the reason D-HUD-4 gives. `scufris-ctl hud` in a window manager
+  binding is already maximally configurable, and it costs the desktop nothing.
+
+The two keys stay grabbed only while the pill is on screen whichever
+accelerator they are on. Configurability does not change what a permanent grab
+costs.
+
+`config.rs` takes them as a `Keys` struct beside `Hooks` rather than three more
+arguments; an empty environment variable is a key nobody named, because the
+unit file writes what the person left blank.
+
+### Verification
+
+- `cargo test --workspace` - 328 pass. New: `config.rs`
+  `the_keys_beside_the_hotkey_are_reported_as_the_deployment_named_them` and
+  `a_key_set_to_nothing_is_a_key_that_was_not_named`; `keys.rs`
+  `a_key_the_deployment_named_is_the_key_that_is_grabbed`,
+  `a_key_turned_off_is_grabbed_by_nothing`, and
+  `an_accelerator_that_will_not_parse_leaves_no_key_rather_than_the_default`.
+- `nix flake check --offline` - pass. `desktop-configuration` diffs both
+  `--print-config` blocks, and `desktop-interface` asserts the module writes
+  neither variable when neither key is named and writes both when they are.
+- `prettier --check`, `tsc --noEmit`, `cargo fmt --all` - clean.
+
+Neither the click nor a named key has been pressed on the i3 desktop. This
+needs a home-manager rebuild first.

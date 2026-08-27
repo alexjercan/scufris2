@@ -19,6 +19,12 @@ pub const DEFAULT_STT_ENDPOINT: &str = "http://127.0.0.1:10301/inference";
 /// Activation accelerator used when the deployment configures none.
 pub const DEFAULT_HOTKEY: &str = "Super+D";
 
+/// What `--print-config` says about a key that is derived from the hotkey.
+///
+/// Not "none", which is a real answer here and means the opposite: a key the
+/// deployment took off the companion. See [`crate::keys::NONE`].
+pub const DERIVED: &str = "derived";
+
 /// State file used when the deployment configures none.
 pub const DEFAULT_STATE_FILE: &str = ".local/state/scufris-desktop/pending.json";
 
@@ -43,6 +49,13 @@ pub struct Config {
     pub stt_endpoint: String,
     /// Accelerator that opens the pill and starts recording.
     pub hotkey: String,
+    /// Accelerator that puts the pill away, when the deployment names one.
+    ///
+    /// Absent is not off: an unnamed key is derived from the hotkey's own
+    /// modifiers, which is what ships. `keys::NONE` is how a key is turned off.
+    pub cancel_key: Option<String>,
+    /// Accelerator that stops Scufris, on the same terms.
+    pub stop_key: Option<String>,
     /// Executable that opens the full popup chat, when one is configured.
     pub chat_command: Option<PathBuf>,
     /// Executable that restarts the owned backend service, when configured.
@@ -79,7 +92,11 @@ impl Config {
             env::var_os("SCUFRIS_DESKTOP_SOCKET"),
             env::var_os("SCUFRIS_DESKTOP_COMMAND_SOCKET"),
             env::var_os("SCUFRIS_STT_ENDPOINT"),
-            env::var_os("SCUFRIS_DESKTOP_HOTKEY"),
+            Keys {
+                hotkey: env::var_os("SCUFRIS_DESKTOP_HOTKEY"),
+                cancel: env::var_os("SCUFRIS_DESKTOP_CANCEL_KEY"),
+                stop: env::var_os("SCUFRIS_DESKTOP_STOP_KEY"),
+            },
             Hooks {
                 chat: env::var_os("SCUFRIS_DESKTOP_CHAT_COMMAND"),
                 restart: env::var_os("SCUFRIS_DESKTOP_RESTART_COMMAND"),
@@ -97,7 +114,7 @@ impl Config {
         socket: Option<OsString>,
         command_socket: Option<OsString>,
         endpoint: Option<OsString>,
-        hotkey: Option<OsString>,
+        keys: Keys,
         hooks: Hooks,
         state: State,
     ) -> Result<Self, ConfigError> {
@@ -120,7 +137,7 @@ impl Config {
         if !stt_endpoint.starts_with("http://") && !stt_endpoint.starts_with("https://") {
             return Err(ConfigError::Endpoint);
         }
-        let hotkey = non_empty(hotkey)
+        let hotkey = non_empty(keys.hotkey)
             .map(|value| value.to_string_lossy().into_owned())
             .unwrap_or_else(|| DEFAULT_HOTKEY.to_string());
         Ok(Self {
@@ -128,6 +145,8 @@ impl Config {
             command_socket,
             stt_endpoint,
             hotkey,
+            cancel_key: word(keys.cancel),
+            stop_key: word(keys.stop),
             chat_command: absolute(hooks.chat, "SCUFRIS_DESKTOP_CHAT_COMMAND")?,
             restart_command: absolute(hooks.restart, "SCUFRIS_DESKTOP_RESTART_COMMAND")?,
             speak_command: absolute(hooks.speak, "SCUFRIS_DESKTOP_SPEAK_COMMAND")?,
@@ -143,18 +162,35 @@ impl Config {
                 .map(|path| path.display().to_string())
                 .unwrap_or_else(|| "none".to_string())
         };
+        // Not `optional`: an unnamed key is derived from the hotkey, and
+        // "none" is the answer for one the deployment turned off.
+        fn derived(value: &Option<String>) -> &str {
+            value.as_deref().unwrap_or(DERIVED)
+        }
         format!(
-            "socket={}\ncommand_socket={}\nstate_file={}\nstt_endpoint={}\nhotkey={}\nchat_command={}\nrestart_command={}\nspeak_command={}\n",
+            "socket={}\ncommand_socket={}\nstate_file={}\nstt_endpoint={}\nhotkey={}\ncancel_key={}\nstop_key={}\nchat_command={}\nrestart_command={}\nspeak_command={}\n",
             self.socket.display(),
             optional(&self.command_socket),
             self.state_file.display(),
             self.stt_endpoint,
             self.hotkey,
+            derived(&self.cancel_key),
+            derived(&self.stop_key),
             optional(&self.chat_command),
             optional(&self.restart_command),
             optional(&self.speak_command),
         )
     }
+}
+
+/// The accelerators the deployment names, as the environment gave them.
+///
+/// Together rather than as three arguments, for the reason [`Hooks`] is: they
+/// are one kind of thing, and two of them are read against the third.
+struct Keys {
+    hotkey: Option<OsString>,
+    cancel: Option<OsString>,
+    stop: Option<OsString>,
 }
 
 /// The executables the deployment supplies, as the environment gave them.
@@ -191,6 +227,15 @@ impl State {
 
 fn non_empty(value: Option<OsString>) -> Option<OsString> {
     value.filter(|value| !value.is_empty())
+}
+
+/// One configured word, or nothing when the deployment set none.
+///
+/// An empty variable is nothing rather than an empty accelerator: a unit file
+/// that exports a variable it has no value for is how a key would otherwise be
+/// turned off by accident.
+fn word(value: Option<OsString>) -> Option<String> {
+    non_empty(value).map(|value| value.to_string_lossy().into_owned())
 }
 
 fn absolute(value: Option<OsString>, name: &'static str) -> Result<Option<PathBuf>, ConfigError> {
@@ -246,7 +291,7 @@ mod tests {
             Some(OsString::from(socket)),
             Some(OsString::from("/run/user/1000/scufris/desktop.sock")),
             endpoint.map(OsString::from),
-            None,
+            unset(),
             Hooks {
                 chat: chat.map(OsString::from),
                 restart: None,
@@ -254,6 +299,15 @@ mod tests {
             },
             state(),
         )
+    }
+
+    /// A deployment that named no accelerator at all.
+    fn unset() -> Keys {
+        Keys {
+            hotkey: None,
+            cancel: None,
+            stop: None,
+        }
     }
 
     #[test]
@@ -276,7 +330,7 @@ mod tests {
             Some(OsString::from("/run/user/1000/scufris/daemon.sock")),
             None,
             None,
-            None,
+            unset(),
             Hooks {
                 chat: None,
                 restart: None,
@@ -335,11 +389,71 @@ mod tests {
                 "state_file=/run/user/1000/scufris-desktop/pending.json\n",
                 "stt_endpoint=http://127.0.0.1:10301/inference\n",
                 "hotkey=Super+D\n",
+                "cancel_key=derived\n",
+                "stop_key=derived\n",
                 "chat_command=/nix/store/x/bin/scufris-chat\n",
                 "restart_command=none\n",
                 "speak_command=none\n",
             )
         );
+    }
+
+    /// The two keys beside the hotkey are the deployment's to name, and
+    /// `--print-config` tells the three answers apart: an accelerator, "none"
+    /// for a key the desktop took back, and "derived" for one left to the
+    /// hotkey. Only the words are checked here; what they grab is
+    /// [`crate::keys`].
+    #[test]
+    fn the_keys_beside_the_hotkey_are_reported_as_the_deployment_named_them() {
+        let config = Config::resolve(
+            Some(OsString::from("/run/user/1000/scufris/daemon.sock")),
+            Some(OsString::from("/run/user/1000/scufris/desktop.sock")),
+            None,
+            Keys {
+                hotkey: Some(OsString::from("Control+Alt+G")),
+                cancel: Some(OsString::from("Control+Alt+Q")),
+                stop: Some(OsString::from(crate::keys::NONE)),
+            },
+            Hooks {
+                chat: None,
+                restart: None,
+                speak: None,
+            },
+            state(),
+        )
+        .unwrap();
+        assert_eq!(config.hotkey, "Control+Alt+G");
+        assert_eq!(config.cancel_key.as_deref(), Some("Control+Alt+Q"));
+        assert_eq!(config.stop_key.as_deref(), Some(crate::keys::NONE));
+        assert!(config.describe().contains("cancel_key=Control+Alt+Q\n"));
+        assert!(config.describe().contains("stop_key=none\n"));
+    }
+
+    /// An environment that sets a key to the empty string named no key. The
+    /// unit file writes every variable whether or not the person filled it in,
+    /// so this is the ordinary case rather than a malformed one.
+    #[test]
+    fn a_key_set_to_nothing_is_a_key_that_was_not_named() {
+        let config = Config::resolve(
+            Some(OsString::from("/run/user/1000/scufris/daemon.sock")),
+            None,
+            None,
+            Keys {
+                hotkey: Some(OsString::new()),
+                cancel: Some(OsString::new()),
+                stop: Some(OsString::new()),
+            },
+            Hooks {
+                chat: None,
+                restart: None,
+                speak: None,
+            },
+            state(),
+        )
+        .unwrap();
+        assert_eq!(config.hotkey, DEFAULT_HOTKEY);
+        assert_eq!(config.cancel_key, None);
+        assert_eq!(config.stop_key, None);
     }
 
     #[test]

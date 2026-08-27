@@ -12,8 +12,9 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 ### Added
 
 - The conversation window. The pill says what Scufris is doing and could never
-  say what was said; this draws it, and gives you a line to type on. Bind
-  `scufris-ctl hud` to a key - it puts the window up, and puts it away again.
+  say what was said; this draws it, and gives you a line to type on. Click the
+  pill to put the window up, and click it again to put it away - the pill's one
+  pointer gesture. Bind `scufris-ctl hud` to a key for the same thing.
   `Enter` sends, `Shift+Enter` starts a new line, `Escape` closes it. The tray
   shows it too, on a left click and from the menu. It holds the same last two
   hundred lines the service keeps, so everything said is there whoever said it
@@ -101,6 +102,10 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   else: a transcript you are still editing stays where it is, and the
   conversation keeps everything said so far. With nothing running it does
   nothing. `scufris-ctl abort` is the same verb from a terminal.
+- `programs.scufris.desktop.cancelKey` and `stopKey` name those two keys
+  yourself. Deriving them from the hotkey is what ships, so most deployments
+  set neither; `"none"` takes a key off the companion entirely, which is the
+  answer where your desktop already means something by it.
 - `packages.scufris-speak`, the synthesiser the companion runs. It binds the
   pinned Piper package, model, and configuration, so the voice is a property of
   the package rather than a run-time setting.

@@ -386,6 +386,24 @@ pill.addEventListener("animationend", (event) => {
 
 void listen("scufris://entrance", () => arrive());
 
+// ---------- the click ----------
+
+// The orb says what Scufris is doing and cannot say what was said. Clicking it
+// opens the window that can, and clicking it again puts that window away.
+//
+// This is the one thing the pill answers, and it is a pointer rather than a
+// key: the window refuses the keyboard on purpose, so a key typed at it never
+// arrives. A click does, because pointer input has nothing to do with focus -
+// which is also how the widget panels take their chrome ticks.
+//
+// Left button only. The right button belongs to whatever menu the window
+// manager puts on a floating window, and taking it would be taking something
+// the person already has.
+pill.addEventListener("click", (event) => {
+  if (event.button !== 0) return;
+  void invoke("hud_toggle");
+});
+
 // ---------- rendering ----------
 
 function formatDuration(seconds: number): string {

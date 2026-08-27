@@ -12,6 +12,13 @@
 //! on screen, because an accelerator held all session is one no other program
 //! can ever use.
 //!
+//! The deployment can name either of them instead. Deriving them is the
+//! default rather than the rule: one modifier to remember is the right thing
+//! to ship, and a desktop where `Super+Escape` already means something is a
+//! reason to move the key rather than to lose it. [`NONE`] takes a key off the
+//! companion entirely, which is the answer for a desktop that wants both of
+//! these keys for itself.
+//!
 //! Stop is its own key rather than a second meaning for Escape. Escape puts a
 //! pill away and throws away a take, and neither reaches the conversation; stop
 //! ends a run that may be part way through changing something. A gesture with
@@ -42,6 +49,24 @@ const CANCEL: &str = "Escape";
 /// belongs to nothing on the desktop, which is what makes it grabbable.
 const STOP: &str = "Period";
 
+/// What a deployment writes to take one key off the companion.
+///
+/// Not an accelerator and never parsed as one. A person who wants `Super+Q` to
+/// stay theirs says so here rather than by finding a key nothing uses.
+pub const NONE: &str = "none";
+
+/// What the deployment said about the keys beside the hotkey.
+///
+/// Each is what was configured, and nothing is what was not: an unset key is
+/// derived from the hotkey, which is what ships.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Wanted<'a> {
+    /// The accelerator that puts the pill away.
+    pub cancel: Option<&'a str>,
+    /// The accelerator that stops Scufris.
+    pub stop: Option<&'a str>,
+}
+
 /// The keys that answer the pill, and how they are arranged while it is up.
 pub struct PillKeys {
     /// The accelerator that puts the pill away, when the hotkey leaves one.
@@ -54,9 +79,9 @@ pub struct PillKeys {
 
 impl PillKeys {
     /// Builds the arrangement this configuration allows.
-    pub fn new(handle: AppHandle, hotkey: &str) -> Self {
-        let cancel = beside(hotkey, CANCEL);
-        let stop = beside(hotkey, STOP);
+    pub fn new(handle: AppHandle, hotkey: &str, wanted: Wanted<'_>) -> Self {
+        let cancel = chosen(wanted.cancel, hotkey, CANCEL);
+        let stop = chosen(wanted.stop, hotkey, STOP);
         let wanted: Vec<Shortcut> = [cancel, stop].into_iter().flatten().collect();
         let grabs = (!wanted.is_empty()).then(|| grabber(handle, wanted));
         Self {
@@ -147,6 +172,21 @@ impl Keys for PillKeys {
     }
 }
 
+/// The accelerator one key ends up on: what was asked for, or what it derives
+/// to, or nothing.
+///
+/// An accelerator that will not parse is warned about and dropped rather than
+/// quietly derived. Falling back would leave the person with a working key on
+/// the wrong accelerator, which is harder to notice than a key that does
+/// nothing and says why in the log.
+fn chosen(wanted: Option<&str>, hotkey: &str, key: &str) -> Option<Shortcut> {
+    match wanted {
+        Some(NONE) => None,
+        Some(accelerator) => parse(accelerator),
+        None => beside(hotkey, key),
+    }
+}
+
 /// One accelerator beside the activation hotkey, on the hotkey's own modifiers.
 ///
 /// Its modifiers and nothing else: `Super+D` opens the pill, so `Super+Escape`
@@ -156,7 +196,11 @@ impl Keys for PillKeys {
 /// desktop would ever see again.
 fn beside(hotkey: &str, key: &str) -> Option<Shortcut> {
     let (modifiers, _) = hotkey.rsplit_once('+')?;
-    let accelerator = format!("{modifiers}+{key}");
+    parse(&format!("{modifiers}+{key}"))
+}
+
+/// One accelerator, or nothing and a line in the log saying why.
+fn parse(accelerator: &str) -> Option<Shortcut> {
     match accelerator.parse::<Shortcut>() {
         Ok(shortcut) => Some(shortcut),
         Err(error) => {
@@ -207,5 +251,43 @@ mod tests {
     fn a_hotkey_with_no_modifier_leaves_the_desktops_bare_keys_alone() {
         assert_eq!(beside("F9", CANCEL), None);
         assert_eq!(beside("F9", STOP), None);
+    }
+
+    /// Deriving is the default and not the rule. What ships is one modifier to
+    /// remember; what a person configures is what they get.
+    #[test]
+    fn a_key_the_deployment_named_is_the_key_that_is_grabbed() {
+        assert_eq!(
+            chosen(None, "Super+D", CANCEL),
+            Some(accelerator("Super+Escape")),
+            "an unset key derives"
+        );
+        assert_eq!(
+            chosen(Some("Control+Shift+Q"), "Super+D", CANCEL),
+            Some(accelerator("Control+Shift+Q"))
+        );
+        // A configured key owes the hotkey nothing, down to sharing no
+        // modifier with it.
+        assert_eq!(
+            chosen(Some("Alt+F4"), "F9", STOP),
+            Some(accelerator("Alt+F4")),
+            "a hotkey with no modifier still allows a named key"
+        );
+    }
+
+    /// A desktop that wants the key for itself says so, rather than hunting for
+    /// an accelerator the companion will fail to parse.
+    #[test]
+    fn a_key_turned_off_is_grabbed_by_nothing() {
+        assert_eq!(chosen(Some(NONE), "Super+D", CANCEL), None);
+        assert_eq!(chosen(Some(NONE), "Super+D", STOP), None);
+    }
+
+    /// Never derived from. A working key on an accelerator the person did not
+    /// ask for is harder to notice than a key that does nothing and says why.
+    #[test]
+    fn an_accelerator_that_will_not_parse_leaves_no_key_rather_than_the_default() {
+        assert_eq!(chosen(Some("Hyper+Nonsense"), "Super+D", CANCEL), None);
+        assert_eq!(chosen(Some(""), "Super+D", STOP), None);
     }
 }

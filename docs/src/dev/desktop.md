@@ -44,14 +44,18 @@ does not stop the conversation.
   `Ctrl+C` copies it. They are ordinary keys in a focused window, so every
   other editing key is the field's own.
 - `Super+Escape` cancels the take. It is grabbed from the display, so it
-  reaches the companion wherever the keyboard is.
+  reaches the companion wherever the keyboard is. `cancelKey` names another
+  accelerator, and `"none"` leaves the key to the desktop.
 - `Super+Period` stops Scufris: it cuts the speech and ends the run. Grabbed
-  the same way and on the same terms. Nothing else is touched - a transcript
+  the same way and on the same terms, and named by `stopKey`. Nothing else is touched - a transcript
   being edited stays where it is - and the pill goes on reporting `working`
   until the service says the run ended, because the service is what knows.
   With no run to end it does nothing.
-- `scufris-ctl hud` puts the conversation window up, and puts it away again.
-  It draws the transcript stream the service pushes to every frontend and
+- A click on the pill puts the conversation window up, and puts it away again.
+  It is the pill's only pointer gesture and the shortest road to the
+  conversation from an orb that carries no label.
+- `scufris-ctl hud` does the same thing from a window manager binding. The
+  window draws the transcript stream the service pushes to every frontend and
   types back on the same socket. `Enter` sends, `Shift+Enter` is a newline,
   and `Escape` closes it - ordinary keys in a focused window, the way the
   textbox's are. It has no accelerator of its own; see the command socket
@@ -136,6 +140,13 @@ grabs them only while the pill is on screen: an accelerator held all session is
 one no other program can use. A hotkey with no modifier grabs nothing, because a
 bare accelerator the display granted the companion is a key no other program
 would see again.
+
+Deriving them is the default rather than the rule. `cancelKey` and `stopKey`
+name either of them instead, and `"none"` takes one off the companion entirely,
+which is the answer for a desktop that already means something by
+`Super+Escape`. An accelerator that will not parse leaves no key and says so in
+the log, rather than quietly falling back to the derived one: a working key on
+the wrong accelerator is harder to notice than a key that does nothing.
 
 Stop is its own key rather than a second meaning for Escape. Escape puts a pill
 away and throws away a take, and neither reaches the conversation; stop ends a
@@ -342,6 +353,12 @@ pill. It is a sibling of the pill's state machine rather than a phase of it:
 the pill machine is about one take and ends with it, and the conversation
 outlives every take. Typing here never raises the textbox, never ends a
 recording, and never moves the pill off whatever it is showing.
+
+Three ways reach it and all three toggle: a click on the pill, the tray's
+"Show conversation", and `scufris-ctl hud`. The click is the pill's only
+pointer gesture. Pointer input has nothing to do with focus, so an unfocusable
+window still receives it, and the orb carries no label and never will - a
+cursor is the only way it can say the click does something.
 
 Two rules follow, and they are the whole of the design.
 
@@ -591,6 +608,8 @@ any level; only their sizes do.
 | `SCUFRIS_DESKTOP_STATE_FILE`      | Durable accepted-transcript file              |
 | `SCUFRIS_STT_ENDPOINT`            | Transcription endpoint                        |
 | `SCUFRIS_DESKTOP_HOTKEY`          | Activation accelerator                        |
+| `SCUFRIS_DESKTOP_CANCEL_KEY`      | Key that puts the pill away, or `none`        |
+| `SCUFRIS_DESKTOP_STOP_KEY`        | Key that stops Scufris, or `none`             |
 | `SCUFRIS_DESKTOP_CHAT_COMMAND`    | Absolute executable that opens the full chat  |
 | `SCUFRIS_DESKTOP_RESTART_COMMAND` | Absolute executable that restarts the backend |
 | `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | Absolute executable that speaks one paragraph |

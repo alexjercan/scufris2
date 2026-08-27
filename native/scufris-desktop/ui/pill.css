@@ -61,6 +61,10 @@ body {
    * src/pill.rs pins, and everything in it inside the blob's curve. */
   padding: 20px 15px 10px;
   transition: filter 0.25s ease;
+  /* The one thing this window does when it is clicked: show the conversation.
+   * The cursor is the only way it can say so, because the orb carries no label
+   * and never will. */
+  cursor: pointer;
 }
 
 /* ---------- entrance ---------- */

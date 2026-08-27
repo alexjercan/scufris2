@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stands in for the synthesiser. Reads one paragraph and stays up until it is
+# killed, so a test can see one utterance replace another.
+#
+# Checked in rather than written by the test that runs it: a file this process
+# has just written is a file this process may still hold open, and a program
+# that is open for writing anywhere cannot be executed. Two threads, one
+# writing and one starting a child, is all that takes.
+cat >/dev/null
+sleep 5

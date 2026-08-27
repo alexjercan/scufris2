@@ -248,6 +248,14 @@ fn bounded(text: String) -> String {
 mod tests {
     use super::*;
 
+    /// The stand-in synthesiser: it takes a paragraph and stays up until it is
+    /// killed. Checked in rather than written here, because a program this
+    /// process has open for writing is one it cannot start, and the tests run
+    /// on threads beside each other.
+    fn synthesiser() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/speaker")
+    }
+
     #[test]
     fn a_paragraph_is_trimmed_rather_than_dropped_and_never_carries_control_bytes() {
         assert_eq!(bounded("  it is raining  ".into()), "it is raining");
@@ -289,15 +297,7 @@ mod tests {
 
     #[test]
     fn one_utterance_at_a_time_and_the_last_word_is_the_current_one() {
-        let script = std::env::temp_dir().join(format!("scufris-speak-{}", std::process::id()));
-        std::fs::write(&script, "#!/bin/sh\ncat >/dev/null\nsleep 5\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-
-        let speaker = Speaker::new(Some(script.clone()));
+        let speaker = Speaker::new(Some(synthesiser()));
         let heard = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&heard);
         speaker.attach(move |speaking| {
@@ -330,20 +330,11 @@ mod tests {
             &[true, false],
             "the companion did not settle into silence: {heard:?}"
         );
-        std::fs::remove_file(&script).unwrap();
     }
 
     #[test]
     fn a_muted_speaker_cuts_what_is_playing_and_takes_nothing_new() {
-        let script = std::env::temp_dir().join(format!("scufris-mute-{}", std::process::id()));
-        std::fs::write(&script, "#!/bin/sh\ncat >/dev/null\nsleep 5\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-
-        let speaker = Speaker::new(Some(script.clone()));
+        let speaker = Speaker::new(Some(synthesiser()));
         let heard = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&heard);
         speaker.attach(move |speaking| {
@@ -369,6 +360,5 @@ mod tests {
         // Unmuting restores nothing. The next answer is what is heard.
         assert!(!speaker.mute(false));
         assert!(!speaker.muted());
-        std::fs::remove_file(&script).unwrap();
     }
 }

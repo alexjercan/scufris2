@@ -158,6 +158,12 @@ pub enum Event {
     /// Escape was pressed: in the textbox, or on the accelerator that answers
     /// a pill with no textbox under it.
     Escape,
+    /// The stop key was pressed, or the tray was asked to stop Scufris.
+    ///
+    /// The one gesture here that reaches the conversation without saying
+    /// anything to it. What it stops is the agent's run; cutting the speech is
+    /// the host's, because the speaker never crossed the socket to begin with.
+    Stop,
     /// Enter was pressed in the textbox, carrying what is in the field.
     Enter {
         /// Text currently in the field, when it is one the person may edit.
@@ -231,6 +237,15 @@ pub enum Action {
     /// a failure of both is reported rather than logged.
     DiscardPending {
         /// Identifier of the transcript being thrown away.
+        id: String,
+    },
+    /// End the agent's current run.
+    ///
+    /// Carries an identifier for the same reason a submission does: the service
+    /// answers every command it is given, and an answer that echoes nothing
+    /// cannot be told from the answer to something else.
+    Abort {
+        /// Identifier the service's answer echoes.
         id: String,
     },
     /// Submit one accepted transcript to the service.
@@ -319,7 +334,8 @@ pub struct Companion {
     speaking: bool,
     connected: bool,
     prefix: String,
-    submissions: u64,
+    /// How many commands this companion has given the service.
+    commands: u64,
     /// True while the person has the pill closed. The pill is a resident HUD:
     /// once an activation brings it up it stays up, resting between
     /// interactions, and only the person's own Escape puts it away. Nothing
@@ -348,7 +364,7 @@ impl Companion {
             speaking: false,
             connected: false,
             prefix: prefix.into(),
-            submissions: 0,
+            commands: 0,
             dismissed: true,
             blind: None,
         }
@@ -772,13 +788,33 @@ impl Companion {
                 };
                 Vec::new()
             }
+            // Stop belongs to the assistant rather than to the phase, so it
+            // reads the one and leaves the other exactly where it was: a
+            // transcript being edited while a run is stopped is still a
+            // transcript, and nothing here has been said to the conversation.
+            //
+            // Only a run can be stopped. A settled agent has nothing to end,
+            // and pressing the key then is not a mistake to report: whatever
+            // the person meant to stop, the speaker, or a run that finished
+            // while they were reaching for the key, has stopped.
+            (_, Event::Stop) => {
+                if self.assistant != Assistant::Working {
+                    return Vec::new();
+                }
+                vec![Action::Abort { id: self.next_id() }]
+            }
             _ => Vec::new(),
         }
     }
 
+    /// The next identifier for anything this companion asks the service for.
+    ///
+    /// One counter for every command rather than one per kind, so no two live
+    /// identifiers can be equal and an answer is never taken for the answer to
+    /// something else.
     fn next_id(&mut self) -> String {
-        self.submissions += 1;
-        format!("{}-{}", self.prefix, self.submissions)
+        self.commands += 1;
+        format!("{}-{}", self.prefix, self.commands)
     }
 
     /// Sends one transcript and records what was already known about it.
@@ -1033,6 +1069,54 @@ mod tests {
         companion.set_assistant(Assistant::Working, String::new());
         assert_eq!(companion.posture(), Posture::Passive);
         assert_eq!(companion.presentation().state, "working");
+    }
+
+    /// Stop belongs to the assistant, not to the phase. It ends the run and
+    /// leaves whatever the person was in the middle of exactly where it was.
+    #[test]
+    fn stopping_a_run_ends_it_and_leaves_the_words_alone() {
+        let mut companion = drafted("open the tasks widget");
+        companion.set_assistant(Assistant::Working, String::new());
+        assert_eq!(
+            companion.apply(Event::Stop),
+            vec![Action::Abort {
+                id: "pill-2".into()
+            }],
+            "the run was not stopped"
+        );
+        // An identifier of its own, so the service's answer to the stop can
+        // never be read as the answer to the words still on screen.
+        assert_eq!(
+            companion.phase(),
+            &Phase::Editing {
+                transcript: "open the tasks widget".into(),
+                id: "pill-1".into(),
+                notice: String::new(),
+            }
+        );
+        assert_eq!(companion.posture(), Posture::Editing);
+    }
+
+    /// Nothing to stop is not a mistake worth reporting. Whatever the person
+    /// meant to stop - the speaker, or a run that settled while they reached
+    /// for the key - has stopped.
+    #[test]
+    fn stopping_a_settled_assistant_asks_the_service_for_nothing() {
+        let mut companion = handed_off();
+        for state in [
+            Assistant::Starting,
+            Assistant::Idle,
+            Assistant::Detached,
+            Assistant::Error,
+        ] {
+            companion.set_assistant(state, String::new());
+            assert_eq!(
+                companion.apply(Event::Stop),
+                Vec::new(),
+                "{state:?} was taken for a run"
+            );
+        }
+        assert!(companion.on_screen(), "stopping put the pill away");
     }
 
     #[test]

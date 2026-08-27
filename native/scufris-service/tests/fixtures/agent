@@ -1,0 +1,9 @@
+#!/bin/sh
+# Stands in for the agent. Takes whatever arguments the service gives it,
+# reads its stdin until the service closes it, and connects to nothing.
+#
+# Checked in rather than written by the test that runs it: a file this process
+# has just written is a file this process may still hold open, and a program
+# that is open for writing anywhere cannot be executed. Two threads, one
+# writing and one starting a child, is all that takes.
+cat >/dev/null

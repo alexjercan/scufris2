@@ -1,17 +1,26 @@
-//! The one key that is arranged where no window is.
+//! The keys that are arranged where no window is.
 //!
 //! The pill never takes the keyboard, and the textbox is not up while the
 //! microphone is open, so between `Super+D` and the words arriving there is no
-//! window to type at. One key covers that gap: the cancel key, which stops a
-//! listen the person did not mean to start.
+//! window to type at. Two keys cover that gap: the cancel key, which stops a
+//! listen the person did not mean to start, and the stop key, which stops
+//! Scufris.
 //!
-//! It is an accelerator the display grabs, built from the hotkey's own
-//! modifiers: `Super+D` opens the pill, so `Super+Escape` puts it away. Grabbed
-//! only while the pill is on screen, because an accelerator held all session is
-//! one no other program can ever use.
+//! They are accelerators the display grabs, built from the hotkey's own
+//! modifiers: `Super+D` opens the pill, so `Super+Escape` puts it away and
+//! `Super+Period` stops what Scufris is doing. Grabbed only while the pill is
+//! on screen, because an accelerator held all session is one no other program
+//! can ever use.
 //!
-//! It is not required. A companion whose hotkey has no modifier is one the
-//! person puts away with the tray, and every other key belongs to the textbox.
+//! Stop is its own key rather than a second meaning for Escape. Escape puts a
+//! pill away and throws away a take, and neither reaches the conversation; stop
+//! ends a run that may be part way through changing something. A gesture with
+//! that much behind it is not one to arrive at by pressing the dismiss key at
+//! the wrong moment.
+//!
+//! Neither is required. A companion whose hotkey has no modifier is one the
+//! person puts away with the tray and stops with `scufris-ctl abort`, and every
+//! other key belongs to the textbox.
 
 use std::{
     sync::mpsc::{self, Sender},
@@ -27,10 +36,18 @@ use crate::app::Keys;
 /// The key that stops a listen.
 const CANCEL: &str = "Escape";
 
-/// The key that answers the pill, and how it is arranged while it is up.
+/// The key that stops Scufris.
+///
+/// The interrupt key of every terminal and half the editors ever written. It
+/// belongs to nothing on the desktop, which is what makes it grabbable.
+const STOP: &str = "Period";
+
+/// The keys that answer the pill, and how they are arranged while it is up.
 pub struct PillKeys {
-    /// The accelerator this companion can grab, when the hotkey leaves one.
+    /// The accelerator that puts the pill away, when the hotkey leaves one.
     cancel: Option<Shortcut>,
+    /// The accelerator that stops Scufris, on the same terms.
+    stop: Option<Shortcut>,
     /// Where a wanted grab is asked for, when there is anything to grab.
     grabs: Option<Sender<bool>>,
 }
@@ -38,9 +55,15 @@ pub struct PillKeys {
 impl PillKeys {
     /// Builds the arrangement this configuration allows.
     pub fn new(handle: AppHandle, hotkey: &str) -> Self {
-        let cancel = cancel(hotkey);
-        let grabs = cancel.map(|shortcut| grabber(handle, shortcut));
-        Self { cancel, grabs }
+        let cancel = beside(hotkey, CANCEL);
+        let stop = beside(hotkey, STOP);
+        let wanted: Vec<Shortcut> = [cancel, stop].into_iter().flatten().collect();
+        let grabs = (!wanted.is_empty()).then(|| grabber(handle, wanted));
+        Self {
+            cancel,
+            stop,
+            grabs,
+        }
     }
 
     /// Says whether an accelerator is the cancel key.
@@ -49,6 +72,11 @@ impl PillKeys {
     /// tells the cancel key from the hotkey that opens the pill.
     pub fn cancels(&self, shortcut: &Shortcut) -> bool {
         self.cancel.as_ref() == Some(shortcut)
+    }
+
+    /// Says whether an accelerator is the stop key.
+    pub fn stops(&self, shortcut: &Shortcut) -> bool {
+        self.stop.as_ref() == Some(shortcut)
     }
 
     /// Asks for the accelerator, or gives it back.
@@ -65,7 +93,7 @@ impl PillKeys {
     }
 }
 
-/// Starts the thread that takes the accelerator and gives it back.
+/// Starts the thread that takes the accelerators and gives them back.
 ///
 /// On a thread of its own, and never on the one that asked. The display hands
 /// every accelerator to one handler on the same thread it takes grabs on, so a
@@ -74,32 +102,38 @@ impl PillKeys {
 /// that thread, which makes it the ordinary road in rather than a corner.
 ///
 /// One thread rather than one per change, because the last posture asked for is
-/// the one the key must be left arranged for, and two threads racing would
-/// leave it arranged for either.
-fn grabber(handle: AppHandle, cancel: Shortcut) -> Sender<bool> {
+/// the one the keys must be left arranged for, and two threads racing would
+/// leave them arranged for either.
+fn grabber(handle: AppHandle, keys: Vec<Shortcut>) -> Sender<bool> {
     let (asked, wanted) = mpsc::channel::<bool>();
     thread::spawn(move || {
-        // Whether it is actually grabbed. A window manager that already holds
-        // this key refuses it, so what was asked for and what is held differ.
-        let mut held = false;
+        // Which are actually grabbed. A window manager that already holds one
+        // of these refuses it, so what was asked for and what is held differ,
+        // and they differ one key at a time.
+        let mut held: Vec<Shortcut> = Vec::new();
         for want in wanted {
-            if want == held {
-                continue;
-            }
             if want {
-                match handle.global_shortcut().register(cancel) {
-                    Ok(()) => held = true,
-                    // A window manager that already holds this key refuses the
-                    // grab, and that is the good case: its own binding runs
-                    // `scufris-ctl` and arrives in the same place.
-                    Err(error) => debug!("{cancel} is somebody else's: {error}"),
+                for key in &keys {
+                    if held.contains(key) {
+                        continue;
+                    }
+                    match handle.global_shortcut().register(*key) {
+                        Ok(()) => held.push(*key),
+                        // A window manager that already holds this key refuses
+                        // the grab, and that is the good case: its own binding
+                        // runs `scufris-ctl` and arrives in the same place.
+                        Err(error) => debug!("{key} is somebody else's: {error}"),
+                    }
                 }
                 continue;
             }
-            match handle.global_shortcut().unregister(cancel) {
-                Ok(()) => held = false,
-                Err(error) => warn!("{cancel} stayed grabbed: {error}"),
-            }
+            held.retain(|key| match handle.global_shortcut().unregister(*key) {
+                Ok(()) => false,
+                Err(error) => {
+                    warn!("{key} stayed grabbed: {error}");
+                    true
+                }
+            });
         }
     });
     asked
@@ -113,16 +147,16 @@ impl Keys for PillKeys {
     }
 }
 
-/// The accelerator that stops a listen, built from the activation hotkey.
+/// One accelerator beside the activation hotkey, on the hotkey's own modifiers.
 ///
-/// The hotkey's own modifiers and nothing else: `Super+D` opens the pill, so
-/// `Super+Escape` puts it away, and the person has one modifier to remember
-/// rather than two. A hotkey with no modifier leaves none, because a bare
-/// Escape the display gave the companion is an Escape no other program on the
+/// Its modifiers and nothing else: `Super+D` opens the pill, so `Super+Escape`
+/// puts it away and `Super+Period` stops it, and the person has one modifier to
+/// remember rather than three. A hotkey with no modifier leaves none, because a
+/// bare key the display gave the companion is one no other program on the
 /// desktop would ever see again.
-fn cancel(hotkey: &str) -> Option<Shortcut> {
+fn beside(hotkey: &str, key: &str) -> Option<Shortcut> {
     let (modifiers, _) = hotkey.rsplit_once('+')?;
-    let accelerator = format!("{modifiers}+{CANCEL}");
+    let accelerator = format!("{modifiers}+{key}");
     match accelerator.parse::<Shortcut>() {
         Ok(shortcut) => Some(shortcut),
         Err(error) => {
@@ -140,23 +174,38 @@ mod tests {
         text.parse().expect("it is an accelerator")
     }
 
-    /// One modifier to remember. Whatever opens the pill is what puts it away,
-    /// down to a hotkey the person built out of two modifiers.
+    /// One modifier to remember. Whatever opens the pill is what puts it away
+    /// and what stops it, down to a hotkey the person built out of two
+    /// modifiers.
     #[test]
     fn the_hotkeys_own_modifiers_are_the_ones_that_answer_it() {
-        assert_eq!(cancel("Super+D"), Some(accelerator("Super+Escape")));
+        assert_eq!(beside("Super+D", CANCEL), Some(accelerator("Super+Escape")));
+        assert_eq!(beside("Super+D", STOP), Some(accelerator("Super+Period")));
         assert_eq!(
-            cancel("Control+Alt+G"),
+            beside("Control+Alt+G", CANCEL),
             Some(accelerator("Control+Alt+Escape"))
         );
+        assert_eq!(
+            beside("Control+Alt+G", STOP),
+            Some(accelerator("Control+Alt+Period"))
+        );
+    }
+
+    /// The two keys are two keys. Stop reaches the conversation and cancel
+    /// never does, so nothing may deliver one by pressing the other.
+    #[test]
+    fn stopping_scufris_is_not_the_key_that_puts_the_pill_away() {
+        assert_ne!(beside("Super+D", CANCEL), beside("Super+D", STOP));
     }
 
     /// A bare accelerator is global. Granting the companion one would take
     /// Escape off the desktop for every other program, for the whole session,
-    /// and nothing here is worth that: the textbox holds its own Escape, and a
-    /// listen can always be put away with the tray.
+    /// and nothing here is worth that: the textbox holds its own Escape, a
+    /// listen can always be put away with the tray, and a run can always be
+    /// stopped with `scufris-ctl abort`.
     #[test]
     fn a_hotkey_with_no_modifier_leaves_the_desktops_bare_keys_alone() {
-        assert_eq!(cancel("F9"), None);
+        assert_eq!(beside("F9", CANCEL), None);
+        assert_eq!(beside("F9", STOP), None);
     }
 }

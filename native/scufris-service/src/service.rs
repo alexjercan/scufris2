@@ -1364,20 +1364,14 @@ mod tests {
 
     #[test]
     fn an_agent_that_never_connects_back_is_noticed() {
-        // A running agent is what makes this reachable, and a `/bin/sh` script
-        // that reads its stdin is one: it stays up until the service says
-        // goodbye and it connects to nothing, which is the whole case.
+        // A running agent is what makes this reachable, and the stand-in agent
+        // is one: it stays up until the service says goodbye and it connects
+        // to nothing, which is the whole case.
         let home = std::env::temp_dir().join(format!("scufris-silent-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
-        let script = home.join("scufris");
-        std::fs::write(&script, "#!/bin/sh\ncat >/dev/null\n").unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
 
         let service = Service::new(Config {
-            agent: script,
+            agent: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/agent"),
             session_dir: home.join("sessions"),
             socket: home.join("service.sock"),
             working_dir: home.clone(),

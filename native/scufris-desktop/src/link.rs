@@ -112,6 +112,11 @@ impl ServiceLink {
         send(&self.writer, ClientBody::Submit { id, text })
     }
 
+    /// Ends the agent's current run.
+    pub fn abort(&self, id: String) -> Result<(), String> {
+        send(&self.writer, ClientBody::Abort { id })
+    }
+
     /// Tells the agent what became of one of its widgets.
     ///
     /// Answers, surface notices, and the catalog all travel this way, on the

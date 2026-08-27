@@ -222,6 +222,8 @@ pub trait Transcriber: Send + Sync {
 pub trait Backend: Send + Sync {
     /// Submits one accepted transcript.
     fn submit(&self, id: String, text: String) -> Result<(), String>;
+    /// Ends the agent's current run.
+    fn abort(&self, id: String) -> Result<(), String>;
 }
 
 /// Where deferred work runs.
@@ -1318,6 +1320,7 @@ impl App {
             }
             Action::ClearPending => self.clear_pending(),
             Action::DiscardPending { id } => return self.discard_pending(&id),
+            Action::Abort { id } => self.abort(id),
             Action::Submit { id, text } => self.submit(id, text),
             Action::CopyTranscript { text } => self.ports.surface.copy(text),
         }
@@ -1503,6 +1506,28 @@ impl App {
                 });
             }),
         );
+    }
+
+    /// Asks the service to end the run.
+    ///
+    /// Nothing waits for the answer and nothing is retained. A stop that did not
+    /// land leaves the pill saying the assistant is working, which is the truth
+    /// and is the whole of what the person needs to know; a stop that did land
+    /// is followed by the state going idle on its own. There is nothing to keep
+    /// and nothing to send twice, so a failure is a line in the log.
+    fn abort(&self, id: String) {
+        let backend = self
+            .backend
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let Some(backend) = backend else {
+            warn!("nothing was stopped: the Scufris service is unavailable");
+            return;
+        };
+        if let Err(reason) = backend.abort(id) {
+            warn!("nothing was stopped: {reason}");
+        }
     }
 
     fn fail_submission(self: &Arc<Self>, id: String, reason: String) {
@@ -2048,6 +2073,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingBackend {
         submissions: Mutex<Vec<(String, String)>>,
+        aborts: Mutex<Vec<String>>,
         refuse: Mutex<Option<String>>,
         /// Runs once, with the submission on the wire and the handoff not yet
         /// finished. That is exactly where a fast daemon answer arrives.
@@ -2064,6 +2090,14 @@ mod tests {
             if let Some(interleave) = interleave {
                 interleave(id);
             }
+            Ok(())
+        }
+
+        fn abort(&self, id: String) -> Result<(), String> {
+            if let Some(reason) = self.refuse.lock().unwrap().clone() {
+                return Err(reason);
+            }
+            self.aborts.lock().unwrap().push(id);
             Ok(())
         }
     }
@@ -2131,6 +2165,47 @@ mod tests {
         take(harness);
         harness.app.handle(Event::Enter { text: None });
         harness.executor.drain();
+    }
+
+    /// The stop key is the one gesture on the pill that reaches the
+    /// conversation without saying anything to it.
+    #[test]
+    fn the_stop_key_ends_the_run_and_leaves_the_pill_reporting() {
+        let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
+        say(&harness);
+        harness.app.observe(LinkEvent::Accepted("pill-1".into()));
+        harness.executor.drain();
+        harness
+            .app
+            .set_assistant(Assistant::Working, "packing".into());
+        harness.executor.drain();
+
+        harness.app.handle(Event::Stop);
+        harness.executor.drain();
+        assert_eq!(
+            *harness.backend.aborts.lock().unwrap(),
+            vec!["pill-2".to_string()],
+            "the run was not stopped"
+        );
+        // The service is what says the run ended, and it has not said so yet.
+        // A pill that reported the stop itself would be reporting a hope.
+        assert_eq!(harness.surface.last().state, "working");
+        assert!(harness.surface.on_screen());
+        assert!(!harness.surface.focused());
+    }
+
+    /// The key is grabbed for as long as the pill is up, so it is pressed far
+    /// more often than there is a run to end.
+    #[test]
+    fn the_stop_key_says_nothing_to_a_settled_assistant() {
+        let harness = harness(FakeRecorder::default(), Ok("unused".into()));
+        harness.app.handle(Event::Stop);
+        harness.executor.drain();
+        assert!(harness.backend.aborts.lock().unwrap().is_empty());
+        assert!(
+            !harness.surface.on_screen(),
+            "the stop key raised the pill it is not grabbed for"
+        );
     }
 
     #[test]

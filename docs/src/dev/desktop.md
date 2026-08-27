@@ -43,12 +43,22 @@ does not stop the conversation.
   other editing key is the field's own.
 - `Super+Escape` cancels the take. It is grabbed from the display, so it
   reaches the companion wherever the keyboard is.
+- `Super+Period` stops Scufris: it cuts the speech and ends the run. Grabbed
+  the same way and on the same terms. Nothing else is touched - a transcript
+  being edited stays where it is - and the pill goes on reporting `working`
+  until the service says the run ended, because the service is what knows.
+  With no run to end it does nothing.
 - The pill is a resident HUD. The first activation brings it up and it then
   stays on screen, resting between interactions and showing what the
   assistant is doing - idle, working, speaking, attention, disconnected.
   `Super+Escape` is the only thing that puts it away, and the next activation
   is what brings it back. Nothing the assistant does ever raises a dismissed
   pill or takes a resting one down.
+- The activation key always listens, so barge-in needs no key of its own.
+  `DesktopSurface::present` cuts the speaker on every presentation that says
+  the microphone is open, which makes it one rule rather than one transition:
+  pressing the key while Scufris talks stops the sentence, and nothing is
+  spoken for as long as the take is running.
 - Cancellation restores focus to the previous window. Submission restores it at
   the handoff, when the textbox goes, and the pill stays up while the turn runs
   - sent, working, speaking - then settles back to resting.
@@ -99,12 +109,19 @@ socket is the person's alone, in their own runtime directory under a private
 one; anything that can open it can already act as them. A session with no
 runtime directory gets no command socket and starts anyway.
 
-`native/scufris-desktop/src/keys.rs` is the other half. It grabs one modified
-accelerator from the display - `Super+Escape`, for the default `Super+D` - built
-from the activation hotkey's own modifiers, and it grabs it only while the pill
-is on screen: an accelerator held all session is one no other program can use.
-A hotkey with no modifier grabs nothing, because a bare accelerator the display
-granted the companion is a key no other program would see again.
+`native/scufris-desktop/src/keys.rs` is the other half. It grabs two modified
+accelerators from the display - `Super+Escape` and `Super+Period`, for the
+default `Super+D` - built from the activation hotkey's own modifiers, and it
+grabs them only while the pill is on screen: an accelerator held all session is
+one no other program can use. A hotkey with no modifier grabs nothing, because a
+bare accelerator the display granted the companion is a key no other program
+would see again.
+
+Stop is its own key rather than a second meaning for Escape. Escape puts a pill
+away and throws away a take, and neither reaches the conversation; stop ends a
+run that may be part way through changing something. A gesture with that much
+behind it is not one to arrive at by pressing the dismiss key at the wrong
+moment.
 
 Neither road is required. A window manager that already holds the accelerator
 refuses the grab, which is the good case: its own binding runs `scufris-ctl` and

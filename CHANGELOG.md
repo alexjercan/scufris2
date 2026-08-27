@@ -78,6 +78,11 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The pill answers `Super+Escape` while it is on screen, built from whatever
   modifier your activation hotkey uses. It cancels a take, and it puts a
   resting pill away without opening the microphone on the way.
+- `Super+Period` stops Scufris, built the same way and grabbed on the same
+  terms. It cuts what is being spoken and ends the run, and it changes nothing
+  else: a transcript you are still editing stays where it is, and the
+  conversation keeps everything said so far. With nothing running it does
+  nothing. `scufris-ctl abort` is the same verb from a terminal.
 - `packages.scufris-speak`, the synthesiser the companion runs. It binds the
   pinned Piper package, model, and configuration, so the voice is a property of
   the package rather than a run-time setting.

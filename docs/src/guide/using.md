@@ -104,12 +104,21 @@ usable and visible around it.
   copies them.
 - `Super+Escape` cancels a take without opening the microphone on the way, and
   it puts a resting pill away.
+- `Super+Period` stops Scufris. It cuts what is being spoken and ends the run,
+  and it changes nothing else: words you are still editing stay where they are,
+  and the conversation keeps everything said so far. With nothing running it
+  does nothing.
 
 The pill is an indicator and nothing else. It never takes the keyboard, so
-`Super+D` and `Super+Escape` are the only keys that reach it, and they are
-built from whatever modifier your activation hotkey uses. The textbox is an
-ordinary focused window, so the caret, the selection, and every editing key are
-its own.
+those three keys are the only ones that reach it, and they are built from
+whatever modifier your activation hotkey uses. The textbox is an ordinary
+focused window, so the caret, the selection, and every editing key are its own.
+
+`Super+D` always listens, so interrupting needs no second gesture. Press it
+while Scufris is talking and the sentence stops and the microphone opens;
+nothing is spoken for as long as the microphone is open. Press it while Scufris
+is working and what you send is delivered into the run it is already doing
+rather than queued behind it.
 
 Sending gives the keyboard back to the window you were using, and the textbox
 goes as the words leave. If transcription fails, nothing is sent and the pill

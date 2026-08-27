@@ -515,3 +515,89 @@ waiting on.
 - `cargo test --workspace`, `cargo clippy --workspace --all-targets -D
 warnings`, `cargo fmt --all` - clean.
 - `nix flake check --offline` - pass.
+
+## Increment 4 done (2026-08-27)
+
+Listening was already one rule by the time this increment started. Two of the
+three parts landed with the increments before it:
+
+- **Steer**, in increment 1. `Service::submit` sends `streaming_behavior:
+"steer"` when the state is `Working` and nothing otherwise, so what you say
+  is a prompt to an idle agent and a steer to a working one.
+- **Barge-in**, in increment 3. `DesktopSurface::present` cuts the speaker on
+  every presentation that says the microphone is open. One rule rather than
+  one transition, and it says something stronger than "the key cuts speech":
+  nothing is spoken for as long as a take is running.
+
+What this increment adds is the third: a key for abort.
+
+### The stop key
+
+`Super+Period`, built from the activation hotkey's own modifiers the way
+`Super+Escape` is, and grabbed on the same terms - only while the pill is on
+screen, because an accelerator held all session is one no other program can
+use. `keys.rs` now holds two accelerators and one grabber thread for both, and
+a key a window manager already owns is skipped without losing the other.
+
+It is its own key rather than a second meaning for Escape. Escape puts a pill
+away and throws away a take; neither reaches the conversation. Stop ends a run
+that may be part way through changing something, and a gesture with that much
+behind it should not be reachable by pressing the dismiss key at the wrong
+moment.
+
+What it does, in two halves that never meet on the wire:
+
+- The speaker is the companion's own, so `main.rs` cuts it in the key handler.
+- The run is the service's, so `Event::Stop` goes to the state machine, which
+  answers with `Action::Abort { id }` when the assistant is `Working` and with
+  nothing otherwise. `App::abort` writes `ClientBody::Abort` and waits for
+  nothing.
+
+Stop belongs to the assistant rather than to the phase, so the phase is left
+exactly where it was: a transcript being edited while a run is stopped is still
+a transcript in the textbox. The pill goes on reporting `working` until the
+service says the run ended, because the service is what knows.
+
+A stop that cannot be sent is a line in the log and nothing else. There is
+nothing to retain and nothing that could be sent twice, and the pill still
+saying `working` is the truth.
+
+Identifiers now come from one counter for every command rather than one for
+submissions, so an abort can never carry a live submission's identifier and no
+answer can be read as the answer to something else.
+
+### Verification
+
+- `cargo test --workspace` - pass, 240 in the companion and 43 in the service.
+  New: `stopping_a_run_ends_it_and_leaves_the_words_alone`,
+  `stopping_a_settled_assistant_asks_the_service_for_nothing`,
+  `the_stop_key_ends_the_run_and_leaves_the_pill_reporting`,
+  `the_stop_key_says_nothing_to_a_settled_assistant`,
+  `stopping_scufris_is_not_the_key_that_puts_the_pill_away`.
+- `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all`,
+  `prettier` - clean.
+- `nix flake check --offline` - pass.
+
+Not verified on a display. `Super+Period` parses as an accelerator and the
+grab is arranged the way the cancel key's is, but nobody has pressed it.
+
+### Fixed on the way: a real flake in the speech tests
+
+`a_muted_speaker_cuts_what_is_playing_and_takes_nothing_new` failed about one
+run in three. The cause is `ETXTBSY`: both speech tests wrote a `/bin/sh`
+script and then executed it, and a file this process has open for writing is a
+file it cannot execute. One thread writing while another starts a child is all
+that takes, and `cargo test` runs them on threads beside each other.
+
+Confirmed rather than guessed: the spawn error was printed in a loop until it
+failed, and it is `ExecutableFileBusy` (os error 26).
+
+The stand-in programs are now checked in - `tests/fixtures/speaker` in the
+companion and `tests/fixtures/agent` in the service - so nothing writes them at
+run time and the race cannot happen. The service test written in the increment
+before this one had the same shape and now uses the fixture too.
+
+`widgets::backends::tests::two_widgets_asking_the_same_question_share_one_process`
+still fails about one run in four. That one is not this: it is
+`20260827-142259` (p80), a late subscriber to a running shared backend never
+being handed the last reading.

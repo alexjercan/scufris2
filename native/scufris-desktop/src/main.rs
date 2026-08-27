@@ -260,6 +260,10 @@ impl Backend for ServiceLink {
     fn submit(&self, id: String, text: String) -> Result<(), String> {
         ServiceLink::submit(self, id, text)
     }
+
+    fn abort(&self, id: String) -> Result<(), String> {
+        ServiceLink::abort(self, id)
+    }
 }
 
 fn start(config: Config) -> Result<(), Box<dyn Error>> {
@@ -290,17 +294,23 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                     if event.state() != ShortcutState::Pressed {
                         return;
                     }
-                    // The hotkey that opens the pill, or the cancel key grabbed
-                    // beside it while it is up. Every accelerator arrives here,
-                    // so which one it is decides what it means.
-                    let cancels = app
-                        .try_state::<Arc<keys::PillKeys>>()
-                        .is_some_and(|keys| keys.cancels(shortcut));
-                    app.state::<Arc<App>>().inner().clone().handle(if cancels {
-                        Event::Escape
-                    } else {
-                        Event::Activate
-                    });
+                    // The hotkey that opens the pill, or one of the two keys
+                    // grabbed beside it while it is up. Every accelerator
+                    // arrives here, so which one it is decides what it means.
+                    let pill = app.try_state::<Arc<keys::PillKeys>>();
+                    let event = match pill {
+                        Some(keys) if keys.cancels(shortcut) => Event::Escape,
+                        Some(keys) if keys.stops(shortcut) => {
+                            // Stop means stop. The speaker is the companion's
+                            // own and never crossed the socket, so it is cut
+                            // right here; the run belongs to the service, so
+                            // the runtime is what asks for that.
+                            app.state::<Arc<Speaker>>().hush();
+                            Event::Stop
+                        }
+                        _ => Event::Activate,
+                    };
+                    app.state::<Arc<App>>().inner().clone().handle(event);
                 })
                 .build(),
         )

@@ -221,22 +221,27 @@
       fade();
       return;
     }
+    // The host raises this window before it says what goes in it, and the
+    // rescue below puts the caret in the field the moment it arrives. So the
+    // field holding the keyboard is not evidence of a person typing: only a
+    // window that was already up can have anything of theirs in it.
+    const arriving = !showing;
     box.dataset["state"] = presentation.state;
     hint.textContent = line;
     words.readOnly = !presentation.editable;
-    // A person typing keeps what they typed. Every other presentation is the
-    // host's word about what the words are.
-    if (!holding() || !presentation.editable) {
+    // What is in the field belongs to whoever may edit it. Once the box is up
+    // and the words are theirs, the host does not write over them.
+    if (arriving || !presentation.editable) {
       words.value = presentation.text;
     }
-    if (!holding()) {
+    if (arriving || !holding()) {
       words.focus();
       words.setSelectionRange(words.value.length, words.value.length);
     }
     fade();
     // The window is raised for this presentation and only this one, so the
     // entrance runs once per arrival rather than on every re-render.
-    if (!showing) pop();
+    if (arriving) pop();
     showing = true;
   });
 

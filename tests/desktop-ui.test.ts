@@ -447,6 +447,19 @@ test("what the person is typing is not overwritten by its own presentation", () 
   assert.equal(words.value, "hello brave worlds");
 });
 
+test("the words arrive in a field that already holds the keyboard", () => {
+  // The host gives this window the keyboard as it raises it, and the rescue
+  // below puts the caret in the field before the transcript is published. A
+  // page that read that as a person typing showed an empty box over a take
+  // nobody could read.
+  const page = textbox();
+  const words = page.element("words");
+  page.window.dispatch("focus", {});
+  assert.equal(page.activeElement, words);
+  present(page, "editing", "hello brave world", true);
+  assert.equal(words.value, "hello brave world");
+});
+
 // ---------- the keys ----------
 
 function editing(page: Page, words: string): Stub {

@@ -44,8 +44,13 @@ must answer every type.
 Alex reviewed revision 1 on the page: fifteen comment threads. All five
 decisions settled, and four laws added that bound the rest.
 
-- **L1** Exactly one `pi --mode rpc`, forever. No pool, no registry, no
-  session routing.
+- **L1** One of everything, on one machine. One `pi --mode rpc`, one
+  `scufris-desktop`, one person, one host. "Service" means a background
+  process on Alex's own machine: no tenancy, no account, no
+  authentication, no network listener, no second device. The socket is a
+  Unix socket in the user's runtime directory, so anything that can open
+  it can already act as them. Every "what if two..." question is answered
+  by this law rather than by code.
 - **L2** Nothing is migrated. No backwards compatibility in any
   direction. Protocol v3 replaces v2 rather than coexisting. Stale state
   on disk, including the job tree under `$XDG_STATE_HOME/scufris/`, is

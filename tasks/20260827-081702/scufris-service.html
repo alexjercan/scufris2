@@ -372,16 +372,35 @@
 
     <p>
       Four constraints settled before the design, each of which removes work
-      rather than adding it. Everything in this document is written inside them.
+      rather than adding it. Everything in this document is written inside them,
+      and the first one is the one that keeps the rest small.
     </p>
 
     <div class="panel law">
-      <h3>L1 &mdash; Exactly one agent, forever</h3>
+      <h3>L1 &mdash; One of everything, on one machine</h3>
       <p>
         One <code>pi --mode rpc</code> child. Never two, never a pool, never a
         registry. The service supervises a single process with a single session,
         so there is no routing by session, no switching, no fan-out, and no
         question anywhere in the protocol about which agent a message is for.
+      </p>
+      <p>
+        And one of everything else: one <code>scufris-desktop</code>, one
+        person, one host.
+        <b
+          >The word "service" here means a background process on your own
+          machine, and nothing more.</b
+        >
+        There is no tenancy, no account, no authentication, no network listener,
+        no second device to keep in step. The socket is a Unix socket in your
+        own runtime directory under a private one, so anything that can open it
+        can already act as you &mdash; the same reasoning the pill's command
+        socket already runs on.
+      </p>
+      <p>
+        This is what keeps the service small enough to be worth building. It
+        routes text between three local processes. Every question that starts
+        with "what if two&hellip;" is answered by this law rather than by code.
       </p>
     </div>
 
@@ -868,7 +887,13 @@
       </h3>
       <p>
         One socket, three kinds of client, declared in the hello:
-        <code>agent</code>, <code>frontend</code>, <code>control</code>.
+        <code>agent</code>, <code>frontend</code>, <code>control</code>. By L1
+        there is at most one <code>agent</code> and at most one
+        <code>frontend</code>; a second <code>frontend</code> takes the place of
+        the first rather than being fanned out to, which is what makes a
+        companion restart land cleanly instead of waiting on a half-open
+        connection. <code>control</code> is short-lived and there may be several
+        at once, because that is just <code>scufris-ctl</code> running.
       </p>
       <pre class="code"><span class="cm">// frontend -> service</span>
 {<span class="t">"v"</span>: 3, <span class="t">"type"</span>: <span class="k">"hello"</span>, <span class="t">"role"</span>: <span class="s">"frontend"</span>}

@@ -33,6 +33,27 @@ HUD was given its own `FocusTracker` and made the same mistake again.
 The range is 28022 changed lines, 2.8x the skill's cap. It was reviewed
 whole because the commits were named explicitly.
 
+## Queued (2026-08-27)
+
+Every finding is tracked. Nothing here is fixed yet.
+
+| Task              | P   | Carries                          |
+| ----------------- | --- | -------------------------------- |
+| `20260827-205332` | 100 | B1, m2, m16                      |
+| `20260827-205335` | 100 | B2, B3, M3, M4, M8, m6, m9       |
+| `20260827-205337` | 85  | M1, M2                           |
+| `20260827-205340` | 80  | M5, M6                           |
+| `20260827-205342` | 75  | m17                              |
+| `20260827-205346` | 65  | M7, m10, m11, m12, m14           |
+| `20260827-205350` | 55  | m1, m3, m4, m5, m7, m8, m13, m15 |
+
+B3 has a direction from Alex, recorded on `20260827-205335`: draw the
+textbox on top, and move the HUD up. The arithmetic there shows both
+halves are needed. Moving the HUD up clears the pill on 1920x1080 and
+only just fits at 1600x900; it cannot clear the pill at 1366x768, where
+the HUD is taller than the space above it. Restacking is the only thing
+that works at every size for the textbox.
+
 ## Findings
 
 ### BLOCKER
@@ -126,7 +147,7 @@ this range with nothing to replace it.
 Six places still say the service suppresses: `app.rs:546`,
 `app.rs:1335`, `app.rs:2365`, `state.rs:105`, `state.rs:358`,
 `conversation.rs:57`. Two of them are load-bearing. `clear_pending`
-declines to reopen the pill on a failed removal *because* it believes a
+declines to reopen the pill on a failed removal _because_ it believes a
 resend cannot reach the conversation twice. `process_prefix` spends 16
 bytes of OS randomness on the stated grounds that a collision would have
 a genuine request refused.
@@ -496,7 +517,7 @@ A skip is not a pass.
 ## Proofs rerun
 
 - `cd native && TMPDIR=/tmp nix develop --offline -c cargo test
-  --workspace` - 331 pass, 0 fail.
+--workspace` - 331 pass, 0 fail.
 - `TMPDIR=/tmp npm test` - 72 pass, 0 fail.
 - `TMPDIR=/tmp npm run typecheck` - clean.
 - `python3 -m unittest discover -s tests` - 45 pass (run by hand; no

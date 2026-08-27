@@ -1,11 +1,12 @@
-// The two desktop webview pages, run headlessly against a stub DOM.
+// The three desktop webview pages, run headlessly against a stub DOM.
 //
 // The pages are compiled by build.rs and loaded by windows that need an X
 // display, a compositor-less desktop and a microphone, so nothing about them is
 // exercised by the Rust tests. What can be exercised is what they compute: the
 // textbox reports which key was pressed and what its field holds, the deletions
-// it binds itself cut the right words, and every state paints an orb at the
-// size the frame is built for.
+// it binds itself cut the right words, every state paints an orb at the size
+// the frame is built for, and the conversation window decides when to follow
+// the scroll and when a typed line has actually left the field.
 //
 // The stub is a fake, and it says so. That is enough for the invariants here,
 // all of which are about which element holds what and what the page asks the
@@ -21,8 +22,15 @@ import { createContext, runInContext } from "node:vm";
 const root = resolve(new URL("..", import.meta.url).pathname);
 const ui = join(root, "native", "scufris-desktop", "ui");
 
+interface Compiled {
+  pill: string;
+  textbox: string;
+  hud: string;
+  engine: string;
+}
+
 /** The pages, compiled the way build.rs compiles them. */
-function pages(): { pill: string; textbox: string; engine: string } {
+function pages(): Compiled {
   if (compiled === null) {
     const built = spawnSync(
       join(root, "node_modules", ".bin", "tsc"),
@@ -37,13 +45,14 @@ function pages(): { pill: string; textbox: string; engine: string } {
     compiled = {
       pill: readFileSync(join(ui, "dist", "pill.js"), "utf8"),
       textbox: readFileSync(join(ui, "dist", "textbox.js"), "utf8"),
+      hud: readFileSync(join(ui, "dist", "hud.js"), "utf8"),
       engine: readFileSync(join(ui, "orb-engine.js"), "utf8"),
     };
   }
   return compiled;
 }
 
-let compiled: { pill: string; textbox: string; engine: string } | null = null;
+let compiled: Compiled | null = null;
 
 // ---------- the stub ----------
 
@@ -128,6 +137,15 @@ class Stub {
   appendChild(node: Stub): Stub {
     this.children.push(node);
     return node;
+  }
+
+  append(...nodes: Stub[]): void {
+    this.children.push(...nodes);
+  }
+
+  replaceChildren(...nodes: Stub[]): void {
+    this.children.length = 0;
+    this.children.push(...nodes);
   }
 
   addEventListener(type: string, handler: Listener): void {
@@ -227,6 +245,8 @@ class Page {
   activeElement: Stub | null = null;
   reducedMotion = false;
   accent = "#95a99f";
+  /** What the host answers each command with, for the pages that read one. */
+  readonly answers: Record<string, unknown> = { pill_cues: true };
   /** What `document.execCommand` does, which is a port's choice. */
   execCommand: ((command: string) => boolean) | null = null;
 
@@ -339,7 +359,7 @@ function run(page: Page, ids: string[], scripts: string[]): void {
       core: {
         invoke: (command: string, args: unknown): Promise<unknown> => {
           page.invocations.push({ command, args });
-          return Promise.resolve(command === "pill_cues" ? true : undefined);
+          return Promise.resolve(page.answers[command]);
         },
       },
       event: {
@@ -370,6 +390,28 @@ function pill(still = false): Page {
 function textbox(): Page {
   const page = new Page();
   run(page, ["box", "words", "hint"], [pages().textbox]);
+  return page;
+}
+
+/** One line of the conversation, as the service pushes it. */
+function line(speaker: string, text: string): Record<string, string> {
+  return { speaker, text };
+}
+
+/**
+ * The conversation window, loaded with its list, its notice and its field.
+ *
+ * `taken` is what the host answers `hud_submit` with: true when the line was
+ * accepted, false when one was already in flight.
+ */
+function hud(taken = true, lines: Record<string, string>[] = []): Page {
+  const page = new Page();
+  page.answers["hud_ready"] = {
+    lines,
+    notice: { sending: false, trouble: "" },
+  };
+  page.answers["hud_submit"] = taken;
+  run(page, ["lines", "notice", "words"], [pages().hud]);
   return page;
 }
 
@@ -667,4 +709,174 @@ test("every state paints an orb at the size the frame is built for", () => {
       assert.ok(spread > 40, `${state} painted an orb only ${spread} across`);
     }
   }
+});
+
+// ---------- the conversation window ----------
+
+/** Presses one key on the conversation page, answering whether it was taken. */
+function tap(page: Page, key: string, shiftKey = false): boolean {
+  let prevented = false;
+  page.window.dispatch("keydown", {
+    key,
+    shiftKey,
+    preventDefault: () => {
+      prevented = true;
+    },
+  });
+  return prevented;
+}
+
+/** Waits for the promises the page started to settle. */
+const settle = (): Promise<void> => new Promise((done) => setImmediate(done));
+
+test("the conversation window draws every line it is handed, and who said it", async () => {
+  const page = hud(true, [
+    line("user", "what is on my calendar"),
+    line("assistant", "nothing until three"),
+  ]);
+  await settle();
+  const lines = page.element("lines");
+  assert.equal(lines.children.length, 2);
+  assert.deepEqual(
+    lines.children.map((entry) => entry.dataset["speaker"]),
+    ["user", "assistant"],
+  );
+  assert.deepEqual(
+    lines.children.map((entry) => entry.children.map((part) => part.content)),
+    [
+      ["you", "what is on my calendar"],
+      ["scufris", "nothing until three"],
+    ],
+  );
+
+  // A speaker this build does not know is drawn rather than dropped: a line
+  // that was said belongs on screen whoever the service says said it.
+  page.publish("scufris://said", line("oracle", "mind the step"));
+  const added = lines.children[2];
+  assert.ok(added !== undefined);
+  assert.deepEqual(
+    added.children.map((part) => part.content),
+    ["oracle", "mind the step"],
+  );
+});
+
+test("a person who has scrolled up to read is not dragged back down", async () => {
+  const page = hud();
+  await settle();
+  const lines = page.element("lines");
+  lines.scrollHeight = 1000;
+  lines.clientHeight = 200;
+
+  // Reading the bottom: within the threshold, so the next line follows.
+  lines.scrollTop = 790;
+  page.publish("scufris://said", line("assistant", "one"));
+  assert.equal(lines.scrollTop, 1000);
+
+  // Scrolled up to read something. 24 pixels is the threshold, and one past
+  // it is a person who is reading rather than one who is at the bottom.
+  lines.scrollTop = 776;
+  page.publish("scufris://said", line("assistant", "two"));
+  assert.equal(lines.scrollTop, 776);
+
+  // Exactly at the threshold is still reading.
+  lines.scrollTop = 1000 - 200 - 24;
+  page.publish("scufris://said", line("assistant", "three"));
+  assert.equal(lines.scrollTop, 776);
+});
+
+test("the notice says the worst thing that is true", async () => {
+  const page = hud();
+  await settle();
+  const notice = page.element("notice");
+  assert.equal(notice.dataset["tone"], "keys");
+  assert.equal(notice.textContent, "enter sends - esc closes");
+
+  page.publish("scufris://notice", { sending: true, trouble: "" });
+  assert.equal(notice.dataset["tone"], "sending");
+  assert.equal(notice.textContent, "sending");
+
+  // Trouble outranks sending. A line that is still in flight and a service
+  // that has gone away are both true at once, and the second is the one the
+  // person can do something about.
+  page.publish("scufris://notice", {
+    sending: true,
+    trouble: "Scufris is not reachable.",
+  });
+  assert.equal(notice.dataset["tone"], "trouble");
+  assert.equal(notice.textContent, "Scufris is not reachable.");
+
+  page.publish("scufris://notice", { sending: false, trouble: "" });
+  assert.equal(notice.dataset["tone"], "keys");
+});
+
+test("one Enter is one message and Shift+Enter is a newline", async () => {
+  const page = hud();
+  await settle();
+  const words = page.element("words");
+
+  words.value = "  ";
+  assert.ok(tap(page, "Enter"));
+  await settle();
+  assert.deepEqual(page.commands(), ["hud_ready"]);
+
+  words.value = "what is on my calendar";
+  assert.ok(tap(page, "Enter"));
+  await settle();
+  assert.equal(page.lastCall("hud_submit")["text"], "what is on my calendar");
+
+  // Shift+Enter is the field's own newline. The page does not take the key
+  // and does not send.
+  words.value = "first line";
+  assert.equal(tap(page, "Enter", true), false);
+  await settle();
+  assert.equal(
+    page.commands().filter((command) => command === "hud_submit").length,
+    1,
+  );
+});
+
+test("a line the host would not take stays in the field", async () => {
+  // M4. The page cleared the field and then asked. `Conversation::typed`
+  // refuses a second line while one is in flight and answers nothing at all -
+  // no transcript entry, no notice, no trouble - so the sentence went
+  // nowhere and nothing said so. Refusing rather than queueing is only
+  // acceptable because the words stay where the person can send them again.
+  const page = hud(false);
+  await settle();
+  const words = page.element("words");
+  words.value = "and one more thing";
+  tap(page, "Enter");
+  await settle();
+  assert.equal(page.lastCall("hud_submit")["text"], "and one more thing");
+  assert.equal(words.value, "and one more thing");
+
+  // Taken is what clears it, and it clears without waiting for the service.
+  const accepted = hud(true);
+  await settle();
+  const field = accepted.element("words");
+  field.value = "and one more thing";
+  tap(accepted, "Enter");
+  await settle();
+  assert.equal(field.value, "");
+});
+
+test("Escape asks the host to put the window away", async () => {
+  const page = hud();
+  await settle();
+  assert.ok(tap(page, "Escape"));
+  await settle();
+  assert.deepEqual(page.commands(), ["hud_ready", "hud_close"]);
+});
+
+test("the keys are the field's, however the window came by them", async () => {
+  const page = hud();
+  await settle();
+  const words = page.element("words");
+  assert.equal(page.activeElement, words);
+
+  // A click on the border, or a focus-follows-mouse enter, gives the window
+  // the keyboard without giving it to the field.
+  page.activeElement = null;
+  page.window.dispatch("focus", {});
+  assert.equal(page.activeElement, words);
 });

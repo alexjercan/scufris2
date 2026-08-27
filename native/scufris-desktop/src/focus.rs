@@ -5,8 +5,9 @@
 //! active window before the pill appears and asks the window manager to
 //! activate it again afterwards. Without an X display it does nothing.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+use tauri::{AppHandle, Manager};
 use x11rb::{
     CURRENT_TIME,
     connection::Connection,
@@ -15,6 +16,8 @@ use x11rb::{
     },
     rust_connection::RustConnection,
 };
+
+use crate::{hud, pill, textbox, widgets};
 
 /// Source indication used by `_NET_ACTIVE_WINDOW` for pager-like clients.
 const SOURCE_PAGER: u32 = 2;
@@ -88,6 +91,35 @@ impl FocusTracker {
         };
         session.activate(window)
     }
+}
+
+/// Every window the companion has put on the display.
+///
+/// The one list. There is a tracker on the pill's side and a tracker on the
+/// conversation window's, and the first time they kept a list each, the second
+/// one was short: it named only its own window, on the reasoning that nothing
+/// else of the companion's could be active while it was up. `capture` does not
+/// ask which window holds the keyboard, it reads `_NET_ACTIVE_WINDOW`, and i3
+/// marks the pill active when the pill maps even though the pill is built
+/// refusing the keyboard. So the pill was recorded, `restore` activated it, and
+/// the person's keys went to the one window here that cannot take them.
+///
+/// A window of the companion's own is never somewhere to give the desktop back
+/// to. Deriving the list from the app rather than passing one keeps that true
+/// for a surface nobody has added yet.
+pub fn own_windows(app: &AppHandle) -> Vec<Window> {
+    let mut mine: Vec<Window> = [
+        pill::known_window(),
+        textbox::known_window(),
+        hud::known_window(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if let Some(widgets) = app.try_state::<Arc<widgets::Widgets>>() {
+        mine.extend(widgets.windows());
+    }
+    mine
 }
 
 /// Answers which of the display's answers is a window to go back to.

@@ -34,7 +34,8 @@ use crate::{
     app::Backend,
     conversation::{Conversation, Notice},
     display::{self, Verdict},
-    focus::FocusTracker,
+    focus::{self, FocusTracker},
+    pill, textbox,
 };
 
 /// Stable window label. `capabilities/default.json` names it too: a window the
@@ -77,12 +78,22 @@ pub struct Backlog {
     pub notice: Notice,
 }
 
-/// Returns the physical position of the window, centered on its monitor.
+/// Returns the physical position of the window, centered above the pill band.
 ///
 /// Centered rather than pinned to an edge: this is the window the person reads
-/// and types in, so it belongs where they are already looking. The pill and its
-/// shelf keep the bottom of the screen, and this stands clear of both by being
-/// nowhere near them.
+/// and types in, so it belongs where they are already looking.
+///
+/// "Nowhere near the pill" was the reasoning and it was not arithmetic. On
+/// 1920x1080 a centered window runs to y=820 and the pill starts at y=778, so
+/// it covered the pill's top 42 pixels; on 1366x768 it covered 198 of them, and
+/// what it covered was the ring that says the microphone is open. So the bottom
+/// edge is bounded against the pill rather than assumed clear of it.
+///
+/// The bound cannot always be met. Below about 1600x900 the window is taller
+/// than the room above the pill, and there is no position on the monitor that
+/// clears it. That case is what [`Hud::show`] refusing to come up over the
+/// textbox is for: placement gets the two apart where there is room, and
+/// stacking order is what settles it where there is not.
 pub fn center(
     monitor_x: i32,
     monitor_y: i32,
@@ -92,8 +103,14 @@ pub fn center(
 ) -> PhysicalPosition<i32> {
     let width = (WIDTH * scale).round() as i32;
     let height = (HEIGHT * scale).round() as i32;
+    let gap = (textbox::GAP * scale).round() as i32;
+    let pill = pill::bottom_center(monitor_x, monitor_y, monitor_width, monitor_height, scale);
     let x = monitor_x + ((monitor_width as i32 - width) / 2).max(0);
-    let y = monitor_y + ((monitor_height as i32 - height) / 2).max(0);
+    let centered = monitor_y + ((monitor_height as i32 - height) / 2).max(0);
+    // Never lower than one gap above the pill, and never off the top of the
+    // monitor: a window with its corner on the screen beats one centered off
+    // the top, where the field the person types in is the part that is gone.
+    let y = centered.min(pill.y - height - gap).max(monitor_y);
     PhysicalPosition::new(x, y)
 }
 
@@ -191,13 +208,32 @@ impl Hud {
     }
 
     /// Puts the window up with the keyboard.
+    ///
+    /// Not over the textbox. i3 does not stack floating windows by
+    /// `_NET_WM_STATE_ABOVE` - it echoes the state and ignores it, and the last
+    /// window mapped is the one on top - so being built `always_on_top(false)`
+    /// did not keep this window under the box the way it was written to. It
+    /// came up over a take the person was editing, took its keyboard, and left
+    /// the state machine editing a box that was neither visible nor holding
+    /// keys. Nothing recovered it: the repair chain does not run at
+    /// `Screen::Ready` and the watch does not run while this window has the
+    /// keys.
+    ///
+    /// So the box wins that band outright. It is up only while there is a take
+    /// in it, it holds the keyboard for exactly that long, and one take is the
+    /// shortest-lived thing on this desktop. Refusing here is the whole fix
+    /// rather than half of one, because restacking alone would leave the box
+    /// visible on top and the keys going to this window.
     pub fn show(&self) -> Result<(), String> {
+        if textbox::up(&self.app) {
+            return Err("The textbox has a take in it.".into());
+        }
         let window = ensure(&self.app).map_err(|error| format!("the HUD is missing: {error}"))?;
         // Before the raise, and never over ourselves: the window recorded here
         // is the one the keyboard goes back to, and recording this one would
         // hand the person their keys back into the window they just closed.
         if !holds_keyboard(&self.app) {
-            self.focus.capture(&self.windows());
+            self.focus.capture(&focus::own_windows(&self.app));
         }
         raise(&window)
     }
@@ -212,6 +248,13 @@ impl Hud {
             // whatever the person moved to.
             return Ok(());
         }
+        // Asked before the window gives the keyboard up, because afterwards
+        // there is nothing left to read. Only a window that had the keys gives
+        // them back: open the window from the tray in one editor, click into a
+        // browser, then put the window away, and an unguarded restore is a
+        // plain focus steal back to the editor. `show` guards the capture the
+        // same way and for the same reason.
+        let held = holds_keyboard(&self.app);
         // Refusing the keyboard first: a hidden window that still says it wants
         // keys is one a window manager can hand them to on the next map.
         if let Err(error) = window.set_focusable(false) {
@@ -222,22 +265,29 @@ impl Hud {
             .map_err(|error| format!("the HUD could not be hidden: {error}"))?;
         match display::went_down(&window, &WINDOW) {
             // Down, or on its way with nobody in a position to watch it go.
-            Verdict::Yes | Verdict::Unsure => self.focus.restore(),
+            Verdict::Yes | Verdict::Unsure if held => self.focus.restore(),
+            Verdict::Yes | Verdict::Unsure => Ok(()),
             Verdict::No => Err("the HUD is still up".into()),
         }
     }
 
-    /// Sends one typed line to the service.
+    /// Sends one typed line to the service, and answers whether it was taken.
     ///
     /// Nothing is appended here on the way out. The line comes back as a
     /// transcript entry when the service takes it, which is what puts it on
     /// screen - so the window shows the conversation rather than this process's
     /// hopes about it.
-    pub fn typed(&self, text: String) {
+    ///
+    /// The answer is what lets the page keep the promise this refusal is built
+    /// on. A second Enter while one line is in flight is refused rather than
+    /// queued, and the reason that is acceptable is that the words stay in the
+    /// field for the person to send again. The page cleared the field before
+    /// asking, so they did not: the sentence went nowhere and nothing said so.
+    pub fn typed(&self, text: String) -> bool {
         let Some(id) = self.lock().typed(&text) else {
             // Blank, or a second Enter on a line that is still in flight. The
             // words are still in the field either way.
-            return;
+            return false;
         };
         self.tell();
         let sent = match self.backend.get() {
@@ -247,6 +297,9 @@ impl Hud {
         if let Err(trouble) = sent {
             self.refused(&id, trouble);
         }
+        // Taken by the window, which is what the field is cleared on. Whether
+        // the service takes it is a later answer and it arrives as a notice.
+        true
     }
 
     /// The service took a line. Nothing happens unless it was this window's.
@@ -274,13 +327,6 @@ impl Hud {
     fn lock(&self) -> std::sync::MutexGuard<'_, Conversation> {
         self.state.lock().unwrap_or_else(|error| error.into_inner())
     }
-
-    /// The companion's own windows, which are never what the keyboard goes back
-    /// to. Only this one exists as far as the tracker is concerned; the pill
-    /// refuses the keyboard and the textbox is not up while this is.
-    fn windows(&self) -> Vec<u32> {
-        known_window().into_iter().collect()
-    }
 }
 
 /// Returns the HUD window, creating it hidden on first use.
@@ -300,6 +346,14 @@ pub fn ensure(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         // seen over whatever is under them; this is a window the person works
         // in, and one they have moved away from belongs behind what they moved
         // to. Toggling it is cheaper than fighting it for the screen.
+        //
+        // This is a request about other people's windows and not about the
+        // companion's own. i3 does not stack floating windows by
+        // `_NET_WM_STATE_ABOVE`: it echoes the state and ignores it, and the
+        // last window mapped is the one on top. So nothing here keeps this
+        // window under the pill or the box. `center` bounds the placement
+        // against the pill band and `Hud::show` refuses to come up over a take
+        // in the box, and between them that is what does.
         .always_on_top(false)
         // Built down and built refusing the keyboard. What it says about the
         // keyboard from then on is only ever what `raise` and `hide` last said.
@@ -317,11 +371,25 @@ pub fn known_window() -> Option<u32> {
     }
 }
 
-/// Answers whether the HUD is on screen, as far as the toolkit knows.
+/// Answers whether the HUD is on screen, according to the display.
+///
+/// The display, not the toolkit. `is_visible` is what this process last asked
+/// for, and it survives i3 unmapping the window on a workspace switch, so on
+/// any workspace but the one the window was left on the toolkit said "up" and
+/// `toggle` took the hide path: one press of the binding showed nothing,
+/// answered `taken`, and pulled the person back to the workspace the window was
+/// on. A display that cannot be asked leaves the toolkit's flag, and only its
+/// positive answer is worth anything - a window is recorded as shown the moment
+/// the request is passed on, and as hidden until then.
 pub fn up(app: &AppHandle) -> bool {
-    app.get_webview_window(LABEL)
-        .and_then(|window| window.is_visible().ok())
-        .unwrap_or(false)
+    let Some(window) = app.get_webview_window(LABEL) else {
+        return false;
+    };
+    match display::up(&window, &WINDOW) {
+        Verdict::Yes => true,
+        Verdict::No => false,
+        Verdict::Unsure => window.is_visible().unwrap_or(false),
+    }
 }
 
 /// Answers whether the HUD is holding the keyboard right now.
@@ -382,31 +450,70 @@ fn place(window: &WebviewWindow) -> tauri::Result<()> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_window_sits_in_the_middle_of_its_monitor() {
-        let position = center(0, 0, 1920, 1080, 1.0);
-        assert_eq!(position.x, (1920 - WIDTH as i32) / 2);
-        assert_eq!(position.y, (1080 - HEIGHT as i32) / 2);
+    /// The bottom edge of the window, and the top edge of the pill under it.
+    fn bottom_and_pill(width: u32, height: u32, scale: f64) -> (i32, i32) {
+        let window = center(0, 0, width, height, scale);
+        let pill = pill::bottom_center(0, 0, width, height, scale);
+        (window.y + (HEIGHT * scale).round() as i32, pill.y)
     }
 
     #[test]
-    fn placement_follows_the_monitor_offset_and_scale() {
+    fn the_window_is_horizontally_centered_on_its_monitor() {
+        assert_eq!(center(0, 0, 1920, 1080, 1.0).x, (1920 - WIDTH as i32) / 2);
         // A second monitor to the right, at twice the scale. The window is
         // measured in physical pixels there, so the same logical size takes
         // twice the room and the centering has to be done after the scaling
         // rather than before it.
-        let position = center(1920, -120, 2560, 1440, 2.0);
-        assert_eq!(position.x, 1920 + (2560 - (WIDTH * 2.0) as i32) / 2);
-        assert_eq!(position.y, -120 + (1440 - (HEIGHT * 2.0) as i32) / 2);
+        assert_eq!(
+            center(1920, -120, 2560, 1440, 2.0).x,
+            1920 + (2560 - (WIDTH * 2.0) as i32) / 2
+        );
     }
 
     #[test]
-    fn a_monitor_too_small_for_the_window_never_places_it_off_screen() {
-        // Better a window with its corner on the monitor than one centered off
-        // the top of it, where the field the person types in would be the part
-        // that is gone.
-        assert_eq!(center(0, 0, 640, 480, 1.0), PhysicalPosition::new(0, 0));
+    fn the_window_stands_clear_of_the_pill_where_the_monitor_has_room() {
+        // B3. Centering blind put the window's bottom edge at y=820 on
+        // 1920x1080 with the pill's top edge at y=778, so it covered the pill's
+        // top 42 pixels - and what it covered was the ring that says the
+        // microphone is open.
+        for (width, height) in [(1920, 1080), (2560, 1440), (1600, 900)] {
+            let (bottom, pill_top) = bottom_and_pill(width, height, 1.0);
+            assert!(
+                bottom <= pill_top,
+                "{width}x{height}: the window runs to {bottom} and the pill starts at {pill_top}"
+            );
+        }
+        // It only moves as far as it has to. Where there is room to spare the
+        // window stays where the eye already is.
+        let clear = center(0, 0, 2560, 1440, 1.0).y;
+        assert_eq!(clear, (1440 - HEIGHT as i32) / 2);
+    }
+
+    #[test]
+    fn a_monitor_with_no_room_above_the_pill_puts_the_window_at_the_top() {
+        // 560 of window, 230 of pill, a 72 margin under it and a 24 gap above
+        // it come to 886, and a 768-tall monitor does not have it. There is no
+        // position that clears the pill, so the window takes the top of the
+        // monitor: that is the least of it covered, and it is never placed off
+        // the screen, where the field the person types in is what goes missing.
+        assert_eq!(center(0, 0, 1366, 768, 1.0), PhysicalPosition::new(303, 0));
         assert_eq!(center(40, 60, 640, 480, 1.0), PhysicalPosition::new(40, 60));
+        // At twice the scale the window is twice as tall in physical pixels, so
+        // a monitor with room at 1x can be out of it at 2x.
+        assert_eq!(center(1920, -120, 2560, 1440, 2.0).y, -120);
+    }
+
+    #[test]
+    fn the_window_never_covers_more_of_the_pill_than_it_has_to() {
+        // The residual, stated rather than left to be discovered. Below about
+        // 1600x900 the window is taller than the room above the pill and some
+        // of the pill is behind it. Bounding the placement is what keeps that
+        // to the smallest overlap the monitor allows.
+        let (bottom, pill_top) = bottom_and_pill(1366, 768, 1.0);
+        assert_eq!(bottom - pill_top, 94);
+        // Blind centering covered more than twice as much.
+        let blind = (768 - HEIGHT as i32) / 2 + HEIGHT as i32;
+        assert_eq!(blind - pill_top, 198);
     }
 
     #[test]

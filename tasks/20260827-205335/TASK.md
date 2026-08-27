@@ -1,8 +1,8 @@
 # Finish the conversation window: focus, stacking and tests
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
-- TAGS: bug,desktop,hud
+- TAGS: bug, desktop, hud
 
 ## Source
 
@@ -196,3 +196,87 @@ their first tested behaviour. M4 is the proof this is not hypothetical.
 --workspace`, and `TMPDIR=/tmp npm test`.
 
 One lane holds the X display at a time.
+
+## Outcome (2026-08-27)
+
+Done, with one decision recorded below and one residual stated.
+
+### B2
+
+One list, derived rather than passed. `focus::own_windows(app)` names the
+pill, the textbox, the conversation window and every widget shell, and
+both trackers call it. `Hud::windows()` and `DesktopSurface::windows()`
+are gone. Two lists were what let the second one be short, and deriving
+the list from the app keeps it right for a surface nobody has added yet.
+
+### B3
+
+Alex's direction, and both halves are in, but the second one is
+implemented as a refusal rather than an X restack. The reason:
+
+- **Move the HUD up.** `hud::center` bounds the bottom edge against the
+  pill band instead of centering blind. It stands clear of the pill at
+  1920x1080, 2560x1440 and 1600x900, and only moves as far as it has to -
+  on a monitor with room to spare it stays centered.
+- **Draw the textbox on top.** Restacking through X would have put the
+  box in front and left the keyboard behind: `raise` calls `set_focus`,
+  so the HUD takes the keys whatever the stacking order says, and the
+  person types into a box they can see that is not receiving. That is
+  the state B3 describes, minus the invisibility. So the box wins the
+  band outright: `Hud::show` refuses while the box is up. The box is up
+  only while there is a take in it, and one take is the shortest-lived
+  thing on this desktop.
+
+  This also settles the stuck state B3 names. Nothing enters `Editing`
+  with the keyboard elsewhere, so the repair chain that does not run at
+  `Screen::Ready` never has to.
+
+  The unverifiable part is why it was not done the other way: whether i3
+  honours `_NET_RESTACK_WINDOW` for a floating window is not something
+  this machine can answer without a display, and the review's own
+  measurement is that i3 ignores the stacking hint it already echoes.
+
+**Residual, stated rather than left to be found.** 560 of window, 230 of
+pill, a 72 margin and a 24 gap come to 886, and a 768-tall monitor does
+not have it. Below about 1600x900 there is no position that clears the
+pill, so the window takes the top of the monitor: 94 pixels of the pill
+behind it at 1366x768, against 198 before. Pinned by
+`the_window_never_covers_more_of_the_pill_than_it_has_to`.
+
+A responsive height would remove that last 94. Not done: the window
+carries equal min and max size hints, which is what makes a tiling window
+manager float it, and changing them while the window is up is the class
+of thing this whole task is fixing. It is a real option and it is not
+free.
+
+### M3, M4, M8, m6, m9
+
+- `hud::up` asks the display. Only the toolkit's positive answer is used
+  when nothing can be asked. This is what made one press of the binding
+  on another workspace show nothing and pull the person back.
+- `hide` restores the keyboard only when the window held it, read before
+  it gives it up. `show` already guarded its capture the same way.
+- `hud_submit` answers whether the line was taken, and the page clears
+  the field on that alone. Refusing a second line rather than queueing it
+  is only acceptable because the words stay in the field, and they did
+  not.
+- `tests/desktop-ui.test.ts` reads `dist/hud.js` and pins all five: the
+  follow-scroll threshold at its exact boundary, the notice precedence,
+  Enter against Shift+Enter, the focus rescue, and the field clearing.
+- m6: `LinkEvent::Conversation` dispatches off the link's reader thread.
+- m9: the capability test covers all four labels, not only the widget
+  glob.
+
+### Proof
+
+- `cargo test --workspace`: 336 pass, 0 fail. `cargo fmt --check` and
+  `cargo clippy --workspace --all-targets` clean.
+- `npm test`: 80 pass, 0 fail (23 in `desktop-ui`, up from 16).
+- `npm run check` clean.
+
+### Not done
+
+No X display was used. The placement, the refusal and the page behaviour
+are all pinned by unit tests; the stacking and focus outcomes on a real
+i3 are not measured here and are part of the live acceptance
+`20260827-081702` still has open.

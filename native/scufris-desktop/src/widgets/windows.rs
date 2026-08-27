@@ -166,7 +166,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_widget_window_label_matches_the_capability_glob() {
+    fn every_window_label_this_build_creates_is_covered_by_the_capability() {
         // capabilities/default.json lists the windows it covers. A label
         // outside them is a window whose chrome ticks invoke nothing, and
         // nothing says so until a tick does nothing.
@@ -180,11 +180,20 @@ mod tests {
         let windows = capability["windows"]
             .as_array()
             .expect("the default capability names the windows it covers");
-        let glob = format!("{LABEL_PREFIX}*");
-        assert!(
-            windows.iter().any(|pattern| pattern == &glob),
-            "the default capability does not cover {glob} windows: {windows:?}"
-        );
+        // Every label, not only the widget glob. Three of the four carried a
+        // doc comment claiming this file named them and nothing checked, so a
+        // rename would have taken a surface's IPC away in silence.
+        for label in [
+            crate::pill::LABEL,
+            crate::textbox::LABEL,
+            crate::hud::LABEL,
+            &format!("{LABEL_PREFIX}*"),
+        ] {
+            assert!(
+                windows.iter().any(|pattern| pattern == label),
+                "the default capability does not cover {label}: {windows:?}"
+            );
+        }
     }
 
     #[test]

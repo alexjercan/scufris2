@@ -167,7 +167,7 @@ impl Surface for DesktopSurface {
         if !textbox::focused(&self.handle) {
             // Never a window of the companion's own, whichever one the window
             // manager is calling active.
-            self.focus.capture(&self.windows());
+            self.focus.capture(&crate::focus::own_windows(&self.handle));
         }
         textbox::show(&self.handle)
     }
@@ -225,26 +225,6 @@ impl Surface for DesktopSurface {
     fn copy(&self, text: String) {
         // The webview owns the clipboard.
         let _ = self.handle.emit(COPY_EVENT, text);
-    }
-}
-
-impl DesktopSurface {
-    /// The windows the companion put on the display, as far as it has made any.
-    ///
-    /// Every widget window as well as the pill and the box. A widget shell is
-    /// built unfocusable and stays that way, so a capture that recorded one as
-    /// the window to give the desktop back to would hand the person's keys to
-    /// the one kind of window here that is certain to refuse them - and the
-    /// keyboard would land nowhere they can type.
-    fn windows(&self) -> Vec<u32> {
-        let mut mine: Vec<u32> = [pill::known_window(), textbox::known_window()]
-            .into_iter()
-            .flatten()
-            .collect();
-        if let Some(widgets) = self.handle.try_state::<Arc<widgets::Widgets>>() {
-            mine.extend(widgets.windows());
-        }
-        mine
     }
 }
 
@@ -501,10 +481,22 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                     // rather than told to flip, so this is not the toggle the
                     // person's own gestures are.
                     LinkEvent::Conversation(up) => {
-                        let shown = if up { said.show() } else { said.hide() };
-                        if let Err(error) = shown {
-                            warn!("{error}");
-                        }
+                        // Off this thread. `observe` runs on the link's single
+                        // reader, and showing the window blocks on the GTK loop
+                        // and then on up to half a second of asking the display
+                        // whether it came up. For that whole window the
+                        // frontend reads no transcript, no state, no answer and
+                        // no widget command: a pill waiting on an answer and a
+                        // window saying `sending` are both waiting on messages
+                        // sitting unread in the socket. Every other branch here
+                        // hands off without blocking.
+                        let window = Arc::clone(&said);
+                        thread::spawn(move || {
+                            let shown = if up { window.show() } else { window.hide() };
+                            if let Err(error) = shown {
+                                warn!("{error}");
+                            }
+                        });
                     }
                     // The catalog goes out once per connection, as soon as
                     // there is a service to relay it: it is what the agent
@@ -733,9 +725,13 @@ fn hud_ready(conversation: tauri::State<'_, Arc<Hud>>) -> hud::Backlog {
 }
 
 /// Enter in the HUD, carrying what is in the field.
+///
+/// Answers whether the line was taken. The page clears the field on that and on
+/// nothing else: a line refused because one is already in flight has to stay
+/// where the person can send it again.
 #[tauri::command]
-fn hud_submit(conversation: tauri::State<'_, Arc<Hud>>, text: String) {
-    conversation.typed(text);
+fn hud_submit(conversation: tauri::State<'_, Arc<Hud>>, text: String) -> bool {
+    conversation.typed(text)
 }
 
 /// Escape in the HUD.

@@ -123,15 +123,23 @@
 
   words.addEventListener("input", fit);
 
-  const send = (): void => {
+  const send = async (): Promise<void> => {
     const text = words.value;
     if (text.trim() === "") return;
-    // Cleared here rather than when the service answers. The person has moved
-    // on to the next thing they want to say, and a field that stayed full for
-    // the length of a round trip is one they would type over.
+    // Cleared on the host taking the line, and on nothing else. Not when the
+    // service answers - the person has moved on to the next thing they want to
+    // say, and a field that stayed full for a socket round trip is one they
+    // would type over. But not before asking either: a second Enter while a
+    // line is in flight is refused, and the whole reason refusing is acceptable
+    // rather than queueing is that the words stay in the field. Clearing first
+    // meant they did not, and nothing came back to say the sentence was gone.
+    //
+    // This wait is the host deciding, which is one IPC hop, not the service
+    // answering.
+    const taken = (await invoke("hud_submit", { text })) as boolean;
+    if (!taken) return;
     words.value = "";
     fit();
-    void invoke("hud_submit", { text });
   };
 
   window.addEventListener("keydown", (event) => {
@@ -144,7 +152,7 @@
       // Shift+Enter is the newline. One Enter is one message, which is the
       // same bargain the textbox makes.
       event.preventDefault();
-      send();
+      void send();
     }
   });
 

@@ -8,7 +8,7 @@
 //!
 //! They are accelerators the display grabs, built from the hotkey's own
 //! modifiers: `Super+D` opens the pill, so `Super+Escape` puts it away and
-//! `Super+Period` stops what Scufris is doing. Grabbed only while the pill is
+//! `Super+Delete` stops what Scufris is doing. Grabbed only while the pill is
 //! on screen, because an accelerator held all session is one no other program
 //! can ever use.
 //!
@@ -45,9 +45,16 @@ const CANCEL: &str = "Escape";
 
 /// The key that stops Scufris.
 ///
-/// The interrupt key of every terminal and half the editors ever written. It
-/// belongs to nothing on the desktop, which is what makes it grabbable.
-const STOP: &str = "Period";
+/// `Period` was the first choice and was wrong: `Super+.` is the emoji picker
+/// on Windows, and the rofi and Hyprland desktops that copied it mean the same
+/// thing by it. A default that collides with a convention that widespread is a
+/// default that is configured away on every machine.
+///
+/// `Delete` belongs to nothing modified, which is what makes it grabbable, and
+/// what it means is close enough: end the thing that is running. It is spelled
+/// out in full because the accelerator parser knows `Delete` and does not know
+/// `Del`.
+const STOP: &str = "Delete";
 
 /// What a deployment writes to take one key off the companion.
 ///
@@ -190,7 +197,7 @@ fn chosen(wanted: Option<&str>, hotkey: &str, key: &str) -> Option<Shortcut> {
 /// One accelerator beside the activation hotkey, on the hotkey's own modifiers.
 ///
 /// Its modifiers and nothing else: `Super+D` opens the pill, so `Super+Escape`
-/// puts it away and `Super+Period` stops it, and the person has one modifier to
+/// puts it away and `Super+Delete` stops it, and the person has one modifier to
 /// remember rather than three. A hotkey with no modifier leaves none, because a
 /// bare key the display gave the companion is one no other program on the
 /// desktop would ever see again.
@@ -224,14 +231,14 @@ mod tests {
     #[test]
     fn the_hotkeys_own_modifiers_are_the_ones_that_answer_it() {
         assert_eq!(beside("Super+D", CANCEL), Some(accelerator("Super+Escape")));
-        assert_eq!(beside("Super+D", STOP), Some(accelerator("Super+Period")));
+        assert_eq!(beside("Super+D", STOP), Some(accelerator("Super+Delete")));
         assert_eq!(
             beside("Control+Alt+G", CANCEL),
             Some(accelerator("Control+Alt+Escape"))
         );
         assert_eq!(
             beside("Control+Alt+G", STOP),
-            Some(accelerator("Control+Alt+Period"))
+            Some(accelerator("Control+Alt+Delete"))
         );
     }
 

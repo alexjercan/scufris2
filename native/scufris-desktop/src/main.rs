@@ -497,6 +497,15 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                     // pill shows one take at a time and has nothing to do with
                     // this; the HUD is the surface that shows the conversation.
                     LinkEvent::Transcript(entry) => said.said(entry),
+                    // The agent asked for the window. It is told what to be
+                    // rather than told to flip, so this is not the toggle the
+                    // person's own gestures are.
+                    LinkEvent::Conversation(up) => {
+                        let shown = if up { said.show() } else { said.hide() };
+                        if let Err(error) = shown {
+                            warn!("{error}");
+                        }
+                    }
                     // The catalog goes out once per connection, as soon as
                     // there is a service to relay it: it is what the agent
                     // types its widget tools from. The HUD empties itself for

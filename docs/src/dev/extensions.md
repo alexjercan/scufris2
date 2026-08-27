@@ -1,6 +1,6 @@
 # Extensions
 
-All five extensions are listed in `package.json`, by the development launcher,
+All six extensions are listed in `package.json`, by the development launcher,
 and by the Nix launcher, together with the workflow and widgets skills.
 
 ## workflow
@@ -88,5 +88,18 @@ the underlying entries stay in the session.
 `scufris_widget_clear`, typed from the catalog the companion announces on each
 connection, and turns a surface the user closed into a `scufris-widget-event`
 follow-up message. It reaches the control socket through the desktop extension,
-which emits the two verbs it needs when it starts serving and withdraws them
-when it stops. See [Widgets](widgets.md).
+which emits the verbs it needs when it starts serving and withdraws them when it
+stops. See [Widgets](widgets.md).
+
+## conversation
+
+`conversation.ts` registers `scufris_conversation`, which shows and closes the
+companion's conversation window. It is the one window Scufris can put on the
+desktop that is not a widget: it is the frontend's own, it is built in rather
+than installed, and all it can be told is whether to be up.
+
+It says `show` and `close` rather than toggling. A toggle from something that
+cannot see the screen does one of two opposite things and cannot tell which, so
+Scufris would have no way to know whether it had just shown the conversation or
+hidden it. Asking for what is already there is harmless, which is what makes the
+explicit verb the cheap one. See [Desktop companion](desktop.md).

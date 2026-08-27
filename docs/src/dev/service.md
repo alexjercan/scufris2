@@ -66,14 +66,15 @@ are what a caller branches on: `agent_unavailable`, `detached`, `debug_held`,
 
 A submission while the agent is working is delivered as a steer, not refused.
 
-The agent pushes rather than asks, so its messages carry no `id` and get no
-answer:
+The agent mostly pushes rather than asks, so most of its messages carry no `id`
+and get no answer:
 
-| Message                             | Where it goes                           |
-| ----------------------------------- | --------------------------------------- |
-| `{"type":"said","text":"..."}`      | the transcript ring, and every frontend |
-| `{"type":"speak","text":"..."}`     | every frontend, and is never kept       |
-| `{"type":"widget","command":{...}}` | every frontend                          |
+| Message                                      | Where it goes                           |
+| -------------------------------------------- | --------------------------------------- |
+| `{"type":"said","text":"..."}`               | the transcript ring, and every frontend |
+| `{"type":"speak","text":"..."}`              | every frontend, and is never kept       |
+| `{"type":"widget","command":{...}}`          | every frontend                          |
+| `{"type":"conversation","id":"1","up":true}` | every frontend, and is answered here    |
 
 `said` and `speak` are two different strings and two different decisions. The
 transcript holds the whole answer; speech holds one paragraph shaped for it.
@@ -83,6 +84,13 @@ the paragraph to go, which is not a fault.
 
 A frontend answers a widget command with `{"type":"report","report":{...}}`,
 which the service hands to the agent.
+
+`conversation` is the exception on both counts: it carries an `id`, and the
+service answers it rather than the frontend. What it asks for is the frontend's
+own conversation window, which does not half raise, so the only failure the
+agent can act on is `no_frontend` - and the service is what knows that. It says
+`up` rather than toggling, because a caller that cannot see the screen would not
+know which of the two things a toggle had just done.
 
 ## State
 

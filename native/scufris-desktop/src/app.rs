@@ -635,10 +635,10 @@ impl App {
                 debug!(id = %id, detail = %detail, "submission refused");
                 self.handle(Event::SubmissionFailed { id, reason: detail })
             }
-            // Two things the pill is not the audience for. The transcript
-            // belongs to whatever shows the conversation, and the speaker is
-            // wired up where the speech is played.
-            LinkEvent::Transcript(_) | LinkEvent::Speak(_) => {}
+            // Three things the pill is not the audience for. The transcript
+            // and the window belong to whatever shows the conversation, and
+            // the speaker is wired up where the speech is played.
+            LinkEvent::Transcript(_) | LinkEvent::Speak(_) | LinkEvent::Conversation(_) => {}
             // Widget commands belong to the widgets runtime, which is a
             // sibling of this state machine rather than a part of it. The
             // wiring routes them there before they reach the pill, so a

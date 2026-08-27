@@ -386,6 +386,22 @@ pub enum ClientBody {
         /// What to do.
         command: WidgetCommand,
     },
+    /// Asks the frontend to put the conversation window on screen, or to take
+    /// it away. Agents only.
+    ///
+    /// Not a widget: it is the frontend's own window, it is built in rather
+    /// than installed, and it carries no payload. What it shares with a widget
+    /// is only that the agent is the one asking.
+    ///
+    /// `up` rather than a toggle. A toggle from a caller that cannot see the
+    /// screen does one of two opposite things and cannot tell which, so the
+    /// agent says what it wants and gets it.
+    Conversation {
+        /// Client-owned identifier the answer echoes.
+        id: String,
+        /// Whether the window should be up.
+        up: bool,
+    },
     /// Tells the agent what became of its widgets. Frontends only.
     Report {
         /// What happened.
@@ -405,6 +421,7 @@ impl ClientBody {
             Self::Said { .. } => "said",
             Self::Speak { .. } => "speak",
             Self::Widget { .. } => "widget",
+            Self::Conversation { .. } => "conversation",
             Self::Report { .. } => "report",
         }
     }
@@ -492,6 +509,15 @@ pub enum ServiceBody {
         /// What to do.
         command: WidgetCommand,
     },
+    /// The agent asked for the conversation window. Pushed to the frontend.
+    ///
+    /// It carries no identifier because the frontend answers nothing: the
+    /// service answered the agent when it relayed this. See
+    /// [`ClientBody::Conversation`].
+    Conversation {
+        /// Whether the window should be up.
+        up: bool,
+    },
     /// One widget answer or notice from the frontend. Pushed to the agent.
     Report {
         /// What happened.
@@ -511,6 +537,7 @@ impl ServiceBody {
             Self::Debug { .. } => "debug",
             Self::Speak { .. } => "speak",
             Self::Widget { .. } => "widget",
+            Self::Conversation { .. } => "conversation",
             Self::Report { .. } => "report",
         }
     }
@@ -641,7 +668,10 @@ pub fn read_client_message(
                 return Err(MessageError::InvalidSubmission("text"));
             }
         }
-        ClientBody::Abort { id } | ClientBody::GetState { id } | ClientBody::Debug { id } => {
+        ClientBody::Abort { id }
+        | ClientBody::GetState { id }
+        | ClientBody::Debug { id }
+        | ClientBody::Conversation { id, .. } => {
             if !is_identifier(id) {
                 return Err(MessageError::InvalidSubmission("id"));
             }
@@ -707,7 +737,7 @@ pub fn read_service_message(
         }
         ServiceBody::Widget { command } => check_widget_command(command)?,
         ServiceBody::Report { report } => check_widget_report(report)?,
-        ServiceBody::Welcome { .. } => {}
+        ServiceBody::Welcome { .. } | ServiceBody::Conversation { .. } => {}
     }
     Ok(message)
 }

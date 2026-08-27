@@ -140,6 +140,7 @@ function expectedArgs(projectRoot: string, sessionDirectory: string): string[] {
     // at all. Without it the conversation has no client in this process.
     join("service", "index.ts"),
     join("widgets", "index.ts"),
+    "conversation.ts",
   ];
   return [
     ...extensions.flatMap((name) => [

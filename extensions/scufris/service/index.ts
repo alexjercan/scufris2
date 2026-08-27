@@ -7,8 +7,8 @@ import { SPOKEN_EVENT, type SpokenSignal } from "../shared/spoken.ts";
 import { SERVICE_FILE_NAME, SOCKET_DIRECTORY_NAME } from "./protocol.ts";
 import {
   ServiceClient,
-  WIDGET_CONTROL_EVENT,
-  type WidgetControlSignal,
+  DESKTOP_CONTROL_EVENT,
+  type DesktopControlSignal,
 } from "./client.ts";
 
 /** Resolves the service socket path for this user session. */
@@ -75,15 +75,15 @@ export default function service(pi: ExtensionAPI): void {
     // Widgets are commanded over this link by the extension that owns them, and
     // this is the only way it reaches one: the link is this extension's, and it
     // lives no longer than the session that started it.
-    pi.events.emit(WIDGET_CONTROL_EVENT, {
+    pi.events.emit(DESKTOP_CONTROL_EVENT, {
       control: client,
-    } satisfies WidgetControlSignal);
+    } satisfies DesktopControlSignal);
   });
 
   pi.on("session_shutdown", () => {
     // Withdrawn before the link closes, so nothing sends a command into a
     // connection that is being taken down under it.
-    pi.events.emit(WIDGET_CONTROL_EVENT, {} satisfies WidgetControlSignal);
+    pi.events.emit(DESKTOP_CONTROL_EVENT, {} satisfies DesktopControlSignal);
     const stopping = client;
     client = undefined;
     context = undefined;

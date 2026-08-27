@@ -120,12 +120,15 @@ export type ClientMessage =
   | { v: 3; type: "hello"; role: "agent" }
   | { v: 3; type: "said"; text: string }
   | { v: 3; type: "speak"; text: string }
-  | { v: 3; type: "widget"; command: WidgetCommand };
+  | { v: 3; type: "widget"; command: WidgetCommand }
+  | { v: 3; type: "conversation"; id: string; up: boolean };
 
 /** What the service says to an agent that this client acts on. */
 export type ServiceMessage =
   | { v: 3; type: "welcome"; role: string }
-  | { v: 3; type: "report"; report: WidgetReport };
+  | { v: 3; type: "report"; report: WidgetReport }
+  | { v: 3; type: "ok"; id: string }
+  | { v: 3; type: "refused"; id: string; code: string; detail: string };
 
 /**
  * Answers whether one string carries a surrogate that is not half of a pair.
@@ -274,10 +277,13 @@ function widgetReport(value: unknown): WidgetReport {
  * Decodes one service message.
  *
  * Messages this agent has no use for decode to `undefined` rather than
- * throwing. `state`, `transcript` and `speak` are for a surface, and `ok`,
- * `refused` and `debug` answer verbs an agent never sends. The agent already
- * has the conversation, so it reads only what is addressed to it, and a service
- * that grows another push must not drop this connection over it.
+ * throwing. `state`, `transcript` and `speak` are for a surface, and `debug`
+ * answers a verb an agent never sends. The agent already has the conversation,
+ * so it reads only what is addressed to it, and a service that grows another
+ * push must not drop this connection over it.
+ *
+ * `ok` and `refused` are read because the agent does send one verb the service
+ * answers itself: the conversation window.
  */
 export function decodeServiceMessage(line: string): ServiceMessage | undefined {
   if (line.endsWith("\r")) {
@@ -316,6 +322,19 @@ export function decodeServiceMessage(line: string): ServiceMessage | undefined {
   }
   if (message.type === "report") {
     return { v: 3, type: "report", report: widgetReport(message.report) };
+  }
+  if (message.type === "ok") {
+    return { v: 3, type: "ok", id: identifier(message.id, "ok id") };
+  }
+  if (message.type === "refused") {
+    const detail = message.detail;
+    return {
+      v: 3,
+      type: "refused",
+      id: identifier(message.id, "refused id"),
+      code: identifier(message.code, "refused code"),
+      detail: typeof detail === "string" ? detail : "",
+    };
   }
   return undefined;
 }

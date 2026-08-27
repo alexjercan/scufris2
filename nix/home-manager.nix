@@ -176,7 +176,7 @@ in {
         default = null;
         description = ''
           Accelerator that stops what Scufris is doing. When null it is derived
-          from the hotkey's own modifiers, so `Super+D` gives `Super+Period`.
+          from the hotkey's own modifiers, so `Super+D` gives `Super+Delete`.
           Set it to `"none"` to leave the key to the desktop; `scufris-ctl
           abort` stops a run without it.
 

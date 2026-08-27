@@ -20,7 +20,8 @@
       "./extensions/scufris/response.ts",
       "./extensions/scufris/calm.ts",
       "./extensions/scufris/service/index.ts",
-      "./extensions/scufris/widgets/index.ts"
+      "./extensions/scufris/widgets/index.ts",
+      "./extensions/scufris/conversation.ts"
     ],
     "skills": [
       "./skills"

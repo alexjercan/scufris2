@@ -18,6 +18,7 @@ in {
     test -f ${resources}/share/scufris/extensions/scufris/service/protocol.ts
     test -f ${resources}/share/scufris/extensions/scufris/service/client.ts
     test -f ${resources}/share/scufris/extensions/scufris/widgets/index.ts
+    test -f ${resources}/share/scufris/extensions/scufris/conversation.ts
     # Nothing in this process tree makes sound. There is no speech module to
     # ship and no variant that ships one, and the synthesiser the companion
     # runs is not on the agent's side of the machine.

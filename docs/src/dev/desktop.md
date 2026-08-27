@@ -46,7 +46,7 @@ does not stop the conversation.
 - `Super+Escape` cancels the take. It is grabbed from the display, so it
   reaches the companion wherever the keyboard is. `cancelKey` names another
   accelerator, and `"none"` leaves the key to the desktop.
-- `Super+Period` stops Scufris: it cuts the speech and ends the run. Grabbed
+- `Super+Delete` stops Scufris: it cuts the speech and ends the run. Grabbed
   the same way and on the same terms, and named by `stopKey`. Nothing else is touched - a transcript
   being edited stays where it is - and the pill goes on reporting `working`
   until the service says the run ended, because the service is what knows.
@@ -134,7 +134,7 @@ one; anything that can open it can already act as them. A session with no
 runtime directory gets no command socket and starts anyway.
 
 `native/scufris-desktop/src/keys.rs` is the other half. It grabs two modified
-accelerators from the display - `Super+Escape` and `Super+Period`, for the
+accelerators from the display - `Super+Escape` and `Super+Delete`, for the
 default `Super+D` - built from the activation hotkey's own modifiers, and it
 grabs them only while the pill is on screen: an accelerator held all session is
 one no other program can use. A hotkey with no modifier grabs nothing, because a
@@ -359,6 +359,15 @@ Three ways reach it and all three toggle: a click on the pill, the tray's
 pointer gesture. Pointer input has nothing to do with focus, so an unfocusable
 window still receives it, and the orb carries no label and never will - a
 cursor is the only way it can say the click does something.
+
+Scufris can put it up too, with `scufris_conversation`. That one says `show`
+and `close` rather than toggling: the person's gestures toggle because the
+person can see the screen, and the agent cannot, so a toggle from it would do
+one of two opposite things and could not tell which. It travels as
+`{"type":"conversation","id":...,"up":...}` on the service socket, and the
+service answers it rather than the frontend - the window does not half raise,
+so `no_frontend` is the only failure worth reporting and the service is what
+knows it.
 
 Two rules follow, and they are the whole of the design.
 

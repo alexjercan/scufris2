@@ -104,7 +104,7 @@ usable and visible around it.
   copies them.
 - `Super+Escape` cancels a take without opening the microphone on the way, and
   it puts a resting pill away.
-- `Super+Period` stops Scufris. It cuts what is being spoken and ends the run,
+- `Super+Delete` stops Scufris. It cuts what is being spoken and ends the run,
   and it changes nothing else: words you are still editing stay where they are,
   and the conversation keeps everything said so far. With nothing running it
   does nothing.
@@ -175,6 +175,11 @@ terminal and its answer are in the window too.
 It is a window you work in rather than an indicator, so it does not stay over
 what you move to. Press the key again to bring it back. There is no scrollback
 beyond the last two hundred lines, which is what the service itself keeps.
+
+Scufris can put it up as well. Ask to see the conversation and it opens the
+window, and ask it to put the window away and it does. It never flips the
+window on its own: it can only show or close, because it cannot see your screen
+and would not know which of the two it had just done.
 
 `scufris-ctl debug` in a terminal is the deeper tool and is not a fallback for
 this. It is a whole Pi session - the tools, the thinking, the lot - and this

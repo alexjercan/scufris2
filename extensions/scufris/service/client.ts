@@ -64,27 +64,36 @@ export type WidgetNotice =
 /**
  * Event this extension emits with the service link it holds.
  *
- * The socket and its lifetime belong to this extension. What the extension that
- * owns widgets needs from it is two verbs, so two verbs are what travel: a
- * control while the link is up, and nothing once it is not.
+ * The socket and its lifetime belong to this extension. What the extensions
+ * that ask the desktop for something need from it is a few verbs, so a few
+ * verbs are what travel: a control while the link is up, and nothing once it
+ * is not.
  */
-export const WIDGET_CONTROL_EVENT = "scufris:widget-control";
+export const DESKTOP_CONTROL_EVENT = "scufris:desktop-control";
 
-/** The service half of widgets, as the extension that owns them sees it. */
-export interface WidgetControl {
+/** The service half of the desktop, as the extensions that use it see it. */
+export interface DesktopControl {
   /** Sends one command to the frontend and answers with what it produced. */
   request(command: WidgetRequest): Promise<WidgetAnswer>;
   /** Registers the one listener for messages that answer no command. */
   watchWidgets(listener: (notice: WidgetNotice) => void): void;
+  /**
+   * Asks for the conversation window to be up, or to be down.
+   *
+   * Not a toggle. The agent cannot see the screen, so a toggle would do one of
+   * two opposite things and could not tell which; it says what it wants
+   * instead, and asking for what is already there is harmless.
+   */
+  conversation(up: boolean): Promise<void>;
 }
 
-/** What [`WIDGET_CONTROL_EVENT`] carries. */
-export interface WidgetControlSignal {
+/** What [`DESKTOP_CONTROL_EVENT`] carries. */
+export interface DesktopControlSignal {
   /** The control while the link is up, and nothing once it is not. */
-  control?: WidgetControl;
+  control?: DesktopControl;
 }
 
-/** One widget command waiting for its answer. */
+/** One command waiting for its answer, whoever answers it. */
 interface PendingWidget {
   resolve: (answer: WidgetAnswer) => void;
   reject: (error: WidgetCommandError) => void;
@@ -92,9 +101,9 @@ interface PendingWidget {
   /**
    * The connection this command was sent on.
    *
-   * Correlation ids restart at `w-1` with each connection, so an id is only
-   * half of an answer's address. An answer that arrived after a reconnect must
-   * not settle a command sent before it.
+   * Correlation ids restart at `w-1` and `c-1` with each connection, so an id
+   * is only half of an answer's address. An answer that arrived after a
+   * reconnect must not settle a command sent before it.
    */
   asked: Socket;
 }
@@ -119,7 +128,7 @@ export interface ServiceClientOptions {
  * Everything an agent says is one-way except a widget command, which carries a
  * correlation id the frontend echoes.
  */
-export class ServiceClient implements WidgetControl {
+export class ServiceClient implements DesktopControl {
   private readonly socketPath: string;
   private readonly log: (message: string, level: "info" | "error") => void;
   private readonly widgetTimeoutMs: number;
@@ -129,7 +138,17 @@ export class ServiceClient implements WidgetControl {
   private retry?: ReturnType<typeof setTimeout>;
   private stopped = false;
   private widgetCommands = 0;
+  private conversationCommands = 0;
   private readonly pendingWidgets = new Map<string, PendingWidget>();
+  /**
+   * Commands the service answers itself, waiting on `ok` or `refused`.
+   *
+   * Its own map rather than a second kind of entry in the widget one. The two
+   * counters are independent, so nothing stops `w-3` and `c-3` being in flight
+   * at once, and one map would let a widget report settle a conversation
+   * command that happened to share its number.
+   */
+  private readonly pendingAnswers = new Map<string, PendingWidget>();
   private notices?: (notice: WidgetNotice) => void;
 
   constructor(options: ServiceClientOptions) {
@@ -250,6 +269,53 @@ export class ServiceClient implements WidgetControl {
     });
   }
 
+  /**
+   * Asks for the conversation window to be up, or to be down.
+   *
+   * The service answers this one itself rather than the frontend, so what
+   * comes back is `ok` or `refused` rather than a report. There is nothing to
+   * carry back on success: the window is the frontend's own, and the only
+   * failure the agent can act on is that there is no screen.
+   */
+  conversation(up: boolean): Promise<void> {
+    const socket = this.socket;
+    if (!socket?.writable) {
+      return Promise.reject(
+        new WidgetCommandError(
+          "service_unavailable",
+          "The Scufris service is not connected.",
+        ),
+      );
+    }
+    this.conversationCommands += 1;
+    const id = `c-${this.conversationCommands}`;
+    const line = encodeClientMessage({
+      v: SERVICE_VERSION,
+      type: "conversation",
+      id,
+      up,
+    });
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingAnswers.delete(id);
+        reject(
+          new WidgetCommandError(
+            "timeout",
+            "The service did not answer the conversation command.",
+          ),
+        );
+      }, this.widgetTimeoutMs);
+      timer.unref?.();
+      this.pendingAnswers.set(id, {
+        resolve: () => resolve(),
+        reject,
+        timer,
+        asked: socket,
+      });
+      socket.write(line);
+    });
+  }
+
   /** Writes one message, or reports that there was nowhere to write it. */
   private tell(message: Parameters<typeof encodeClientMessage>[0]): void {
     const socket = this.socket;
@@ -310,7 +376,34 @@ export class ServiceClient implements WidgetControl {
         return;
       }
       if (message?.type === "report") this.settle(socket, message.report);
+      // The service's own answers. Only one verb this client sends is answered
+      // this way, and a pending it does not match is an answer to nothing.
+      if (message?.type === "ok") this.answer(socket, message.id);
+      if (message?.type === "refused") {
+        this.answer(socket, message.id, message.code, message.detail);
+      }
     }
+  }
+
+  /** Settles the command one `ok` or `refused` answers, if it is still there. */
+  private answer(
+    from: Socket,
+    id: string,
+    code?: string,
+    detail?: string,
+  ): void {
+    const pending = this.pendingAnswers.get(id);
+    if (!pending || pending.asked !== from) {
+      this.log(`no command is waiting for ${id}`, "info");
+      return;
+    }
+    this.pendingAnswers.delete(id);
+    clearTimeout(pending.timer);
+    if (code === undefined) {
+      pending.resolve({});
+      return;
+    }
+    pending.reject(new WidgetCommandError(code, detail ?? ""));
   }
 
   /** Applies one widget report to the command waiting for it, if one is. */
@@ -378,13 +471,15 @@ export class ServiceClient implements WidgetControl {
     this.retry.unref?.();
   }
 
-  /** Fails every waiting widget command, because none of them can be answered. */
+  /** Fails every waiting command, because none of them can be answered. */
   private abandon(code: string, detail: string): void {
-    for (const [, pending] of this.pendingWidgets) {
-      clearTimeout(pending.timer);
-      pending.reject(new WidgetCommandError(code, detail));
+    for (const waiting of [this.pendingWidgets, this.pendingAnswers]) {
+      for (const [, pending] of waiting) {
+        clearTimeout(pending.timer);
+        pending.reject(new WidgetCommandError(code, detail));
+      }
+      waiting.clear();
     }
-    this.pendingWidgets.clear();
   }
 }
 

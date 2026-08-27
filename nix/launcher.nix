@@ -17,6 +17,8 @@
     "${resources}/share/scufris/extensions/scufris/service/index.ts"
     "--extension"
     "${resources}/share/scufris/extensions/scufris/widgets/index.ts"
+    "--extension"
+    "${resources}/share/scufris/extensions/scufris/conversation.ts"
     "--skill"
     "${resources}/share/scufris/skills/widgets"
   ];

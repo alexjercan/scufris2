@@ -97,7 +97,12 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The pill answers `Super+Escape` while it is on screen, built from whatever
   modifier your activation hotkey uses. It cancels a take, and it puts a
   resting pill away without opening the microphone on the way.
-- `Super+Period` stops Scufris, built the same way and grabbed on the same
+- `scufris_conversation`, so Scufris can show the conversation window itself.
+  Ask to see the conversation and it opens the window; ask it to put the window
+  away and it does. It shows and closes rather than toggling, because it cannot
+  see your screen and a toggle would leave it unable to say which of the two it
+  had just done.
+- `Super+Delete` stops Scufris, built the same way and grabbed on the same
   terms. It cuts what is being spoken and ends the run, and it changes nothing
   else: a transcript you are still editing stays where it is, and the
   conversation keeps everything said so far. With nothing running it does

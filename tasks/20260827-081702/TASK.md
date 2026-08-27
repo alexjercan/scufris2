@@ -836,3 +836,75 @@ unit file writes what the person left blank.
 
 Neither the click nor a named key has been pressed on the i3 desktop. This
 needs a home-manager rebuild first.
+
+## Increment 8 done: a key that is free, and a window Scufris can open (2026-08-27)
+
+Two things, both from using increment 7 on the real desktop.
+
+### The stop key moved
+
+`Super+Period` is rofi-emoji on this machine, and that is not a local
+accident: `Super+.` is the Windows emoji picker, and the rofi and Hyprland
+desktops that copied it mean the same thing by it. The premise the key was
+chosen on - "it belongs to nothing on the desktop" - was simply false.
+
+The default is `Super+Delete` now. Checked rather than assumed: `Delete` parses
+as an accelerator and `Del` does not, so the constant is spelled out. The
+scratch test that established this was deleted with the answer written into the
+constant's doc comment.
+
+Nothing was migrated, because nothing had shipped on `Period`: the key was
+added in this same unreleased cycle.
+
+### The conversation window, from the agent
+
+`scufris_conversation`, in a new one-file extension `extensions/scufris/
+conversation.ts`.
+
+- **D-CONV-1 Show and close, never toggle.** The user asked for a toggle. A
+  toggle from a caller that cannot see the screen does one of two opposite
+  things and cannot tell which, so Scufris would say "I have opened the
+  conversation" having just hidden it. The person's own three gestures still
+  toggle, because the person can see the screen. Asking for what is already
+  there is harmless, which is what makes the explicit verb the cheap one.
+- **D-CONV-2 Its own verb, not a widget.** `ClientBody::Conversation { id, up }`
+  beside `ClientBody::Widget`. The window is the frontend's own, built in
+  rather than installed, and carries no payload; the only thing it shares with
+  a widget is that the agent is the one asking. Reusing `WidgetCommand` would
+  have bought a `surface` identifier and a close report it has no use for.
+- **D-CONV-3 The service answers, not the frontend.** Every widget command is
+  answered by the frontend, which is right: an open produces a surface and a
+  widget name can be wrong. Nothing here can half happen. The one failure the
+  agent can act on is that there is no screen, and the service is what knows
+  that, so it answers `ok` or `refused { no_frontend }` on relay. That also
+  makes the agent read `ok` and `refused` for the first time; before this
+  every verb it sent was one-way or answered by a report.
+- **D-CONV-4 `WidgetControl` became `DesktopControl`.** The control the service
+  extension hands out is not widgets any more. Renamed with the event string
+  (`scufris:desktop-control`) rather than growing a `conversation()` method on
+  something called `WidgetControl`.
+
+### Fixed on the way: a widget report could settle a conversation command
+
+Caught by the test written for it, not in review. The first version put
+conversation commands in `pendingWidgets`, keyed by id. The two counters are
+independent, so `w-3` and `c-3` can be in flight at once, and a
+`report { done, id: "c-3" }` resolved the conversation command. Split into
+`pendingAnswers`; `abandon` clears both.
+
+### Verification
+
+- `cargo test --workspace` - 331 pass. New in the service:
+  `the_conversation_window_is_relayed_and_answered_by_the_service`,
+  `asking_for_the_conversation_window_with_no_screen_is_refused`,
+  `a_control_client_cannot_ask_for_the_conversation_window`.
+- `npm run check` - 72 pass, 5 of them new: 4 in `tests/conversation.test.ts`
+  and the client round trip in `tests/service.test.ts`, which is the one that
+  caught the shared-map bug.
+- `cargo clippy --workspace --all-targets`, `cargo fmt --all`, `prettier` -
+  clean.
+- `nix flake check --offline` - pass, including the launcher check that pins
+  the exact `--extension` list.
+
+Neither the new key nor the tool has been exercised on the i3 desktop. This
+needs a home-manager rebuild first.

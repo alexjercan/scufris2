@@ -58,6 +58,7 @@ extensions=(
   "$root/extensions/scufris/calm.ts"
   "$root/extensions/scufris/service/index.ts"
   "$root/extensions/scufris/widgets/index.ts"
+  "$root/extensions/scufris/conversation.ts"
 )
 skills=(
   "$root/skills/workflow"

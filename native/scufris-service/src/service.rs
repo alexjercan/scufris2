@@ -628,6 +628,33 @@ impl Service {
         inner.push_frontends(ServiceBody::Widget { command });
     }
 
+    /// Relays the agent's request for the conversation window.
+    ///
+    /// The service answers this one itself rather than waiting for the
+    /// frontend, because the only failure the agent can do anything about is
+    /// that there is no screen, and the service is what knows that. A window
+    /// the frontend owns raising itself does not half happen.
+    pub fn relay_conversation(&self, client: u64, id: String, up: bool) {
+        let mut inner = self.lock();
+        if !inner.is_agent(client) {
+            return;
+        }
+        if inner.of_role(Role::Frontend).is_empty() {
+            debug!(up, "the conversation window has no screen");
+            inner.send(
+                client,
+                ServiceBody::Refused {
+                    id,
+                    code: NO_FRONTEND.into(),
+                    detail: "there is no frontend connected".into(),
+                },
+            );
+            return;
+        }
+        inner.push_frontends(ServiceBody::Conversation { up });
+        inner.send(client, ServiceBody::Ok { id });
+    }
+
     /// Relays one widget report from the frontend to the agent.
     pub fn relay_report(&self, client: u64, report: WidgetReport) {
         let mut inner = self.lock();
@@ -1295,6 +1322,57 @@ mod tests {
                 },
             }]
         );
+    }
+
+    /// The service answers this one itself. The frontend is told and says
+    /// nothing back, because a window it owns raising itself does not half
+    /// happen and the agent could not act on it if it did.
+    #[test]
+    fn the_conversation_window_is_relayed_and_answered_by_the_service() {
+        let service = service();
+        let frontend = connect(&service, 1, Role::Frontend);
+        let agent = connect(&service, 2, Role::Agent);
+        drain(&frontend);
+        service.relay_conversation(2, "c-1".into(), true);
+        assert_eq!(
+            drain(&frontend),
+            [ServiceBody::Conversation { up: true }],
+            "the window is told what to be"
+        );
+        assert_eq!(drain(&agent), [ServiceBody::Ok { id: "c-1".into() }]);
+        service.relay_conversation(2, "c-2".into(), false);
+        assert_eq!(drain(&frontend), [ServiceBody::Conversation { up: false }]);
+        assert_eq!(drain(&agent), [ServiceBody::Ok { id: "c-2".into() }]);
+    }
+
+    /// The one failure the agent can do anything about, and the only reason
+    /// this carries an identifier at all: a machine with no screen is a
+    /// machine where saying "it is on screen" would be a lie.
+    #[test]
+    fn asking_for_the_conversation_window_with_no_screen_is_refused() {
+        let service = service();
+        let agent = connect(&service, 1, Role::Agent);
+        service.relay_conversation(1, "c-1".into(), true);
+        assert_eq!(
+            drain(&agent),
+            [ServiceBody::Refused {
+                id: "c-1".into(),
+                code: NO_FRONTEND.into(),
+                detail: "there is no frontend connected".into(),
+            }]
+        );
+    }
+
+    /// The same rule every agent-only verb has. A terminal is not a screen.
+    #[test]
+    fn a_control_client_cannot_ask_for_the_conversation_window() {
+        let service = service();
+        let frontend = connect(&service, 1, Role::Frontend);
+        let control = connect(&service, 2, Role::Control);
+        drain(&frontend);
+        service.relay_conversation(2, "c-1".into(), true);
+        assert!(drain(&frontend).is_empty());
+        assert!(drain(&control).is_empty());
     }
 
     #[test]

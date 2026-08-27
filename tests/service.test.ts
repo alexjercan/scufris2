@@ -22,7 +22,7 @@ import service, {
   resolveSocketPath,
 } from "../extensions/scufris/service/index.ts";
 import { SPOKEN_EVENT } from "../extensions/scufris/shared/spoken.ts";
-import { WIDGET_CONTROL_EVENT } from "../extensions/scufris/service/client.ts";
+import { DESKTOP_CONTROL_EVENT } from "../extensions/scufris/service/client.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** One service standing in for the real one, on a socket in a scratch directory. */
@@ -163,12 +163,31 @@ test("an agent reads what is addressed to it and ignores the rest", () => {
       report: { type: "opened", id: "w-1", surface: "clock-1" },
     },
   );
+  // The service answers the conversation window itself, so these two are the
+  // agent's after all.
+  assert.deepEqual(decodeServiceMessage('{"v":3,"type":"ok","id":"c-1"}'), {
+    v: 3,
+    type: "ok",
+    id: "c-1",
+  });
+  assert.deepEqual(
+    decodeServiceMessage(
+      '{"v":3,"type":"refused","id":"c-1","code":"no_frontend","detail":"no screen"}',
+    ),
+    {
+      v: 3,
+      type: "refused",
+      id: "c-1",
+      code: "no_frontend",
+      detail: "no screen",
+    },
+  );
   // The state, the transcript and the speech are a surface's. An agent that
   // dropped the link over one would be an agent no service could push to.
   for (const line of [
     '{"v":3,"type":"state","state":"idle","detail":""}',
     '{"v":3,"type":"speak","text":"the harness is green"}',
-    '{"v":3,"type":"ok","id":"c-1"}',
+    '{"v":3,"type":"transcript","entry":{"speaker":"user","text":"hello"}}',
   ]) {
     assert.equal(decodeServiceMessage(line), undefined, line);
   }
@@ -303,6 +322,58 @@ test("a widget command is settled by the answer that names it", async () => {
   }
 });
 
+test("the conversation window is settled by the service's own answer", async () => {
+  const root = await scratch("conversation");
+  const socketPath = join(root, "service.sock");
+  const listening = await FakeService.listen(socketPath);
+  const client = new ServiceClient({ socketPath, widgetTimeoutMs: 200 });
+  try {
+    client.start();
+    await listening.until(1);
+
+    // `ok` and `refused` rather than a report: the frontend answers nothing
+    // here, because the service answered when it relayed.
+    const showing = client.conversation(true);
+    assert.equal(
+      (await listening.until(2))[1],
+      '{"v":3,"type":"conversation","id":"c-1","up":true}',
+    );
+    listening.push('{"v":3,"type":"ok","id":"c-1"}');
+    assert.equal(await showing, undefined);
+
+    const closing = client.conversation(false);
+    assert.equal(
+      (await listening.until(3))[2],
+      '{"v":3,"type":"conversation","id":"c-2","up":false}',
+    );
+    listening.push(
+      '{"v":3,"type":"refused","id":"c-2","code":"no_frontend",' +
+        '"detail":"there is no frontend connected"}',
+    );
+    await assert.rejects(closing, (error: unknown) => {
+      assert.ok(error instanceof WidgetCommandError);
+      assert.equal(error.code, "no_frontend");
+      return true;
+    });
+
+    // Its own counter, so a widget answer can never settle one of these.
+    const waiting = client.conversation(true);
+    await listening.until(4);
+    listening.push(
+      '{"v":3,"type":"report","report":{"type":"done","id":"c-3"}}',
+    );
+    await assert.rejects(waiting, (error: unknown) => {
+      assert.ok(error instanceof WidgetCommandError);
+      assert.equal(error.code, "timeout");
+      return true;
+    });
+  } finally {
+    client.stop();
+    await listening.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("a command with no link is refused rather than queued", async () => {
   const client = new ServiceClient({ socketPath: "/nonexistent/service.sock" });
   await assert.rejects(client.request({ type: "clear" }), (error: unknown) => {
@@ -356,7 +427,7 @@ test("only the foreground Scufris connects, and it carries what was said", async
     process.env.SCUFRIS_ROLE = "orchestrator";
     service(api);
     let control: unknown;
-    api.events.on(WIDGET_CONTROL_EVENT, (signal: any) => {
+    api.events.on(DESKTOP_CONTROL_EVENT, (signal: any) => {
       control = signal.control;
     });
     emit("session_start");

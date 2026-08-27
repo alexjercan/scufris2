@@ -62,6 +62,9 @@ pub enum LinkEvent {
     /// The agent asked the widgets runtime to do something. Widget traffic
     /// never reaches the pill's state machine.
     Widget(WidgetCommand),
+    /// The agent asked for the conversation window, up or down. It reaches the
+    /// window and nothing else: the pill goes on reporting what it was.
+    Conversation(bool),
 }
 
 /// Returns the next backoff after one failed connection attempt.
@@ -196,6 +199,7 @@ fn serve(
             // Widget commands belong to the widgets runtime, never to the
             // pill's state machine.
             ServiceBody::Widget { command } => observe(LinkEvent::Widget(command)),
+            ServiceBody::Conversation { up } => observe(LinkEvent::Conversation(up)),
             // A frontend sends reports and never receives one, and a debug
             // lease belongs to whoever asked for it in a terminal.
             ServiceBody::Report { .. } | ServiceBody::Debug { .. } => {

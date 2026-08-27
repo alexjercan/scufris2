@@ -3,10 +3,10 @@ import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { CatalogEntry } from "../extensions/scufris/service/protocol.ts";
 import {
-  WIDGET_CONTROL_EVENT,
+  DESKTOP_CONTROL_EVENT,
   WidgetCommandError,
   type WidgetAnswer,
-  type WidgetControl,
+  type DesktopControl,
   type WidgetNotice,
   type WidgetRequest,
 } from "../extensions/scufris/service/client.ts";
@@ -35,7 +35,7 @@ const clock: CatalogEntry = {
 };
 
 /** The control the service link hands over, with the socket taken out. */
-class FakeControl implements WidgetControl {
+class FakeControl implements DesktopControl {
   readonly sent: WidgetRequest[] = [];
   listener?: (notice: WidgetNotice) => void;
   answer: (command: WidgetRequest) => Promise<WidgetAnswer> = async () => ({
@@ -49,6 +49,13 @@ class FakeControl implements WidgetControl {
 
   watchWidgets(listener: (notice: WidgetNotice) => void): void {
     this.listener = listener;
+  }
+
+  /** The conversation window is a sibling verb; widgets never ask for it. */
+  readonly shown: boolean[] = [];
+
+  async conversation(up: boolean): Promise<void> {
+    this.shown.push(up);
   }
 
   /** Delivers one unsolicited frontend message, as the socket would. */
@@ -118,7 +125,7 @@ function harness() {
     emit,
     /** Hands the extension one control, the way the service extension does. */
     serve(control: FakeControl | undefined) {
-      api.events.emit(WIDGET_CONTROL_EVENT, { control });
+      api.events.emit(DESKTOP_CONTROL_EVENT, { control });
     },
     /** Runs one registered tool and returns its result. */
     async call(name: string, params: unknown = {}) {

@@ -172,6 +172,7 @@ fn act(service: &Arc<Service>, client: u64, body: ClientBody) {
         ClientBody::Said { text } => service.said(client, text),
         ClientBody::Speak { text } => service.speak(client, text),
         ClientBody::Widget { command } => service.relay_widget(client, command),
+        ClientBody::Conversation { id, up } => service.relay_conversation(client, id, up),
         ClientBody::Report { report } => service.relay_report(client, report),
     }
 }

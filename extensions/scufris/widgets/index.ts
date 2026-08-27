@@ -10,10 +10,10 @@ import {
   type CatalogEntry,
 } from "../service/protocol.ts";
 import {
-  WIDGET_CONTROL_EVENT,
+  DESKTOP_CONTROL_EVENT,
   WidgetCommandError,
-  type WidgetControl,
-  type WidgetControlSignal,
+  type DesktopControl,
+  type DesktopControlSignal,
   type WidgetNotice,
   type WidgetRequest,
 } from "../service/client.ts";
@@ -60,7 +60,7 @@ export default function widgets(pi: ExtensionAPI): void {
   // nothing.
   if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
 
-  let control: WidgetControl | undefined;
+  let control: DesktopControl | undefined;
   let context: ExtensionContext | undefined;
   /** The widget names the tools were registered with, once they have been. */
   let installed: string[] | undefined;
@@ -259,8 +259,8 @@ export default function widgets(pi: ExtensionAPI): void {
     );
   };
 
-  pi.events.on(WIDGET_CONTROL_EVENT, (value: unknown) => {
-    control = (value as Partial<WidgetControlSignal> | undefined)?.control;
+  pi.events.on(DESKTOP_CONTROL_EVENT, (value: unknown) => {
+    control = (value as Partial<DesktopControlSignal> | undefined)?.control;
     // The listener belongs to the control, and a control is one session's. It
     // is registered again with each one, which is what keeps the catalog and
     // the person's own closes arriving across a restart.

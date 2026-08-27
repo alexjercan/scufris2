@@ -356,7 +356,7 @@
       <a href="#s05">05 Surfaces</a>
       <a href="#s06">06 One turn</a>
       <a href="#s07">07 What this deletes</a>
-      <a href="#s08">08 No terminal, and no attaching one</a>
+      <a href="#s08">08 No attaching, so one verb instead</a>
       <a href="#s09">09 Decisions</a>
       <a href="#s10">10 Increments</a>
     </nav>
@@ -946,9 +946,9 @@
       <code>scufris-ctl</code> is the <code>control</code> role, which gives it
       real verbs for the first time: <code>send</code>, <code>listen</code>,
       <code>cancel</code>, <code>abort</code>, <code>state</code>,
-      <code>detach</code>, <code>attach</code>. It works with no graphical
-      session at all, which is how the service gets tested without a display and
-      how the conversation stays reachable over ssh.
+      <code>debug</code>. It works with no graphical session at all, which is
+      how the service gets tested without a display and how the conversation
+      stays reachable over ssh.
     </p>
   </section>
 
@@ -1353,7 +1353,7 @@
   <section id="s08">
     <div class="shead">
       <span class="snum">08</span>
-      <h2>No terminal, and no attaching one</h2>
+      <h2>No attaching, so one verb instead</h2>
       <span class="srule"></span>
       <span class="stag">Answered</span>
     </div>
@@ -1386,14 +1386,14 @@
 
     <ul>
       <li>
-        <b>An explicit handoff.</b> <code>scufris-ctl detach</code> stops the
-        service's agent child and leaves the session directory free; you then
-        run an ordinary <code>pi --continue</code> in any terminal against it
-        and get the whole TUI back. <code>scufris-ctl attach</code> restarts the
-        child when you are done. The service reports <code>detached</code> as a
-        state, so the pill says so rather than looking broken. This needs no
-        systemd unit and no popup: it is two ctl verbs against a service that
-        already supervises the child.
+        <b>One verb that hands you the terminal:</b>
+        <code>scufris-ctl debug</code>. It stops the service's agent, starts
+        <code>pi</code> on the same session in the terminal you ran it from, and
+        gives the agent back when you leave. Detaching and reattaching by hand
+        is a sequence to remember and a state to get stuck in, so there is no
+        such pair of verbs &mdash; there is one command that behaves like
+        attaching a debugger, and the section below is how it cannot leave
+        Scufris switched off.
       </li>
       <li>
         <b>A read-only live view.</b> Pi appends the session as JSONL and
@@ -1403,6 +1403,59 @@
         HUD renders.
       </li>
     </ul>
+
+    <div class="panel">
+      <h3>Detach is a lease, not a mode</h3>
+      <p>
+        The failure worth designing out is not the awkward sequence; it is
+        ending up detached with nothing to put it back. A missed reattach leaves
+        an assistant that never answers again, and the person who would fix it
+        is the one who does not know it happened.
+      </p>
+      <p>
+        So the detach is held open by the connection that asked for it.
+        <code>scufris-ctl debug</code> opens a control connection, asks to
+        detach, and holds that connection for exactly as long as the terminal
+        session lasts.
+        <b>When the connection closes, the service starts the agent again</b>
+        &mdash; on a clean exit, on Ctrl-C, on a closed terminal, on the ctl
+        being killed outright. The kernel closes the socket when the process
+        dies, so nothing has to be remembered and nothing has to be trapped.
+        This is the same reasoning
+        <code>tools/desktop/scufris-socket-lock</code> already runs on, where a
+        lock is held by a pipe rather than by a promise.
+      </p>
+      <p>The rest is bookkeeping the one verb does for you.</p>
+      <ul>
+        <li>
+          The service stops the agent the way it stops any child &mdash; stdin
+          closed, <code>SIGTERM</code>, <code>SIGKILL</code> after a bound
+          &mdash; and answers with the exact session path.
+        </li>
+        <li>
+          The ctl runs <code>pi</code> on <em>that path</em> rather than on
+          <code>--continue</code>, so there is no question about which session
+          the terminal resumed. Whatever you say there is in the conversation
+          when the service comes back, because it is the same file.
+        </li>
+        <li>
+          The state goes to <code>detached</code> and the pill says so. Voice
+          input is refused with a code rather than swallowed: prompts travel on
+          the agent's stdin, and while you are in the terminal, that is yours.
+        </li>
+        <li>
+          Widgets keep working. The terminal <code>pi</code> loads the same
+          extensions, so it connects to the same socket in the
+          <code>agent</code> role and the surface protocol never notices the
+          difference. Only prompts have nowhere to go.
+        </li>
+        <li>
+          One at a time, by L1. A second <code>debug</code> is refused while a
+          lease is held, and so is a <code>debug</code> from something that is
+          not a terminal &mdash; the verb exists to hand you a TUI.
+        </li>
+      </ul>
+    </div>
 
     <div class="panel risk">
       <h3>The service becomes the single point</h3>
@@ -1467,8 +1520,8 @@
       <div class="rec">
         <b>Settled:</b> the popup unit is retired outright. The HUD is built
         when we want it, not as a precondition. The pill is the surface that
-        matters, and <code>detach</code> covers the terminal case in the
-        meantime.
+        matters, and <code>scufris-ctl debug</code> covers the terminal case in
+        the meantime.
       </div>
     </div>
 
@@ -1510,9 +1563,9 @@
         <code>pi --mode rpc</code>, owns the session directory, maps events onto
         <code>ScufrisState</code>, holds the transcript ring, answers extension
         UI requests, and serves protocol v3 with three roles.
-        <code>scufris-ctl send | state | abort | detach | attach</code>. Nothing
-        graphical changes and the old arrangement keeps working beside it, so
-        this lands and is exercised on its own.
+        <code>scufris-ctl send | state | abort | debug</code>. Nothing graphical
+        changes and the old arrangement keeps working beside it, so this lands
+        and is exercised on its own.
       </li>
       <li>
         <b>The switch.</b> One commit: the desktop extension becomes a client,

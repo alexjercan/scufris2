@@ -109,13 +109,38 @@ same session file would be a second writer.
 
 Two things are possible instead, and both are in the design:
 
-- `scufris-ctl detach` stops the agent child and frees the session
-  directory, so an ordinary `pi --continue` in any terminal takes over
-  with the full TUI. `attach` restarts the child. The service reports
-  `detached` as a state. No unit and no popup required.
+- `scufris-ctl debug` is one verb, not a pair. Alex asked for this: "so I
+  don't have to `detach` `continue` `attach`, it's basically like starting
+  a debugger". It stops the agent child, gets the exact session path back,
+  runs `pi` on that path in the terminal it was called from, and gives the
+  agent back on exit. No unit and no popup required.
 - Pi appends the session as JSONL and publishes the path as
   `PI_SESSION_FILE`, so `tail -f` is a raw live transcript with no second
   writer.
+
+### The detach is a lease, not a mode
+
+The failure to design out is ending up detached with nothing to put it
+back. So the detach is held by the control connection that asked for it.
+When that connection closes the service starts the agent again: clean
+exit, Ctrl-C, closed terminal, or the ctl killed outright. The kernel
+closes the socket when the process dies, so nothing is remembered and
+nothing is trapped. Same reasoning as
+`tools/desktop/scufris-socket-lock`, where a lock is held by a pipe.
+
+The rest is bookkeeping the verb does:
+
+- The agent child is stopped the way any child is: stdin closed,
+  `SIGTERM`, `SIGKILL` after a bound.
+- The ctl runs `pi` on the returned path, not on `--continue`, so there
+  is no question which session resumed.
+- State goes to `detached`. Voice input is refused with a code rather
+  than swallowed, because prompts travel on the agent's stdin.
+- Widgets keep working. The terminal `pi` loads the same extensions and
+  connects to the same socket in the `agent` role. Only prompts have
+  nowhere to go.
+- One at a time by L1. A second `debug` is refused while a lease is held,
+  and so is a `debug` from something that is not a terminal.
 
 ## Increments
 
@@ -123,7 +148,7 @@ Two things are possible instead, and both are in the design:
    supervising one `pi --mode rpc`, owning the session directory, mapping
    events to `ScufrisState`, holding the transcript ring, answering
    extension UI requests, serving v3 with three roles. `scufris-ctl send
-| state | abort | detach | attach`. Nothing graphical changes.
+| state | abort | debug`. Nothing graphical changes.
 2. The switch, one commit. Extension becomes a client, frontend becomes a
    client, piper moves into the frontend, and `desktop.sock`,
    `command.rs`, `keys.rs`, the socket lock, `SCUFRIS_DAEMON`, protocol

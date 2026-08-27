@@ -1,7 +1,7 @@
-desktop/target/
+native/target/
 docs/book/
-desktop/scufris-desktop/gen/
-desktop/scufris-desktop/ui/dist/
+native/scufris-desktop/gen/
+native/scufris-desktop/ui/dist/
 flake.lock
-desktop/scufris-desktop/ui/orb-engine.js
+native/scufris-desktop/ui/orb-engine.js
 tasks/20260822-132001/scufris-hud.html

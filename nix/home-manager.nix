@@ -9,6 +9,7 @@
   defaults = defaultsFor system;
   voiceRuntime = import ./voice.nix {inherit pkgs;};
   whisperRuntime = import ./whisper.nix {inherit pkgs;};
+  serviceCfg = cfg.service;
   desktopCfg = cfg.desktop;
   whisperCfg = desktopCfg.stt.whisper;
   bundledEndpoint = "http://${whisperCfg.host}:${toString whisperCfg.port}${whisperRuntime.inferencePath}";
@@ -60,6 +61,17 @@ in {
       default = defaults.piPackage;
       defaultText = lib.literalExpression "inputs.llm-agents.packages.${system}.pi";
       description = "Pi package used by the Scufris launcher.";
+    };
+
+    ctlPackage = lib.mkOption {
+      type = lib.types.package;
+      default = defaults.ctlPackage;
+      defaultText = lib.literalExpression "self.packages.\${system}.scufris-ctl";
+      description = ''
+        scufris-ctl package. Installed by whichever of the service and the
+        companion is enabled, because a window manager binding and a terminal
+        both reach Scufris by name and neither wants the other's package.
+      '';
     };
 
     finalPackage = lib.mkOption {
@@ -138,6 +150,46 @@ in {
           readOnly = true;
           description = "Rendered direct popup launcher for desktop consumers when the popup is enabled.";
         };
+      };
+    };
+
+    service = {
+      enable = lib.mkEnableOption "the headless scufris-service background service";
+
+      package = lib.mkOption {
+        type = lib.types.package;
+        default = defaults.servicePackage;
+        defaultText = lib.literalExpression "self.packages.\${system}.scufris-service";
+        description = "scufris-service package.";
+      };
+
+      agentPackage = lib.mkOption {
+        type = lib.types.package;
+        default = cfg.finalPackage;
+        defaultText = lib.literalExpression "programs.scufris.finalPackage";
+        description = ''
+          Launcher the service runs as its one Pi agent. The service starts it
+          in RPC mode, so this is the same Scufris the popup runs, not a
+          different agent.
+        '';
+      };
+
+      sessionDirectory = lib.mkOption {
+        type = lib.types.strMatching "/.*";
+        default = "${config.xdg.dataHome}/scufris/sessions";
+        defaultText = lib.literalExpression "\"\${config.xdg.dataHome}/scufris/sessions\"";
+        description = ''
+          Absolute directory the service keeps its conversation in. The service
+          owns it, and `scufris-ctl debug` hands a terminal the same session
+          out of it.
+        '';
+      };
+
+      serviceName = lib.mkOption {
+        type = lib.types.str;
+        default = "scufris-service";
+        readOnly = true;
+        description = "Stable systemd user service identity for the background service, without the unit suffix.";
       };
     };
 
@@ -301,6 +353,38 @@ in {
         };
       };
     })
+    (lib.mkIf (cfg.enable && serviceCfg.enable) {
+      assertions = [
+        (lib.hm.assertions.assertPlatform "programs.scufris.service" pkgs lib.platforms.linux)
+      ];
+
+      home.packages = [serviceCfg.package cfg.ctlPackage];
+
+      systemd.user.services.${serviceCfg.serviceName} = {
+        Unit = {
+          # No graphical session, and nothing ordered after one. The
+          # service is the half that keeps the conversation whether or not
+          # anything is on screen, and a terminal over ssh reaches it with
+          # scufris-ctl.
+          Description = "Scufris background service";
+        };
+        Service = {
+          Type = "simple";
+          ExecStart = lib.getExe serviceCfg.package;
+          Environment = [
+            "SCUFRIS_SERVICE_AGENT=${lib.getExe serviceCfg.agentPackage}"
+            "SCUFRIS_SERVICE_SESSION_DIR=${serviceCfg.sessionDirectory}"
+          ];
+          # The service restarts its own agent, so it going down is a fault of
+          # the service itself and the conversation is on disk either way.
+          Restart = "on-failure";
+          RestartSec = 3;
+          RuntimeDirectory = serviceCfg.serviceName;
+          WorkingDirectory = "%h";
+        };
+        Install.WantedBy = ["default.target"];
+      };
+    })
     (lib.mkIf (cfg.enable && desktopCfg.enable) {
       assertions = [
         (lib.hm.assertions.assertPlatform "programs.scufris.desktop" pkgs lib.platforms.linux)
@@ -314,7 +398,7 @@ in {
         }
       ];
 
-      home.packages = [desktopCfg.package];
+      home.packages = [desktopCfg.package cfg.ctlPackage];
 
       systemd.user.services.${desktopCfg.serviceName} = {
         Unit = {

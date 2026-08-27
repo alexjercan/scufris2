@@ -11,6 +11,7 @@
 
 - [Architecture](dev/architecture.md)
 - [Extensions](dev/extensions.md)
+- [Background service](dev/service.md)
 - [Desktop companion](dev/desktop.md)
 - [Widgets](dev/widgets.md)
 - [Jobs](dev/jobs.md)

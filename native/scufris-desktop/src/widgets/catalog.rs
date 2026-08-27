@@ -2,7 +2,7 @@
 //!
 //! A widget is a directory: `widget.toml` says what it is called and how big
 //! its window is, and `widget.ts` renders into it. In-repo widgets live under
-//! `desktop/widgets/` and are compiled into the binary by `build.rs`, so
+//! `native/widgets/` and are compiled into the binary by `build.rs`, so
 //! discovery is a startup check over what was built rather than a walk of the
 //! filesystem. `SCUFRIS_WIDGET_PATH` names extra roots on the person's own
 //! machine, walked at startup and read from their compiled `widget.js`.

@@ -27,9 +27,16 @@
   };
   desktop = import ./desktop.nix {
     inherit pkgs version;
-    source = ../desktop;
-    lockFile = ../desktop/Cargo.lock;
+    source = ../native;
+    lockFile = ../native/Cargo.lock;
   };
+  native = import ./service.nix {
+    inherit pkgs version;
+    source = ../native;
+    lockFile = ../native/Cargo.lock;
+  };
+  service = native.service;
+  ctl = native.ctl;
   devShell = import ./dev-shell.nix {inherit pkgs voice;};
   docs = import ./docs.nix {inherit inputs self pkgs;};
 in {
@@ -41,6 +48,8 @@ in {
     launcher
     voiceLauncher
     desktop
+    service
+    ctl
     devShell
     docs
     ;

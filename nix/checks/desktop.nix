@@ -96,9 +96,8 @@ in
       test -f ${desktop}/share/applications/scufris-desktop.desktop
       test -f ${desktop}/share/icons/hicolor/scalable/apps/scufris.svg
 
-      # A window manager binding runs the command client by name, so it ships
-      # with the companion rather than as something the person installs next.
-      ${desktop}/bin/scufris-ctl --help | grep -F 'usage: scufris-ctl <verb>'
+      # The command client is its own package now, built without any of this.
+      ! test -e ${desktop}/bin/scufris-ctl
       touch "$out"
     '';
 
@@ -154,15 +153,15 @@ in
       touch "$out"
     '';
 
-    # rustfmt needs no dependencies, so the companion's formatting is checked
+    # rustfmt needs no dependencies, so the whole Rust workspace is checked
     # here. Clippy needs the whole dependency tree and stays a release step.
-    desktop-format =
-      pkgs.runCommand "scufris-desktop-format-check" {
+    native-format =
+      pkgs.runCommand "scufris-native-format-check" {
         nativeBuildInputs = [pkgs.cargo pkgs.rustfmt];
       } ''
-        cp -R ${../../desktop} desktop
-        chmod -R u+w desktop
-        cd desktop
+        cp -R ${../../native} native
+        chmod -R u+w native
+        cd native
         cargo fmt --all --check
         touch "$out"
       '';
@@ -178,6 +177,7 @@ in
     assert desktopUnit.Service.Restart == "on-failure";
     assert desktopUnit.Service.StateDirectory == "scufris-desktop";
     assert desktopUnit.Service.ExecStart == [(lib.getExe desktop)];
+    assert lib.elem scufris.ctl desktopHome.config.home.packages;
     assert lib.elem "SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10302/inference" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_HOTKEY=Super+D" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe testChat}" desktopUnit.Service.Environment;

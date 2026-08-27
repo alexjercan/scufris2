@@ -7,9 +7,9 @@ widget.
 
 The daemon side is `extensions/scufris/widgets/index.ts` and the
 `skills/widgets` skill. The companion side is
-`desktop/scufris-desktop/src/widgets/`, the shell page in
-`desktop/scufris-desktop/shell/`, and the widgets themselves in
-`desktop/widgets/`.
+`native/scufris-desktop/src/widgets/`, the shell page in
+`native/scufris-desktop/shell/`, and the widgets themselves in
+`native/widgets/`.
 
 ## Postures
 
@@ -229,7 +229,7 @@ The page draws nothing on a clock of its own. WebKitGTK throttles a hidden page
 and a pooled shell is hidden by definition, so everything happens because a
 message arrived.
 
-A widget is a directory under `desktop/widgets/` holding `widget.toml` and
+A widget is a directory under `native/widgets/` holding `widget.toml` and
 `widget.ts`. The directory name is the widget identifier; a manifest that
 disagrees is a startup failure, and so is a duplicate. The module exports one
 function:
@@ -249,7 +249,7 @@ a note's spawn payload is its data, while a timer's is the request its data
 answers. What the shell does hold is an update that arrived while the module was
 still importing, which is that widget's first data rather than a lost message.
 
-`desktop/widgets/widget.d.ts` is the whole contract and the only copy of it.
+`native/widgets/widget.d.ts` is the whole contract and the only copy of it.
 The shell's own tsconfig reads that same file rather than declaring the types a
 second time: two copies of a contract are two contracts, and the day they drift
 is a day both projects compile and the panel breaks in front of the person.
@@ -265,7 +265,7 @@ manifests and compiled modules into the binary. What ships is what was built,
 and a widget whose TypeScript does not compile fails the build rather than the
 first person who asks for it.
 
-The compiled modules land in `desktop/widgets/dist/`, outside the frontend
+The compiled modules land in `native/widgets/dist/`, outside the frontend
 directory on purpose. Everything under `ui/dist` is bundled into the app
 protocol and reachable from any window, so a widget module served from there
 would make the per-surface `scufris-widget:` scheme a formality rather than a
@@ -274,7 +274,7 @@ gate.
 ## Backends
 
 A widget that shows a number that changes needs something producing the number.
-That something is a backend: a directory under `desktop/backends/` holding a
+That something is a backend: a directory under `native/backends/` holding a
 `backend.py` that writes one JSON line per reading to standard output. The
 directory name is the identifier, and a widget names one in its manifest:
 
@@ -290,7 +290,7 @@ reason a renamed widget is: the alternative is a panel that opens and then never
 shows anything.
 
 The first line a backend is handed on standard input is the payload the open
-carried. `desktop/backends/system/backend.py` reads one key from it, `every`,
+carried. `native/backends/system/backend.py` reads one key from it, `every`,
 and reports processor load, per-core load, memory in use, and uptime.
 
 A panel can also write back. `ctx.send(action)` puts one JSON line on the

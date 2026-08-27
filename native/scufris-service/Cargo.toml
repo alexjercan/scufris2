@@ -1,0 +1,24 @@
+[package]
+name = "scufris-service"
+description = "Scufris background service: owns the Pi agent, the session, and the socket"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+clap = { version = "4.6.6", features = ["derive", "env"] }
+# Stopping the agent means stopping what the agent started, so the child gets
+# its own process group and the group is what gets signalled. The workspace
+# forbids unsafe; this is the safe wrapper around the calls that need it, and
+# the same one scufris-desktop already uses for widget backends.
+nix = { version = "0.31.3", default-features = false, features = ["signal"] }
+scufris-control = { path = "../scufris-control" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+tracing = "0.1.41"
+tracing-journald = "0.3.1"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+
+[lints]
+workspace = true

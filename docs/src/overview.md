@@ -27,10 +27,16 @@ Scufris packages five capability-owned Pi extensions:
   model can name are the ones that are installed. See [Widgets](dev/widgets.md).
 
 `scufris-desktop` is the desktop companion: a voice pill, a widget runtime, and
-a tray icon, built from the `desktop/` cargo workspace and shipped as a separate
+a tray icon, built from the `native/` cargo workspace and shipped as a separate
 Linux package. It records, transcribes locally, and submits the words as an ordinary
 user message. The conversation stays in the popup Pi process, so a companion
 crash never stops it. See [Desktop companion](dev/desktop.md).
+
+`scufris-service` is the headless half, built from the same workspace and
+shipped as its own package with no graphical dependency. It supervises one
+`pi --mode rpc` agent, owns the session directory, and serves the socket every
+surface connects to. `scufris-ctl` talks to it from a terminal. See
+[Background service](dev/service.md).
 
 Deterministic executables called by extensions live under `tools/`. Commands
 for people live under `scripts/`. Model-facing workflow policy lives in small

@@ -30,7 +30,7 @@ Build the companion and print what it resolved. This starts no window, so it
 is the cheapest proof that the working tree builds and configures:
 
 ```bash
-cargo run --manifest-path desktop/scufris-desktop/Cargo.toml -- --print-config
+cargo run --manifest-path native/scufris-native/Cargo.toml -- --print-config
 ```
 
 ```text
@@ -52,7 +52,7 @@ companion against the same runtime directory. Use two terminals, both inside
 SCUFRIS_DAEMON=1 npm run dev
 
 # 2. the companion
-cargo run --manifest-path desktop/scufris-desktop/Cargo.toml
+cargo run --manifest-path native/scufris-native/Cargo.toml
 ```
 
 Then press `Super+D`, speak, and press `Enter`. The words arrive in the Pi
@@ -85,7 +85,7 @@ default:
 
 ```bash
 SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10302/inference \
-  cargo run --manifest-path desktop/scufris-desktop/Cargo.toml
+  cargo run --manifest-path native/scufris-native/Cargo.toml
 ```
 
 With no server anywhere, start one on its own port:
@@ -106,7 +106,7 @@ the hooks. Point them at absolute executables to exercise them:
 ```bash
 SCUFRIS_DESKTOP_CHAT_COMMAND=/path/to/open-chat \
 SCUFRIS_DESKTOP_RESTART_COMMAND=/path/to/restart-backend \
-  cargo run --manifest-path desktop/scufris-desktop/Cargo.toml
+  cargo run --manifest-path native/scufris-native/Cargo.toml
 ```
 
 The companion is Linux and X11 only. Without a display it starts and does no
@@ -148,10 +148,12 @@ Test ownership:
   Calm, identity, and repository structure. `tests/desktop.test.ts` covers the
   daemon side of the control protocol: socket ownership, submission
   acknowledgment, and the accepted, uncertain, and unsent answers.
-- `desktop/`: the companion in Rust. `scufris-control` owns the protocol
-  encoding, and `scufris-desktop` owns the state machine, the pending
-  transcript store, audio conversion, and the tray. Every port is faked, so
-  `cargo test` needs no display, no microphone, and no socket.
+- `native/`: the Rust workspace. `scufris-control` owns the protocol encoding,
+  `scufris-desktop` owns the state machine, the pending transcript store, audio
+  conversion, and the tray, and `scufris-service` owns the agent, the session,
+  and the version 3 socket. Every port is faked and the service's stand-in
+  agent is a `/bin/sh` script, so `cargo test` needs no display, no microphone,
+  and no Pi.
 - `tests/test_scufris_jobs.py`: the jobs helper and inspection CLI. Lifecycle
   tests create real tmux sessions on the default server, relocated per test
   fixture with `TMUX_TMPDIR` into an isolated server directory, and prove

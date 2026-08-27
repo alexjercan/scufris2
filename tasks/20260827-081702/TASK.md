@@ -156,3 +156,88 @@ The rest is bookkeeping the verb does:
 3. The textbox. Review state and Enter-while-recording deleted with it.
 4. Listening is one rule: barge-in, steer, and a key for abort.
 5. The HUD, when we want it.
+
+## Increment 1 done (2026-08-27)
+
+Landed on `master`. The service starts, the ctl talks to it, and `debug`
+hands a terminal the session and takes it back.
+
+Deviations from the design page, both deliberate:
+
+- **Two roles, not three.** `frontend` and `control`. The `agent` role has
+  no behaviour until the extension becomes a client in increment 2, and
+  the project forbids empty placeholders. Adding it is a one-line change
+  to the enum when there is something for it to do.
+- **`Starting` added to `ScufrisState`, `Attention` deferred.** The agent
+  is spawned before it has answered anything, and a frontend that showed
+  `idle` for that window would be wrong. `Attention` waits until dialog
+  routing exists, which is increment 2; today the service answers
+  extension UI requests itself.
+
+### What was built
+
+- `native/` is the workspace, renamed from `desktop/`. `nix/desktop.nix`
+  now builds `-p scufris-desktop` only.
+- `native/scufris-control/src/service.rs`: protocol v3. `read_line` split
+  out of `read_message` so the version is checked before the body shape,
+  and a v2 peer is told which version it spoke.
+- `native/scufris-service/`: `config`, `rpc`, `agent`, `service`,
+  `server`, `logging`, `main`, and `bin/scufris-ctl.rs` moved here from
+  `scufris-control`. Arguments are parsed with `clap`.
+- `nix/service.nix` splits one build into the `scufris-service` and
+  `scufris-ctl` packages; neither pulls GTK or WebKitGTK.
+  `programs.scufris.service.enable` gives it a systemd user unit wanted by
+  `default.target`, off by default.
+- `docs/src/dev/service.md` is the chapter.
+
+### Verification
+
+- `cargo test -p scufris-service -p scufris-control`: 35 + 25 passed.
+  The end-to-end one is
+  `server::tests::a_debug_lease_hands_the_session_over_and_closing_gives_it_back`,
+  which drives a `/bin/sh` stand-in agent through the real socket: hello,
+  `debug`, assert the command line, close the connection, assert the agent
+  starts a second time.
+- `nix flake check`.
+- By hand, against the real `scufris` launcher: the service comes up on
+  `idle`, `send` submits and the state cycles `idle -> working -> idle`,
+  `watch` follows it, `debug` from a pipe is refused with exit 2, and a
+  raw control client gets back the exact session file the agent was on,
+  is refused a second lease with `debug_held`, is refused a submission
+  with `detached`, and sees `idle` again a moment after it closes. `SIGTERM`
+  stops the agent and removes the socket, leaving `desktop.sock` alone.
+
+### Found while testing: the assistant says nothing on the transcript
+
+Scufris does not answer with an assistant text block. Its spoken answer is
+the `spoken` argument of a `scufris_final_response` tool call, which the
+`desktop` extension forwards today. So the service's transcript ring gets
+the user's line and nothing back, and `watch` shows only what was said to
+it.
+
+Left as it is. The service reads text blocks, which is right for any
+agent, and teaching it one extension's tool name is work increment 2
+deletes: there the extension is a client in the `agent` role and pushes
+the spoken response itself.
+
+One test needed a bounded wait, and the reason is worth keeping: another
+test spawns children, and a forked child holds a copy of every open
+descriptor until it execs. So a just-closed listener still answers for a
+few microseconds, and `a_stale_socket_is_replaced_and_a_live_one_is_not`
+saw it on a loaded builder. Measured at 6 in 4000 locally.
+
+### Testing it by hand
+
+```bash
+cd native
+nix develop --offline -c cargo build -p scufris-service
+SCUFRIS_SERVICE_AGENT="$(command -v scufris)" ./target/debug/scufris-service
+
+# another terminal
+./target/debug/scufris-ctl state          # starting, then idle
+./target/debug/scufris-ctl watch          # follows state and conversation
+./target/debug/scufris-ctl send hello     # prompt, or a steer while working
+./target/debug/scufris-ctl abort
+./target/debug/scufris-ctl debug          # the session opens here; leaving
+                                          # gives the agent back
+```

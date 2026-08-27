@@ -8,8 +8,8 @@ checks, and the documents that describe them.
 
 Grep both sides of every pair the change touches:
 
-- Protocol: `desktop/control-protocol-v*.json` fixtures are read by
-  the Rust suite (`desktop/scufris-control/src/lib.rs`, `include_str`)
+- Protocol: `native/control-protocol-v*.json` fixtures are read by
+  the Rust suite (`native/scufris-control/src/lib.rs`, `include_str`)
   and the TS suite (`tests/desktop.test.ts`); `PROTOCOL_VERSION` lives
   in both `scufris-control` and
   `extensions/scufris/desktop/protocol.ts`. A message shape changed on

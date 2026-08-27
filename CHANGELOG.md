@@ -11,6 +11,18 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Added
 
+- `scufris-service`, the headless half of Scufris. It supervises one
+  `pi --mode rpc` agent, owns the session directory, and serves one socket that
+  every surface connects to. It builds and runs with no graphical dependency,
+  so a machine with no display keeps the conversation. Off by default;
+  `programs.scufris.service.enable` gives it a systemd user unit of its own.
+  See the [background service](docs/src/dev/service.md) chapter.
+- `scufris-ctl send`, `state`, `watch`, `abort` and `debug`, which reach the
+  background service from any terminal. `debug` takes the agent away and opens
+  its session where you are; closing the terminal gives it back, so there is no
+  way to be left detached with nothing to put it back. `scufris-ctl` is now its
+  own package, installed by whichever half of Scufris you enable.
+
 - Native widgets. Scufris can open a small panel on the desktop while it
   answers: an exhibit on a shelf above the pill, which ages out on its own, or
   an instrument in one of four edge slots when you ask to keep it. A widget

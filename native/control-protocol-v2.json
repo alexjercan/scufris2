@@ -1,5 +1,5 @@
 {
-  "comment": "Shared wire fixtures for desktop control protocol v2. The protocol is implemented once per side, so both suites read these exact lines: desktop/scufris-control/src/lib.rs and tests/desktop.test.ts.",
+  "comment": "Shared wire fixtures for desktop control protocol v2. The protocol is implemented once per side, so both suites read these exact lines: native/scufris-control/src/lib.rs and tests/desktop.test.ts.",
   "canonical": {
     "companion": [
       "{\"v\":2,\"type\":\"hello\"}",

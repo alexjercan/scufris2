@@ -14,3 +14,4 @@ in
   // import ./home.nix args
   // import ./voice.nix args
   // import ./desktop.nix args
+  // import ./service.nix args

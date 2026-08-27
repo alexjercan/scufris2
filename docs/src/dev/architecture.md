@@ -7,12 +7,15 @@ Repository ownership follows the runtime architecture:
 - `extensions/scufris/` contains the Pi extensions: `workflow/`, `voice/`,
   `desktop/`, `widgets/`, and the small independent `calm.ts`. Extensions own
   lifecycle events, native tools, session state, and notifications.
-- `desktop/` is a cargo workspace holding `scufris-control`, the desktop control
-  protocol, and `scufris-desktop`, the Tauri voice pill, widget runtime, and
-  tray companion. It ships as its own flake package. Beside the workspace,
-  `desktop/widgets/` holds the widgets themselves and `desktop/backends/` the
-  samplers that feed them; both are compiled into the companion by its
-  `build.rs`. See [Desktop companion](desktop.md) and [Widgets](widgets.md).
+- `native/` is a cargo workspace holding `scufris-control`, the wire protocols,
+  `scufris-desktop`, the Tauri voice pill, widget runtime, and tray companion,
+  and `scufris-service`, the headless background service and its `scufris-ctl`
+  client. Each ships as its own flake package, and the service package builds
+  with no graphical dependency at all. Beside the workspace, `native/widgets/`
+  holds the widgets themselves and `native/backends/` the samplers that feed
+  them; both are compiled into the companion by its `build.rs`. See
+  [Background service](service.md), [Desktop companion](desktop.md), and
+  [Widgets](widgets.md).
 - `tools/` contains deterministic executables called by extensions:
   `jobs/scufris-jobs`, `jobs/scufris-report`,
   `quick-review-agent/scufris-quick-review-agent`,
@@ -23,8 +26,8 @@ Repository ownership follows the runtime architecture:
 - `skills/` contains the distributed model-facing skills, `workflow` and
   `widgets`. Development-only skills live in `.agents/skills/`.
 - `nix/` contains one file per build concern: `resources.nix`, `launcher.nix`,
-  `popup.nix`, `voice.nix`, `desktop.nix`, `whisper.nix`, `dev-shell.nix`,
-  `docs.nix`, and `home-manager.nix`. `nix/scufris.nix` composes them into the
+  `popup.nix`, `voice.nix`, `desktop.nix`, `service.nix`, `whisper.nix`,
+  `dev-shell.nix`, `docs.nix`, and `home-manager.nix`. `nix/scufris.nix` composes them into the
   component set for one system, `nix/checks/` asserts that composition, and
   `flake.nix` only selects the outputs.
 
@@ -125,8 +128,12 @@ optional popup, desktop companion, and bundled whisper-server services. The
 check groups under `nix/checks/` assert the exact rendered arguments
 (`launcher.nix`), the distributed files (`resources.nix`), the module interface
 (`home.nix`), closure separation with a real Piper synthesis fixture
-(`voice.nix`), and the resolved companion configuration (`desktop.nix`).
+(`voice.nix`), the resolved companion configuration (`desktop.nix`), and the
+headless service and its client (`service.nix`).
 
-`scufris-desktop` is built from the `desktop/` cargo workspace by
+`scufris-desktop` is built from the `native/` cargo workspace by
 `nix/desktop.nix` as a separate package output. It is absent from the default
 and voice launcher closures, which the desktop closure check enforces.
+`scufris-service` and `scufris-ctl` come from the same workspace by
+`nix/service.nix`, and the service closure check enforces that neither pulls in
+GTK or WebKitGTK.

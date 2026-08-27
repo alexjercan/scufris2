@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod command;
+pub mod service;
 
 /// Wire protocol version accepted by both peers.
 pub const PROTOCOL_VERSION: u32 = 2;
@@ -399,10 +400,12 @@ pub fn is_submission_text(value: &str) -> bool {
         && !value.contains(['\r', '\0'])
 }
 
-/// Reads and decodes one bounded LF-terminated JSON message.
-pub fn read_message<T: for<'de> Deserialize<'de>>(
-    reader: &mut impl BufRead,
-) -> Result<T, MessageError> {
+/// Reads one bounded LF-terminated line, without decoding it.
+///
+/// Split out from [`read_message`] so a reader can look at the version before
+/// it commits to a body shape. A peer speaking another version should be told
+/// which version it spoke, not that its message did not parse.
+pub fn read_line(reader: &mut impl BufRead) -> Result<Vec<u8>, MessageError> {
     let mut bytes = Vec::new();
     let mut limited = std::io::Read::take(reader, (MAX_MESSAGE_BYTES + 1) as u64);
     limited.read_until(b'\n', &mut bytes)?;
@@ -418,7 +421,14 @@ pub fn read_message<T: for<'de> Deserialize<'de>>(
     if bytes.last() == Some(&b'\r') {
         return Err(MessageError::MissingTerminator);
     }
-    Ok(serde_json::from_slice(&bytes)?)
+    Ok(bytes)
+}
+
+/// Reads and decodes one bounded LF-terminated JSON message.
+pub fn read_message<T: for<'de> Deserialize<'de>>(
+    reader: &mut impl BufRead,
+) -> Result<T, MessageError> {
+    Ok(serde_json::from_slice(&read_line(reader)?)?)
 }
 
 /// Encodes and writes one bounded LF-terminated JSON message.

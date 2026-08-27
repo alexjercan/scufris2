@@ -1,7 +1,7 @@
 # Desktop companion
 
 `scufris-desktop` is the Scufris voice pill and tray companion. It is a Tauri
-application built from the `desktop/` cargo workspace and shipped as its own
+application built from the `native/` cargo workspace and shipped as its own
 flake package, so consumers who never enable it never build Tauri.
 
 ## Ownership
@@ -55,7 +55,7 @@ retained as **uncertain** instead: `Ctrl+C` copies it, `Escape` discards it, and
 `Enter` says what sending it again would risk before a second `Enter` does it.
 Activation never discards a retained transcript.
 
-Every one of these transitions lives in `desktop/scufris-desktop/src/state.rs`
+Every one of these transitions lives in `native/scufris-desktop/src/state.rs`
 as a pure state machine, so the whole interaction is tested without a display.
 Everything the runtime reaches outside itself - the microphone, the endpoint,
 the socket, the window, the disk, and where deferred work runs - is a port on
@@ -68,7 +68,7 @@ pill holding the keyboard is the pill taking it away from whatever the person
 was typing in. So the same three keys have a second road in, and it does not go
 through the window at all.
 
-`desktop/scufris-desktop/src/command.rs` listens on a Unix socket at
+`native/scufris-desktop/src/command.rs` listens on a Unix socket at
 `$XDG_RUNTIME_DIR/scufris/desktop.sock`, beside the daemon socket and not it.
 This is the one place the companion is the server: `daemon.rs` connects out, and
 this listens for the person's own window manager. One LF-terminated JSON line
@@ -80,9 +80,11 @@ each way, one verb per connection, and the connection closes:
 {"v":1,"verb":"accept"}
 ```
 
-`scufris-ctl <verb>` is the client, and it ships beside the companion because a
-window manager binding runs it by name. Its exit status is what a binding can
-branch on: 0 the verb reached the pill, 1 it did not, 2 the run was wrong.
+`scufris-ctl <verb>` is the client. It is its own flake package, installed by
+whichever half of Scufris is enabled, because a window manager binding runs it
+by name and a terminal reaches the background service with it. Its exit status
+is what a binding can branch on: 0 the verb reached the pill, 1 it did not, 2
+the run was wrong. See [Background service](service.md) for its other verbs.
 
 `open` and `cancel` go straight to the state machine, as `Activate` and
 `Escape`. `accept` does not: the pill page holds the editable field, so the verb
@@ -92,7 +94,7 @@ own runtime directory under a private one; anything that can open it can already
 act as them. A session with no runtime directory gets no command socket and
 starts anyway.
 
-`desktop/scufris-desktop/src/keys.rs` is the other half: it arranges, for each
+`native/scufris-desktop/src/keys.rs` is the other half: it arranges, for each
 posture the pill takes, where those keys are read.
 
 - A **binding mode**, through the `SCUFRIS_DESKTOP_MODE_COMMAND` hook, run with
@@ -598,10 +600,10 @@ companion's per-window channel afterwards.
 
 The protocol is implemented twice, once per side, and each side owns its tests:
 
-- `desktop/scufris-control/src/lib.rs` for the companion.
+- `native/scufris-control/src/lib.rs` for the companion.
 - `extensions/scufris/desktop/protocol.ts` and `server.ts` for the daemon.
 
-Neither implementation is the reference. `desktop/control-protocol-v2.json`
+Neither implementation is the reference. `native/control-protocol-v2.json`
 holds canonical, tolerated, and rejected lines for both directions, and both
 suites read that same file, so the two sides cannot drift apart.
 
@@ -658,12 +660,12 @@ Setting both is an error.
 
 ## Packaging
 
-`nix/desktop.nix` builds the workspace with `rustPlatform.buildRustPackage`,
-runs the Rust tests in its check phase, and wraps the binary with the WebKitGTK
-and tray libraries it dlopens. The result also ships a desktop entry, an icon,
-and `scufris-ctl`, which belongs beside the companion it talks to: a window
-manager binding needs it on `PATH`, and a person who installed the companion has
-already installed the thing whose keys it presses.
+`nix/desktop.nix` builds `-p scufris-desktop` out of the workspace with
+`rustPlatform.buildRustPackage`, runs that package's tests in its check phase,
+and wraps the binary with the WebKitGTK and tray libraries it dlopens. The
+result also ships a desktop entry and an icon. `scufris-ctl` is not in it:
+`nix/service.nix` builds the client, and the module installs it beside whichever
+half of Scufris is enabled.
 
 `nix/checks.nix` asserts that the companion, WebKitGTK, and their closure stay
 out of the default and voice launcher closures, that `--print-config` resolves

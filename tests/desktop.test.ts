@@ -1041,7 +1041,7 @@ test("both protocol implementations agree on the same wire fixtures", async () =
   // these exact lines so the two implementations cannot drift.
   const fixtures = JSON.parse(
     await readFile(
-      new URL("../desktop/control-protocol-v2.json", import.meta.url),
+      new URL("../native/control-protocol-v2.json", import.meta.url),
       "utf8",
     ),
   );

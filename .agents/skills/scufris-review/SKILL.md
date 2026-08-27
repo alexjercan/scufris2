@@ -44,6 +44,17 @@ git diff <range>
 
 Add the task body when the range belongs to a task.
 
+## Check the briefs before you dispatch
+
+```bash
+python3 .agents/skills/scufris-review/check-briefs.py
+```
+
+A lane that greps for a file that does not exist reports a pass, so a
+stale brief is worse than no brief. This resolves every path and symbol
+the briefs name. It cannot check a claim about behaviour, so read a
+brief you edited against the tree as well.
+
 ## Dispatch the lanes
 
 Send every lane in ONE message so they run concurrently. Give each the

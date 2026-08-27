@@ -8,24 +8,33 @@ checks, and the documents that describe them.
 
 Grep both sides of every pair the change touches:
 
-- Protocol: version 3 is implemented three times.
-  `native/scufris-control/src/service.rs` is the service and the
-  companion, and `extensions/scufris/service/protocol.ts` is the
-  agent; `PROTOCOL_VERSION` lives in both. A message shape, a role
-  name, or a refusal code changed on one side only is a broken pair,
-  and `tests/service.test.ts` is the TS side's own guard.
+- Protocol: version 3 is implemented twice.
+  `native/scufris-control/src/service.rs` is the service and every
+  native client, and `extensions/scufris/service/protocol.ts` is the
+  agent; `SERVICE_VERSION` lives in both, as do
+  `MAX_TRANSCRIPT_TEXT_BYTES` and `MAX_MESSAGE_BYTES`. A message shape,
+  a role name, a refusal code, or a cap changed on one side only is a
+  broken pair, and `tests/service.test.ts` is the TS side's own guard.
+  Every stable refusal code belongs in the `refusal` module; one
+  written as a literal at its send site is invisible to a client author
+  enumerating the module.
 - Identity: the sentence in `extensions/scufris/workflow/identity.ts`
   is asserted byte-for-byte in `tests/identity.test.ts`.
 - Launcher: the argv built in `nix/launcher.nix` is asserted exactly
   in `nix/checks/launcher.nix`. A new skill directory or extension
   entry needs both, and `scripts/scufris-dev` besides.
 - Capabilities: the window labels in `capabilities/default.json` must
-  cover every label `src/` creates - a window outside the list loses
-  its IPC silently.
-- Frames: the window sizes pinned in `src/pill.rs` and `src/review.rs`
-  are exactly the layouts `ui/pill.css` and `ui/review.css` build; the
-  comments state the arithmetic. A size changed on one side is a
-  frame that clips or a window that shows its ground.
+  cover every `LABEL` const under `src/` - a window outside the list
+  loses its IPC silently. There are three fixed ones (`pill`,
+  `textbox`, `hud`) and the `widget-*` glob.
+- Frames: the window sizes pinned in `src/pill.rs`, `src/textbox.rs`
+  and `src/hud.rs` are exactly the layouts `ui/pill.css`,
+  `ui/textbox.css` and `ui/hud.css` build; the comments state the
+  arithmetic, and `pill.rs` and `textbox.rs` each have a
+  `the_frame_is_the_size_the_page_lays_out` test. A size changed on one
+  side is a frame that clips or a window that shows its ground. The
+  HUD is placed against the pill rather than centred, so its height and
+  the gap decide how much of the pill it covers on a short screen.
 - Versions: `Cargo.toml`, `tauri.conf.json`, and `package.json` state
   the same version. The 0.3.0/0.4.0 drift shipped once.
 - The nix ripple: `package.json` (`pi.extensions`, `pi.skills`) ->

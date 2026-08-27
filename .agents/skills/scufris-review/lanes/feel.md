@@ -17,10 +17,13 @@ cannot get a run, and say the judgement is unrendered.
 - The entrance: the rise, the recoil, the page pop from the orb's own
   center. A re-presentation that replays it, a tween a hide does not
   cancel, motion that survives `prefers-reduced-motion` anywhere.
-- The box: the caret exactly on the grid from the first frame, marks
-  that ride the pop instead of freezing mid-animation, the two-ended
-  fade on a long take, the hint saying what the keys actually do in
-  this state.
+- The textbox: the field ready to type in from the first frame, the
+  two-ended fade on a long take, the hint saying what the keys actually
+  do in this state.
+- The conversation window: what a long line does, whether the view
+  follows a new line only when the person was already at the bottom,
+  whether a speaker is legible without reading the label, and what the
+  window looks like with nothing in it yet.
 - The timer: listening-only, small, dim - an afterthought by design.
   Flag it growing ambitions.
 - Sound and silence: an earcon missing where a state change is

@@ -310,6 +310,11 @@ pub mod refusal {
     pub const WRONG_ROLE: &str = "wrong_role";
     /// The agent itself refused the command.
     pub const AGENT_REFUSED: &str = "agent_refused";
+    /// There is no screen to open a widget or a conversation window on.
+    ///
+    /// Sent by the service and not by a frontend, because there being no
+    /// frontend is exactly what a frontend cannot say.
+    pub const NO_FRONTEND: &str = "no_frontend";
 }
 
 /// One versioned message sent by a client to the service.

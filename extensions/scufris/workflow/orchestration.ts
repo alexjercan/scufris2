@@ -12,10 +12,6 @@ import {
   ACKNOWLEDGMENT_STATE_EVENT,
   type AcknowledgmentState,
 } from "../shared/acknowledgment.ts";
-import {
-  ATTENTION_STATE_EVENT,
-  type AttentionStateSignal,
-} from "../shared/assistant-state.ts";
 import { runPrivateHelper, toolResult } from "../shared/runtime.ts";
 import {
   startQuickReviewAgent,
@@ -200,37 +196,13 @@ export function deliveredWorkerEventIds(
   return result;
 }
 
-/**
- * Maps one worker event to the assistant state the desktop tray shows. A
- * blocked worker needs the user; a failed one is an error worth surfacing.
- */
-export function workerAttentionSignal(
-  job: WorkerEventTarget,
-  event: WorkerEvent,
-): AttentionStateSignal {
-  if (event.type === "blocked") {
-    return {
-      state: "attention",
-      detail: `Job ${job.job_id} is blocked: ${event.value}`,
-    };
-  }
-  if (event.type === "failed") {
-    return {
-      state: "error",
-      detail: `Job ${job.job_id} failed: ${event.value}`,
-    };
-  }
-  return { state: "clear", detail: "" };
-}
-
 export function deliverWorkerEvent(
-  pi: Pick<ExtensionAPI, "sendMessage" | "events">,
+  pi: Pick<ExtensionAPI, "sendMessage">,
   context: Pick<ExtensionContext, "hasUI" | "ui">,
   job: WorkerEventTarget,
   event: WorkerEvent,
   mode: WakeMode,
 ): void {
-  pi.events.emit(ATTENTION_STATE_EVENT, workerAttentionSignal(job, event));
   if (!workerEventWakes(event.type, mode)) {
     if (context.hasUI)
       context.ui.notify(`${job.job_id}: ${event.value}`, "info");
@@ -256,7 +228,7 @@ export function deliverWorkerEvent(
 }
 
 export function deliverRuntimeFailure(
-  pi: Pick<ExtensionAPI, "sendMessage" | "events">,
+  pi: Pick<ExtensionAPI, "sendMessage">,
   context: Pick<ExtensionContext, "hasUI" | "ui">,
   job: WorkerEventTarget,
   error: string,

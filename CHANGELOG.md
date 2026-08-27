@@ -190,6 +190,13 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   `voice-resources` package, and `npm run dev:voice`. They existed to ship a
   speech module and set a variable for it, and both are gone. There is one
   launcher, and it is the one that was always silent.
+- The tray's `attention` colour for an unattended job. A blocked or failed job
+  used to paint the tray wisteria until you dealt with it, and the extension
+  that served that signal is gone with control protocol v2. The job still
+  reaches you, and always has: `blocked` and `failed` wake the conversation in
+  every wake mode, so Scufris tells you in words. What is lost is the ambient
+  second copy. The tray still shows `attention` for a transcript it is holding
+  for you, which is its own thing and unaffected.
 
 ## [0.4.0] - 2026-08-25
 

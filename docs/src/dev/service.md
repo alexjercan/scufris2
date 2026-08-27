@@ -62,7 +62,7 @@ requests tells the answers apart without counting.
 Anything the service will not do comes back as
 `{"type":"refused","id":...,"code":...,"detail":...}`. The codes are stable and
 are what a caller branches on: `agent_unavailable`, `detached`, `debug_held`,
-`wrong_role`, `agent_refused`. `detail` is for a person to read.
+`wrong_role`, `agent_refused`, `no_frontend`. `detail` is for a person to read.
 
 A submission while the agent is working is delivered as a steer, not refused.
 

@@ -71,10 +71,6 @@ const MAX_FAILURES: u32 = 3;
 /// saying it too early is a warning about nothing.
 const HELLO_GRACE: Duration = Duration::from_secs(10);
 
-/// What a widget command is answered with when there is no screen to open it
-/// on. The agent is waiting on an answer, so silence would hang it.
-const NO_FRONTEND: &str = "no_frontend";
-
 /// One connected client, as the service holds it.
 struct Client {
     role: Role,
@@ -624,7 +620,7 @@ impl Service {
                 ServiceBody::Report {
                     report: WidgetReport::Failed {
                         id,
-                        code: NO_FRONTEND.into(),
+                        code: refusal::NO_FRONTEND.into(),
                         detail: "there is no frontend connected".into(),
                     },
                 },
@@ -651,7 +647,7 @@ impl Service {
                 client,
                 ServiceBody::Refused {
                     id,
-                    code: NO_FRONTEND.into(),
+                    code: refusal::NO_FRONTEND.into(),
                     detail: "there is no frontend connected".into(),
                 },
             );
@@ -1357,7 +1353,7 @@ mod tests {
             [ServiceBody::Report {
                 report: WidgetReport::Failed {
                     id: "w-1".into(),
-                    code: NO_FRONTEND.into(),
+                    code: refusal::NO_FRONTEND.into(),
                     detail: "there is no frontend connected".into(),
                 },
             }]
@@ -1397,7 +1393,7 @@ mod tests {
             drain(&agent),
             [ServiceBody::Refused {
                 id: "c-1".into(),
-                code: NO_FRONTEND.into(),
+                code: refusal::NO_FRONTEND.into(),
                 detail: "there is no frontend connected".into(),
             }]
         );

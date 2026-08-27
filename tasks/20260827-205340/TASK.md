@@ -1,8 +1,8 @@
 # Route or retire what the inversion left behind
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 80
-- TAGS: orchestration,service,protocol
+- TAGS: orchestration, service, protocol
 
 ## Source
 
@@ -56,3 +56,54 @@ update the four send sites, and list it in `dev/service.md:63`.
 - For M5, if the event is routed: an end-to-end check that a blocked job
   reaches the tray. If it is removed: the CHANGELOG entry is the
   evidence.
+
+## Outcome (2026-08-27)
+
+### M5: removed, and the routing queued as its own task
+
+One correction to the finding first. "A blocked job therefore never
+reaches the person" is not right. `workerEventWakes` is
+`type !== "working" || mode === "all"`, so `blocked` and `failed` wake
+the conversation in every mode. Scufris says it in words on the same
+event that raised the signal. What was lost is the ambient second copy -
+a cue that stays up until it is dealt with - not the delivery.
+
+Routed nowhere, because there is nowhere cheap to route it to.
+`attention` is not a `ScufrisState`: that vocabulary answers "what is
+Scufris doing", attention answers "what is waiting for you", and the two
+have separate lifetimes. A sixth variant would fight the other five, the
+agent being `working` while a job is blocked. Routing it properly means
+a notice channel with its own identity, replay, and lifecycle - a
+feature increment, not a review fix, and not something to smuggle into a
+cleanup task.
+
+So: the emit, `workerAttentionSignal`, and `shared/assistant-state.ts`
+are gone; `deliverWorkerEvent` and `deliverRuntimeFailure` narrowed to
+`Pick<ExtensionAPI, "sendMessage">`. The `attention` tray state stays,
+because `Phase::Retained` still reaches it and that is a different
+thing.
+
+The comment being removed said "the signal stays because losing it would
+mean building it again". Answered with `20260827-212938`, which carries
+the shape, the reason it is not a state variant, and a pointer to
+recover `workerAttentionSignal` from history. A task holds intent better
+than a dead constant does.
+
+CHANGELOG entry added under Unreleased/Removed, saying what is lost and
+what still works.
+
+### M6: moved
+
+`refusal::NO_FRONTEND` in `scufris-control/src/service.rs` beside the
+other five, with a doc line saying why the service sends it and a
+frontend cannot. The private const in the service binary is gone and its
+four send sites name the module. `dev/service.md` lists six codes.
+
+The three wire tests pass unchanged, which is the point: the string did
+not move, only where it is written down.
+
+### Proof
+
+- `npm run check`: typecheck, 79 tests, format, all clean.
+- `cargo test --workspace`: 336 passed, 0 failed.
+- `cargo clippy --workspace --all-targets`: clean.

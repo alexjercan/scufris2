@@ -3,14 +3,13 @@
 // The pages are compiled by build.rs and loaded by windows that need an X
 // display, a compositor-less desktop and a microphone, so nothing about them is
 // exercised by the Rust tests. What can be exercised is what they compute: the
-// caret and the selection are blocks laid under one unbroken run of words, the
-// editing keys reach the mirror, and every state paints an orb at the size the
-// frame is built for.
+// textbox reports which key was pressed and what its field holds, the deletions
+// it binds itself cut the right words, and every state paints an orb at the
+// size the frame is built for.
 //
-// The stub is a fake, and it says so: it lays characters out on a fixed grid
-// rather than shaping type. That is enough for the invariants here, all of
-// which are about which element holds what and where a block is put, and none
-// of which are about the shape of a letter.
+// The stub is a fake, and it says so. That is enough for the invariants here,
+// all of which are about which element holds what and what the page asks the
+// host to do, and none of which are about the shape of a letter.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -23,7 +22,7 @@ const root = resolve(new URL("..", import.meta.url).pathname);
 const ui = join(root, "native", "scufris-desktop", "ui");
 
 /** The pages, compiled the way build.rs compiles them. */
-function pages(): { pill: string; review: string; engine: string } {
+function pages(): { pill: string; textbox: string; engine: string } {
   if (compiled === null) {
     const built = spawnSync(
       join(root, "node_modules", ".bin", "tsc"),
@@ -37,14 +36,14 @@ function pages(): { pill: string; review: string; engine: string } {
     );
     compiled = {
       pill: readFileSync(join(ui, "dist", "pill.js"), "utf8"),
-      review: readFileSync(join(ui, "dist", "review.js"), "utf8"),
+      textbox: readFileSync(join(ui, "dist", "textbox.js"), "utf8"),
       engine: readFileSync(join(ui, "orb-engine.js"), "utf8"),
     };
   }
   return compiled;
 }
 
-let compiled: { pill: string; review: string; engine: string } | null = null;
+let compiled: { pill: string; textbox: string; engine: string } | null = null;
 
 // ---------- the stub ----------
 
@@ -56,14 +55,6 @@ interface Rect {
   width: number;
   height: number;
 }
-
-/** One character of the fake type, and one line of it. */
-const ADVANCE = 10.8;
-const LINE = 26.1;
-/** How many characters the fake box fits on a line before it wraps. */
-const COLUMNS = 52;
-/** Where the text area sits in the fake window. */
-const FRAME = { left: 24, top: 17 };
 
 function rect(left: number, top: number, width: number, height: number): Rect {
   return {
@@ -225,15 +216,8 @@ function painter(): Painter {
   };
 }
 
-interface Emission {
-  target: string;
-  event: string;
-  payload: Record<string, unknown>;
-}
-
 class Page {
   readonly elements = new Map<string, Stub>();
-  readonly emissions: Emission[] = [];
   readonly invocations: { command: string; args: unknown }[] = [];
   readonly handlers = new Map<string, Listener[]>();
   readonly frames: ((now: number) => void)[] = [];
@@ -265,42 +249,20 @@ class Page {
     for (const handler of this.handlers.get(event) ?? []) handler({ payload });
   }
 
-  drafts(): Record<string, unknown>[] {
-    return this.emissions
-      .filter((emission) => emission.event === "scufris://draft")
-      .map((emission) => emission.payload);
+  /** Every command the page asked the host to run, in order. */
+  commands(): string[] {
+    return this.invocations.map((invocation) => invocation.command);
   }
 
-  lastDraft(): Record<string, unknown> {
-    const drafts = this.drafts();
-    const last = drafts[drafts.length - 1];
-    assert.ok(last !== undefined, "nothing was mirrored");
-    return last;
-  }
-}
-
-/** The characters `from` to `to` as the fake type would have drawn them. */
-// The visual scale the measured rectangles report, as during the box's pop-in
-// transform: 1 outside the one test that sets it.
-let zoom = 1;
-
-function drawn(from: number, to: number): Rect[] {
-  const rects: Rect[] = [];
-  let index = from;
-  while (index < to) {
-    const line = Math.floor(index / COLUMNS);
-    const stop = Math.min(to, (line + 1) * COLUMNS);
-    rects.push(
-      rect(
-        FRAME.left + zoom * (index % COLUMNS) * ADVANCE,
-        FRAME.top + zoom * line * LINE,
-        zoom * (stop - index) * ADVANCE,
-        zoom * LINE,
-      ),
+  /** The arguments of the last call to one command. */
+  lastCall(command: string): Record<string, unknown> {
+    const calls = this.invocations.filter(
+      (invocation) => invocation.command === command,
     );
-    index = stop;
+    const last = calls[calls.length - 1];
+    assert.ok(last !== undefined, `the page never invoked ${command}`);
+    return (last.args ?? {}) as Record<string, unknown>;
   }
-  return rects;
 }
 
 function run(page: Page, ids: string[], scripts: string[]): void {
@@ -321,19 +283,6 @@ function run(page: Page, ids: string[], scripts: string[]): void {
         const node = new Stub();
         node.page = page;
         return node;
-      },
-      createRange: () => {
-        let from = 0;
-        let to = 0;
-        return {
-          setStart: (_node: unknown, offset: number): void => {
-            from = offset;
-          },
-          setEnd: (_node: unknown, offset: number): void => {
-            to = offset;
-          },
-          getClientRects: (): Rect[] => drawn(from, to),
-        };
       },
       execCommand: (command: string): boolean =>
         page.execCommand === null ? false : page.execCommand(command),
@@ -400,14 +349,6 @@ function run(page: Page, ids: string[], scripts: string[]): void {
           page.handlers.set(event, existing);
           return Promise.resolve(undefined);
         },
-        emitTo: (
-          target: string,
-          event: string,
-          payload: Record<string, unknown>,
-        ): Promise<void> => {
-          page.emissions.push({ target, event, payload });
-          return Promise.resolve();
-        },
       },
     },
     devicePixelRatio: 1,
@@ -416,28 +357,19 @@ function run(page: Page, ids: string[], scripts: string[]): void {
   for (const script of scripts) runInContext(script, context);
 }
 
-/** The pill page, loaded with its engine and its four elements. */
+/** The pill page, loaded with its engine and its three elements. */
 function pill(still = false): Page {
   const page = new Page();
   page.reducedMotion = still;
   const { pill: script, engine } = pages();
-  run(page, ["pill", "transcript", "timer", "orb"], [engine, script]);
+  run(page, ["pill", "timer", "orb"], [engine, script]);
   return page;
 }
 
-/** The review page, loaded with the text area sized like the real one. */
-function review(): Page {
+/** The textbox page, loaded with its field and its hint. */
+function textbox(): Page {
   const page = new Page();
-  run(
-    page,
-    ["box", "text", "words", "marks", "probe", "hint"],
-    [pages().review],
-  );
-  const text = page.element("text");
-  text.rect = rect(FRAME.left, FRAME.top, COLUMNS * ADVANCE, 3 * LINE);
-  text.offsetWidth = COLUMNS * ADVANCE;
-  text.clientHeight = 3 * LINE;
-  page.element("probe").rect = rect(FRAME.left, FRAME.top, ADVANCE, LINE);
+  run(page, ["box", "words", "hint"], [pages().textbox]);
   return page;
 }
 
@@ -456,143 +388,73 @@ function present(
   });
 }
 
-function marks(page: Page, kind: string): Stub[] {
-  return page
-    .element("marks")
-    .children.filter((child) => child.className === kind);
-}
+// ---------- the field ----------
 
-function column(node: Stub): number {
-  return Number.parseFloat(String(node.style["left"]));
-}
-
-// ---------- the caret ----------
-
-test("the caret is a block under the letter, and the words are one run", () => {
-  const page = review();
-  const words = "hello brave world";
-  present(page, "review", words, true);
-  assert.equal(page.element("words").textContent, words);
-
-  for (let at = 0; at <= words.length; at += 1) {
-    page.publish("scufris://draft", {
-      text: words,
-      start: at,
-      end: at,
-      caret: at,
-    });
-    // The words never move, and never split: the run holds all of them, in
-    // order, whatever the caret is doing.
-    assert.equal(page.element("words").textContent, words);
-    assert.equal(page.element("words").children.length, 0);
-    const carets = marks(page, "caret");
-    assert.equal(carets.length, 1, `no caret at ${at}`);
-    const caret = carets[0];
-    assert.ok(caret !== undefined);
-    assert.ok(
-      Math.abs(column(caret) - at * ADVANCE) < 0.001,
-      `the caret at ${at} is drawn at ${column(caret)}`,
-    );
-    // A block the width of a letter, not a rule between two of them.
-    assert.equal(caret.style["width"], `${ADVANCE}px`);
-    assert.equal(caret.style["top"], "0px");
-  }
+test("the words arrive in the field, with the line that says what the keys do", () => {
+  const page = textbox();
+  present(page, "editing", "hello brave world", true);
+  const words = page.element("words");
+  assert.equal(words.value, "hello brave world");
+  assert.equal(words.readOnly, false);
+  assert.equal(page.element("box").dataset["state"], "editing");
+  assert.equal(page.element("hint").textContent, "enter sends - esc discards");
+  // The caret is left where a person would carry on typing.
+  assert.equal(words.selectionStart, "hello brave world".length);
+  assert.equal(page.activeElement, words);
 });
 
-test("a draft measured mid-pop still lands the marks on the letters", () => {
-  // While the box pops in, every measured rectangle is scaled by the
-  // transform; the marks are laid in the box's own coordinates, so an
-  // unscaled reading left the caret short of its letter until the next key
-  // redrew it. The regression: present during the pop and the caret must
-  // already sit at the end of the words.
-  const page = review();
-  const s = 0.94;
-  const text = page.element("text");
-  text.rect = rect(FRAME.left, FRAME.top, s * COLUMNS * ADVANCE, s * 3 * LINE);
-  page.element("probe").rect = rect(
-    FRAME.left,
-    FRAME.top,
-    s * ADVANCE,
-    s * LINE,
-  );
-  zoom = s;
-  try {
-    const words = "hello brave world";
-    present(page, "review", words, true);
-    const caret = marks(page, "caret")[0];
-    assert.ok(caret !== undefined);
-    assert.ok(
-      Math.abs(column(caret) - words.length * ADVANCE) < 0.001,
-      `the caret is drawn at ${column(caret)}, not ${words.length * ADVANCE}`,
-    );
-    const width = Number.parseFloat(String(caret.style["width"]));
-    assert.ok(Math.abs(width - ADVANCE) < 0.001);
-    assert.equal(caret.style["top"], "0px");
-  } finally {
-    zoom = 1;
-  }
-});
-
-test("a selection is drawn as bands under the words, one for each line", () => {
-  const page = review();
-  const words = "a".repeat(COLUMNS + 20);
-  present(page, "review", words, true);
-  page.publish("scufris://draft", {
-    text: words,
-    start: 4,
-    end: COLUMNS + 8,
-    caret: COLUMNS + 8,
-  });
-  assert.equal(page.element("words").textContent, words);
-  const bands = marks(page, "pick");
-  assert.equal(bands.length, 2, "a selection across two lines drew one band");
-  const first = bands[0];
-  const second = bands[1];
-  assert.ok(first !== undefined && second !== undefined);
-  assert.ok(Math.abs(column(first) - 4 * ADVANCE) < 0.001);
-  assert.equal(first.style["top"], "0px");
-  assert.equal(second.style["top"], `${LINE}px`);
-  assert.equal(second.style["width"], `${8 * ADVANCE}px`);
-  // The caret rides the end the person is dragging, on top of the band.
-  const caret = marks(page, "caret")[0];
-  assert.ok(caret !== undefined);
-  assert.ok(Math.abs(column(caret) - 8 * ADVANCE) < 0.001);
-});
-
-test("a frozen transcript is drawn with no caret and no selection", () => {
-  const page = review();
+test("a transcript nobody may edit is shown and frozen", () => {
+  const page = textbox();
   present(page, "uncertain", "the words nobody may edit", false);
-  assert.equal(page.element("words").textContent, "the words nobody may edit");
-  assert.equal(page.element("marks").children.length, 0);
-  // The draft never arrives for a frozen field, but a stray one changes
-  // nothing either.
-  page.publish("scufris://draft", {
-    text: "the words nobody may edit",
-    start: 0,
-    end: 4,
-    caret: 4,
-  });
-  assert.equal(page.element("marks").children.length, 0);
+  const words = page.element("words");
+  assert.equal(words.value, "the words nobody may edit");
+  assert.equal(words.readOnly, true);
+  assert.match(String(page.element("hint").textContent), /unsure/);
 });
 
-test("an empty transcript still carries a caret, one letter wide", () => {
-  const page = review();
-  present(page, "review", "", true);
-  const caret = marks(page, "caret")[0];
-  assert.ok(caret !== undefined);
-  assert.equal(caret.style["left"], "0px");
-  assert.equal(caret.style["width"], `${ADVANCE}px`);
-  assert.equal(caret.style["height"], `${LINE}px`);
+test("a state this window is not for empties it", () => {
+  // The host takes the box down for these, and a box that kept the last
+  // transcript would show it again for a moment on the next raise.
+  const page = textbox();
+  present(page, "editing", "hello brave world", true);
+  present(page, "listening", "", false);
+  const words = page.element("words");
+  assert.equal(words.value, "");
+  assert.equal(words.readOnly, true);
+});
+
+test("a take longer than the box fades under its own edge", () => {
+  const page = textbox();
+  const words = page.element("words");
+  words.clientHeight = 3 * 26;
+  words.scrollHeight = 9 * 26;
+  present(page, "editing", "a".repeat(400), true);
+  assert.ok(words.classes.has("overflowing"), "a long take was not faded");
+
+  words.scrollHeight = 26;
+  words.dispatch("input", {});
+  assert.ok(!words.classes.has("overflowing"));
+});
+
+test("what the person is typing is not overwritten by its own presentation", () => {
+  const page = textbox();
+  const words = page.element("words");
+  present(page, "editing", "hello brave world", true);
+  words.value = "hello brave worlds";
+  // The same phase renders again - a failed save adds a notice to it - and the
+  // words on screen are the person's, not the host's older copy.
+  present(page, "editing", "hello brave world", true);
+  assert.equal(words.value, "hello brave worlds");
 });
 
 // ---------- the keys ----------
 
 function editing(page: Page, words: string): Stub {
-  present(page, "review", words, true);
-  const transcript = page.element("transcript");
-  transcript.selectionStart = words.length;
-  transcript.selectionEnd = words.length;
-  return transcript;
+  present(page, "editing", words, true);
+  const field = page.element("words");
+  field.selectionStart = words.length;
+  field.selectionEnd = words.length;
+  return field;
 }
 
 function press(page: Page, key: string, control: boolean): void {
@@ -605,153 +467,140 @@ function press(page: Page, key: string, control: boolean): void {
   });
 }
 
-test("a click on the pill leaves the field the focus the keys need", () => {
-  // A click is how a person brings this window back, and a click's default is
-  // to move the focus to whatever lies under it. Enter and Escape are read
-  // from the window and would live through that; the arrows, Backspace, and
-  // every letter are read from the field, so a review recovered by a click
-  // could only be sent or thrown away, never edited.
-  const page = pill();
-  editing(page, "hello world");
-  let refused = 0;
-  const click = {
-    preventDefault: (): void => {
-      refused += 1;
-    },
-  };
+test("enter sends what the field holds and escape throws it away", () => {
+  const page = textbox();
+  const words = editing(page, "hello brave world");
+  words.value = "hello brave worlds";
+  press(page, "Enter", false);
+  assert.equal(page.lastCall("textbox_submit")["text"], "hello brave worlds");
 
-  page.document.dispatch("mousedown", click);
-  assert.equal(refused, 1);
+  press(page, "Escape", false);
+  assert.ok(page.commands().includes("textbox_cancel"));
+});
 
-  // Nothing is being edited, so the click is the person's to spend as they like.
-  present(page, "listening", "", false);
-  page.document.dispatch("mousedown", click);
-  assert.equal(refused, 1);
+test("a frozen transcript sends no words of its own", () => {
+  // Enter on an uncertain transcript is the person saying "send it anyway",
+  // and what is sent is the text the host kept, never an edit this window
+  // would not have taken.
+  const page = textbox();
+  present(page, "uncertain", "the words nobody may edit", false);
+  press(page, "Enter", false);
+  assert.equal(page.lastCall("textbox_submit")["text"], null);
+});
+
+test("ctrl-c asks the host to copy, and a selection keeps the ordinary copy", () => {
+  const page = textbox();
+  const words = editing(page, "hello brave world");
+  press(page, "c", true);
+  assert.ok(page.commands().includes("textbox_copy"));
+
+  // Copying part of the words is the field's own job.
+  const before = page.commands().length;
+  words.selectionStart = 6;
+  words.selectionEnd = 11;
+  press(page, "c", true);
+  assert.equal(page.commands().length, before);
 });
 
 test("a window that gets the keyboard back takes the field again", () => {
   // The desktop can move the focus off the field on its own, and the window
   // comes back with the keyboard and nothing to type into.
-  const page = pill();
-  const transcript = editing(page, "hello world");
-  transcript.selectionStart = 5;
-  transcript.selectionEnd = 5;
-  transcript.blur();
+  const page = textbox();
+  const words = editing(page, "hello world");
+  words.selectionStart = 5;
+  words.selectionEnd = 5;
+  words.blur();
 
   page.window.dispatch("focus", {});
 
-  assert.equal(page.activeElement, transcript);
-  assert.equal(transcript.selectionStart, 5);
+  assert.equal(page.activeElement, words);
+  assert.equal(words.selectionStart, 5);
   press(page, "Backspace", true);
-  assert.equal(transcript.value, " world");
+  assert.equal(words.value, " world");
 });
 
-test("ctrl-backspace deletes a word and mirrors what is left", () => {
-  const page = pill();
-  const transcript = editing(page, "hello brave world");
+test("ctrl-backspace deletes a word", () => {
+  const page = textbox();
+  const words = editing(page, "hello brave world");
   press(page, "Backspace", true);
   // The word and the space that joined it to the one before: two spaces where
   // a word used to be is not what deleting a word means.
-  assert.equal(transcript.value, "hello brave");
-  const draft = page.lastDraft();
-  assert.equal(draft["text"], "hello brave");
-  assert.equal(draft["caret"], 11);
-  assert.equal(draft["start"], 11);
-  assert.equal(draft["end"], 11);
+  assert.equal(words.value, "hello brave");
+  assert.equal(words.selectionStart, 11);
+  assert.equal(words.selectionEnd, 11);
 
   press(page, "Backspace", true);
-  assert.equal(transcript.value, "hello");
-  assert.equal(page.lastDraft()["text"], "hello");
+  assert.equal(words.value, "hello");
 
   // The last word leaves nothing behind it, and the field is then empty.
   press(page, "Backspace", true);
-  assert.equal(transcript.value, "");
-  assert.equal(page.lastDraft()["caret"], 0);
+  assert.equal(words.value, "");
+  assert.equal(words.selectionStart, 0);
 });
 
 test("the port's own delete is used when it has one, with the same result", () => {
-  const page = pill();
-  const transcript = editing(page, "hello brave world");
+  const page = textbox();
+  const words = editing(page, "hello brave world");
   page.execCommand = (command: string): boolean => {
     if (command !== "delete") return false;
-    transcript.value =
-      transcript.value.slice(0, transcript.selectionStart) +
-      transcript.value.slice(transcript.selectionEnd);
-    transcript.selectionEnd = transcript.selectionStart;
+    words.value =
+      words.value.slice(0, words.selectionStart) +
+      words.value.slice(words.selectionEnd);
+    words.selectionEnd = words.selectionStart;
     return true;
   };
   press(page, "Backspace", true);
-  assert.equal(transcript.value, "hello brave");
-  assert.equal(page.lastDraft()["text"], "hello brave");
+  assert.equal(words.value, "hello brave");
 });
 
 test("ctrl-delete, ctrl-u and ctrl-k cut forward, to the start and to the end", () => {
-  const forward = pill();
-  const words = forward.element("transcript");
-  editing(forward, "hello brave world");
+  const forward = textbox();
+  const words = editing(forward, "hello brave world");
   words.selectionStart = 6;
   words.selectionEnd = 6;
   press(forward, "Delete", true);
   assert.equal(words.value, "hello world");
-  assert.equal(forward.lastDraft()["text"], "hello world");
 
-  const start = pill();
+  const start = textbox();
   const line = editing(start, "hello brave world");
   line.selectionStart = 12;
   line.selectionEnd = 12;
   press(start, "u", true);
   assert.equal(line.value, "world");
-  assert.equal(start.lastDraft()["caret"], 0);
+  assert.equal(line.selectionStart, 0);
 
-  const end = pill();
+  const end = textbox();
   const rest = editing(end, "hello brave world");
   rest.selectionStart = 6;
   rest.selectionEnd = 6;
   press(end, "k", true);
   assert.equal(rest.value, "hello ");
-  assert.equal(end.lastDraft()["text"], "hello ");
 });
 
 test("the field keeps the keys it already carries, selections included", () => {
-  const page = pill();
-  const transcript = editing(page, "hello brave world");
+  const page = textbox();
+  const words = editing(page, "hello brave world");
   // A selection is a range the field deletes itself: nothing here may turn
   // one backspace into a word.
-  transcript.selectionStart = 6;
-  transcript.selectionEnd = 11;
+  words.selectionStart = 6;
+  words.selectionEnd = 11;
   press(page, "Backspace", true);
-  assert.equal(transcript.value, "hello brave world");
+  assert.equal(words.value, "hello brave world");
   // A plain backspace is the field's too.
-  transcript.selectionStart = 17;
-  transcript.selectionEnd = 17;
+  words.selectionStart = 17;
+  words.selectionEnd = 17;
   press(page, "Backspace", false);
-  assert.equal(transcript.value, "hello brave world");
-});
-
-test("a word jump changes no words and still reaches the mirror", () => {
-  const page = pill();
-  const transcript = editing(page, "hello brave world");
-  const before = page.drafts().length;
-  // What Ctrl+Left does in the field itself: the caret moves, nothing else.
-  transcript.selectionStart = 6;
-  transcript.selectionEnd = 6;
-  transcript.dispatch("keyup", {});
-  assert.equal(page.drafts().length, before + 1);
-  const draft = page.lastDraft();
-  assert.equal(draft["text"], "hello brave world");
-  assert.equal(draft["caret"], 6);
+  assert.equal(words.value, "hello brave world");
 });
 
 test("nothing is edited where nothing is editable", () => {
-  const page = pill();
+  const page = textbox();
   present(page, "uncertain", "the words nobody may edit", false);
-  const transcript = page.element("transcript");
-  transcript.selectionStart = transcript.value.length;
-  transcript.selectionEnd = transcript.value.length;
-  const before = page.drafts().length;
+  const words = page.element("words");
+  words.selectionStart = words.value.length;
+  words.selectionEnd = words.value.length;
   press(page, "Backspace", true);
-  assert.equal(transcript.value, "the words nobody may edit");
-  assert.equal(page.drafts().length, before, "a frozen field was mirrored");
+  assert.equal(words.value, "the words nobody may edit");
 });
 
 // ---------- the orb ----------
@@ -768,7 +617,7 @@ const STATES = [
   "idle",
   "listening",
   "transcribing",
-  "review",
+  "editing",
   "sent",
   "retained",
   "uncertain",
@@ -788,7 +637,7 @@ test("every state paints an orb at the size the frame is built for", () => {
       present(page, state === "listening" ? "idle" : "listening", "", false);
       paint(page, still);
       page.painter.arcs.length = 0;
-      present(page, state, "", state === "review");
+      present(page, state, "", state === "editing");
       paint(page, still);
       const arcs = page.painter.arcs;
       assert.ok(arcs.length > 20, `${state} painted ${arcs.length} dots`);

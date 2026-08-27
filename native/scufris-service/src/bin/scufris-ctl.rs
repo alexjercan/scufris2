@@ -84,10 +84,6 @@ enum Spoken {
     Debug,
     /// Bring the pill up and start recording.
     Open,
-    /// Cancel what is running, or put a resting pill away.
-    Cancel,
-    /// Accept what the pill is showing.
-    Accept,
 }
 
 fn main() -> ExitCode {
@@ -101,8 +97,6 @@ fn main() -> ExitCode {
         Spoken::Abort => report(ask(ClientBody::Abort { id: REQUEST.into() })),
         Spoken::Debug => debug(),
         Spoken::Open => report(pill(Verb::Open)),
-        Spoken::Cancel => report(pill(Verb::Cancel)),
-        Spoken::Accept => report(pill(Verb::Accept)),
     }
 }
 

@@ -4,9 +4,9 @@ fn main() {
     println!("cargo:rerun-if-changed=ui/pill.ts");
     println!("cargo:rerun-if-changed=ui/pill.css");
     println!("cargo:rerun-if-changed=ui/index.html");
-    println!("cargo:rerun-if-changed=ui/review.ts");
-    println!("cargo:rerun-if-changed=ui/review.css");
-    println!("cargo:rerun-if-changed=ui/review.html");
+    println!("cargo:rerun-if-changed=ui/textbox.ts");
+    println!("cargo:rerun-if-changed=ui/textbox.css");
+    println!("cargo:rerun-if-changed=ui/textbox.html");
     println!("cargo:rerun-if-changed=ui/orb-engine.js");
     println!("cargo:rerun-if-changed=ui/orb-engine.d.ts");
     println!("cargo:rerun-if-changed=ui/tauri.d.ts");
@@ -31,8 +31,8 @@ fn build_frontend() {
     for file in [
         "index.html",
         "pill.css",
-        "review.html",
-        "review.css",
+        "textbox.html",
+        "textbox.css",
         "orb-engine.js",
     ] {
         fs::copy(ui.join(file), ui.join("dist").join(file))

@@ -7,7 +7,7 @@
 // message arrived: the host sends, the page renders. Nothing polls, nothing
 // ticks, nothing waits on rAF.
 //
-// Wrapped in a block for the same reason review.ts is: it is a classic script,
+// Wrapped in a block for the same reason textbox.ts is: it is a classic script,
 // so a name at its top level is a name in every other page's global scope.
 //
 // Compiled by tsc from build.rs into ui/dist; the window loads the output.

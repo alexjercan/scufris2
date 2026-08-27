@@ -8,10 +8,10 @@ flake package, so consumers who never enable it never build Tauri.
 
 scufris-desktop owns:
 
-- Activation, the pill window, and the tray.
+- Activation, the pill window, the textbox window, and the tray.
 - Microphone recording and cancellation.
 - Local transcription against the configured endpoint.
-- Transcript review and editing.
+- Transcript editing, in the textbox.
 - Backend health presentation and bounded restart requests.
 - Focus restoration.
 
@@ -31,25 +31,27 @@ does not stop the conversation.
 ## Interaction
 
 - The activation accelerator, `Super+D` by default, opens the bottom-center
-  pill, gives it keyboard focus, and starts recording immediately.
+  pill and starts recording immediately. The pill never takes the keyboard.
 - The pill rises into place from the bottom of the screen and shows a
   level-driven orb in the recording accent, with the recording duration on one
   dim line under it. The tray keeps the red privacy ring.
-- `Escape` while recording stops and discards the recording.
-- `Enter` while recording stops, transcribes, shows the sent text, and submits
-  without another confirmation.
-- The accelerator again while recording stops, transcribes, and opens an
-  editable review state. `Enter` sends the reviewed transcript; `Escape`
-  discards it.
+- The accelerator again stops the take, transcribes, and raises the textbox
+  over the pill with the words in it. The textbox is the one window here that
+  takes the keyboard.
+- `Enter` in the textbox sends what is in it. `Escape` discards it, and
+  `Ctrl+C` copies it. They are ordinary keys in a focused window, so every
+  other editing key is the field's own.
+- `Super+Escape` cancels the take. It is grabbed from the display, so it
+  reaches the companion wherever the keyboard is.
 - The pill is a resident HUD. The first activation brings it up and it then
   stays on screen, resting between interactions and showing what the
   assistant is doing - idle, working, speaking, attention, disconnected.
-  `Escape` is the only thing that puts it away, and the next activation is
-  what brings it back. Nothing the assistant does ever raises a dismissed
+  `Super+Escape` is the only thing that puts it away, and the next activation
+  is what brings it back. Nothing the assistant does ever raises a dismissed
   pill or takes a resting one down.
-- Cancellation restores focus to the previous window. Submission restores it
-  at the handoff, and the pill stays up without the keyboard while the turn
-  runs - sent, working, speaking - then settles back to resting.
+- Cancellation restores focus to the previous window. Submission restores it at
+  the handoff, when the textbox goes, and the pill stays up while the turn runs
+  - sent, working, speaking - then settles back to resting.
 
 If the microphone cannot start, or an open capture stream fails, the pill drops
 the recording indicator and states why. If transcription fails, nothing is
@@ -68,10 +70,11 @@ the socket, the window, the disk, and where deferred work runs - is a port on
 
 ## Keys that do not need the window
 
-A key typed at the pill only arrives while the pill holds the keyboard, and the
-pill holding the keyboard is the pill taking it away from whatever the person
-was typing in. So the same three keys have a second road in, and it does not go
-through the window at all.
+The pill is the indicator, and an indicator that holds the keyboard is one that
+took it away from whatever the person was typing in. So the pill refuses focus
+on every show, and the two keys that reach it do not go through its window at
+all. The textbox is the other half of the same rule: it takes the keyboard,
+because a window with a caret in it is one the person meant to be typing in.
 
 `native/scufris-desktop/src/command.rs` listens on a Unix socket at
 `$XDG_RUNTIME_DIR/scufris/desktop.sock`, beside the service socket and not it.
@@ -80,52 +83,38 @@ the service, and this listens for the person's own window manager. One LF-termin
 each way, one verb per connection, and the connection closes:
 
 ```
-{"v":1,"verb":"open"}      ->  {"v":1,"answer":"taken"}
-{"v":1,"verb":"cancel"}    ->  {"v":1,"answer":"refused","detail":"..."}
-{"v":1,"verb":"accept"}
+{"v":1,"verb":"open"}  ->  {"v":1,"answer":"taken"}
+                       ->  {"v":1,"answer":"refused","detail":"..."}
 ```
 
-`scufris-ctl <verb>` is the client. It is its own flake package, installed by
+`scufris-ctl open` is the client. It is its own flake package, installed by
 whichever half of Scufris is enabled, because a window manager binding runs it
 by name and a terminal reaches the background service with it. Its exit status
 is what a binding can branch on: 0 the verb reached the pill, 1 it did not, 2
 the run was wrong. See [Background service](service.md) for its other verbs.
 
-`open` and `cancel` go straight to the state machine, as `Activate` and
-`Escape`. `accept` does not: the pill page holds the editable field, so the verb
-is emitted to the page as `scufris://accept` and the page sends whatever a
-person's own `Enter` would have sent. The socket is the person's alone, in their
-own runtime directory under a private one; anything that can open it can already
-act as them. A session with no runtime directory gets no command socket and
-starts anyway.
+`open` goes straight to the state machine as `Activate`, which is the whole of
+the activation key: it starts a take, and it stops one that is running. The
+socket is the person's alone, in their own runtime directory under a private
+one; anything that can open it can already act as them. A session with no
+runtime directory gets no command socket and starts anyway.
 
-`native/scufris-desktop/src/keys.rs` is the other half: it arranges, for each
-posture the pill takes, where those keys are read.
+`native/scufris-desktop/src/keys.rs` is the other half. It grabs one modified
+accelerator from the display - `Super+Escape`, for the default `Super+D` - built
+from the activation hotkey's own modifiers, and it grabs it only while the pill
+is on screen: an accelerator held all session is one no other program can use.
+A hotkey with no modifier grabs nothing, because a bare accelerator the display
+granted the companion is a key no other program would see again.
 
-- A **binding mode**, through the `SCUFRIS_DESKTOP_MODE_COMMAND` hook, run with
-  one argument. The companion asks for `scufris` while the pill is focused and
-  `default` for every other posture, including as it exits. i3 and sway hold
-  bare Escape and Return inside a named mode, which is the only way a bare key
-  reaches the pill without being taken off the desktop for every other program.
-  The window manager enters the mode when the person opens the pill; the
-  companion is what leaves it, so a pill that closed for a reason nobody asked
-  for does not leave the keyboard in a mode.
-- **Modified accelerators** the display grabs, for a desktop with no binding
-  modes. They are built from the activation hotkey's own modifiers, so `Super+D`
-  gives `Super+Escape` and `Super+Enter`, and they are grabbed only while the
-  pill is on screen - an accelerator held all session is one no other program
-  can use. A hotkey with no modifier grabs nothing: a bare accelerator the
-  display granted the companion is a key no other program would see again.
+Neither road is required. A window manager that already holds the accelerator
+refuses the grab, which is the good case: its own binding runs `scufris-ctl` and
+arrives in the same place.
 
-Both run for every posture change and neither is required. A window manager that
-already holds one of the accelerators refuses the grab, which is the good case:
-its own binding runs `scufris-ctl` and arrives in the same place.
-
-The activation accelerator itself follows the same rule. Under the binding mode
-recipe the window manager owns `$mod+d`, so the companion's own registration of
-it is refused; that is logged and the companion starts anyway. X reports a key
-another client has grabbed as `BadAccess`, which the display layer surfaces as
-"already registered", so that is what the log line says.
+The activation accelerator itself follows the same rule. Where the window
+manager owns `$mod+d`, the companion's own registration of it is refused; that
+is logged and the companion starts anyway. X reports a key another client has
+grabbed as `BadAccess`, which the display layer surfaces as "already
+registered", so that is what the log line says.
 
 ## Pill design
 
@@ -141,7 +130,7 @@ hue, separates states, so every state survives grayscale.
 | --------------------- | -------- | ------------------------------------------ |
 | listening             | yellow   | wave, breathing with the mic level         |
 | transcribing          | brown    | ribbon, composing                          |
-| review                | quartz   | ring, near-still; the box carries the text |
+| editing               | quartz   | ring, near-still; the box carries the text |
 | working               | niagara  | orbits, fast                               |
 | speaking              | green    | wave, same grammar as listening            |
 | attention             | wisteria | ring plus two pulses, then a slow loop     |
@@ -149,12 +138,12 @@ hue, separates states, so every state survives grayscale.
 | error                 | red      | ring, slowed to a third                    |
 | disconnected          | gray     | web, desaturated                           |
 
-Chrome exists only when there is something to act on. In review and in
-uncertain a second window rises above the orb with the transcript, a caret
-where the person's own caret is, and one line saying what the keys do. It is
-display-only and never focused: every key still belongs to the orb window, so
-the field the words come from lives there, invisible, and each edit is mirrored
-next door over `scufris://draft`. Everything else - the state name, the error
+Chrome exists only when there is something to act on. While the words are the
+person's to answer - editing, retained, uncertain - the textbox rises above the
+orb with the transcript in a real field and one line saying what the keys do.
+It is the window that holds the keyboard, so the caret and the selection are
+the browser's own and the page decides nothing: it reports which key was
+pressed and what the field holds. Everything else - the state name, the error
 reason, the notice on a retained transcript - is the tray's to say.
 
 Both windows are exactly their opaque page. Margins around them would need
@@ -168,7 +157,7 @@ up without re-applying them, and a frame that resized under the orb would move
 the orb.
 
 The webview is CSS plus one small Canvas 2D orb, written in strict
-TypeScript (`ui/pill.ts` and `ui/review.ts`) and compiled by `build.rs` into
+TypeScript (`ui/pill.ts` and `ui/textbox.ts`) and compiled by `build.rs` into
 `ui/dist`, the directory Tauri embeds. WebGL is banned: WebKitGTK silently
 software-renders. The displayed level springs toward the 60 ms Rust tick with
 `display += (target - display) * 0.25`, and one `requestAnimationFrame` loop
@@ -231,21 +220,26 @@ microphone that opens behind a pill that never came up is a microphone the
 person was never told about.
 
 So every surface operation whose outcome a later decision depends on reports
-what it achieved, and the runtime records only that. `show` asks the window
-afterwards whether it is up, and whether it holds the keyboard, and treats a
-window that cannot answer as one that has not: a window manager may accept
-`set_focus` and hand the keyboard elsewhere, or later, or never. `hide` asks the
-same question in reverse, because an always-on-top pill recorded as down is a
-pill nothing will ever take down again.
+what it achieved, and the runtime records only that. Showing a window asks it
+afterwards whether it is up; raising the textbox asks it as well whether it
+holds the keyboard, and treats a window that cannot answer as one that has not:
+a window manager may accept `set_focus` and hand the keyboard elsewhere, or
+later, or never. `hide` asks the same question in reverse, because an
+always-on-top pill recorded as down is a pill nothing will ever take down again.
 
 A show has three answers, not two.
 
-- **Ready** - up, on top, holding the keyboard.
+- **Ready** - up, on top, holding the keyboard. Only the textbox reaches this;
+  the pill refuses the keyboard on every show by contract.
 - **Seen** - up and on top, keyboard elsewhere. The person can read it, so the
   indicator counts and the phase runs.
 - **Doubtful** - up, but placement or always-on-top was refused, so it may be
   behind whatever the person is looking at. The phase has a window and runs, but
   nothing that rests on being seen may rest on this.
+
+The focus hints go on before the window is mapped, on every raise. A window
+manager reads them when it maps a window, so a pill that refuses the keyboard
+once and a textbox that claimed it once are both wrong the second time round.
 
 The microphone rests on being seen. `StartRecording` refuses unless the pill has
 taken a presentation that says the microphone is open and the window is
@@ -269,11 +263,11 @@ the next start to recover, and the tray, which is what is left, says what
 happened. The person's next activation clears it.
 
 A window that came up wrong is a different thing, and the runtime repairs it
-itself. A pill that would not go down is over the desktop with focus already
-given back, so the keys the person presses reach their own window, not the pill;
-a pill that would not take the keyboard cannot be typed into; a passive pill
-still holding the keyboard would swallow the keys the person is typing into
-their own window, so the repair hands them back. All are asked again after a
+itself. A pill that would not go down is over the desktop and has no keys of
+its own, so nothing outside the runtime can even send it an Escape; a textbox
+that would not take the keyboard cannot be typed into; a textbox left standing
+after the phase that needed it would swallow the keys the person went back to
+typing with, so the repair takes it away. All are asked again after a
 short delay, on the newest decision rather than the one that fell short, a
 bounded number of times, one chain at a time. A window manager that has
 refused three times is refusing, and the next decision asks again anyway.
@@ -306,7 +300,8 @@ delivered it is unknowable, so the recovered text is frozen - see below.
 ## One identifier per transcript
 
 A transcript keeps one submission identifier from the moment it is transcribed
-until it is acknowledged - across review edits, across retries, and across a
+until it is acknowledged - across edits in the textbox, across retries, and
+across a
 restart. Identifiers carry a per-process prefix drawn from the operating
 system's randomness, because they outlive the process that made them: a process
 identifier and a clock are reused, and a collision would have a genuinely new
@@ -502,17 +497,16 @@ any level; only their sizes do.
 
 ## Environment
 
-| Variable                          | Meaning                                        |
-| --------------------------------- | ---------------------------------------------- |
-| `SCUFRIS_DESKTOP_SOCKET`          | Service socket path override                   |
-| `SCUFRIS_DESKTOP_COMMAND_SOCKET`  | Command socket path override                   |
-| `SCUFRIS_DESKTOP_STATE_FILE`      | Durable accepted-transcript file               |
-| `SCUFRIS_STT_ENDPOINT`            | Transcription endpoint                         |
-| `SCUFRIS_DESKTOP_HOTKEY`          | Activation accelerator                         |
-| `SCUFRIS_DESKTOP_CHAT_COMMAND`    | Absolute executable that opens the full chat   |
-| `SCUFRIS_DESKTOP_RESTART_COMMAND` | Absolute executable that restarts the backend  |
-| `SCUFRIS_DESKTOP_MODE_COMMAND`    | Absolute executable that sets the binding mode |
-| `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | Absolute executable that speaks one paragraph  |
+| Variable                          | Meaning                                       |
+| --------------------------------- | --------------------------------------------- |
+| `SCUFRIS_DESKTOP_SOCKET`          | Service socket path override                  |
+| `SCUFRIS_DESKTOP_COMMAND_SOCKET`  | Command socket path override                  |
+| `SCUFRIS_DESKTOP_STATE_FILE`      | Durable accepted-transcript file              |
+| `SCUFRIS_STT_ENDPOINT`            | Transcription endpoint                        |
+| `SCUFRIS_DESKTOP_HOTKEY`          | Activation accelerator                        |
+| `SCUFRIS_DESKTOP_CHAT_COMMAND`    | Absolute executable that opens the full chat  |
+| `SCUFRIS_DESKTOP_RESTART_COMMAND` | Absolute executable that restarts the backend |
+| `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | Absolute executable that speaks one paragraph |
 
 ## Limits
 

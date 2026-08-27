@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Pill, transcript, and widget window access to Scufris companion commands and events.",
-  "windows": ["pill", "review", "widget-*"],
+  "windows": ["pill", "textbox", "widget-*"],
   "permissions": ["core:default"]
 }

@@ -41,7 +41,6 @@ stt_endpoint=http://127.0.0.1:10301/inference
 hotkey=Super+D
 chat_command=none
 restart_command=none
-mode_command=none
 speak_command=none
 ```
 

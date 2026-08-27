@@ -351,9 +351,9 @@ wrong task.
 
 Writing a new task is not the panel's job yet. The window is unfocusable so that
 one landing mid-sentence never takes the keyboard, which also means nothing
-typed can land in it. Until keyboard routing is settled - the i3 binding mode
-task - the panel acts on what is already on the list, and anything that writes
-the file puts things there.
+typed can land in it. Until a widget window can ask for the keyboard the way the
+textbox does, the panel acts on what is already on the list, and anything that
+writes the file puts things there.
 
 A reading is not a citation. Scufris naming a panel is what says the
 conversation is still about it; a sampler writing its line every second says

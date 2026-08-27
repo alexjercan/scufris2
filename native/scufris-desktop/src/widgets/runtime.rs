@@ -22,7 +22,7 @@ use serde_json::Value;
 use tauri::PhysicalPosition;
 use tracing::warn;
 
-use crate::{pill, review, widgets::catalog::Catalog};
+use crate::{pill, textbox, widgets::catalog::Catalog};
 
 /// How many exhibits the shelf holds before the oldest one retires.
 pub const SHELF_SLOTS: usize = 3;
@@ -48,7 +48,7 @@ pub const EDGE_SLOTS: [EdgeSlot; 4] = [
 /// One height whether the box is up or not. The shelf is a row of places, and a
 /// place that moves aside when something else appears is not a place: an exhibit
 /// the person had their eye on would jump every time they spoke.
-const SHELF_GAP: f64 = review::GAP + review::HEIGHT + review::GAP;
+const SHELF_GAP: f64 = textbox::GAP + textbox::HEIGHT + textbox::GAP;
 
 /// Distance between the centers of two shelf columns, in logical pixels.
 ///
@@ -2237,7 +2237,7 @@ cadence = 500
         // have to read, so the shelf is the one that gives way - and it gives
         // way always, rather than moving when the box appears.
         let pill = pill::bottom_center(0, 0, 1920, 1080, 1.0);
-        let box_top = review::above_pill(0, 0, 1920, 1080, 1.0).y;
+        let box_top = textbox::above_pill(0, 0, 1920, 1080, 1.0).y;
         let card = place(Slot::Shelf(0), CARD, &MONITOR);
         assert!(
             card.y + CARD.height as i32 <= box_top,

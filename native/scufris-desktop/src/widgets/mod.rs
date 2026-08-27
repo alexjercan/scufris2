@@ -714,12 +714,12 @@ mod tests {
     use crate::widgets::runtime::Life;
 
     #[test]
-    fn the_pill_and_the_review_box_are_not_widget_shells() {
+    fn the_pill_and_the_textbox_are_not_widget_shells() {
         // The window event handler routes by label. A prefix that caught the
         // pill would close the pill the first time a widget was dismissed.
         assert!(is_shell("widget-1"));
         assert!(!is_shell(crate::pill::LABEL));
-        assert!(!is_shell(crate::review::LABEL));
+        assert!(!is_shell(crate::textbox::LABEL));
     }
 
     #[test]

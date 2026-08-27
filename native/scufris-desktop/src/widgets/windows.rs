@@ -100,7 +100,7 @@ pub fn fit(window: &WebviewWindow, size: Size) -> Result<(), String> {
 /// nothing here asks otherwise.
 ///
 /// The name the display knows it by is the caller's to keep. The pill and the
-/// review box each hold one of their own, because each of them is one window
+/// textbox each hold one of their own, because each of them is one window
 /// asked about again and again; there are many widget windows, so the pool
 /// holds one per shell rather than one for all of them.
 pub fn raise(window: &WebviewWindow, known: &AtomicU32) -> Result<(), String> {

@@ -76,12 +76,9 @@ pub enum Phase {
     /// The microphone is recording.
     Listening,
     /// Recording stopped and local transcription is running.
-    Transcribing {
-        /// What happens once the transcript arrives.
-        intent: Intent,
-    },
-    /// An editable transcript is waiting for the user.
-    Reviewing {
+    Transcribing,
+    /// An editable transcript is waiting for the user in the textbox.
+    Editing {
         /// Current transcript text.
         transcript: String,
         /// Identifier this transcript keeps until it is acknowledged.
@@ -128,8 +125,8 @@ impl Phase {
         match self {
             Phase::Resting => "resting",
             Phase::Listening => "listening",
-            Phase::Transcribing { .. } => "transcribing",
-            Phase::Reviewing { .. } => "reviewing",
+            Phase::Transcribing => "transcribing",
+            Phase::Editing { .. } => "editing",
             Phase::Sent { .. } => "sent",
             Phase::Retained { .. } => "retained",
             Phase::Failed { .. } => "failed",
@@ -153,25 +150,17 @@ pub enum Delivery {
     Uncertain,
 }
 
-/// What the user asked for when recording stopped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Intent {
-    /// Transcribe and submit without another confirmation.
-    Send,
-    /// Transcribe and open the editable review state.
-    Review,
-}
-
 /// One thing that happened to the companion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// The activation hotkey fired, or the tray asked for voice input.
     Activate,
-    /// Escape was pressed in the pill.
+    /// Escape was pressed: in the textbox, or on the accelerator that answers
+    /// a pill with no textbox under it.
     Escape,
-    /// Enter was pressed in the pill, carrying any edited text.
+    /// Enter was pressed in the textbox, carrying what is in the field.
     Enter {
-        /// Text currently in the editable field, when the pill has one.
+        /// Text currently in the field, when it is one the person may edit.
         text: Option<String>,
     },
     /// Local transcription produced text.
@@ -258,32 +247,64 @@ pub enum Action {
     },
 }
 
-/// Everything the pill renders, derived from the phase and the service state.
+/// Everything the surfaces render, derived from the phase and the service
+/// state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Presentation {
     /// Stable state name used by the pill and the tray.
     pub state: &'static str,
-    /// Text the pill shows, empty when there is none.
+    /// Text the textbox shows, empty when there is none.
     pub text: String,
     /// Short explanation of an error or a retained transcript.
     pub detail: String,
-    /// Whether the pill offers an editable field.
+    /// Whether the textbox field may be edited.
     pub editable: bool,
     /// Whether the pill shows the recording indicator and duration.
     pub recording: bool,
 }
 
-/// Where the pill window belongs for the current state.
+/// Where the companion's windows belong for the current phase.
+///
+/// The pill never holds the keyboard: it is an indicator, and taking keys away
+/// from whatever the person is typing in to show them one is a trade nothing
+/// here is worth. The textbox does hold it, and only while there are words in
+/// front of the person to read, correct, and send.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Posture {
-    /// On screen holding the keyboard: a phase the person acts in.
-    Focused,
-    /// On screen without the keyboard. The desktop is the person's again and
-    /// the pill only reports: the handoff of a submission, and the turn it
-    /// started, watched until the assistant settles.
+    /// The pill is up and the textbox stands over it with the keyboard: a
+    /// phase whose words the person answers.
+    Editing,
+    /// The pill is up and the phase waits for it. The microphone is open or
+    /// about to be, or something went wrong that the person has to read.
+    /// Nothing holds the keyboard.
+    Watched,
+    /// The pill is up, reporting, and nothing waits on it: the handoff of a
+    /// submission, and the turn it started, watched until the assistant
+    /// settles.
     Passive,
     /// Off screen.
     Off,
+}
+
+impl Posture {
+    /// Answers whether the phase may not run until its windows are on screen.
+    ///
+    /// The microphone must never open behind a privacy indicator that is not
+    /// there, and words nobody can see are words nobody can correct. A phase
+    /// the person only watches has neither problem and is not held up.
+    pub fn waits(self) -> bool {
+        matches!(self, Self::Editing | Self::Watched)
+    }
+
+    /// Answers whether the pill belongs on screen.
+    pub fn on_screen(self) -> bool {
+        self != Self::Off
+    }
+
+    /// Answers whether the textbox belongs on screen with the keyboard.
+    pub fn textbox(self) -> bool {
+        self == Self::Editing
+    }
 }
 
 /// The pill state machine.
@@ -363,24 +384,24 @@ impl Companion {
     pub fn holds_unsent_transcript(&self) -> bool {
         matches!(
             self.phase,
-            Phase::Reviewing { .. } | Phase::Sent { .. } | Phase::Retained { .. }
+            Phase::Editing { .. } | Phase::Sent { .. } | Phase::Retained { .. }
         )
     }
 
-    /// Answers where the pill window belongs right now.
+    /// Answers where the companion's windows belong right now.
     ///
     /// The host reads this after every change instead of being handed show and
     /// hide actions. Two changes can be in flight at once - the person's key
     /// and the service's answer - and the one that ran last is the one whose
-    /// window the person must end up looking at.
+    /// windows the person must end up looking at.
     ///
     /// A transcript handed off for submission gives the keyboard back at once:
     /// the words are the service's now, and waiting for an acknowledgment would
-    /// hold the keyboard in an always-on-top pill for as long as the backend
-    /// takes. The window itself stays, passively, and goes on reporting what
-    /// the assistant does - sent, working, speaking, then resting - because
-    /// the pill is a resident HUD: only the person's Escape puts it away, and
-    /// only their activation brings it back.
+    /// hold the keyboard in an always-on-top textbox for as long as the backend
+    /// takes. The pill stays, passively, and goes on reporting what the
+    /// assistant does - sent, working, speaking, then resting - because it is
+    /// a resident HUD: only the person's Escape puts it away, and only their
+    /// activation brings it back.
     pub fn posture(&self) -> Posture {
         if self.blind.is_some() {
             return Posture::Off;
@@ -396,14 +417,20 @@ impl Companion {
                     Posture::Passive
                 }
             }
-            _ => Posture::Focused,
+            // The phases with words in them. The textbox is where they are
+            // read, and it is the one window here that takes the keyboard.
+            Phase::Editing { .. } | Phase::Retained { .. } => Posture::Editing,
+            // The microphone, the transcription, and whatever went wrong with
+            // either: nothing to type into, and nothing that may run before
+            // the person can see it.
+            Phase::Listening | Phase::Transcribing | Phase::Failed { .. } => Posture::Watched,
         }
     }
 
-    /// Answers whether the pill belongs on screen, in either posture.
+    /// Answers whether the pill belongs on screen, in any posture.
     #[cfg(test)]
     pub fn on_screen(&self) -> bool {
-        self.posture() != Posture::Off
+        self.posture().on_screen()
     }
 
     /// Returns true while the host has no usable pill window.
@@ -424,7 +451,7 @@ impl Companion {
     pub fn abandon(&mut self, reason: String) -> Vec<Action> {
         let actions = match self.phase {
             Phase::Listening => vec![Action::DiscardRecording],
-            Phase::Transcribing { .. } => vec![Action::CancelTranscription],
+            Phase::Transcribing => vec![Action::CancelTranscription],
             _ => Vec::new(),
         };
         self.phase = Phase::Resting;
@@ -523,34 +550,27 @@ impl Companion {
                 self.phase = Phase::Listening;
                 vec![Action::StartRecording]
             }
+            // The activation key always listens, so a second press is what
+            // stops the microphone. There is no second thing it could mean:
+            // every transcript goes to the textbox, and the textbox is what
+            // sends.
             (Phase::Listening, Event::Activate) => {
-                self.phase = Phase::Transcribing {
-                    intent: Intent::Review,
-                };
-                vec![Action::StopRecording]
-            }
-            (Phase::Listening, Event::Enter { .. }) => {
-                self.phase = Phase::Transcribing {
-                    intent: Intent::Send,
-                };
+                self.phase = Phase::Transcribing;
                 vec![Action::StopRecording]
             }
             (Phase::Listening, Event::Escape) => self.close(vec![Action::DiscardRecording]),
-            (Phase::Transcribing { .. }, Event::Escape) => {
-                self.close(vec![Action::CancelTranscription])
-            }
+            (Phase::Transcribing, Event::Escape) => self.close(vec![Action::CancelTranscription]),
             // The microphone can fail before capture starts and while it runs.
             // Either way the pill must stop claiming to record.
             (Phase::Listening, Event::RecordingFailed(reason)) => {
                 self.phase = Phase::Failed { reason };
                 vec![Action::DiscardRecording]
             }
-            (Phase::Transcribing { .. }, Event::RecordingFailed(reason)) => {
+            (Phase::Transcribing, Event::RecordingFailed(reason)) => {
                 self.phase = Phase::Failed { reason };
                 vec![Action::CancelTranscription]
             }
-            (Phase::Transcribing { intent }, Event::Transcribed(transcript)) => {
-                let intent = *intent;
+            (Phase::Transcribing, Event::Transcribed(transcript)) => {
                 let transcript = transcript.trim().to_string();
                 if transcript.is_empty() {
                     self.phase = Phase::Failed {
@@ -563,28 +583,19 @@ impl Companion {
                     id: id.clone(),
                     text: transcript.clone(),
                 };
-                match intent {
-                    Intent::Send => {
-                        let mut actions = vec![persist];
-                        actions.extend(self.submit(transcript, id, false));
-                        actions
-                    }
-                    Intent::Review => {
-                        self.phase = Phase::Reviewing {
-                            transcript,
-                            id,
-                            notice: String::new(),
-                        };
-                        vec![persist]
-                    }
-                }
+                self.phase = Phase::Editing {
+                    transcript,
+                    id,
+                    notice: String::new(),
+                };
+                vec![persist]
             }
-            (Phase::Transcribing { .. }, Event::TranscriptionFailed(reason)) => {
+            (Phase::Transcribing, Event::TranscriptionFailed(reason)) => {
                 self.phase = Phase::Failed { reason };
                 Vec::new()
             }
             (
-                Phase::Reviewing { transcript, id, .. }
+                Phase::Editing { transcript, id, .. }
                 | Phase::Retained {
                     transcript,
                     id,
@@ -640,17 +651,17 @@ impl Companion {
                 actions
             }
             (
-                Phase::Reviewing { transcript, .. } | Phase::Retained { transcript, .. },
+                Phase::Editing { transcript, .. } | Phase::Retained { transcript, .. },
                 Event::Copy,
             ) => vec![Action::CopyTranscript {
                 text: transcript.clone(),
             }],
-            (Phase::Reviewing { id, .. } | Phase::Retained { id, .. }, Event::Escape) => {
+            (Phase::Editing { id, .. } | Phase::Retained { id, .. }, Event::Escape) => {
                 let id = id.clone();
                 self.close(vec![Action::DiscardPending { id }])
             }
-            // Escape dismisses the pill; Enter only acknowledges the failure
-            // and lets the pill rest on screen.
+            // Nothing to answer and nothing to correct, so Escape is the only
+            // key a failure has: it puts the pill away.
             (Phase::Failed { .. }, Event::Escape) => self.close(Vec::new()),
             // The two phases the pill is on screen without the keyboard in.
             // Escape there is the person putting the pill away, and it had no
@@ -665,7 +676,6 @@ impl Companion {
                 self.dismissed = true;
                 Vec::new()
             }
-            (Phase::Failed { .. }, Event::Enter { .. }) => self.settle(Vec::new()),
             // The interaction has already ended by the time this arrives, so
             // it is reported: silently keeping discarded words would be worse.
             (Phase::Resting, Event::DiscardFailed(reason)) => self.report_failure(reason),
@@ -693,8 +703,8 @@ impl Companion {
                 };
                 Vec::new()
             }
-            (Phase::Reviewing { transcript, id, .. }, Event::PersistFailed(notice)) => {
-                self.phase = Phase::Reviewing {
+            (Phase::Editing { transcript, id, .. }, Event::PersistFailed(notice)) => {
+                self.phase = Phase::Editing {
                     transcript: transcript.clone(),
                     id: id.clone(),
                     notice,
@@ -838,17 +848,17 @@ impl Companion {
                 editable: false,
                 recording: true,
             },
-            Phase::Transcribing { .. } => Presentation {
+            Phase::Transcribing => Presentation {
                 state: "transcribing",
                 text: String::new(),
                 detail: String::new(),
                 editable: false,
                 recording: false,
             },
-            Phase::Reviewing {
+            Phase::Editing {
                 transcript, notice, ..
             } => Presentation {
-                state: "review",
+                state: "editing",
                 text: transcript.clone(),
                 detail: notice.clone(),
                 editable: true,
@@ -895,7 +905,7 @@ impl Companion {
         }
         match self.phase {
             Phase::Listening => "listening",
-            Phase::Transcribing { .. } => "transcribing",
+            Phase::Transcribing => "transcribing",
             Phase::Failed { .. } => "error",
             // An accepted transcript the service has not taken needs the user,
             // whatever the service itself is doing.
@@ -928,13 +938,13 @@ mod tests {
         assert_eq!(Phase::Resting.name(), "resting");
         assert_eq!(Phase::Listening.name(), "listening");
         assert_eq!(
-            Phase::Reviewing {
+            Phase::Editing {
                 transcript: "secret words".into(),
                 id: "pill-1".into(),
                 notice: String::new(),
             }
             .name(),
-            "reviewing"
+            "editing"
         );
         let mut companion = Companion::new("pill");
         assert_eq!(companion.phase_name(), "resting");
@@ -954,14 +964,54 @@ mod tests {
         companion
     }
 
+    /// A companion whose recording is transcribed and waiting in the textbox.
+    ///
+    /// Two presses to get here, and that is the whole interaction now: the
+    /// activation key opens the microphone and the same key closes it, and
+    /// what was said lands in a window the person reads before Enter sends it.
+    fn drafted(words: &str) -> Companion {
+        let mut companion = opened();
+        assert_eq!(
+            companion.apply(Event::Activate),
+            vec![Action::StopRecording]
+        );
+        assert_eq!(
+            companion.apply(Event::Transcribed(words.into())),
+            vec![persist("pill-1", words)]
+        );
+        companion
+    }
+
     /// A companion whose submission was just acknowledged: resting, up.
     fn handed_off() -> Companion {
-        let mut companion = opened();
+        let mut companion = drafted("open the tasks widget");
         companion.apply(Event::Enter { text: None });
-        companion.apply(Event::Transcribed("open the tasks widget".into()));
         companion.apply(Event::Acknowledged("pill-1".into()));
         assert_eq!(companion.phase(), &Phase::Resting);
         companion
+    }
+
+    /// The pill is an indicator and nothing else. Every phase that wants the
+    /// keyboard wants it for words, and words live in the textbox.
+    #[test]
+    fn only_the_phases_with_words_in_them_ask_for_the_keyboard() {
+        let mut companion = opened();
+        assert_eq!(companion.posture(), Posture::Watched);
+        assert!(!companion.posture().textbox());
+        companion.apply(Event::Activate);
+        assert_eq!(companion.posture(), Posture::Watched);
+        companion.apply(Event::Transcribed("draft".into()));
+        assert_eq!(companion.posture(), Posture::Editing);
+        assert!(companion.posture().textbox());
+        // Handed over: the words are the service's, so the keyboard is the
+        // person's again while the pill goes on reporting.
+        companion.apply(Event::Enter { text: None });
+        assert_eq!(companion.posture(), Posture::Passive);
+        assert!(!companion.posture().textbox());
+        assert!(!companion.posture().waits());
+        // And a refusal brings the words back, so it brings the textbox back.
+        companion.apply(refused("pill-1", "offline"));
+        assert_eq!(companion.posture(), Posture::Editing);
     }
 
     #[test]
@@ -1012,7 +1062,7 @@ mod tests {
         // Escape is the one road off the screen, and the next activation is
         // the one road back.
         companion.apply(Event::Activate);
-        assert_eq!(companion.posture(), Posture::Focused);
+        assert_eq!(companion.posture(), Posture::Watched);
         companion.apply(Event::Escape);
         assert_eq!(companion.posture(), Posture::Off);
         companion.set_assistant(Assistant::Speaking, String::new());
@@ -1022,7 +1072,7 @@ mod tests {
             "a dismissed pill stays dismissed whatever the assistant does"
         );
         companion.apply(Event::Activate);
-        assert_eq!(companion.posture(), Posture::Focused);
+        assert_eq!(companion.posture(), Posture::Watched);
     }
 
     fn persist(id: &str, text: &str) -> Action {
@@ -1053,18 +1103,35 @@ mod tests {
         }
     }
 
+    /// Every voice submission passes through the textbox. There is no key that
+    /// sends a transcript nobody has read: the second activation stops the
+    /// microphone, the words arrive in a window, and Enter is what sends them.
     #[test]
-    fn enter_while_recording_transcribes_and_submits_without_confirmation() {
+    fn a_transcript_is_read_in_the_textbox_before_anything_is_sent() {
         let mut companion = opened();
         assert_eq!(
-            companion.apply(Event::Enter { text: None }),
+            companion.apply(Event::Activate),
             vec![Action::StopRecording]
         );
         assert_eq!(
             companion.apply(Event::Transcribed("  open the tasks widget \n".into())),
+            vec![persist("pill-1", "open the tasks widget")],
+            "the words were sent without the person seeing them"
+        );
+        let presentation = companion.presentation();
+        assert_eq!(presentation.state, "editing");
+        assert!(presentation.editable);
+        assert_eq!(presentation.text, "open the tasks widget");
+        assert_eq!(companion.posture(), Posture::Editing);
+
+        // The person corrects them and sends.
+        assert_eq!(
+            companion.apply(Event::Enter {
+                text: Some("open the tasks panel".into())
+            }),
             vec![
-                persist("pill-1", "open the tasks widget"),
-                submit("pill-1", "open the tasks widget"),
+                persist("pill-1", "open the tasks panel"),
+                submit("pill-1", "open the tasks panel"),
             ]
         );
         assert_eq!(
@@ -1072,7 +1139,6 @@ mod tests {
             Posture::Passive,
             "the keyboard was not given back"
         );
-        assert_eq!(companion.presentation().text, "open the tasks widget");
         // The desktop is already back; the acknowledgment only retires the
         // durable copy.
         assert_eq!(
@@ -1083,34 +1149,7 @@ mod tests {
     }
 
     #[test]
-    fn a_second_activation_while_recording_opens_the_editable_review() {
-        let mut companion = opened();
-        assert_eq!(
-            companion.apply(Event::Activate),
-            vec![Action::StopRecording]
-        );
-        assert_eq!(
-            companion.apply(Event::Transcribed("draft text".into())),
-            vec![persist("pill-1", "draft text")]
-        );
-        let presentation = companion.presentation();
-        assert_eq!(presentation.state, "review");
-        assert!(presentation.editable);
-        assert_eq!(presentation.text, "draft text");
-        assert_eq!(
-            companion.apply(Event::Enter {
-                text: Some("corrected text".into())
-            }),
-            vec![
-                persist("pill-1", "corrected text"),
-                submit("pill-1", "corrected text"),
-            ]
-        );
-        assert_eq!(companion.posture(), Posture::Passive);
-    }
-
-    #[test]
-    fn escape_discards_recording_and_review_and_closes_the_pill() {
+    fn escape_discards_the_recording_and_the_draft_and_closes_the_pill() {
         let mut companion = opened();
         assert_eq!(
             companion.apply(Event::Escape),
@@ -1118,10 +1157,8 @@ mod tests {
         );
         assert!(!companion.on_screen(), "the pill stayed up after a cancel");
 
-        let mut companion = opened();
-        companion.apply(Event::Activate);
-        companion.apply(Event::Transcribed("draft".into()));
-        // Discarding a reviewed transcript is explicit, so the durable copy goes
+        let mut companion = drafted("draft");
+        // Discarding a drafted transcript is explicit, so the durable copy goes
         // with it under the stronger discard rules.
         assert_eq!(
             companion.apply(Event::Escape),
@@ -1136,7 +1173,7 @@ mod tests {
     #[test]
     fn failed_transcription_submits_nothing_and_reports_the_reason() {
         let mut companion = opened();
-        companion.apply(Event::Enter { text: None });
+        companion.apply(Event::Activate);
         assert_eq!(
             companion.apply(Event::TranscriptionFailed("Whisper is unreachable.".into())),
             Vec::new()
@@ -1169,7 +1206,7 @@ mod tests {
     #[test]
     fn a_capture_stream_that_fails_mid_recording_reports_the_same_way() {
         let mut companion = opened();
-        companion.apply(Event::Enter { text: None });
+        companion.apply(Event::Activate);
         assert_eq!(companion.presentation().state, "transcribing");
         assert_eq!(
             companion.apply(Event::RecordingFailed("microphone capture failed".into())),
@@ -1181,14 +1218,13 @@ mod tests {
 
     #[test]
     fn the_desktop_comes_back_when_the_words_are_handed_off() {
-        let mut companion = opened();
-        companion.apply(Event::Enter { text: None });
+        let mut companion = drafted("open the tasks widget");
         // Handing the words to the service is where the keyboard comes back. It
         // must not be held until an acknowledgment that can take a whole turn
-        // to arrive, or never arrive at all. The window itself stays, passive,
+        // to arrive, or never arrive at all. The pill itself stays, passive,
         // to report the turn it started.
         assert_eq!(
-            companion.apply(Event::Transcribed("open the tasks widget".into())),
+            companion.apply(Event::Enter { text: None }),
             vec![
                 persist("pill-1", "open the tasks widget"),
                 submit("pill-1", "open the tasks widget"),
@@ -1209,7 +1245,7 @@ mod tests {
     }
 
     #[test]
-    fn a_handed_off_transcript_brings_the_pill_back_when_it_goes_wrong() {
+    fn a_handed_off_transcript_brings_the_textbox_back_when_it_goes_wrong() {
         for (event, expected) in [
             (refused("pill-1", "The backend is unavailable."), "retained"),
             (
@@ -1217,15 +1253,14 @@ mod tests {
                 "uncertain",
             ),
         ] {
-            let mut companion = opened();
+            let mut companion = drafted("book the flight");
             companion.apply(Event::Enter { text: None });
-            companion.apply(Event::Transcribed("book the flight".into()));
             assert_eq!(companion.posture(), Posture::Passive);
             assert_eq!(companion.apply(event), Vec::new());
             assert_eq!(
                 companion.posture(),
-                Posture::Focused,
-                "the pill did not take the keyboard back for {expected}"
+                Posture::Editing,
+                "the textbox did not take the keyboard back for {expected}"
             );
             assert_eq!(companion.presentation().state, expected);
             assert_eq!(companion.presentation().text, "book the flight");
@@ -1234,11 +1269,10 @@ mod tests {
 
     #[test]
     fn an_undeliverable_transcript_is_retained_and_resubmittable() {
-        let mut companion = opened();
+        let mut companion = drafted("remember the milk");
         companion.apply(Event::Enter { text: None });
-        companion.apply(Event::Transcribed("remember the milk".into()));
-        // The pill went passive at the handoff, so a refusal has to take the
-        // keyboard again to say so.
+        // The pill went passive at the handoff, so a refusal has to bring the
+        // textbox back to say so.
         assert_eq!(
             companion.apply(refused("pill-1", "The backend is unavailable.")),
             Vec::new()
@@ -1261,9 +1295,10 @@ mod tests {
         assert_eq!(companion.posture(), Posture::Passive);
     }
 
-    /// The pill is the recording privacy indicator and the only place a
-    /// transcript can be read or corrected. A phase that cannot have one has
-    /// nothing left to offer, so it stops rather than carrying on unseen.
+    /// The pill is the recording privacy indicator and the textbox is the only
+    /// place a transcript can be read or corrected. A phase that cannot have a
+    /// window has nothing left to offer, so it stops rather than carrying on
+    /// unseen.
     #[test]
     fn a_pill_that_cannot_be_opened_stops_the_recording_and_says_so_on_the_tray() {
         let mut companion = opened();
@@ -1293,9 +1328,8 @@ mod tests {
 
     #[test]
     fn abandoning_an_accepted_transcript_never_throws_it_away() {
-        let mut companion = opened();
+        let mut companion = drafted("remember the milk");
         companion.apply(Event::Enter { text: None });
-        companion.apply(Event::Transcribed("remember the milk".into()));
         companion.apply(refused("pill-1", "The backend is unavailable."));
         assert!(companion.on_screen());
 
@@ -1313,7 +1347,7 @@ mod tests {
     #[test]
     fn abandoning_during_transcription_cancels_it() {
         let mut companion = opened();
-        companion.apply(Event::Enter { text: None });
+        companion.apply(Event::Activate);
         assert_eq!(
             companion.abandon("the pill did not come up".into()),
             vec![Action::CancelTranscription]
@@ -1323,9 +1357,8 @@ mod tests {
 
     #[test]
     fn an_uncertain_transcript_is_never_resent_without_the_person_saying_so() {
-        let mut companion = opened();
+        let mut companion = drafted("book the flight");
         companion.apply(Event::Enter { text: None });
-        companion.apply(Event::Transcribed("book the flight".into()));
         // The submission left the companion and was never acknowledged, so it
         // may already be in the conversation and may already have run.
         companion.apply(uncertain("pill-1", "The backend did not confirm delivery."));
@@ -1382,15 +1415,15 @@ mod tests {
 
     #[test]
     fn an_answer_for_another_submission_never_settles_the_current_one() {
-        let mut companion = opened();
+        let mut companion = drafted("book the flight");
         companion.apply(Event::Enter { text: None });
-        companion.apply(Event::Transcribed("book the flight".into()));
         // The first submission is answered late, after the person recorded
         // again: concurrent dispatch and forced sends make that ordinary.
         companion.apply(Event::Acknowledged("pill-1".into()));
         companion.apply(Event::Activate);
-        companion.apply(Event::Enter { text: None });
+        companion.apply(Event::Activate);
         companion.apply(Event::Transcribed("read my mail".into()));
+        companion.apply(Event::Enter { text: None });
         assert!(companion.awaiting("pill-2"));
 
         assert_eq!(
@@ -1418,9 +1451,8 @@ mod tests {
 
     #[test]
     fn a_refused_send_says_so_and_keeps_the_words_editable() {
-        let mut companion = opened();
+        let mut companion = drafted("remember the milk");
         companion.apply(Event::Enter { text: None });
-        companion.apply(Event::Transcribed("remember the milk".into()));
         // The service refused before anything left it, and said which
         // submission it was refusing.
         assert_eq!(
@@ -1452,9 +1484,8 @@ mod tests {
 
     #[test]
     fn a_refusal_of_a_forced_send_does_not_forget_the_earlier_uncertainty() {
-        let mut companion = opened();
+        let mut companion = drafted("book the flight");
         companion.apply(Event::Enter { text: None });
-        companion.apply(Event::Transcribed("book the flight".into()));
         companion.apply(uncertain("pill-1", "no confirmation"));
         // The person decided to send it anyway, and this attempt was refused.
         companion.apply(Event::Enter { text: None });
@@ -1486,11 +1517,10 @@ mod tests {
 
     #[test]
     fn a_failed_durable_save_stops_the_submission_and_keeps_the_text() {
-        let mut companion = opened();
+        let mut companion = drafted("do not lose me");
         companion.apply(Event::Enter { text: None });
-        companion.apply(Event::Transcribed("do not lose me".into()));
-        // The runtime stops before Submit, so nothing was sent, and the phase
-        // it lands in is one the person has to see.
+        // The runtime stops before Submit when the save fails, so this send
+        // never happened, and the phase it lands in is one the person sees.
         assert_eq!(
             companion.apply(Event::PersistFailed("the disk is full".into())),
             Vec::new()
@@ -1509,14 +1539,12 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_durable_save_during_review_is_visible_without_losing_the_draft() {
-        let mut companion = opened();
-        companion.apply(Event::Activate);
-        companion.apply(Event::Transcribed("draft text".into()));
+    fn a_failed_durable_save_while_editing_is_visible_without_losing_the_draft() {
+        let mut companion = drafted("draft text");
         companion.apply(Event::PersistFailed("the disk is full".into()));
 
         let presentation = companion.presentation();
-        assert_eq!(presentation.state, "review");
+        assert_eq!(presentation.state, "editing");
         assert_eq!(presentation.text, "draft text");
         assert_eq!(presentation.detail, "the disk is full");
         assert!(presentation.editable);
@@ -1544,9 +1572,8 @@ mod tests {
 
     #[test]
     fn a_late_acknowledgment_retires_a_retained_transcript() {
-        let mut companion = opened();
+        let mut companion = drafted("open the tasks widget");
         companion.apply(Event::Enter { text: None });
-        companion.apply(Event::Transcribed("open the tasks widget".into()));
         companion.apply(uncertain("pill-1", "no confirmation"));
         assert_eq!(companion.presentation().state, "uncertain");
         // The service confirms after the companion gave up waiting. The
@@ -1572,10 +1599,8 @@ mod tests {
     }
 
     #[test]
-    fn a_transcript_keeps_one_identifier_across_review_edits_and_retries() {
-        let mut companion = opened();
-        companion.apply(Event::Activate);
-        companion.apply(Event::Transcribed("first draft".into()));
+    fn a_transcript_keeps_one_identifier_across_edits_and_retries() {
+        let mut companion = drafted("first draft");
         companion.apply(Event::Enter {
             text: Some("second draft".into()),
         });
@@ -1594,35 +1619,31 @@ mod tests {
 
         // Only a genuinely new recording takes a new identifier.
         companion.apply(Event::Activate);
-        companion.apply(Event::Enter { text: None });
+        companion.apply(Event::Activate);
         assert_eq!(
             companion.apply(Event::Transcribed("a new request".into())),
-            vec![
-                persist("pill-2", "a new request"),
-                submit("pill-2", "a new request"),
-            ]
+            vec![persist("pill-2", "a new request")]
         );
     }
 
     #[test]
     fn activation_never_discards_an_unsent_transcript() {
-        let mut companion = opened();
+        let mut companion = drafted("keep me");
         companion.apply(Event::Enter { text: None });
-        companion.apply(Event::Transcribed("keep me".into()));
         companion.apply(refused("pill-1", "offline"));
         assert_eq!(companion.apply(Event::Activate), Vec::new());
         assert!(companion.holds_unsent_transcript());
     }
 
     #[test]
-    fn a_restored_transcript_reopens_the_pill_and_keeps_its_identifier() {
+    fn a_restored_transcript_reopens_the_textbox_and_keeps_its_identifier() {
         let mut companion = Companion::new("later");
         companion.set_connected(true);
         companion.restore(Pending {
             id: "pill-7".into(),
             text: "survived the crash".into(),
         });
-        assert!(companion.on_screen());
+        assert_eq!(companion.posture(), Posture::Editing);
         let presentation = companion.presentation();
         assert_eq!(presentation.state, "uncertain");
         assert_eq!(presentation.text, "survived the crash");
@@ -1641,10 +1662,10 @@ mod tests {
         // A new recording in this process cannot reuse the recovered identifier.
         companion.apply(Event::Acknowledged("pill-7".into()));
         companion.apply(Event::Activate);
-        companion.apply(Event::Enter { text: None });
+        companion.apply(Event::Activate);
         assert_eq!(
             companion.apply(Event::Transcribed("fresh".into())),
-            vec![persist("later-1", "fresh"), submit("later-1", "fresh")]
+            vec![persist("later-1", "fresh")]
         );
     }
 
@@ -1660,13 +1681,13 @@ mod tests {
 
     #[test]
     fn a_stale_acknowledgment_does_not_close_a_newer_submission() {
-        let mut companion = opened();
+        let mut companion = drafted("first");
         companion.apply(Event::Enter { text: None });
-        companion.apply(Event::Transcribed("first".into()));
         companion.apply(Event::Acknowledged("pill-1".into()));
         companion.apply(Event::Activate);
-        companion.apply(Event::Enter { text: None });
+        companion.apply(Event::Activate);
         companion.apply(Event::Transcribed("second".into()));
+        companion.apply(Event::Enter { text: None });
         assert!(companion.awaiting("pill-2"));
         assert!(!companion.awaiting("pill-1"));
         assert_eq!(
@@ -1708,7 +1729,7 @@ mod tests {
     #[test]
     fn an_empty_transcript_is_an_error_rather_than_an_empty_submission() {
         let mut companion = opened();
-        companion.apply(Event::Enter { text: None });
+        companion.apply(Event::Activate);
         assert_eq!(
             companion.apply(Event::Transcribed("   ".into())),
             Vec::new()
@@ -1720,22 +1741,19 @@ mod tests {
     fn escape_puts_a_resting_pill_away_and_an_activation_brings_it_back() {
         let mut companion = handed_off();
         assert_eq!(companion.posture(), Posture::Passive);
-        // Nothing to cancel, so nothing to do but go down. Before the verb
-        // could arrive without focus this had no road at all: the pill takes
-        // no keys while it rests, so the only way down was to open the
-        // microphone with the hotkey and then cancel that.
+        // Nothing to cancel, so nothing to do but go down. The pill holds no
+        // keys, so this Escape is the accelerator arriving from outside it.
         assert_eq!(companion.apply(Event::Escape), Vec::new());
         assert_eq!(companion.posture(), Posture::Off);
         assert_eq!(companion.phase(), &Phase::Resting);
         companion.apply(Event::Activate);
-        assert_eq!(companion.posture(), Posture::Focused);
+        assert_eq!(companion.posture(), Posture::Watched);
     }
 
     #[test]
     fn escape_while_a_submission_is_in_flight_hides_the_pill_and_keeps_waiting() {
-        let mut companion = opened();
+        let mut companion = drafted("open the tasks widget");
         companion.apply(Event::Enter { text: None });
-        companion.apply(Event::Transcribed("open the tasks widget".into()));
         let Phase::Sent { id, .. } = companion.phase().clone() else {
             panic!("the transcript was handed over: {:?}", companion.phase());
         };
@@ -1753,7 +1771,7 @@ mod tests {
     #[test]
     fn escape_during_transcription_cancels_the_pending_transcript() {
         let mut companion = opened();
-        companion.apply(Event::Enter { text: None });
+        companion.apply(Event::Activate);
         assert_eq!(
             companion.apply(Event::Escape),
             vec![Action::CancelTranscription]

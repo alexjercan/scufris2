@@ -55,7 +55,7 @@ in
 
       # A window manager binding and a terminal both run the client by name.
       ${ctl}/bin/scufris-ctl --help | grep -F 'Usage: scufris-ctl <COMMAND>'
-      for verb in send state watch abort debug open cancel accept; do
+      for verb in send state watch abort debug open; do
         ${ctl}/bin/scufris-ctl --help | grep -qE "^  $verb "
       done
       ! ${ctl}/bin/scufris-ctl nonsense

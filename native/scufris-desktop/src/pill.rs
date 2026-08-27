@@ -179,21 +179,6 @@ pub fn ensure(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     Ok(window)
 }
 
-/// Answers whether the pill window currently holds the keyboard.
-///
-/// The display is asked, not the window: the window answers with what the
-/// toolkit last noticed, and this answer decides whether the window behind the
-/// pill is worth remembering. A stale "no" while the pill holds the keyboard is
-/// what would record the pill itself as the window to go back to, leaving the
-/// person nothing to be given back.
-///
-/// An answer nobody could give still counts as no, which is what the window's
-/// own answer already amounted to.
-pub fn focused(app: &AppHandle) -> bool {
-    app.get_webview_window(LABEL)
-        .is_some_and(|window| display::keyboard(&window, &WINDOW) == Verdict::Yes)
-}
-
 /// Answers what the display knows the pill by, once it has made a window.
 ///
 /// Nothing before the first show, which is also the first moment anything could
@@ -205,31 +190,38 @@ pub fn known_window() -> Option<u32> {
     }
 }
 
+/// Answers whether the keyboard has been forced onto the pill.
+///
+/// A dead end rather than a state. This window refuses the keyboard on every
+/// show and has no key handlers at all, so a window manager that hands it focus
+/// anyway has taken the person's keys as surely as one that focused nothing -
+/// and unlike a window they moved to themselves, there is nobody to take them
+/// from.
+pub fn holds_the_keyboard(app: &AppHandle) -> bool {
+    app.get_webview_window(LABEL)
+        .is_some_and(|window| display::keyboard(&window, &WINDOW) == Verdict::Yes)
+}
+
 /// The two window operations whose order is the keyboard contract.
 ///
 /// A trait so the order they run in is testable without a display, for the same
-/// reason the transcript box has one: the order is the whole contract.
+/// reason the textbox has one: the order is the whole contract.
 trait Opening {
-    /// Says whether the pill will take the keyboard.
+    /// Says that the pill wants nothing from the keyboard.
     ///
     /// Applied straight to the window instead of being queued behind the event
     /// loop, which is the whole reason it can be used as an ordering: the
     /// answer is on the window before the show that follows it has even been
     /// asked for.
-    fn accept_keyboard(&self, accept: bool) -> Result<(), String>;
+    fn refuse_keyboard(&self) -> Result<(), String>;
     /// Puts the pill on screen.
     fn show(&self) -> Result<(), String>;
 }
 
 impl Opening for WebviewWindow {
-    fn accept_keyboard(&self, accept: bool) -> Result<(), String> {
-        self.set_focusable(accept).map_err(|error| {
-            if accept {
-                format!("the pill would not claim the keyboard: {error}")
-            } else {
-                format!("the pill would not refuse the keyboard: {error}")
-            }
-        })
+    fn refuse_keyboard(&self) -> Result<(), String> {
+        self.set_focusable(false)
+            .map_err(|error| format!("the pill would not refuse the keyboard: {error}"))
     }
 
     fn show(&self) -> Result<(), String> {
@@ -237,30 +229,22 @@ impl Opening for WebviewWindow {
     }
 }
 
-/// Says what the pill will do with the keyboard, then puts it on screen.
+/// Says that the pill wants nothing from the keyboard, then puts it on screen.
 ///
 /// In that order, and every time. A window manager reads whether a window will
 /// take the keyboard once, when it takes the window over, and it takes it over
-/// when the window is mapped. The toolkit builds the pill refusing the
-/// keyboard, which is what keeps it from stealing focus while it is still being
-/// placed, and hands the refusal back only after the first draw, which is after
-/// the mapping. So a pill shown as built is taken over as one that cannot be
-/// focused: i3 offers it the keyboard with `WM_TAKE_FOCUS`, which the toolkit
-/// never answers, and records the pill as its focused window anyway. Every
-/// later request to activate it is then a request to activate the window the
-/// window manager already believes is active, and nothing happens at all. The
-/// keys keep going to the window the person was using, however many times the
-/// runtime asks.
-fn open(frame: &impl Opening, accept: bool) -> Result<(), String> {
-    match (accept, frame.accept_keyboard(accept)) {
-        // A pill that is about to be given the person's keys cannot go up
-        // unable to take them: the phase that asked for it has nowhere else to
-        // send an Enter.
-        (true, Err(error)) => return Err(error),
-        // The handoff posture is only chrome. It is worth putting up even when
-        // it could not say it wants nothing from the keyboard.
-        (false, Err(error)) => tracing::warn!("{error}"),
-        (_, Ok(())) => {}
+/// when the window is mapped. The toolkit builds the pill refusing the keyboard
+/// and hands the refusal back after the first draw, so a pill mapped without
+/// this said again is one a window manager may hand the person's keys to - and
+/// this window has no key handlers at all, so they would land nowhere.
+///
+/// The refusal is a warning rather than a refusal to come up. The pill is the
+/// privacy indicator and an indicator that will not go up is worse than one
+/// that went up saying the wrong thing about the keyboard, which the runtime
+/// watches for anyway.
+fn open(frame: &impl Opening) -> Result<(), String> {
+    if let Err(error) = frame.refuse_keyboard() {
+        tracing::warn!("{error}");
     }
     frame.show()
 }
@@ -422,15 +406,16 @@ fn glide(window: &WebviewWindow, rise: Rise) {
     });
 }
 
-/// Places the pill, shows it, focuses it, and reports what that achieved.
+/// Places the pill and shows it without ever touching the keyboard.
 ///
 /// The pill is the recording privacy indicator, so the caller is told what the
 /// window is doing rather than what it was asked to do: an operation that
-/// returns without error has still only asked.
+/// returns without error has still only asked. The display is what says
+/// otherwise, and it is given time to: a request that has not been carried out
+/// yet is not one that failed.
 ///
-/// The entrance is asked for last and waited for never: a pill that took the
-/// keyboard took it before the first step, and the person may type into one
-/// that is still climbing.
+/// The entrance is asked for last and waited for never. Nothing waits on a pill
+/// that is still climbing, because nothing is typed into it.
 pub fn show(app: &AppHandle) -> Result<Shown, String> {
     let window = ensure(app).map_err(|error| format!("the pill window is missing: {error}"))?;
     // Placement is part of being seen: a pill left at a position nobody chose
@@ -448,16 +433,15 @@ pub fn show(app: &AppHandle) -> Result<Shown, String> {
     shown
 }
 
-/// Shows the pill, asks for the keyboard, and reports what that achieved.
+/// Shows the pill and reports what that achieved.
 ///
-/// The pill is the recording privacy indicator, so the caller is told what the
-/// window is doing rather than what it was asked to do: an operation that
-/// returns without error has still only asked. The display is what says
-/// otherwise, and it is given time to: a request that has not been carried out
-/// yet is not one that failed.
+/// The keyboard is left exactly where the person put it. This window has no key
+/// handlers and never has: refusing the keyboard before the window manager
+/// takes the window over is what keeps it from swallowing the keys they are
+/// typing into their own window.
 fn reveal(window: &WebviewWindow, mut doubt: String) -> Result<Shown, String> {
-    // Claiming the keyboard comes first, and every time. See `open`.
-    open(window, true)?;
+    // Refusing the keyboard comes first, and every time. See `open`.
+    open(window)?;
     let up = display::came_up(window, &WINDOW);
     // Cutting comes as soon as the display has a window to cut, and before any
     // of the answers below can return early: a pill that reported trouble and
@@ -474,65 +458,10 @@ fn reveal(window: &WebviewWindow, mut doubt: String) -> Result<Shown, String> {
     if !doubt.is_empty() {
         return Ok(Shown::Doubtful(doubt));
     }
-    if up == Verdict::Unsure {
-        // The keyboard is still asked for - the request is worth making either
-        // way - but nothing here may be recorded as achieved.
-        let _ = window.set_focus();
-        return Ok(Shown::Unsure(
-            "nothing could say whether the pill came up".into(),
-        ));
-    }
-    if let Err(error) = window.set_focus() {
-        return Ok(Shown::Seen(Some(format!(
-            "the pill could not take the keyboard: {error}"
-        ))));
-    }
-    // Asking for the keyboard is not holding it. A window manager may accept
-    // the request and hand the keyboard elsewhere, or later, or never.
-    //
-    // Not holding it says nothing out loud. The pill is up, which is what the
-    // privacy indicator rests on, and the runtime asks for the keyboard again
-    // on its own; it is the runtime that says so, once, if it runs out of
-    // asking. A window that is being asked again is not one to interrupt
-    // anybody about.
-    match display::took_the_keyboard(window, &WINDOW) {
-        Verdict::Yes => Ok(Shown::Ready),
-        Verdict::No | Verdict::Unsure => Ok(Shown::Seen(None)),
-    }
-}
-
-/// Places the pill and shows it without touching the keyboard.
-///
-/// The passive pill only reports the turn it started, so being up is all it
-/// owes: placement or always-on-top falling short is worth a report, not a
-/// refusal, because nothing that rests on being seen rests on this posture.
-pub fn show_passive(app: &AppHandle) -> Result<Shown, String> {
-    let window = ensure(app).map_err(|error| format!("the pill window is missing: {error}"))?;
-    let rise = arrange(&window).unwrap_or_else(|error| {
-        tracing::warn!("the passive pill could not be placed: {error}");
-        None
-    });
-    // The other half of the same contract: this posture hands the desktop back
-    // to the person, so a pill mapped here must refuse the keyboard before the
-    // window manager takes it over, or it takes the keys they are typing into
-    // their own window.
-    open(&window, false)?;
-    let up = display::came_up(&window, &WINDOW);
-    // The same reason as the active pill: a window the display has is a window
-    // that has to stop being a rectangle.
-    shape(&window);
-    if up == Verdict::No {
-        return Err("the pill did not come up".into());
-    }
-    if let Err(error) = window.set_always_on_top(true) {
-        tracing::warn!("the passive pill could not be kept on top: {error}");
-    }
-    // The same arrival, with the keyboard left exactly where the person put it.
-    if let Some(rise) = rise {
-        glide(&window, rise);
-    }
     match up {
         Verdict::Yes => Ok(Shown::Seen(None)),
+        // Asked for and not yet carried out: not a failure, and nothing here
+        // may be recorded as achieved.
         _ => Ok(Shown::Unsure(
             "nothing could say whether the pill came up".into(),
         )),
@@ -589,10 +518,8 @@ mod tests {
     }
 
     impl Opening for RecordedOpening {
-        fn accept_keyboard(&self, accept: bool) -> Result<(), String> {
-            self.operations
-                .borrow_mut()
-                .push(format!("accept-keyboard {accept}"));
+        fn refuse_keyboard(&self) -> Result<(), String> {
+            self.operations.borrow_mut().push("refuse-keyboard".into());
             if self.mute {
                 return Err("the pill would not say".into());
             }
@@ -605,39 +532,25 @@ mod tests {
         }
     }
 
+    /// The pill never holds the keyboard, in any phase. A window manager reads
+    /// that when it takes the window over, which is at the mapping, so said
+    /// after the show it is read one show too late and the pill swallows the
+    /// keys the person is typing into their own window.
     #[test]
-    fn a_pill_that_will_hold_the_keys_claims_them_before_it_is_shown() {
-        // The window manager reads this when it takes the window over, which is
-        // at the mapping. Said after the show it is read too late, and every
-        // request for the keyboard afterwards is answered by a window manager
-        // that already believes the pill has it.
+    fn the_pill_refuses_the_keys_before_it_is_shown() {
         let frame = RecordedOpening::default();
-        assert_eq!(open(&frame, true), Ok(()));
-        assert_eq!(frame.operations(), ["accept-keyboard true", "show"]);
-    }
-
-    #[test]
-    fn a_pill_handing_the_desktop_back_refuses_the_keys_before_it_is_shown() {
-        let frame = RecordedOpening::default();
-        assert_eq!(open(&frame, false), Ok(()));
-        assert_eq!(frame.operations(), ["accept-keyboard false", "show"]);
-    }
-
-    #[test]
-    fn a_pill_that_cannot_claim_the_keyboard_stays_down() {
-        // The phase that asked for it sends Enter and Escape nowhere else.
-        let frame = RecordedOpening::mute();
-        assert!(open(&frame, true).is_err());
-        assert_eq!(frame.operations(), ["accept-keyboard true"]);
+        assert_eq!(open(&frame), Ok(()));
+        assert_eq!(frame.operations(), ["refuse-keyboard", "show"]);
     }
 
     #[test]
     fn a_pill_that_cannot_refuse_the_keyboard_is_still_put_up() {
-        // Nothing rests on this posture but being seen, and being seen is worth
-        // more than the refusal it could not say.
+        // Nothing rests on the pill but being seen, and being seen is worth
+        // more than the refusal it could not say. The runtime watches for a
+        // keyboard that landed here anyway.
         let frame = RecordedOpening::mute();
-        assert_eq!(open(&frame, false), Ok(()));
-        assert_eq!(frame.operations(), ["accept-keyboard false", "show"]);
+        assert_eq!(open(&frame), Ok(()));
+        assert_eq!(frame.operations(), ["refuse-keyboard", "show"]);
     }
 
     #[test]

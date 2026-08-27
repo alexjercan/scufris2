@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Scufris transcript</title>
+    <link rel="stylesheet" href="textbox.css" />
+  </head>
+  <body>
+    <main id="box" class="box" data-state="editing">
+      <!-- The words, in an ordinary field in a focused window. The caret, the
+           selection, and every editing key are the browser's own: the box that
+           drew its own caret existed because the keys lived in another window,
+           and they do not any more. -->
+      <textarea
+        id="words"
+        class="words"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        aria-label="Transcript"
+      ></textarea>
+      <p id="hint" class="hint"></p>
+    </main>
+    <script src="textbox.js"></script>
+  </body>
+</html>

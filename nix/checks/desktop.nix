@@ -19,9 +19,6 @@
   testChat = pkgs.writeShellScriptBin "scufris-chat" ''
     printf 'open the chat\n'
   '';
-  testMode = pkgs.writeShellScriptBin "scufris-desktop-mode" ''
-    printf 'mode %s\n' "$1"
-  '';
   testAgent = pkgs.writeShellScriptBin "scufris" ''
     printf 'scufris %s\n' "$@"
   '';
@@ -40,7 +37,6 @@
         enable = true;
         package = desktop;
         chatCommand = testChat;
-        modeCommand = testMode;
         stt.whisper = {
           package = testWhisper;
           model = testWhisperModel;
@@ -118,7 +114,6 @@ in
       hotkey=Super+D
       chat_command=none
       restart_command=none
-      mode_command=none
       speak_command=none
       EOF
       diff -u expected-defaults defaults
@@ -133,7 +128,6 @@ in
         SCUFRIS_DESKTOP_STATE_FILE=/run/user/1000/scufris-desktop/pending.json \
         SCUFRIS_DESKTOP_CHAT_COMMAND=/nix/store/fake/bin/scufris-chat \
         SCUFRIS_DESKTOP_RESTART_COMMAND=/nix/store/fake/bin/scufris-restart-backend \
-        SCUFRIS_DESKTOP_MODE_COMMAND=/nix/store/fake/bin/scufris-desktop-mode \
         SCUFRIS_DESKTOP_SPEAK_COMMAND=/nix/store/fake/bin/scufris-speak \
         ${desktop}/bin/scufris-desktop --print-config > overridden
       cat > expected-overridden <<'EOF'
@@ -144,7 +138,6 @@ in
       hotkey=Super+G
       chat_command=/nix/store/fake/bin/scufris-chat
       restart_command=/nix/store/fake/bin/scufris-restart-backend
-      mode_command=/nix/store/fake/bin/scufris-desktop-mode
       speak_command=/nix/store/fake/bin/scufris-speak
       EOF
       diff -u expected-overridden overridden
@@ -185,8 +178,6 @@ in
     assert lib.elem "SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10302/inference" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_HOTKEY=Super+D" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe testChat}" desktopUnit.Service.Environment;
-    assert lib.elem "SCUFRIS_DESKTOP_MODE_COMMAND=${lib.getExe testMode}" desktopUnit.Service.Environment;
-    assert !(lib.any (lib.hasPrefix "SCUFRIS_DESKTOP_MODE_COMMAND=") configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment);
     # The speaker is the companion's. Voice hands it a synthesiser, and a
     # deployment without voice hands it nothing and it stays silent.
     assert lib.any (lib.hasPrefix "SCUFRIS_DESKTOP_SPEAK_COMMAND=") desktopUnit.Service.Environment;

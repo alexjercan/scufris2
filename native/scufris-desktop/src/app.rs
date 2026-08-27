@@ -55,10 +55,10 @@ const REPAIR_DELAY: Duration = Duration::from_millis(250);
 
 /// How long between two looks at the keyboard while a phase needs it.
 ///
-/// Only ever while the pill is holding the person's keys, which is a turn and
-/// nothing longer, and it costs two questions to the display. Short enough that
-/// a keyboard lost to something that came and went is back before the person
-/// has finished pressing the key that did nothing.
+/// Only ever while the textbox is holding the person's keys, which is a turn
+/// and nothing longer, and it costs two questions to the display. Short enough
+/// that a keyboard lost to something that came and went is back before the
+/// person has finished pressing the key that did nothing.
 const WATCH_INTERVAL: Duration = Duration::from_millis(400);
 
 /// Event name carrying the pill presentation to the frontend.
@@ -73,14 +73,6 @@ pub const COPY_EVENT: &str = "scufris://copy";
 /// Event name carrying the sound cue enablement to the frontend.
 pub const CUES_EVENT: &str = "scufris://cues";
 
-/// Event name asking the pill page to accept what it is showing.
-///
-/// Enter arriving from outside the window. It goes to the page rather than
-/// straight to the state machine because the page holds the editable field:
-/// the same words a person's own Enter would send are the words this sends,
-/// whether or not they edited them.
-pub const ACCEPT_EVENT: &str = "scufris://accept";
-
 /// Interval between recording progress updates.
 const TICK_INTERVAL: Duration = Duration::from_millis(60);
 
@@ -92,11 +84,11 @@ pub const ACK_TIMEOUT: Duration = Duration::from_secs(15);
 pub struct PresentationPayload {
     /// Stable pill state name.
     pub state: &'static str,
-    /// Transcript the pill shows.
+    /// Transcript the textbox shows.
     pub text: String,
     /// Short explanation of an error or a retained transcript.
     pub detail: String,
-    /// Whether the pill offers an editable field.
+    /// Whether the textbox field may be edited.
     pub editable: bool,
     /// Whether the pill shows the recording indicator.
     pub recording: bool,
@@ -111,7 +103,7 @@ pub struct TickPayload {
     pub level: f32,
 }
 
-/// What a request to put the pill on screen achieved.
+/// What a request to put a window on screen achieved.
 ///
 /// Asking is not achieving, and the difference decides whether the microphone
 /// may open: the pill is the recording privacy indicator, so the runtime is
@@ -122,18 +114,19 @@ pub struct TickPayload {
 /// the time an answer read straight after one describes the moment before it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Shown {
-    /// The pill is up, on top, and holds the keyboard: everything asked for.
+    /// The window is up, on top, and holds the keyboard: everything asked for.
+    /// Only the textbox ever answers this. The pill never takes the keyboard.
     Ready,
-    /// The pill is up and on top, so the person can see it. `Some` when the
+    /// The window is up and on top, so the person can see it. `Some` when the
     /// keyboard is provably somewhere else, which is worth saying out loud, and
     /// `None` when nothing could say where it went, which is not.
     Seen(Option<String>),
-    /// The pill is up, but nothing proved the person can see it: it may be
+    /// The window is up, but nothing proved the person can see it: it may be
     /// behind whatever they are looking at. Nothing that rests on being seen
     /// may rest on this.
     Doubtful(String),
-    /// The pill was asked to come up and nothing could say whether it did. Not
-    /// a failure and not an achievement: the phase carries on, nothing that
+    /// The window was asked to come up and nothing could say whether it did.
+    /// Not a failure and not an achievement: the phase carries on, nothing that
     /// needs the person to see the pill may run, and the next decision asks
     /// again.
     Unsure(String),
@@ -148,7 +141,7 @@ pub enum Hidden {
     Unsure(String),
 }
 
-/// The pill window and the tray.
+/// The two windows and the tray.
 ///
 /// Every operation whose outcome a later decision depends on reports whether it
 /// happened. A window that did not come up, a pill that is still on screen after
@@ -156,19 +149,29 @@ pub enum Hidden {
 /// runtime must not record as done, because the record is what stops it being
 /// tried again.
 pub trait Surface: Send + Sync {
-    /// Records the active window, then shows and focuses the pill.
+    /// Shows the pill without ever touching the keyboard, and says what that
+    /// achieved. Never [`Shown::Ready`]: the pill is an indicator.
     fn show_pill(&self) -> Result<Shown, String>;
-    /// Shows the pill without touching the keyboard, and says what that
-    /// achieved. Never [`Shown::Ready`]: this posture leaves the keyboard alone.
-    fn show_pill_passive(&self) -> Result<Shown, String>;
     /// Hides the pill, and says what that achieved.
     fn hide_pill(&self) -> Result<Hidden, String>;
-    /// Answers whether the pill holds the keyboard at this moment.
+    /// Records the active window, then puts the textbox over the pill with the
+    /// keyboard, and says what that achieved.
+    fn show_textbox(&self) -> Result<Shown, String>;
+    /// Takes the textbox down and gives the keyboard back to the window it
+    /// covered.
+    ///
+    /// Asked for whether or not the record says the box is up, so a box that
+    /// came up without being written down is still taken away. The adapter is
+    /// what makes that idempotent: focus is given back only by a box that was
+    /// really there, because restoring it from a box that never rose would take
+    /// the keyboard off the person's own window.
+    fn hide_textbox(&self) -> Result<(), String>;
+    /// Answers whether the textbox holds the keyboard at this moment.
     ///
     /// What a show achieved was true when it was written down, and the person
     /// can click their own window straight afterwards. A phase that needs the
     /// keys asks the display rather than reading that record.
-    fn pill_has_keyboard(&self) -> bool;
+    fn textbox_has_keyboard(&self) -> bool;
     /// Answers whether the keyboard is on nothing that can use it.
     ///
     /// The display says so, or nothing does: a keyboard no client was given, or
@@ -176,9 +179,7 @@ pub trait Surface: Send + Sync {
     /// keys landing nowhere, and neither can be taken from anybody, which is
     /// what separates this from a window the person moved to themselves.
     fn nobody_has_the_keyboard(&self) -> bool;
-    /// Gives focus back to the window the pill covered.
-    fn restore_focus(&self) -> Result<(), String>;
-    /// Renders one presentation in the pill.
+    /// Renders one presentation in the pill and the textbox.
     fn present(&self, payload: PresentationPayload) -> Result<(), String>;
     /// Renders recording progress in the pill.
     ///
@@ -194,22 +195,21 @@ pub trait Surface: Send + Sync {
     fn copy(&self, text: String);
 }
 
-/// Where the pill's keys are held while the pill is up.
+/// Where the one key outside a window is held while the pill is up.
 ///
-/// The pill never takes the keyboard from the person's editor, so Escape and
-/// Enter cannot reach it by being typed into it. Something outside the window
-/// has to read them: a window manager binding mode, or an accelerator the
-/// display grabs. Which of those applies is not the same for every posture -
-/// bare keys belong to a pill the person is answering, and a modified key is
-/// safe for as long as the pill is on screen at all - so the runtime says how
-/// the pill stands and leaves the arrangement here.
+/// Every ordinary key belongs to the textbox, which is focused and reads them
+/// itself. What is left is the gap the textbox is not up for: between the
+/// hotkey and the words arriving, nothing holds the keyboard, so the key that
+/// stops a listen has to be an accelerator the display grabs. It is safe for as
+/// long as the pill is on screen and is given straight back when it is not, so
+/// the runtime says whether the pill is up and leaves the arrangement here.
 pub trait Keys: Send + Sync {
-    /// Says where the pill stands, and only when that changes.
+    /// Says whether the pill is on screen, and only when that changes.
     ///
     /// Nothing is reported back. A key that could not be arranged is not a
     /// phase that failed: the tray, the hotkey, and `scufris-ctl` all still
     /// reach the same runtime.
-    fn stand(&self, posture: Posture);
+    fn stand(&self, on_screen: bool);
 }
 
 /// Local speech-to-text.
@@ -420,7 +420,11 @@ impl<T> Ordered<T> {
     }
 }
 
-/// What the last window operation proved about the pill window.
+/// What the last window operations proved about the companion's windows.
+///
+/// One ladder for both windows, because the textbox only ever stands over a
+/// pill that is up: there is no rung where the box holds the keys and the
+/// indicator under it is not there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
     /// The pill is down.
@@ -433,7 +437,7 @@ enum Screen {
     Doubtful,
     /// The pill is up and on top, so the person can see it.
     Seen,
-    /// The pill is up, on top, and holds the keyboard.
+    /// The pill is up and the textbox stands over it holding the keyboard.
     Ready,
 }
 
@@ -485,12 +489,12 @@ pub struct App {
     /// Counts the changes made to the companion, so the surfaces can tell a
     /// newer decision from an older one.
     decisions: AtomicU64,
-    /// Keeps the window, the pill, and the tray on the newest decision.
+    /// Keeps the windows, the pill, and the tray on the newest decision.
     surface: Ordered<Surfaced>,
-    /// What the window operations proved the pill is doing, as opposed to what
-    /// they were asked to do. Only a change is worth an operation: showing a
-    /// ready pill would take focus back from whatever the person moved to, and
-    /// restoring focus twice would take it from wherever they moved it.
+    /// What the window operations proved the windows are doing, as opposed to
+    /// what they were asked to do. Only a change is worth an operation: raising
+    /// a textbox that already holds the keyboard would take focus back from
+    /// whatever the person moved to.
     screen: Mutex<Screen>,
     /// True while the presentation the pill last took says the microphone is
     /// open. The pill is the privacy indicator: the tray says the same thing,
@@ -503,10 +507,10 @@ pub struct App {
     /// True while the keyboard is being watched, so a phase that needs it does
     /// not collect one watch per decision.
     watching: AtomicBool,
-    /// How the pill stood when its keys were last arranged. Arranging them
-    /// costs a process and a round trip to the display, so only a change is
+    /// Whether the pill was on screen when the cancel key was last arranged.
+    /// Arranging it costs a round trip to the display, so only a change is
     /// worth one.
-    keys_stand: Mutex<Posture>,
+    keys_stand: Mutex<bool>,
 }
 
 impl App {
@@ -530,7 +534,7 @@ impl App {
             drawn_recording: AtomicBool::new(false),
             repairing: AtomicBool::new(false),
             watching: AtomicBool::new(false),
-            keys_stand: Mutex::new(Posture::Off),
+            keys_stand: Mutex::new(false),
         }
     }
 
@@ -688,10 +692,10 @@ impl App {
     /// Stops any live recording. The accepted transcript stays on disk.
     pub fn shutdown(&self) {
         self.tick.fetch_add(1, Ordering::Relaxed);
-        // Before anything else that can fail. A binding mode is the window
-        // manager's state, not the companion's, and a companion that exits
-        // holding one leaves the person's Escape key going nowhere.
-        self.set_keys(Posture::Off);
+        // Before anything else that can fail. A grab is the display's state,
+        // not the companion's, and the display drops it with the connection
+        // that holds it, so this is only what makes that orderly.
+        self.set_keys(false);
         if let Some(recording) = self.take_recording() {
             recording.discard();
         }
@@ -705,16 +709,16 @@ impl App {
     /// the phase each event leaves rather than the one it started in.
     pub fn handle(self: &Arc<Self>, event: Event) {
         let (actions, decision) = self.decide(|companion| companion.apply(event));
-        if decision.surfaced.posture != Posture::Focused {
-            // A phase that is leaving, or one the person only watches, stays
-            // on the surfaces until its actions are done, so the pill the
-            // person is looking at is the one they finished with.
+        if !decision.surfaced.posture.waits() {
+            // A phase that is leaving, or one that is only reporting, stays on
+            // the surfaces until its actions are done, so the pill the person
+            // is looking at is the one they finished with.
             self.carry_out(actions, Some(decision));
             return;
         }
         // A phase the person has to see is on the surfaces before any of its
         // own actions run, and it is on them in fact: this waits for what the
-        // window and the pill actually did, on whichever thread did it.
+        // windows and the pill actually did, on whichever thread did it.
         let runtime = Arc::clone(self);
         self.show(
             decision,
@@ -830,15 +834,18 @@ impl App {
         );
     }
 
-    /// Puts the window where one decision wants it and renders that decision.
+    /// Puts the windows where one decision wants them and renders that decision.
     ///
-    /// Returns a failure only for the window: a pill that is not there is a
+    /// Returns a failure only for the windows: a pill that is not there is a
     /// phase with nowhere to happen, while a surface that refused to render is
     /// one of two, and the other may well have taken it.
     fn put(self: &Arc<Self>, surfaced: &Surfaced) -> Result<(), String> {
         let placed = match surfaced.posture {
-            Posture::Focused => self.raise(),
-            Posture::Passive => self.settle(),
+            Posture::Editing => self.raise(),
+            // Two postures, one arrangement: the pill up and the box away. What
+            // separates them is what may run behind it, which the caller has
+            // already decided by waiting or not waiting for this.
+            Posture::Watched | Posture::Passive => self.settle(),
             Posture::Off => self.lower(),
         };
         // Both surfaces are told whatever the window did. When the pill cannot
@@ -852,13 +859,13 @@ impl App {
         } else if !self.repairing.swap(true, Ordering::SeqCst) {
             self.repair(REPAIR_ATTEMPTS);
         }
-        // Where the pill stands is what decides which of its keys are worth
-        // arranging, so the arrangement follows every posture rather than one.
-        self.set_keys(surfaced.posture);
+        // The cancel key is safe for as long as the pill is up and belongs to
+        // the desktop the moment it is not.
+        self.set_keys(surfaced.posture.on_screen());
         // A phase that holds the person's keys keeps them for as long as it is
         // on screen, and nothing outside the runtime can say when they are
         // gone: a person whose keys reach nothing has no key left to ask with.
-        if surfaced.posture == Posture::Focused {
+        if surfaced.posture.textbox() {
             self.watch();
         }
         // The microphone is open and nothing on screen is saying so.
@@ -914,35 +921,85 @@ impl App {
         }
     }
 
-    /// Puts the pill on screen, and records only what that achieved.
+    /// Puts the pill up and the textbox over it with the keyboard, and records
+    /// only what that achieved.
     ///
-    /// A record that the pill has the keyboard is worth skipping the work for
+    /// The pill first, always: it is the indicator, and the box is placed above
+    /// wherever it landed. A pill that would not come up stops the raise, so a
+    /// box never stands over nothing.
+    ///
+    /// A record that the box has the keyboard is worth skipping the work for
     /// only while it is still true. The person can click their own window
     /// between one phase and the next, and every phase that reaches here is one
     /// whose keys - Enter, Escape - have nowhere else to go. So the display is
-    /// asked, and a pill that has lost the keyboard is shown again with a whole
+    /// asked, and a box that has lost the keyboard is raised again with a whole
     /// repair chain behind it rather than left on a record written earlier.
     fn raise(&self) -> Result<(), String> {
-        if self.screen() == Screen::Ready && self.ports.surface.pill_has_keyboard() {
-            return Ok(());
-        }
-        // Whatever the record said, the keyboard is not on the pill.
+        self.stand()?;
         if self.screen() == Screen::Ready {
+            if self.ports.surface.textbox_has_keyboard() {
+                return Ok(());
+            }
+            // Whatever the record said, the keyboard is not on the box.
             self.set_screen(Screen::Seen);
+        }
+        match self.ports.surface.show_textbox() {
+            Ok(Shown::Ready) => {
+                // Ready is about both windows. The box has the keys, but a pill
+                // nothing has proved is up leaves the raise short of it, and the
+                // repair chain asks for the pill again.
+                if self.screen().visible() {
+                    self.set_screen(Screen::Ready);
+                }
+                Ok(())
+            }
+            // Up without the keys. The person can read the words and cannot
+            // answer them, so nothing is recorded as reached and the repair
+            // chain asks again.
+            Ok(Shown::Seen(trouble)) => {
+                if let Some(trouble) = trouble {
+                    warn!("{trouble}");
+                }
+                Ok(())
+            }
+            // The box is up and may be behind what the person is looking at.
+            // The pill under it is unchanged, so its record is left alone.
+            Ok(Shown::Doubtful(trouble)) => {
+                warn!("{trouble}");
+                Ok(())
+            }
+            Ok(Shown::Unsure(reason)) => {
+                debug!("{reason}");
+                Ok(())
+            }
+            // Nothing is recorded. What the windows were doing before is still
+            // the best thing known about them, and the next decision is free to
+            // try again.
+            Err(reason) => Err(reason),
+        }
+    }
+
+    /// Puts the pill up, and records only what that achieved.
+    ///
+    /// A pill nothing can see is put up again: the two ways it gets there -
+    /// a placement that failed, an always-on-top the window manager refused -
+    /// are both retried by asking for the same show, and the microphone rests
+    /// on the answer.
+    fn stand(&self) -> Result<(), String> {
+        if self.screen().visible() {
+            return Ok(());
         }
         match self.ports.surface.show_pill() {
             Ok(shown) => {
                 self.record(shown);
                 Ok(())
             }
-            // Nothing is recorded. What the window was doing before is still
-            // the best thing known about it, and the next decision is free to
-            // try again.
             Err(reason) => Err(reason),
         }
     }
 
-    /// Writes down what one show proved, and says out loud only what failed.
+    /// Writes down what one pill show proved, and says out loud only what
+    /// failed.
     ///
     /// A window operation that came back with an error failed, and is worth a
     /// warning. A window that has simply not got there yet is not: the runtime
@@ -951,10 +1008,12 @@ impl App {
     /// value, or none of them are worth anything.
     fn record(&self, shown: Shown) {
         self.set_screen(match shown {
+            // The pill never asks for the keyboard, so nothing it answers with
+            // reaches here. Written down all the same rather than left to a
+            // panic: an indicator is not worth stopping the process for.
             Shown::Ready => Screen::Ready,
             // The person can see the pill, which is what the privacy indicator
-            // needs. The keyboard is asked for again, because this is not
-            // recorded as the pill being ready.
+            // needs.
             Shown::Seen(trouble) => {
                 if let Some(trouble) = trouble {
                     warn!("{trouble}");
@@ -975,53 +1034,33 @@ impl App {
         });
     }
 
-    /// Keeps the pill on screen without the keyboard, and records only what
+    /// Leaves the pill on screen with the textbox away, and records only what
     /// that achieved.
     ///
-    /// This is the handoff posture: the desktop is the person's again while
-    /// the window stays to report the turn. A pill that still holds the
-    /// keyboard would swallow the keys the person types into their own
-    /// window, so holding it counts as falling short and is repaired.
+    /// Two phases live here. The microphone's, where the pill has to be seen
+    /// before anything opens, and the handoff, where the desktop is the
+    /// person's again while the window stays to report the turn. Neither has
+    /// anything to type into, so the box goes, and it goes whatever the record
+    /// says: a box that came up without being written down is still an
+    /// always-on-top window over a phase that is finished.
     fn settle(&self) -> Result<(), String> {
-        match self.screen() {
-            Screen::Seen | Screen::Doubtful => Ok(()),
-            Screen::Ready => match self.ports.surface.restore_focus() {
-                Ok(()) => {
-                    self.set_screen(Screen::Seen);
-                    Ok(())
-                }
-                // Still holding the keyboard, so still Ready: the repair
-                // chain asks again rather than recording a release that did
-                // not happen.
-                Err(reason) => Err(reason),
-            },
-            // A pill nothing is known about is put up the same way a pill that
-            // is down is. The keyboard is left where it is: taking it back from
-            // a window that may never have had it would take it from wherever
-            // the person moved it.
-            Screen::Off | Screen::Unknown => match self.ports.surface.show_pill_passive() {
-                Ok(shown) => {
-                    self.record(shown);
-                    Ok(())
-                }
-                Err(reason) => Err(reason),
-            },
+        self.ports.surface.hide_textbox()?;
+        if self.screen() == Screen::Ready {
+            self.set_screen(Screen::Seen);
         }
+        self.stand()
     }
 
-    /// Takes the pill off screen, and records only what that achieved.
+    /// Takes both windows off screen, and records only what that achieved.
     fn lower(&self) -> Result<(), String> {
         if self.screen() == Screen::Off {
             return Ok(());
         }
-        // Only a pill that holds the keyboard has focus to give back. A
-        // passive pill already returned it at the handoff, and asking again
-        // would put on record a restoration that never happened.
-        if self.screen() == Screen::Ready
-            && let Err(reason) = self.ports.surface.restore_focus()
-        {
-            // The pill is going away either way. Only the window behind it is
-            // worse off, and saying so is all there is to do about it.
+        // The box first: it stands over the pill and it is the one holding the
+        // keyboard, so this is what gives the person's window its keys back.
+        // The pill is going away either way, so a box that will not go is said
+        // out loud rather than allowed to stop the hide.
+        if let Err(reason) = self.ports.surface.hide_textbox() {
             warn!("{reason}");
         }
         match self.ports.surface.hide_pill() {
@@ -1049,11 +1088,16 @@ impl App {
         }
     }
 
-    /// Answers whether the window is not where the phase needs it.
+    /// Answers whether the windows are not where the phase needs them.
     fn falls_short(&self, posture: Posture) -> bool {
         match posture {
-            Posture::Focused => self.screen() != Screen::Ready,
-            // A passive pill must be up and must not hold the keyboard.
+            // The box up with the keyboard, over a pill that is up.
+            Posture::Editing => self.screen() != Screen::Ready,
+            // The pill somewhere the person can read it: the microphone rests
+            // on exactly that, and so does a failure they have to see.
+            Posture::Watched => !self.screen().visible(),
+            // Up and reporting is enough. What must not be true is the box
+            // still holding the keys the person went back to typing with.
             Posture::Passive => !matches!(self.screen(), Screen::Seen | Screen::Doubtful),
             Posture::Off => self.screen() != Screen::Off,
         }
@@ -1061,11 +1105,11 @@ impl App {
 
     /// Asks again for a window that did not reach the state its phase needs.
     ///
-    /// Nobody else can. A pill that would not go down is over the desktop with
-    /// the keyboard already given back, so it cannot even be sent an Escape; a
-    /// pill that would not take the keyboard cannot be typed into. So the
-    /// runtime asks again itself, on the newest phase rather than the one that
-    /// fell short, and it stops asking: a window manager that has refused three
+    /// Nobody else can. A pill that would not go down is over the desktop and
+    /// has no keys of its own, so it cannot even be sent an Escape; a textbox
+    /// that would not take the keyboard cannot be typed into. So the runtime
+    /// asks again itself, on the newest phase rather than the one that fell
+    /// short, and it stops asking: a window manager that has refused three
     /// times is refusing, and the next decision asks again anyway.
     ///
     /// Running out of asking is the moment the shortfall is said out loud, and
@@ -1101,13 +1145,13 @@ impl App {
 
     /// Watches the keyboard for as long as a phase needs it.
     ///
-    /// The repair chain covers a pill that never got there. This covers a pill
+    /// The repair chain covers a box that never got there. This covers a box
     /// that had the keyboard and lost it with nothing to show for it: a window
     /// that maps, takes the keyboard and goes away leaves the window manager
-    /// handing focus to the transcript box, which refuses it, and the keys land
-    /// on nothing at all. No decision follows, because a decision needs a key,
-    /// and the person's keys are exactly what has gone. So the runtime looks
-    /// for itself.
+    /// handing focus to the pill, which refuses it, and the keys land on
+    /// nothing at all. No decision follows, because a decision needs a key, and
+    /// the person's keys are exactly what has gone. So the runtime looks for
+    /// itself.
     fn watch(self: &Arc<Self>) {
         if self.watching.swap(true, Ordering::SeqCst) {
             return;
@@ -1115,22 +1159,22 @@ impl App {
         self.look_again();
     }
 
-    /// Arranges the pill's keys, and only when the posture changes.
+    /// Arranges the cancel key, and only when the pill comes or goes.
     ///
-    /// A binding mode is a process and a grab is a round trip to the display,
-    /// so a phase that is focused after another focused phase pays for neither.
-    /// The lock is held across the arrangement so two threads changing the
-    /// posture at once cannot leave the keys on the older of the two.
-    fn set_keys(&self, posture: Posture) {
+    /// A grab is a round trip to the display, so a phase that follows another
+    /// on-screen phase pays for nothing. The lock is held across the
+    /// arrangement so two threads changing the posture at once cannot leave the
+    /// key arranged for the older of the two.
+    fn set_keys(&self, on_screen: bool) {
         let mut stood = self
             .keys_stand
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        if *stood == posture {
+        if *stood == on_screen {
             return;
         }
-        *stood = posture;
-        self.ports.keys.stand(posture);
+        *stood = on_screen;
+        self.ports.keys.stand(on_screen);
     }
 
     fn look_again(self: &Arc<Self>) {
@@ -1143,29 +1187,29 @@ impl App {
     /// Takes the keyboard back when it is on nothing that can use it.
     ///
     /// Only then. A window the person moved to has the keyboard because they
-    /// put it there, and a pill that fought them for it would be worse than the
-    /// hole this closes; the next decision raises the pill again, which is the
-    /// behaviour that already exists for that case. A keyboard nobody holds is
-    /// taken from nobody.
+    /// put it there, and a textbox that fought them for it would be worse than
+    /// the hole this closes; the next decision raises the box again, which is
+    /// the behaviour that already exists for that case. A keyboard nobody holds
+    /// is taken from nobody.
     fn look(self: &Arc<Self>) {
-        if self.posture() != Posture::Focused {
+        if !self.posture().textbox() {
             // The phase let the keyboard go, so there is nothing left to watch.
             self.watching.store(false, Ordering::SeqCst);
             // A phase that started needing the keyboard while this tick was
             // deciding to stop found the watch still armed and left it here.
-            if self.posture() == Posture::Focused {
+            if self.posture().textbox() {
                 self.watch();
             }
             return;
         }
-        // A pill that has not got there yet belongs to the repair chain, which
-        // is already asking for it. Two of them asking would be two shows for
+        // A box that has not got there yet belongs to the repair chain, which
+        // is already asking for it. Two of them asking would be two raises for
         // one shortfall.
         if self.screen() == Screen::Ready
-            && !self.ports.surface.pill_has_keyboard()
+            && !self.ports.surface.textbox_has_keyboard()
             && self.ports.surface.nobody_has_the_keyboard()
         {
-            info!("the keyboard was left on nothing, so the pill takes it back");
+            info!("the keyboard was left on nothing, so the textbox takes it back");
             self.show(self.snapshot(), Box::new(|_| {}));
         }
         self.look_again();
@@ -1179,15 +1223,16 @@ impl App {
     fn shortfall(&self) -> String {
         match (self.posture(), self.screen()) {
             (Posture::Off, _) => "the pill is still up".into(),
-            (Posture::Focused, Screen::Seen | Screen::Doubtful) => {
-                "the pill did not take the keyboard".into()
+            (Posture::Editing, Screen::Seen | Screen::Doubtful) => {
+                "the textbox did not take the keyboard".into()
             }
-            (Posture::Passive, Screen::Ready) => "the pill would not give the keyboard back".into(),
+            (Posture::Watched, Screen::Doubtful) => "the pill would not stay on top".into(),
+            (Posture::Passive, Screen::Ready) => "the textbox would not go away".into(),
             _ => "the pill did not come up".into(),
         }
     }
 
-    /// Where the newest phase needs the pill window to be.
+    /// Where the newest phase needs the companion's windows to be.
     fn posture(&self) -> Posture {
         self.companion
             .lock()
@@ -1394,7 +1439,10 @@ impl App {
                     };
                     let Some(payload) = payload else { return };
                     if payload.seconds >= MAX_RECORDING.as_secs() {
-                        runtime.handle(Event::Enter { text: None });
+                        // The same thing a second press of the activation key
+                        // does: stop the microphone and put the words in the
+                        // textbox. Nothing is sent by a timer.
+                        runtime.handle(Event::Activate);
                         return;
                     }
                     runtime.ports.surface.tick(payload);
@@ -1582,7 +1630,9 @@ mod tests {
         /// What the pill window is actually doing, as opposed to how many times
         /// it was told to do something.
         on_screen: AtomicBool,
-        /// True while the pill holds the keyboard.
+        /// True while the textbox is up.
+        box_up: AtomicBool,
+        /// True while the textbox holds the keyboard.
         focused: AtomicBool,
         /// True while the keyboard is on nothing that can use it, the way a
         /// window that took it and went away leaves the display.
@@ -1595,8 +1645,6 @@ mod tests {
         panic_on_show: AtomicBool,
         /// Show attempts that return an error without the pill coming up.
         refuse_show: Refusals,
-        /// Show attempts where the pill comes up but does not take focus.
-        partial_show: AtomicU64,
         /// Show attempts where the pill comes up but nothing proves the person
         /// can see it, the way a refused always-on-top leaves it.
         blind_show: AtomicU64,
@@ -1608,7 +1656,14 @@ mod tests {
         unsure_hide: AtomicU64,
         /// Hide attempts that return an error and leave the pill up.
         refuse_hide: Refusals,
-        /// Focus restorations that return an error.
+        /// Raises that return an error without the textbox coming up.
+        refuse_raise: Refusals,
+        /// Raises where the textbox comes up but does not take the keyboard.
+        partial_raise: AtomicU64,
+        /// Raises nothing can speak for.
+        unsure_raise: AtomicU64,
+        /// Attempts to take the textbox down that return an error, the way a
+        /// window that will not go or a focus that will not go back does.
         refuse_focus: Refusals,
         /// Presentations the pill refuses to render.
         refuse_present: Refusals,
@@ -1629,16 +1684,19 @@ mod tests {
                 hidden: AtomicU64::new(0),
                 restored: AtomicU64::new(0),
                 on_screen: AtomicBool::new(false),
+                box_up: AtomicBool::new(false),
                 focused: AtomicBool::new(false),
                 stranded: AtomicBool::new(false),
                 window: Mutex::default(),
                 panic_on_show: AtomicBool::new(false),
                 refuse_show: Refusals::new("the pill did not come up"),
-                partial_show: AtomicU64::new(0),
                 blind_show: AtomicU64::new(0),
                 unsure_show: AtomicU64::new(0),
                 unsure_hide: AtomicU64::new(0),
                 refuse_hide: Refusals::new("the pill is still up"),
+                refuse_raise: Refusals::new("the textbox did not come up"),
+                partial_raise: AtomicU64::new(0),
+                unsure_raise: AtomicU64::new(0),
                 refuse_focus: Refusals::new("the previous window would not take focus"),
                 refuse_present: Refusals::new("the pill would not render"),
                 refuse_tray: Refusals::new("the tray icon would not change"),
@@ -1662,7 +1720,7 @@ mod tests {
             self.on_screen.load(Ordering::SeqCst)
         }
 
-        /// True while the pill window holds the keyboard.
+        /// True while the textbox holds the keyboard.
         fn focused(&self) -> bool {
             self.focused.load(Ordering::SeqCst)
         }
@@ -1704,28 +1762,7 @@ mod tests {
                 // person is looking at, so nothing proves they can see it.
                 return Ok(Shown::Doubtful("the pill would not stay on top".into()));
             }
-            if self.partial_show.load(Ordering::SeqCst) > 0 {
-                self.partial_show.fetch_sub(1, Ordering::SeqCst);
-                return Ok(Shown::Seen(Some(
-                    "the pill could not take the keyboard".into(),
-                )));
-            }
-            self.focused.store(true, Ordering::SeqCst);
-            // The pill has the keys, so they are on something again.
-            self.stranded.store(false, Ordering::SeqCst);
-            Ok(Shown::Ready)
-        }
-        fn show_pill_passive(&self) -> Result<Shown, String> {
-            self.window.lock().unwrap().push("show-passive");
-            self.refuse_show.attempt()?;
-            self.on_screen.store(true, Ordering::SeqCst);
-            self.shown.fetch_add(1, Ordering::Relaxed);
-            if self.unsure_show.load(Ordering::SeqCst) > 0 {
-                self.unsure_show.fetch_sub(1, Ordering::SeqCst);
-                return Ok(Shown::Unsure(
-                    "nothing could say whether the pill came up".into(),
-                ));
-            }
+            // Never Ready. This window refuses the keyboard on every show.
             Ok(Shown::Seen(None))
         }
         fn hide_pill(&self) -> Result<Hidden, String> {
@@ -1734,7 +1771,6 @@ mod tests {
             // the runtime must not record it as down.
             self.refuse_hide.attempt()?;
             self.on_screen.store(false, Ordering::SeqCst);
-            self.focused.store(false, Ordering::SeqCst);
             self.hidden.fetch_add(1, Ordering::Relaxed);
             if self.unsure_hide.load(Ordering::SeqCst) > 0 {
                 self.unsure_hide.fetch_sub(1, Ordering::SeqCst);
@@ -1744,18 +1780,46 @@ mod tests {
             }
             Ok(Hidden::Down)
         }
-        fn pill_has_keyboard(&self) -> bool {
+        fn show_textbox(&self) -> Result<Shown, String> {
+            self.window.lock().unwrap().push("raise");
+            self.refuse_raise.attempt()?;
+            self.box_up.store(true, Ordering::SeqCst);
+            if self.unsure_raise.load(Ordering::SeqCst) > 0 {
+                self.unsure_raise.fetch_sub(1, Ordering::SeqCst);
+                return Ok(Shown::Unsure(
+                    "nothing could say whether the textbox came up".into(),
+                ));
+            }
+            if self.partial_raise.load(Ordering::SeqCst) > 0 {
+                self.partial_raise.fetch_sub(1, Ordering::SeqCst);
+                return Ok(Shown::Seen(Some(
+                    "the textbox could not take the keyboard".into(),
+                )));
+            }
+            self.focused.store(true, Ordering::SeqCst);
+            // The box has the keys, so they are on something again.
+            self.stranded.store(false, Ordering::SeqCst);
+            Ok(Shown::Ready)
+        }
+        fn hide_textbox(&self) -> Result<(), String> {
+            // A box that is already down is left alone, the way the adapter
+            // leaves it: the keyboard is not given back to a window that never
+            // lost it.
+            if !self.box_up.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+            self.window.lock().unwrap().push("drop");
+            self.refuse_focus.attempt()?;
+            self.box_up.store(false, Ordering::SeqCst);
+            self.focused.store(false, Ordering::SeqCst);
+            self.restored.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+        fn textbox_has_keyboard(&self) -> bool {
             self.focused.load(Ordering::SeqCst)
         }
         fn nobody_has_the_keyboard(&self) -> bool {
             self.stranded.load(Ordering::SeqCst)
-        }
-        fn restore_focus(&self) -> Result<(), String> {
-            self.window.lock().unwrap().push("restore");
-            self.refuse_focus.attempt()?;
-            self.focused.store(false, Ordering::SeqCst);
-            self.restored.fetch_add(1, Ordering::Relaxed);
-            Ok(())
         }
         fn present(&self, payload: PresentationPayload) -> Result<(), String> {
             let watcher = self.at_present.lock().unwrap().take();
@@ -1962,18 +2026,18 @@ mod tests {
         }
     }
 
-    /// Every arrangement of the pill's keys, in the order they were asked for.
+    /// Every arrangement of the cancel key, in the order it was asked for.
     #[derive(Default)]
-    struct RecordedKeys(Mutex<Vec<Posture>>);
+    struct RecordedKeys(Mutex<Vec<bool>>);
 
     impl Keys for RecordedKeys {
-        fn stand(&self, posture: Posture) {
-            self.0.lock().unwrap().push(posture);
+        fn stand(&self, on_screen: bool) {
+            self.0.lock().unwrap().push(on_screen);
         }
     }
 
     impl RecordedKeys {
-        fn changes(&self) -> Vec<Posture> {
+        fn changes(&self) -> Vec<bool> {
             self.0.lock().unwrap().clone()
         }
     }
@@ -2051,6 +2115,22 @@ mod tests {
             executor,
             backend,
         }
+    }
+
+    /// Records one take and leaves the words in the textbox, which is what the
+    /// two presses of the one key do: the first opens the microphone, the
+    /// second closes it and puts what was said on screen.
+    fn take(harness: &Harness) {
+        harness.app.handle(Event::Activate);
+        harness.app.handle(Event::Activate);
+        harness.executor.drain();
+    }
+
+    /// Records one take and sends it unchanged: the whole of an ordinary run.
+    fn say(harness: &Harness) {
+        take(harness);
+        harness.app.handle(Event::Enter { text: None });
+        harness.executor.drain();
     }
 
     #[test]
@@ -2145,9 +2225,7 @@ mod tests {
     fn a_transcript_that_cannot_be_saved_is_never_submitted() {
         let harness = harness(FakeRecorder::default(), Ok("do not lose me".into()));
         *harness.store.refuse_save.lock().unwrap() = Some("the disk is full".into());
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Enter { text: None });
-        harness.executor.drain();
+        say(&harness);
 
         assert!(
             harness.backend.submissions.lock().unwrap().is_empty(),
@@ -2170,17 +2248,19 @@ mod tests {
     }
 
     #[test]
-    fn a_review_draft_survives_a_failed_save_and_says_so() {
+    fn a_transcript_survives_a_failed_save_and_says_so() {
         let harness = harness(FakeRecorder::default(), Ok("draft text".into()));
         *harness.store.refuse_save.lock().unwrap() = Some("the disk is full".into());
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Activate);
-        harness.executor.drain();
+        take(&harness);
 
         let presentation = harness.surface.last();
-        assert_eq!(presentation.state, "review");
+        assert_eq!(presentation.state, "editing");
         assert_eq!(presentation.text, "draft text");
         assert!(presentation.detail.contains("the disk is full"));
+        assert!(
+            presentation.editable,
+            "the words are still the person's to correct"
+        );
         assert!(harness.backend.submissions.lock().unwrap().is_empty());
     }
 
@@ -2200,9 +2280,7 @@ mod tests {
     #[test]
     fn a_removal_that_keeps_failing_does_not_reopen_the_finished_pill() {
         let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Enter { text: None });
-        harness.executor.drain();
+        say(&harness);
 
         *harness.store.refuse_clear.lock().unwrap() = true;
         harness.app.handle(Event::Acknowledged("pill-1".into()));
@@ -2220,9 +2298,7 @@ mod tests {
     #[test]
     fn an_accepted_transcript_is_persisted_before_it_is_submitted() {
         let harness = harness(FakeRecorder::default(), Ok("remember the milk".into()));
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Enter { text: None });
-        harness.executor.drain();
+        say(&harness);
 
         assert_eq!(
             *harness.store.pending.lock().unwrap(),
@@ -2235,10 +2311,11 @@ mod tests {
             *harness.backend.submissions.lock().unwrap(),
             vec![("pill-1".to_string(), "remember the milk".to_string())]
         );
-        // The keyboard comes back with the handoff, not with the answer: an
-        // ordinary submission must not hold it for a whole turn. The window
-        // itself stays up, passive, to report the turn it started.
-        assert_eq!(harness.surface.window(), ["show", "restore"]);
+        // The textbox goes with the handoff, not with the answer, and the
+        // keyboard goes back with it: an ordinary submission must not hold the
+        // person's keys for a whole turn. The pill stays up, passive, to report
+        // the turn it started.
+        assert_eq!(harness.surface.window(), ["show", "raise", "drop"]);
         assert!(harness.surface.on_screen());
         assert!(!harness.surface.focused());
 
@@ -2247,7 +2324,7 @@ mod tests {
         // not touched again.
         harness.app.handle(Event::Acknowledged("pill-1".into()));
         assert_eq!(*harness.store.pending.lock().unwrap(), None);
-        assert_eq!(harness.surface.window(), ["show", "restore"]);
+        assert_eq!(harness.surface.window(), ["show", "raise", "drop"]);
         assert!(harness.surface.on_screen());
         assert_eq!(harness.surface.last().state, "idle");
         assert_eq!(harness.surface.restored.load(Ordering::Relaxed), 1);
@@ -2261,9 +2338,7 @@ mod tests {
             Ok("survives the crash".into()),
             Arc::clone(&store),
         );
-        first.app.handle(Event::Activate);
-        first.app.handle(Event::Enter { text: None });
-        first.executor.drain();
+        say(&first);
         assert!(store.pending.lock().unwrap().is_some());
         // The process dies here: no acknowledgment, no explicit discard.
 
@@ -2353,7 +2428,7 @@ mod tests {
         );
         // Nothing was proved, so nothing is recorded as reached, and the
         // runtime asks again on its own.
-        assert!(harness.app.falls_short(Posture::Focused));
+        assert!(harness.app.falls_short(Posture::Editing));
     }
 
     /// Being asked is not being on screen. The microphone rests on the person
@@ -2386,28 +2461,23 @@ mod tests {
         harness.surface.unsure_hide.store(1, Ordering::SeqCst);
 
         harness.app.handle(Event::Escape);
-        assert_eq!(harness.surface.window(), ["show", "restore", "hide"]);
+        assert_eq!(harness.surface.window(), ["show", "hide"]);
 
         harness.executor.expire();
         assert_eq!(
             harness.surface.window(),
-            ["show", "restore", "hide", "hide"],
+            ["show", "hide", "hide"],
             "an unproved hide was recorded as done"
         );
         // The second hide was proved, so the chain has nothing left to ask for.
         harness.executor.expire();
-        assert_eq!(
-            harness.surface.window(),
-            ["show", "restore", "hide", "hide"]
-        );
+        assert_eq!(harness.surface.window(), ["show", "hide", "hide"]);
     }
 
     #[test]
     fn a_delivered_submission_with_no_acknowledgment_is_retried_under_one_identifier() {
         let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Enter { text: None });
-        harness.executor.drain();
+        say(&harness);
         // The connection drops after the daemon accepted the text but before
         // the acknowledgment arrives, so the timeout is what fires.
         harness.executor.expire();
@@ -2450,9 +2520,7 @@ mod tests {
     #[test]
     fn a_daemon_refusal_keeps_the_words_editable_and_ordinarily_retriable() {
         let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Enter { text: None });
-        harness.executor.drain();
+        say(&harness);
         assert_eq!(harness.surface.last().state, "sent");
 
         // What the service answers when it refused the send before any of the
@@ -2526,9 +2594,7 @@ mod tests {
                 .expect("the answer thread panicked");
             }));
 
-            harness.app.handle(Event::Activate);
-            harness.app.handle(Event::Enter { text: None });
-            harness.executor.drain();
+            say(&harness);
 
             assert_eq!(harness.surface.last().state, expected);
             assert!(
@@ -2602,43 +2668,39 @@ mod tests {
         assert_eq!(harness.recorder.sinks.lock().unwrap().len(), 1);
     }
 
-    /// A show can put the pill up and still not get everything it asked for.
-    /// The person can see it, so what the pill is for works and the recording
-    /// may start; the keyboard is elsewhere, so nothing records that it is.
+    /// A raise can put the textbox up and still not get everything it asked
+    /// for. The words are on screen, so the person can read them; the keyboard
+    /// is elsewhere, so they cannot answer them and nothing records that they
+    /// can.
     #[test]
-    fn a_pill_that_comes_up_without_the_keyboard_is_asked_again() {
-        let harness = harness(FakeRecorder::default(), Ok("unused".into()));
-        harness.surface.partial_show.store(1, Ordering::SeqCst);
+    fn a_textbox_that_comes_up_without_the_keyboard_is_asked_again() {
+        let harness = harness(FakeRecorder::default(), Ok("recovered".into()));
+        harness.surface.partial_raise.store(1, Ordering::SeqCst);
 
-        harness.app.handle(Event::Activate);
+        take(&harness);
         assert!(
             harness.surface.on_screen(),
             "the privacy indicator is not up"
         );
         assert!(!harness.surface.focused());
-        assert_eq!(
-            harness.recorder.sinks.lock().unwrap().len(),
-            1,
-            "the pill was seen, so the recording had the indicator it needs"
-        );
-        assert_eq!(harness.surface.window(), ["show"]);
+        assert_eq!(harness.surface.window(), ["show", "raise"]);
 
-        // Nobody can type into a pill that does not hold the keyboard, so no
-        // key of the person's can ask for it again. The runtime asks itself.
+        // Nobody can type into a box that does not hold the keyboard, so no key
+        // of the person's can ask for it again. The runtime asks itself.
         harness.executor.expire();
-        assert_eq!(harness.surface.window(), ["show", "show"]);
+        assert_eq!(harness.surface.window(), ["show", "raise", "raise"]);
         assert!(
             harness.surface.focused(),
-            "the pill never asked for the keyboard again"
+            "the textbox never asked for the keyboard again"
         );
     }
 
     /// A pill that would not go down is still up, and an always-on-top pill
     /// left over the desktop is the failure this must not record as success.
     ///
-    /// Nobody outside the runtime can clear it. Focus has already gone back to
-    /// the person's window, so the keys they press reach that window, not the
-    /// pill. The runtime takes it down itself.
+    /// Nobody outside the runtime can clear it. The pill has no keys of its
+    /// own, so it cannot even be sent an Escape. The runtime takes it down
+    /// itself.
     #[test]
     fn a_pill_that_will_not_go_down_takes_itself_down() {
         let harness = harness(FakeRecorder::default(), Ok("unused".into()));
@@ -2651,19 +2713,14 @@ mod tests {
             "the fake did not model a hide that leaves the pill up"
         );
         assert_eq!(harness.surface.hidden.load(Ordering::Relaxed), 0);
-        assert_eq!(harness.surface.window(), ["show", "restore", "hide"]);
+        assert_eq!(harness.surface.window(), ["show", "hide"]);
 
         harness.executor.expire();
         assert!(
             !harness.surface.on_screen(),
             "the always-on-top pill was left over the desktop"
         );
-        // Focus went back on the first attempt, before the hide failed, so
-        // the repair has only the hide left to do.
-        assert_eq!(
-            harness.surface.window(),
-            ["show", "restore", "hide", "hide"]
-        );
+        assert_eq!(harness.surface.window(), ["show", "hide", "hide"]);
     }
 
     /// What the runtime says when it stops asking is the one line about a
@@ -2671,16 +2728,29 @@ mod tests {
     /// actually left behind rather than what one attempt saw.
     #[test]
     fn the_shortfall_names_what_the_window_never_reached() {
-        let harness = harness(FakeRecorder::default(), Ok("unused".into()));
+        // A finished turn keeps the pill and gives the keyboard back, so a box
+        // still standing over it is what this one has to name.
+        let sent = harness(FakeRecorder::default(), Ok("recovered".into()));
+        say(&sent);
+        sent.app.set_screen(Screen::Ready);
+        assert_eq!(sent.app.shortfall(), "the textbox would not go away");
+
+        let harness = harness(FakeRecorder::default(), Ok("recovered".into()));
         harness.app.handle(Event::Activate);
 
+        harness.app.set_screen(Screen::Doubtful);
+        assert_eq!(harness.app.shortfall(), "the pill would not stay on top");
+        harness.app.set_screen(Screen::Unknown);
+        assert_eq!(harness.app.shortfall(), "the pill did not come up");
+
+        // The take ends in the textbox, which is where the keys are.
+        harness.app.handle(Event::Activate);
+        harness.executor.drain();
         harness.app.set_screen(Screen::Seen);
         assert_eq!(
             harness.app.shortfall(),
-            "the pill did not take the keyboard"
+            "the textbox did not take the keyboard"
         );
-        harness.app.set_screen(Screen::Unknown);
-        assert_eq!(harness.app.shortfall(), "the pill did not come up");
 
         harness.app.handle(Event::Escape);
         harness.app.set_screen(Screen::Seen);
@@ -2689,14 +2759,14 @@ mod tests {
 
     /// A phase whose keys have nowhere else to go asks for the keyboard again.
     ///
-    /// Reaching review is the moment this matters most: the words are on
-    /// screen, Enter sends them and Escape throws them away, and a runtime that
-    /// read an older record instead of asking would leave the person pressing
-    /// both into whatever window took the keyboard in the meantime.
+    /// The textbox is where that matters: the words are on screen, Enter sends
+    /// them and Escape throws them away, and a runtime that read an older
+    /// record instead of asking would leave the person pressing both into
+    /// whatever window took the keyboard in the meantime.
     #[test]
-    fn a_phase_that_needs_the_keys_asks_again_when_the_pill_has_lost_them() {
+    fn a_phase_that_needs_the_keys_asks_again_when_the_textbox_has_lost_them() {
         let harness = harness(FakeRecorder::default(), Ok("recovered".into()));
-        harness.app.handle(Event::Activate);
+        take(&harness);
         assert_eq!(harness.app.screen(), Screen::Ready);
 
         // The person clicked their own window. Nothing told the runtime, which
@@ -2704,11 +2774,13 @@ mod tests {
         harness.surface.focused.store(false, Ordering::SeqCst);
         let before = harness.surface.window().len();
 
-        harness.app.handle(Event::Activate);
+        harness
+            .app
+            .handle(Event::PersistFailed("the disk is full".into()));
 
         assert!(
-            harness.surface.window()[before..].contains(&"show"),
-            "review inherited a keyboard the pill no longer had"
+            harness.surface.window()[before..].contains(&"raise"),
+            "the words kept a keyboard the textbox no longer had"
         );
         assert_eq!(harness.app.screen(), Screen::Ready);
     }
@@ -2725,13 +2797,11 @@ mod tests {
     #[test]
     fn a_keyboard_left_on_nothing_is_taken_back_without_a_key() {
         let harness = harness(FakeRecorder::default(), Ok("recovered".into()));
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Activate);
-        harness.executor.drain();
+        take(&harness);
         assert_eq!(harness.app.screen(), Screen::Ready);
-        assert_eq!(harness.surface.last().state, "review");
+        assert_eq!(harness.surface.last().state, "editing");
 
-        // Something mapped over the review, took the keyboard, and went.
+        // Something mapped over the textbox, took the keyboard, and went.
         harness.surface.focused.store(false, Ordering::SeqCst);
         harness.surface.stranded.store(true, Ordering::SeqCst);
         let before = harness.surface.window().len();
@@ -2739,28 +2809,26 @@ mod tests {
         harness.executor.expire();
 
         assert!(
-            harness.surface.window()[before..].contains(&"show"),
+            harness.surface.window()[before..].contains(&"raise"),
             "the person was left pressing keys into nothing"
         );
         assert!(
             harness.surface.focused(),
-            "the pill never got the keys back"
+            "the textbox never got the keys back"
         );
         assert_eq!(harness.app.screen(), Screen::Ready);
         // Still on the same words: taking the keyboard back is not a phase.
-        assert_eq!(harness.surface.last().state, "review");
+        assert_eq!(harness.surface.last().state, "editing");
     }
 
     /// The other half of the same rule. A window the person moved to has the
-    /// keyboard because they put it there, and a pill that took it back would
-    /// make the desktop unusable for as long as a turn is up. Only a keyboard
-    /// nobody holds is taken, because that one is taken from nobody.
+    /// keyboard because they put it there, and a textbox that took it back
+    /// would make the desktop unusable for as long as a turn is up. Only a
+    /// keyboard nobody holds is taken, because that one is taken from nobody.
     #[test]
     fn a_keyboard_another_window_took_is_left_where_the_person_put_it() {
         let harness = harness(FakeRecorder::default(), Ok("recovered".into()));
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Activate);
-        harness.executor.drain();
+        take(&harness);
 
         // The person clicked their own window. It holds the keyboard, and it
         // can use it.
@@ -2772,17 +2840,18 @@ mod tests {
         assert_eq!(
             harness.surface.window()[before..],
             [] as [&'static str; 0],
-            "the pill fought the person for the keyboard"
+            "the textbox fought the person for the keyboard"
         );
     }
 
     /// The watch belongs to the phase that needs the keys. A phase that has
-    /// given the desktop back must not have the pill looking over its shoulder,
-    /// and must not leave a watch running that nothing will ever stop.
+    /// given the desktop back must not have the companion looking over its
+    /// shoulder, and must not leave a watch running that nothing will ever
+    /// stop.
     #[test]
     fn the_watch_stops_when_the_phase_stops_needing_the_keyboard() {
         let harness = harness(FakeRecorder::default(), Ok("recovered".into()));
-        harness.app.handle(Event::Activate);
+        take(&harness);
         assert!(harness.app.watching.load(Ordering::SeqCst));
 
         harness.app.handle(Event::Escape);
@@ -2791,70 +2860,72 @@ mod tests {
         harness.executor.expire();
         assert!(!harness.app.watching.load(Ordering::SeqCst));
 
-        // A pill that is down is not one to take the keyboard back to, however
-        // lost the keys are.
+        // A companion whose windows are down is not one to take the keyboard
+        // back to, however lost the keys are.
         harness.surface.stranded.store(true, Ordering::SeqCst);
         let before = harness.surface.window().len();
         harness.executor.expire();
         assert_eq!(harness.surface.window().len(), before);
 
         // The next phase that needs the keys watches them again.
-        harness.app.handle(Event::Activate);
+        take(&harness);
         assert!(harness.app.watching.load(Ordering::SeqCst));
     }
 
-    /// The pill's keys are arranged for where the pill stands. One posture is
-    /// arranged once: a focused phase following another focused phase changes
-    /// nothing, because each arrangement costs a process and a grab.
+    /// The cancel key is grabbed for as long as the pill is up. One arrangement
+    /// per arrival: a phase that follows another on-screen phase changes
+    /// nothing, because each arrangement costs a round trip to the display.
     #[test]
-    fn the_pills_keys_are_arranged_once_for_each_posture_the_pill_takes() {
+    fn the_cancel_key_is_arranged_once_for_each_time_the_pill_comes_or_goes() {
         let harness = harness(FakeRecorder::default(), Ok("recovered".into()));
         harness.app.handle(Event::Activate);
-        assert_eq!(harness.keys.changes(), [Posture::Focused]);
+        assert_eq!(harness.keys.changes(), [true]);
 
-        // Recording to review is one focused phase after another.
+        // Recording to the textbox is one on-screen phase after another.
         harness.app.handle(Event::Activate);
         harness.executor.drain();
         assert_eq!(
             harness.keys.changes(),
-            [Posture::Focused],
-            "the mode was entered twice for one pill"
+            [true],
+            "the key was grabbed twice for one pill"
         );
 
         harness.app.handle(Event::Escape);
         harness.executor.drain();
         assert_eq!(harness.app.posture(), Posture::Off);
-        assert_eq!(harness.keys.changes(), [Posture::Focused, Posture::Off]);
+        assert_eq!(harness.keys.changes(), [true, false]);
     }
 
     /// A pill the person only watches is something they glance at while they
-    /// type, and it is told apart from a pill that is gone. The bare keys a
-    /// focused pill holds are not its to hold; the pill is still on screen, so
-    /// the keys that put it away are.
+    /// type, and it is told apart from a pill that is gone. The desktop is
+    /// theirs again; the pill is still on screen, so the key that puts it away
+    /// stays grabbed.
     #[test]
     fn a_pill_the_person_only_watches_is_told_from_one_that_is_gone() {
         let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Enter { text: None });
-        harness.executor.drain();
+        say(&harness);
 
         assert_eq!(harness.surface.last().state, "sent");
         assert_eq!(harness.app.posture(), Posture::Passive);
-        assert_eq!(harness.keys.changes(), [Posture::Focused, Posture::Passive]);
+        assert_eq!(
+            harness.keys.changes(),
+            [true],
+            "the cancel key was given back while the pill was still up"
+        );
     }
 
-    /// A binding mode is the window manager's state and not the companion's, so
-    /// a companion that goes away holding one leaves the person's Escape key
+    /// A grabbed accelerator is the display's state and not the companion's, so
+    /// a companion that goes away holding one leaves the person's cancel key
     /// reaching nothing at all.
     #[test]
     fn a_companion_that_stops_does_not_take_the_persons_escape_key_with_it() {
         let harness = harness(FakeRecorder::default(), Ok("unused".into()));
         harness.app.handle(Event::Activate);
-        assert_eq!(harness.keys.changes(), [Posture::Focused]);
+        assert_eq!(harness.keys.changes(), [true]);
 
         harness.app.shutdown();
 
-        assert_eq!(harness.keys.changes(), [Posture::Focused, Posture::Off]);
+        assert_eq!(harness.keys.changes(), [true, false]);
     }
 
     /// Asking again is bounded. A window manager that has refused every time
@@ -2940,9 +3011,6 @@ mod tests {
     #[test]
     fn a_pill_that_may_be_behind_another_window_stops_the_recording() {
         let harness = harness(FakeRecorder::default(), Ok("unused".into()));
-        // The pill comes up where it can be seen but without the keyboard, so
-        // the runtime keeps asking for the window.
-        harness.surface.partial_show.store(1, Ordering::SeqCst);
         harness.app.handle(Event::Activate);
         assert_eq!(
             harness.recorder.captures(),
@@ -2950,9 +3018,15 @@ mod tests {
             "the pill was seen, so the recording could start"
         );
 
-        // The next attempt gets the window up and cannot keep it on top.
+        // The pill lost its place, and every show from here leaves it where
+        // nothing proves the person can see it. The next thing the companion
+        // does is what finds it there.
+        harness.app.set_screen(Screen::Unknown);
         harness.surface.blind_show.store(u64::MAX, Ordering::SeqCst);
-        harness.executor.expire();
+        harness
+            .app
+            .set_assistant(Assistant::Working, "packing".into());
+        harness.executor.drain();
 
         assert!(
             harness.recorder.was_discarded(0),
@@ -3027,7 +3101,7 @@ mod tests {
         // Trying again is bounded. A surface refusing everything is left to the
         // next change rather than asked forever.
         harness.surface.refuse_present.fail(u64::MAX);
-        harness.app.handle(Event::Enter { text: None });
+        harness.app.handle(Event::Activate);
         assert_eq!(
             u64::MAX
                 - harness
@@ -3116,17 +3190,13 @@ mod tests {
     #[test]
     fn a_late_answer_for_a_retired_submission_leaves_the_new_one_alone() {
         let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Enter { text: None });
-        harness.executor.drain();
+        say(&harness);
         harness.app.observe(LinkEvent::Accepted("pill-1".into()));
         harness.executor.drain();
 
         // A second recording is under way when the first submission's slow
         // answer finally arrives.
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Enter { text: None });
-        harness.executor.drain();
+        say(&harness);
         assert_eq!(harness.surface.last().state, "sent");
 
         harness.app.observe(LinkEvent::Refused(
@@ -3149,9 +3219,7 @@ mod tests {
     fn an_unreachable_backend_keeps_the_transcript_on_disk() {
         let harness = harness(FakeRecorder::default(), Ok("keep me".into()));
         *harness.backend.refuse.lock().unwrap() = Some("The backend is unavailable.".into());
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Enter { text: None });
-        harness.executor.drain();
+        say(&harness);
 
         assert_eq!(harness.surface.last().state, "retained");
         assert_eq!(
@@ -3169,10 +3237,8 @@ mod tests {
             Ok("forget I said that".into()),
             Arc::clone(&store),
         );
-        first.app.handle(Event::Activate);
-        first.app.handle(Event::Activate);
-        first.executor.drain();
-        assert_eq!(first.surface.last().state, "review");
+        take(&first);
+        assert_eq!(first.surface.last().state, "editing");
 
         *store.refuse_clear.lock().unwrap() = true;
         first.app.handle(Event::Escape);
@@ -3195,9 +3261,7 @@ mod tests {
     #[test]
     fn a_discard_that_can_neither_be_removed_nor_tombstoned_reopens_the_pill() {
         let harness = harness(FakeRecorder::default(), Ok("forget I said that".into()));
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Activate);
-        harness.executor.drain();
+        take(&harness);
 
         *harness.store.refuse_clear.lock().unwrap() = true;
         *harness.store.refuse_tombstone.lock().unwrap() = true;
@@ -3221,9 +3285,7 @@ mod tests {
     #[test]
     fn a_late_acknowledgment_retires_a_retained_transcript() {
         let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Enter { text: None });
-        harness.executor.drain();
+        say(&harness);
         harness.executor.expire();
         assert_eq!(harness.surface.last().state, "uncertain");
 
@@ -3239,12 +3301,10 @@ mod tests {
     }
 
     #[test]
-    fn a_discarded_review_clears_the_durable_transcript() {
+    fn a_discarded_transcript_clears_the_durable_copy() {
         let harness = harness(FakeRecorder::default(), Ok("never mind".into()));
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Activate);
-        harness.executor.drain();
-        assert_eq!(harness.surface.last().state, "review");
+        take(&harness);
+        assert_eq!(harness.surface.last().state, "editing");
         assert!(harness.store.pending.lock().unwrap().is_some());
 
         harness.app.handle(Event::Escape);
@@ -3255,28 +3315,25 @@ mod tests {
     }
 
     /// The live sequence that locked the keyboard up, at the level the phases
-    /// can see it: listen, review, send, let the turn run out, then listen and
-    /// review again.
+    /// can see it: listen, read the words, send, let the turn run out, then
+    /// listen and read again.
     ///
-    /// The second review is where the person lost the keyboard, and nothing
-    /// here reproduces it. This walk passes before the fix as well as after:
-    /// the runtime presents the second review exactly like the first, asks for
-    /// the keyboard again, and is told the pill holds it. That is the finding.
-    /// The defect is one layer down, in what the transcript box tells the
-    /// window manager when it is mapped a second time, and `review::raise`
-    /// carries the regression test for it. What this walk protects is that no
-    /// later change to the phases quietly makes a second turn present less
-    /// than the first.
+    /// The second take is where the person lost the keyboard, and nothing here
+    /// reproduces it. This walk passes before the fix as well as after: the
+    /// runtime presents the second take exactly like the first, asks for the
+    /// keyboard again, and is told the box holds it. That is the finding. The
+    /// defect is one layer down, in what the textbox tells the window manager
+    /// when it is mapped a second time, and `textbox::raise` carries the
+    /// regression test for it. What this walk protects is that no later change
+    /// to the phases quietly makes a second turn present less than the first.
     #[test]
-    fn a_second_turn_reviews_exactly_like_the_first() {
+    fn a_second_turn_presents_exactly_like_the_first() {
         let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
 
         // Turn one: the activation hotkey, some words, the hotkey again.
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Activate);
-        harness.executor.drain();
+        take(&harness);
         let first = harness.surface.last();
-        assert_eq!(first.state, "review");
+        assert_eq!(first.state, "editing");
         assert!(first.editable);
         assert!(harness.surface.focused());
 
@@ -3322,7 +3379,7 @@ mod tests {
         assert_eq!(second.text, first.text);
         assert!(
             harness.surface.focused(),
-            "the second review left the keyboard somewhere else"
+            "the second take left the keyboard somewhere else"
         );
     }
 
@@ -3332,9 +3389,7 @@ mod tests {
             FakeRecorder::default(),
             Err("Speech recognition is unreachable.".into()),
         );
-        harness.app.handle(Event::Activate);
-        harness.app.handle(Event::Enter { text: None });
-        harness.executor.drain();
+        say(&harness);
 
         assert_eq!(harness.surface.last().state, "error");
         assert_eq!(*harness.store.pending.lock().unwrap(), None);

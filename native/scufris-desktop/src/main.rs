@@ -1,9 +1,10 @@
 //! scufris-desktop: the Scufris voice pill and tray companion.
 //!
-//! The companion owns activation, the microphone, local transcription,
-//! transcript review, and health presentation. It never owns the conversation:
-//! accepted transcripts go to the Scufris daemon as ordinary user messages over
-//! the control socket, and the daemon stays the only writer of session files.
+//! The companion owns activation, the microphone, local transcription, the
+//! textbox the words pass through, and health presentation. It never owns the
+//! conversation: accepted transcripts go to the Scufris daemon as ordinary user
+//! messages over the control socket, and the daemon stays the only writer of
+//! session files.
 
 mod app;
 mod audio;
@@ -17,10 +18,10 @@ mod link;
 mod logging;
 mod pending;
 mod pill;
-mod review;
 mod speech;
 mod state;
 mod stt;
+mod textbox;
 mod tray;
 mod widgets;
 
@@ -37,9 +38,9 @@ use std::{
 };
 
 use app::{
-    ACCEPT_EVENT, ACK_TIMEOUT, App, Backend, COPY_EVENT, CUES_EVENT, Executor, Hidden, Keys,
-    PRESENTATION_EVENT, Ports, PresentationPayload, Shown, Surface, TICK_EVENT, ThreadExecutor,
-    TickPayload, Transcriber,
+    ACK_TIMEOUT, App, Backend, COPY_EVENT, CUES_EVENT, Executor, Hidden, Keys, PRESENTATION_EVENT,
+    Ports, PresentationPayload, Shown, Surface, TICK_EVENT, ThreadExecutor, TickPayload,
+    Transcriber,
 };
 use audio::{CpalRecorder, Recorder};
 use config::Config;
@@ -114,7 +115,7 @@ fn configure_webkit_renderer() -> Result<(), Box<dyn Error>> {
 /// them enabled, the tray menu mutes them.
 struct CueSwitch(AtomicBool);
 
-/// The pill window, the tray, and focus restoration.
+/// The two windows, the tray, and focus restoration.
 struct DesktopSurface {
     handle: AppHandle,
     menu: Menu<tauri::Wry>,
@@ -139,18 +140,6 @@ impl DesktopSurface {
 
 impl Surface for DesktopSurface {
     fn show_pill(&self) -> Result<Shown, String> {
-        // Only when the pill does not already hold the keyboard. Capturing
-        // then would record the pill itself as the window to go back to. A
-        // pill that is up but passive is fine to capture over: the active
-        // window is the person's own, and that is where focus must return.
-        if !pill::focused(&self.handle) {
-            // Never a window of the companion's own. The window manager names
-            // the transcript box as the active window for as long as the box is
-            // up, and the pill can be shown again with the box on screen: the
-            // watch does exactly that when something takes the keyboard away
-            // mid-review.
-            self.focus.capture(&self.windows());
-        }
         let shown = pill::show(&self.handle)?;
         // After the pill, and only if it came up: the shelf stands above the
         // pill, and panels over a desktop with no pill under them are panels
@@ -159,51 +148,52 @@ impl Surface for DesktopSurface {
         Ok(shown)
     }
 
-    fn show_pill_passive(&self) -> Result<Shown, String> {
-        let shown = pill::show_passive(&self.handle)?;
-        self.layer(false);
-        Ok(shown)
-    }
-
     fn hide_pill(&self) -> Result<Hidden, String> {
-        // The box belongs to the orb, so it goes first: a pill on its way down
-        // must never leave a transcript hanging over the desktop behind it.
-        if let Err(error) = review::hide(&self.handle) {
-            warn!("{error}");
-        }
-        // And so does the shelf, for the same reason. State intact, widgets
-        // mounted, clocks stopped: this is the layer going away, not the
-        // panels going away.
+        // The shelf goes with the pill: a panel left over a bare desktop is a
+        // widget belonging to nothing. State intact, widgets mounted, clocks
+        // stopped - this is the layer going away, not the panels going away.
         self.layer(true);
         pill::hide(&self.handle)
     }
 
-    fn pill_has_keyboard(&self) -> bool {
-        pill::focused(&self.handle)
+    fn show_textbox(&self) -> Result<Shown, String> {
+        // Only when the box does not already hold the keyboard. Capturing then
+        // would record the box itself as the window to give the desktop back
+        // to. A pill on screen is fine to capture over: it never holds the
+        // keyboard, so the active window is still the person's own.
+        if !textbox::focused(&self.handle) {
+            // Never a window of the companion's own, whichever one the window
+            // manager is calling active.
+            self.focus.capture(&self.windows());
+        }
+        textbox::show(&self.handle)
     }
 
-    fn nobody_has_the_keyboard(&self) -> bool {
-        // The display's own answer, or the one window of ours that would be a
-        // dead end for every key: the box refuses the keyboard and has no key
-        // handlers, so a window manager that forces focus onto it has taken the
-        // keys as surely as a window manager that focused nothing.
-        display::nobody_holds_the_keyboard() == display::Verdict::Yes
-            || review::holds_the_keyboard(&self.handle)
-    }
-
-    fn restore_focus(&self) -> Result<(), String> {
+    fn hide_textbox(&self) -> Result<(), String> {
+        // A box that is already down has no keyboard to give back, and giving
+        // it back anyway would take the keys off whatever the person moved to.
+        // This is what makes the operation safe to ask for unconditionally.
+        if !textbox::up(&self.handle) {
+            return Ok(());
+        }
+        textbox::hide(&self.handle)?;
         self.focus.restore()
     }
 
+    fn textbox_has_keyboard(&self) -> bool {
+        textbox::focused(&self.handle)
+    }
+
+    fn nobody_has_the_keyboard(&self) -> bool {
+        // The display's own answer, or the one window of ours that is a dead
+        // end for every key: the pill refuses the keyboard and has no key
+        // handlers, so a window manager that forces focus onto it has taken the
+        // keys as surely as a window manager that focused nothing.
+        display::nobody_holds_the_keyboard() == display::Verdict::Yes
+            || pill::holds_the_keyboard(&self.handle)
+    }
+
     fn present(&self, payload: PresentationPayload) -> Result<(), String> {
-        // The box is raised before the presentation is emitted, so the page it
-        // renders is already on screen when the words reach it. A box that
-        // would not come up is a warning and not a refusal: the orb is what the
-        // runtime rests on, and failing here would keep the words from reaching
-        // it too.
-        if let Err(error) = review::follow(&self.handle, payload.state) {
-            warn!("{error}");
-        }
         // A person who is talking is not reading the screen. The pill already
         // knows the microphone is open, and this is the only place that says so
         // on every presentation rather than on one transition.
@@ -244,7 +234,7 @@ impl DesktopSurface {
     /// the one kind of window here that is certain to refuse them - and the
     /// keyboard would land nowhere they can type.
     fn windows(&self) -> Vec<u32> {
-        let mut mine: Vec<u32> = [pill::known_window(), review::known_window()]
+        let mut mine: Vec<u32> = [pill::known_window(), textbox::known_window()]
             .into_iter()
             .flatten()
             .collect();
@@ -300,22 +290,17 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                     if event.state() != ShortcutState::Pressed {
                         return;
                     }
-                    // The hotkey that opens the pill, or one of the two the
-                    // pill grabs while it is up. Every accelerator arrives
-                    // here, so which one it is decides what it means.
-                    match app
+                    // The hotkey that opens the pill, or the cancel key grabbed
+                    // beside it while it is up. Every accelerator arrives here,
+                    // so which one it is decides what it means.
+                    let cancels = app
                         .try_state::<Arc<keys::PillKeys>>()
-                        .and_then(|keys| keys.verb(shortcut))
-                    {
-                        Some(verb) => {
-                            let _ = perform(app, verb);
-                        }
-                        None => app
-                            .state::<Arc<App>>()
-                            .inner()
-                            .clone()
-                            .handle(Event::Activate),
-                    }
+                        .is_some_and(|keys| keys.cancels(shortcut));
+                    app.state::<Arc<App>>().inner().clone().handle(if cancels {
+                        Event::Escape
+                    } else {
+                        Event::Activate
+                    });
                 })
                 .build(),
         )
@@ -342,12 +327,12 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
         })
         .invoke_handler(tauri::generate_handler![
             pill_ready,
-            review_ready,
-            pill_submit,
-            pill_cancel,
-            pill_copy,
             pill_cues,
             pill_log,
+            textbox_ready,
+            textbox_submit,
+            textbox_cancel,
+            textbox_copy,
             widget_shell_ready,
             widget_tick,
             widget_hover,
@@ -356,7 +341,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
         .setup(move |tauri| {
             let handle = tauri.handle().clone();
             pill::ensure(&handle)?;
-            review::ensure(&handle)?;
+            textbox::ensure(&handle)?;
 
             // Before the menu, because the menu offers what is installed: the
             // catalog is what the summon submenu is built from.
@@ -409,11 +394,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
 
             // Managed as well as held by the runtime: the accelerator handler
             // has only the app to ask which key it was given.
-            let pill_keys = Arc::new(keys::PillKeys::new(
-                handle.clone(),
-                config.mode_command.clone(),
-                &config.hotkey,
-            ));
+            let pill_keys = Arc::new(keys::PillKeys::new(handle.clone(), &config.hotkey));
             tauri.manage(Arc::clone(&pill_keys));
 
             // Before the runtime, because the runtime holds the surface that
@@ -489,12 +470,12 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             tauri.manage(link);
 
             // A window manager that has already taken the activation key is the
-            // good case rather than a fault: under the binding mode recipe its
-            // own binding runs `scufris-ctl open` and arrives in the same
-            // place. The display reports a key somebody else grabbed as one
-            // that is already registered, which is what it looks like from
-            // here. Refusing to start over it would leave the person with no
-            // companion for a key that was going to work.
+            // good case rather than a fault: its own binding runs
+            // `scufris-ctl open` and arrives in the same place. The display
+            // reports a key somebody else grabbed as one that is already
+            // registered, which is what it looks like from here. Refusing to
+            // start over it would leave the person with no companion for a key
+            // that was going to work.
             if let Err(error) = tauri.global_shortcut().register(shortcut) {
                 warn!(
                     hotkey = %config.hotkey,
@@ -569,13 +550,11 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
 /// Where the command socket is, so the exit can take it away again.
 struct CommandSocket(std::path::PathBuf);
 
-/// Carries out one verb from the desktop.
+/// Carries out the one verb the desktop can send.
 ///
-/// Two of the three go straight to the state machine, because they carry no
-/// words. Accepting does not: the pill page holds the editable field, so the
-/// verb goes there and the page sends what a person's own Enter would have
-/// sent. It is answered as taken once the page has been told, which is as far
-/// as an event can be followed.
+/// Straight to the state machine, because it carries no words. Everything that
+/// does carry words is typed into the textbox, which is focused and reads its
+/// own keys.
 fn perform(handle: &AppHandle, verb: Verb) -> Outcome {
     match verb {
         Verb::Open => {
@@ -586,20 +565,6 @@ fn perform(handle: &AppHandle, verb: Verb) -> Outcome {
                 .handle(Event::Activate);
             Outcome::Taken
         }
-        Verb::Cancel => {
-            handle
-                .state::<Arc<App>>()
-                .inner()
-                .clone()
-                .handle(Event::Escape);
-            Outcome::Taken
-        }
-        Verb::Accept => match handle.emit_to(pill::LABEL, ACCEPT_EVENT, ()) {
-            Ok(()) => Outcome::Taken,
-            Err(error) => Outcome::Refused {
-                detail: format!("the pill would not take it: {error}"),
-            },
-        },
     }
 }
 
@@ -613,29 +578,36 @@ fn pill_ready(runtime: tauri::State<'_, Arc<App>>, reduced_motion: bool) {
     runtime.inner().clone().publish();
 }
 
-/// The transcript page saying hello, and asking what it has missed.
+/// The textbox page saying hello, and asking what it has missed.
 ///
 /// A transcript recovered from a previous process is published as the companion
 /// starts, which can be before this window's page is listening. Rather than let
 /// the box come up empty over words nobody can read, the page asks for the
 /// presentation again once it is ready for one.
 #[tauri::command]
-fn review_ready(runtime: tauri::State<'_, Arc<App>>) {
+fn textbox_ready(runtime: tauri::State<'_, Arc<App>>) {
     runtime.inner().clone().publish();
 }
 
+/// Enter in the textbox, carrying whatever is in the field.
+///
+/// `text` is absent for a transcript the person may not edit, so the machine
+/// sends the words it is holding rather than the ones a page could have
+/// changed underneath it.
 #[tauri::command]
-fn pill_submit(runtime: tauri::State<'_, Arc<App>>, text: Option<String>) {
+fn textbox_submit(runtime: tauri::State<'_, Arc<App>>, text: Option<String>) {
     runtime.inner().clone().handle(Event::Enter { text });
 }
 
+/// Escape in the textbox.
 #[tauri::command]
-fn pill_cancel(runtime: tauri::State<'_, Arc<App>>) {
+fn textbox_cancel(runtime: tauri::State<'_, Arc<App>>) {
     runtime.inner().clone().handle(Event::Escape);
 }
 
+/// Ctrl+C in the textbox, with nothing selected.
 #[tauri::command]
-fn pill_copy(runtime: tauri::State<'_, Arc<App>>) {
+fn textbox_copy(runtime: tauri::State<'_, Arc<App>>) {
     runtime.inner().clone().handle(Event::Copy);
 }
 

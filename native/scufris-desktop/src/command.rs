@@ -1,7 +1,7 @@
-//! The command socket the desktop presses the pill's keys through.
+//! The command socket the window manager opens the pill through.
 //!
 //! The companion is the server here, which is the opposite of everywhere else:
-//! [`crate::daemon`] connects out to the Scufris daemon, and this listens for
+//! [`crate::link`] connects out to the Scufris service, and this listens for
 //! the person's own window manager.
 //!
 //! One verb per connection, answered before the connection closes. There is no
@@ -209,11 +209,9 @@ mod tests {
     #[test]
     fn a_verb_reaches_the_pill_and_the_caller_is_told_it_did() {
         let socket = Listening::new("taken", Outcome::Taken);
-        for verb in [Verb::Open, Verb::Cancel, Verb::Accept] {
-            let line = serde_json::to_string(&Command::new(verb)).expect("it encodes");
-            assert_eq!(socket.say(&line).outcome, Outcome::Taken, "{verb:?}");
-        }
-        assert_eq!(socket.verbs(), vec![Verb::Open, Verb::Cancel, Verb::Accept]);
+        let line = serde_json::to_string(&Command::new(Verb::Open)).expect("it encodes");
+        assert_eq!(socket.say(&line).outcome, Outcome::Taken);
+        assert_eq!(socket.verbs(), vec![Verb::Open]);
     }
 
     #[test]
@@ -224,7 +222,7 @@ mod tests {
                 detail: "the pill is blind".into(),
             },
         );
-        let line = serde_json::to_string(&Command::new(Verb::Cancel)).expect("it encodes");
+        let line = serde_json::to_string(&Command::new(Verb::Open)).expect("it encodes");
         assert_eq!(
             socket.say(&line).outcome,
             Outcome::Refused {
@@ -239,6 +237,10 @@ mod tests {
         for line in [
             "not json at all",
             r#"{"v":1,"verb":"quit"}"#,
+            // The two the textbox took over. A binding that still sends them
+            // is refused rather than answered.
+            r#"{"v":1,"verb":"accept"}"#,
+            r#"{"v":1,"verb":"cancel"}"#,
             r#"{"v":99,"verb":"open"}"#,
             r#"{"verb":"open"}"#,
         ] {

@@ -11,18 +11,6 @@
         <canvas id="orb" width="160" height="160" aria-hidden="true"></canvas>
       </div>
       <p id="timer" class="timer"></p>
-      <!-- The transcript the person edits. It has no place on a bare orb, but
-           it is still what holds the words and the caret, so it stays here,
-           invisible and focusable, and the review window mirrors it. -->
-      <input
-        id="transcript"
-        class="transcript"
-        type="text"
-        autocomplete="off"
-        spellcheck="false"
-        aria-label="Transcript"
-        hidden
-      />
     </main>
     <script src="orb-engine.js"></script>
     <script src="pill.js"></script>

@@ -1,16 +1,17 @@
-//! The companion's own command socket, and the verbs the desktop sends it.
+//! The companion's own command socket, and the verb the desktop sends it.
 //!
-//! Two protocols live in this crate and they face opposite ways. The daemon
-//! protocol is the conversation: the companion and the Scufris daemon agree on
+//! Two protocols live in this crate and they face opposite ways. The service
+//! protocol is the conversation: the companion and `scufris-service` agree on
 //! what was said. This one is the desktop: a key binding, a script, or a
-//! terminal telling the pill what to do.
+//! terminal asking the companion to listen.
 //!
-//! Which is the whole point of it. The pill's keys used to need focus, so
-//! using them meant taking the keyboard away from whatever the person was
-//! typing in. A verb on a socket needs nothing: the window manager reads the
-//! key and says what happened, and the pill is never the focused window.
+//! One verb, because the pill has no keys of its own. The textbox holds the
+//! keyboard while there are words in it, so Enter and Escape are ordinary keys
+//! in a focused window and need nothing from outside. What is left is the way
+//! in: a window manager binding that opens the pill and starts the microphone
+//! without the companion having to grab the key itself.
 //!
-//! One LF-terminated JSON line each way, bounded the way the daemon protocol
+//! One LF-terminated JSON line each way, bounded the way the service protocol
 //! is. The answer is written before the connection closes, so a caller that
 //! got an answer knows the companion took the verb.
 
@@ -55,20 +56,16 @@ impl Command {
     }
 }
 
-/// What the desktop can ask the pill to do.
+/// What the desktop can ask the companion to do.
 ///
-/// The same three things the pill's own keys do, and nothing else. This socket
-/// is a way to press those keys without holding the keyboard; it is not a
-/// second way to drive the companion.
+/// One thing, and nothing else. This socket is the activation key arriving
+/// from a window manager rather than from a grab; it is not a second way to
+/// drive the companion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "verb", rename_all = "snake_case")]
 pub enum Verb {
     /// Bring the pill up and start recording. The activation hotkey.
     Open,
-    /// Escape. Cancels what is running, or puts a resting pill away.
-    Cancel,
-    /// Enter. Accepts what the pill is showing, with whatever is in its field.
-    Accept,
 }
 
 impl Verb {
@@ -76,8 +73,6 @@ impl Verb {
     pub fn named(word: &str) -> Option<Self> {
         match word {
             "open" => Some(Self::Open),
-            "cancel" => Some(Self::Cancel),
-            "accept" => Some(Self::Accept),
             _ => None,
         }
     }
@@ -86,8 +81,6 @@ impl Verb {
     pub fn name(self) -> &'static str {
         match self {
             Self::Open => "open",
-            Self::Cancel => "cancel",
-            Self::Accept => "accept",
         }
     }
 }
@@ -116,13 +109,13 @@ impl Answer {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "answer", rename_all = "snake_case")]
 pub enum Outcome {
-    /// The verb reached the pill.
+    /// The verb reached the companion.
     ///
-    /// Not that it changed anything. Escape in a phase with nothing to cancel
-    /// is still an Escape that arrived, and the caller is a key binding that
-    /// has nothing useful to do with the difference.
+    /// Not that it changed anything. An activation in a phase that ignores one
+    /// is still an activation that arrived, and the caller is a key binding
+    /// that has nothing useful to do with the difference.
     Taken,
-    /// The verb did not reach the pill, and why.
+    /// The verb did not reach the companion, and why.
     Refused {
         /// What went wrong, for the person reading their terminal.
         detail: String,
@@ -135,15 +128,19 @@ mod tests {
 
     #[test]
     fn every_verb_survives_the_round_trip_by_the_name_it_is_typed_with() {
-        for word in ["open", "cancel", "accept"] {
-            let verb = Verb::named(word).expect("the word names a verb");
-            assert_eq!(verb.name(), word);
-            let line = serde_json::to_string(&Command::new(verb)).expect("it encodes");
-            let read: Command = serde_json::from_str(&line).expect("it decodes");
-            assert_eq!(read, Command::new(verb));
-            assert!(line.contains(&format!("\"verb\":\"{word}\"")), "{line}");
-        }
+        let word = "open";
+        let verb = Verb::named(word).expect("the word names a verb");
+        assert_eq!(verb.name(), word);
+        let line = serde_json::to_string(&Command::new(verb)).expect("it encodes");
+        let read: Command = serde_json::from_str(&line).expect("it decodes");
+        assert_eq!(read, Command::new(verb));
+        assert!(line.contains(&format!("\"verb\":\"{word}\"")), "{line}");
+
         assert_eq!(Verb::named("quit"), None);
+        // The two the textbox took over. A caller that still types them is
+        // told they are not verbs rather than being answered.
+        assert_eq!(Verb::named("accept"), None);
+        assert_eq!(Verb::named("cancel"), None);
     }
 
     #[test]

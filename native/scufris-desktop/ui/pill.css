@@ -1,14 +1,13 @@
 /* The bare orb, from the Orb Study section 03 "The pill is the orb"
  * (tasks/20260825-231826/orb-study.html). The window is a frame around the
- * 160px orb and nothing else: no label, no transcript line, no wave, no border.
+ * 160px orb and nothing else: no label, no transcript, no wave, no border.
  * The orb's shape and accent carry the state on their own, and the only other
  * mark is the listening timer, one dim line under it.
  *
  * Color follows the state grammar: yellow listening, brown transcribing,
- * quartz review, niagara working, green speaking, wisteria attention and
- * detached, red only
- * for error. Motion pattern, not hue, separates states, so everything survives
- * grayscale. */
+ * quartz editing, niagara working, green speaking, wisteria attention and
+ * detached, red only for error. Motion pattern, not hue, separates states, so
+ * everything survives grayscale. */
 
 :root {
   --bg4: #52494e;
@@ -103,7 +102,7 @@ body {
 .pill[data-state="transcribing"] {
   --acc: var(--brown);
 }
-.pill[data-state="review"] {
+.pill[data-state="editing"] {
   --acc: var(--quartz);
 }
 .pill[data-state="sent"] {
@@ -219,28 +218,6 @@ body {
   font-size: 20px;
   letter-spacing: 0.04em;
   color: var(--bg4);
-}
-
-/* Off the orb entirely, and still focusable: the keys are the orb window's,
- * so the field that holds the words has to live in it. What the person types
- * is mirrored into the review window, which is where they read it. Kept inside
- * the blob rather than in a cut-away corner, so nothing about the window's
- * shape can ever be what decides whether the keys land. */
-.transcript {
-  position: absolute;
-  left: 50%;
-  bottom: 20px;
-  width: 1px;
-  height: 1px;
-  border: none;
-  padding: 0;
-  background: transparent;
-  color: transparent;
-  font: inherit;
-  caret-color: transparent;
-  opacity: 0;
-  outline: none;
-  user-select: text;
 }
 
 /* Reduced motion: no self-driven animation at all, the entrance included, and

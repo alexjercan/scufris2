@@ -1,8 +1,9 @@
 //! Companion configuration resolved from the environment.
 //!
 //! Every outside effect the companion can start is named here. The chat,
-//! restart, and mode hooks are absolute executables supplied by the deployment,
-//! so the companion never builds a command line or reaches for a shell.
+//! restart, and speak hooks are absolute executables supplied by the
+//! deployment, so the companion never builds a command line or reaches for a
+//! shell.
 
 use std::{
     env,
@@ -46,9 +47,6 @@ pub struct Config {
     pub chat_command: Option<PathBuf>,
     /// Executable that restarts the owned backend service, when configured.
     pub restart_command: Option<PathBuf>,
-    /// Executable that puts the window manager into a binding mode, when one is
-    /// configured. Run with the mode name as its only argument.
-    pub mode_command: Option<PathBuf>,
     /// Executable that speaks one paragraph read from its standard input, when
     /// one is configured. Without it the companion stays silent, which is a
     /// deployment without a synthesiser rather than a fault.
@@ -85,7 +83,6 @@ impl Config {
             Hooks {
                 chat: env::var_os("SCUFRIS_DESKTOP_CHAT_COMMAND"),
                 restart: env::var_os("SCUFRIS_DESKTOP_RESTART_COMMAND"),
-                mode: env::var_os("SCUFRIS_DESKTOP_MODE_COMMAND"),
                 speak: env::var_os("SCUFRIS_DESKTOP_SPEAK_COMMAND"),
             },
             State {
@@ -133,7 +130,6 @@ impl Config {
             hotkey,
             chat_command: absolute(hooks.chat, "SCUFRIS_DESKTOP_CHAT_COMMAND")?,
             restart_command: absolute(hooks.restart, "SCUFRIS_DESKTOP_RESTART_COMMAND")?,
-            mode_command: absolute(hooks.mode, "SCUFRIS_DESKTOP_MODE_COMMAND")?,
             speak_command: absolute(hooks.speak, "SCUFRIS_DESKTOP_SPEAK_COMMAND")?,
             state_file: state.resolve()?,
         })
@@ -148,7 +144,7 @@ impl Config {
                 .unwrap_or_else(|| "none".to_string())
         };
         format!(
-            "socket={}\ncommand_socket={}\nstate_file={}\nstt_endpoint={}\nhotkey={}\nchat_command={}\nrestart_command={}\nmode_command={}\nspeak_command={}\n",
+            "socket={}\ncommand_socket={}\nstate_file={}\nstt_endpoint={}\nhotkey={}\nchat_command={}\nrestart_command={}\nspeak_command={}\n",
             self.socket.display(),
             optional(&self.command_socket),
             self.state_file.display(),
@@ -156,7 +152,6 @@ impl Config {
             self.hotkey,
             optional(&self.chat_command),
             optional(&self.restart_command),
-            optional(&self.mode_command),
             optional(&self.speak_command),
         )
     }
@@ -170,7 +165,6 @@ impl Config {
 struct Hooks {
     chat: Option<OsString>,
     restart: Option<OsString>,
-    mode: Option<OsString>,
     speak: Option<OsString>,
 }
 
@@ -248,15 +242,6 @@ mod tests {
         endpoint: Option<&str>,
         chat: Option<&str>,
     ) -> Result<Config, ConfigError> {
-        hooked(socket, endpoint, chat, None)
-    }
-
-    fn hooked(
-        socket: &str,
-        endpoint: Option<&str>,
-        chat: Option<&str>,
-        mode: Option<&str>,
-    ) -> Result<Config, ConfigError> {
         Config::resolve(
             Some(OsString::from(socket)),
             Some(OsString::from("/run/user/1000/scufris/desktop.sock")),
@@ -265,7 +250,6 @@ mod tests {
             Hooks {
                 chat: chat.map(OsString::from),
                 restart: None,
-                mode: mode.map(OsString::from),
                 speak: None,
             },
             state(),
@@ -279,7 +263,6 @@ mod tests {
         assert_eq!(config.hotkey, DEFAULT_HOTKEY);
         assert_eq!(config.chat_command, None);
         assert_eq!(config.restart_command, None);
-        assert_eq!(config.mode_command, None);
         assert_eq!(config.speak_command, None);
     }
 
@@ -297,7 +280,6 @@ mod tests {
             Hooks {
                 chat: None,
                 restart: None,
-                mode: None,
                 speak: None,
             },
             state(),
@@ -335,19 +317,14 @@ mod tests {
             resolve("/socket", None, Some("scufris-chat")),
             Err(ConfigError::Command("SCUFRIS_DESKTOP_CHAT_COMMAND"))
         ));
-        assert!(matches!(
-            hooked("/socket", None, None, Some("i3-msg")),
-            Err(ConfigError::Command("SCUFRIS_DESKTOP_MODE_COMMAND"))
-        ));
     }
 
     #[test]
     fn the_description_names_every_outside_effect() {
-        let config = hooked(
+        let config = resolve(
             "/run/user/1000/scufris/daemon.sock",
             None,
             Some("/nix/store/x/bin/scufris-chat"),
-            Some("/nix/store/x/bin/scufris-desktop-mode"),
         )
         .unwrap();
         assert_eq!(
@@ -360,7 +337,6 @@ mod tests {
                 "hotkey=Super+D\n",
                 "chat_command=/nix/store/x/bin/scufris-chat\n",
                 "restart_command=none\n",
-                "mode_command=/nix/store/x/bin/scufris-desktop-mode\n",
                 "speak_command=none\n",
             )
         );

@@ -200,7 +200,6 @@ the environment:
 | `SCUFRIS_DESKTOP_HOTKEY`          | `Super+D`                                      |
 | `SCUFRIS_DESKTOP_CHAT_COMMAND`    | none                                           |
 | `SCUFRIS_DESKTOP_RESTART_COMMAND` | none                                           |
-| `SCUFRIS_DESKTOP_MODE_COMMAND`    | none                                           |
 | `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | none, and the companion stays silent           |
 
 The companion starts without a backend and reports it as unavailable in the

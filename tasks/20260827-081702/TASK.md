@@ -295,3 +295,65 @@ cargo clippy --workspace --all-targets  # clean
 cargo fmt --all --check            # clean
 nix flake check --offline          # all 36 checks passed
 ```
+
+## Increment 3 done (2026-08-27)
+
+Landed on `master`. The pill is an indicator that never takes the
+keyboard, and the textbox is the one focused window a voice submission
+passes through.
+
+What changed:
+
+- **The review state became a phase called `Editing`, and the review
+  window became the textbox.** `src/review.rs` -> `src/textbox.rs`,
+  `ui/review.{ts,css,html}` -> `ui/textbox.{ts,css,html}`. The window is
+  built focusable, claims the keyboard on every raise, and holds a real
+  `<textarea>`. The fake caret, the selection bands, the measuring probe
+  and the `scufris://draft` mirror are all gone: the caret, the
+  selection, and every editing key are the browser's own.
+- **The pill lost its keys.** `ui/index.html` has no hidden `<input>`,
+  `ui/pill.ts` has no keydown handler, no mousedown guard and no
+  `scufris://accept`. `pill::focused` became `pill::holds_the_keyboard`,
+  which is what `nobody_has_the_keyboard` reads: the pill is the dead end
+  the window manager hands focus to when a window takes the keyboard and
+  goes away.
+- **`Posture` has four states, not three.** `Editing`, `Watched`,
+  `Passive`, `Off`. `Watched` is the microphone's: the phase waits for
+  the pill because the person has to be able to read that the microphone
+  is open, and it wants no keyboard. That split is what keeps the privacy
+  guarantee now that listening is not a focused phase.
+- **`keys.rs` is one accelerator.** The i3 binding mode, the
+  `SCUFRIS_DESKTOP_MODE_COMMAND` hook and the mode-enter/mode-leave dance
+  are deleted, with `programs.scufris.desktop.modeCommand`. What is left
+  is `Super+Escape`, built from the hotkey's own modifiers and grabbed
+  only while the pill is on screen.
+- **`(Listening, Enter)` is deleted.** One take is one key: `Super+D`
+  starts it and `Super+D` stops it. The max-recording ticker sends
+  `Event::Activate` rather than sending by timer.
+- **`scufris-ctl accept` and `cancel` retire.** `Verb` is one variant,
+  `Open`, and a caller that still types the old words is told they are
+  not verbs.
+
+### A finding, fixed while adapting the tests
+
+`raise()` recorded `Screen::Ready` whenever the textbox answered `Ready`,
+even when the pill under it had not been proved up. `Ready` is about both
+windows, so a raise over an unproved pill now stays short of it and the
+repair chain asks for the pill again. The test that pins it is
+`a_restore_nothing_can_confirm_keeps_the_words_on_screen`.
+
+### Verification
+
+```
+TMPDIR=/tmp npm run check           # tsc clean, 74 tests pass, prettier clean
+cd native && cargo test --workspace # 22 + 234 + 42 pass
+cargo clippy --workspace --all-targets  # clean
+cargo fmt --all --check             # clean
+nix flake check --offline           # all checks passed
+```
+
+Not verified by hand: the companion needs a display, and the keyboard
+contract is the half no headless test reaches. What to try on the
+machine - `Super+D`, `Super+D`, type into the box, `Enter`; then a second
+turn, because a window manager reads the focus hints when it maps a
+window and the second map is where the old review box lost the keyboard.

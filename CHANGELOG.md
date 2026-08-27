@@ -66,17 +66,12 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   so another project can ship a widget for the desktop. Widgets that shipped
   with Scufris always win, and one that will not install is reported in the log
   rather than stopping the companion.
-- `scufris-ctl`, which presses the pill's keys from outside its window. It ships
-  with the companion and takes one verb - `open`, `cancel`, or `accept` - so a
-  window manager binding can be the thing that reads the key. On i3 that makes
-  bare `Escape` and `Return` a binding mode the pill owns only while it is up;
-  `programs.scufris.desktop.modeCommand` is how the companion leaves the mode
-  again, including when the pill closed for a reason you never asked for. See
+- `scufris-ctl open`, which puts the pill up from outside its window, so a
+  window manager binding can be the thing that opens it. See
   [Using Scufris](docs/src/guide/using.md).
-- The pill answers `Super+Escape` and `Super+Enter` while it is on screen,
-  built from whatever modifier your activation hotkey uses. That is the
-  fallback on a desktop with no binding modes, and it is what puts a resting
-  pill away without opening the microphone on the way.
+- The pill answers `Super+Escape` while it is on screen, built from whatever
+  modifier your activation hotkey uses. It cancels a take, and it puts a
+  resting pill away without opening the microphone on the way.
 - `packages.scufris-speak`, the synthesiser the companion runs. It binds the
   pinned Piper package, model, and configuration, so the voice is a property of
   the package rather than a run-time setting.
@@ -102,6 +97,11 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   says it. Nothing in the agent's process tree makes sound, and a session with
   no companion simply stays silent. Enabling `voice` hands the companion the
   synthesiser and turns speech on in the service.
+- `Super+D` is the one key of the take. Press it once and the pill rises and
+  the microphone opens; press it again and the take stops and what you said
+  arrives in a textbox above the pill. The textbox is an ordinary focused
+  window, so `Enter`, `Escape`, and every editing key are its own and work
+  wherever you are. The pill is an indicator and never takes the keyboard.
 
 ### Removed
 
@@ -115,6 +115,12 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   `scufris-dashboard` helper, the `dashboardd` flake input, and the
   `programs.scufris.dashboard.*` options are gone. Widgets return as a native
   runtime inside the desktop companion.
+- The window manager binding mode, and with it the `accept` and `cancel` verbs
+  of `scufris-ctl` and `programs.scufris.desktop.modeCommand`. The textbox holds
+  the keyboard itself, so there is nothing left for a binding mode to route. A
+  configuration that sets `modeCommand` fails to evaluate; nothing is migrated.
+- `Enter` while the microphone is open. One take is one key: `Super+D` stops
+  it, and the words are sent from the textbox.
 
 ## [0.4.0] - 2026-08-25
 

@@ -417,24 +417,40 @@
     </div>
 
     <div class="panel law">
-      <h3>L3 &mdash; The agent keeps working exactly as it does now</h3>
+      <h3>
+        L3 &mdash; The agent keeps working as it does now, plus one change
+      </h3>
       <p>
         Jobs, tmux panes, delegation, skills, Calm, response shaping, the
         <code>.scufris.toml</code> agent menu: all of it stays inside
-        <code>pi</code> and none of it changes shape here. The one file that
-        changes is the desktop extension, which stops binding a socket and
-        starts connecting to one. The service never learns what a job is.
+        <code>pi</code> and none of it changes shape here. The one file this
+        design touches is the desktop extension, which stops binding a socket
+        and starts connecting to one. The service never learns what a job is.
+      </p>
+      <p>
+        The one change that does land inside the agent is not this design's:
+        <code>tasks/20260826-183008/TASK.md</code>,
+        <em>Scufris does what is asked, not a workflow</em> (priority 75, tags
+        <code>identity</code> and <code>workflow</code>). It lands
+        independently, and L4 is what it leaves behind. Read the two together:
+        everything the agent does today survives <em>except</em> the fixed
+        pipeline, and nothing here waits on that task or is blocked by it.
       </p>
     </div>
 
     <div class="panel law">
       <h3>L4 &mdash; One job, one agent, and no pipeline</h3>
       <p>
-        Assumed from task <code>20260826-183008</code>: a request runs the
-        agents it names and no others, and one job has exactly one agent as its
-        interface. Whatever that agent spawns beneath itself is its own
-        business. That work is separate from this document, but it bounds it:
-        the service routes a conversation, not a workflow.
+        The shape task <code>20260826-183008</code> leaves the agent in: a
+        request runs the agents it names and no others, and one job has exactly
+        one agent as its interface. Whatever that agent spawns beneath itself is
+        its own business.
+      </p>
+      <p>
+        That work is separate from this document, but it bounds it. The service
+        routes a conversation, not a workflow: there is nothing in the protocol
+        that knows a request can become several pieces of work, and nothing that
+        would need to change if one did.
       </p>
     </div>
   </section>

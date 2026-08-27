@@ -55,11 +55,17 @@ decisions settled, and four laws added that bound the rest.
   direction. Protocol v3 replaces v2 rather than coexisting. Stale state
   on disk, including the job tree under `$XDG_STATE_HOME/scufris/`, is
   deleted rather than converted.
-- **L3** The agent keeps working exactly as it does now. Jobs, tmux,
-  delegation, skills, Calm, response shaping all stay inside `pi`. Only
-  the desktop extension changes, from server to client.
-- **L4** One job, one agent, no pipeline. Assumed from task
-  `20260826-183008`; separate work, but it bounds this design.
+- **L3** The agent keeps working as it does now, plus one change. Jobs,
+  tmux, delegation, skills, Calm, response shaping all stay inside `pi`.
+  The only file this design touches there is the desktop extension, from
+  server to client. The one change that does land inside the agent is not
+  this design's: `tasks/20260826-183008/TASK.md`, "Scufris does what is
+  asked, not a workflow" (p75, tags identity and workflow). It lands
+  independently. Nothing here waits on it or is blocked by it.
+- **L4** One job, one agent, no pipeline. The shape `20260826-183008`
+  leaves the agent in. It bounds this design: the service routes a
+  conversation, not a workflow, and nothing in the protocol knows a
+  request can become several pieces of work.
 
 Decisions, as settled by Alex:
 

@@ -53,10 +53,11 @@ pub struct Conversation {
 impl Conversation {
     /// Builds one, with the identifier prefix this process owns.
     ///
-    /// The prefix is the pill's, and the counter is not: identifiers are what
-    /// the service suppresses duplicates by, and two senders sharing a prefix
-    /// and a counter would eventually name two different lines the same thing.
-    /// The `h` is what keeps them apart.
+    /// The prefix is the pill's, and the counter is not: an identifier is how
+    /// an answer is matched to the line that asked, and two senders sharing a
+    /// prefix and a counter would eventually name two different lines the same
+    /// thing and take each other's answers. The `h` is what keeps them
+    /// apart.
     pub fn new(prefix: impl Into<String>) -> Self {
         Self {
             lines: VecDeque::new(),

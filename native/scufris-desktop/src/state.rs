@@ -102,7 +102,10 @@ pub enum Phase {
     Retained {
         /// Transcript kept in the pill so it is never lost.
         transcript: String,
-        /// Identifier reused by every retry, so a retry cannot duplicate.
+        /// Identifier reused by every retry, so an answer to any attempt is
+        /// an answer to this transcript. It is a correlation handle and not a
+        /// duplicate guard: nothing on the far side suppresses by it, and
+        /// `warned` is what stops a resend the person did not ask for.
         id: String,
         /// Why the submission did not land.
         reason: String,
@@ -353,9 +356,9 @@ pub struct Companion {
 impl Companion {
     /// Creates a closed pill with an unreachable service.
     ///
-    /// `prefix` must be unique per process. Identifiers survive a restart, so a
-    /// reused prefix could collide with an identifier the service already
-    /// acknowledged and would then suppress a genuinely new submission.
+    /// `prefix` must be unique per process. Identifiers survive a restart, and
+    /// they are how an answer is matched to the submission that asked, so a
+    /// reused prefix could have one submission take another's answer.
     pub fn new(prefix: impl Into<String>) -> Self {
         Self {
             phase: Phase::Resting,
@@ -491,8 +494,10 @@ impl Companion {
 
     /// Reopens the pill on a transcript recovered from a previous process.
     ///
-    /// The recovered identifier is kept, so resending cannot duplicate a
-    /// request the service already accepted.
+    /// The recovered identifier is kept, so an answer to the resend answers
+    /// the transcript the previous process was holding. What keeps it out of
+    /// the conversation twice is `Delivery::Uncertain` below, not the
+    /// identifier: nothing suppresses by identifier any more.
     pub fn restore(&mut self, pending: Pending) {
         if !matches!(self.phase, Phase::Resting) {
             return;

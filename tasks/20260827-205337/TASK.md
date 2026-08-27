@@ -1,8 +1,8 @@
 # Settle the submission identifier and its stale timer
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 85
-- TAGS: bug,desktop,service
+- TAGS: bug, desktop, service
 
 ## Source
 
@@ -85,3 +85,69 @@ Write that as a failing test first.
   repeated identifier is refused, and a check that the pill's
   `{prefix}-{n}` and the conversation window's `{prefix}-h{n}` still
   cannot collide.
+
+## Outcome (2026-08-27)
+
+### M1: documented, not restored
+
+Took the second option. The identifier is a correlation handle. Nothing
+suppresses by it, and the comments now say so.
+
+The guard is not gone, it moved. `Companion::restore` brings a recovered
+record back as `Delivery::Uncertain`, which is not editable and needs two
+Enters past an explicit warning. Read `restore` and every path that
+reaches it: there is no path that resends without asking. Adding an
+accepted-identifier set to the service would have added a second guard
+behind the one that already holds, and a table that grows for the life
+of the process.
+
+Both decisions the finding asked to revisit stand, on new grounds:
+
+- `clear_pending` stays quiet. Not because a resend cannot reach the
+  conversation twice, but because the person is asked before it does.
+  Reopening the pill on a failed removal would take a window back from
+  someone who just finished with it, to warn about something they are
+  going to be warned about anyway.
+- `process_prefix` keeps its 16 bytes. A collision no longer refuses a
+  genuine request; it does something worse. The service echoes the
+  identifier and nothing else names the submission, so two live
+  submissions sharing one take each other's answers.
+
+Seven comments rewritten: `app.rs` process_prefix, clear_pending, and
+the test at 2418; `state.rs` `Retained.id`, `Companion::new`, `restore`;
+`conversation.rs` `Conversation::new`. Plus `docs/src/dev/desktop.md`,
+which stated the deleted rule as the reason the conversation window
+takes a `-h` counter.
+
+### M2: fixed with a generation
+
+`App::submissions`, an `AtomicU64` beside `capture_generation`. `submit`
+claims a generation before anything can go out, so a later attempt has
+already retired this one's timer whichever of them the executor runs
+first. The timer returns if the count has moved.
+
+Guarded in `submit` rather than at `state.rs:780`, which the finding
+suggested. `Event::SubmissionUncertain` is also raised by the transport
+error path, which is not stale and carries no generation. Keeping the
+guard where the timer is spawned leaves that path alone.
+
+### Proof
+
+Written failing first, and it took three attempts to write one that
+fails. `expire()` fires every timer, so the live attempt's own timer
+settles the state legitimately and the assertion passes with the defect
+present. Firing two `expire_oldest()` calls assumed the stale timer was
+first; it is not - an interleaved task sits at index 0 and there are
+three pending timers, not two. What works: snapshot `pending_delays()`,
+fire all but the last one at a time, and assert the state stays `sent`
+throughout. Added `QueueExecutor::pending_delays` and `expire_oldest`
+for it.
+
+Verified both ways. With the guard disabled the test fails with "timer 2
+of 3 settled a submission that is still running". With it restored it
+passes.
+
+- `cargo test --workspace`: 336 passed, 0 failed.
+- `cargo clippy --workspace --all-targets`: clean.
+- `cargo fmt --all --check`: clean.
+- `npx prettier --check docs/src/dev/desktop.md`: clean.

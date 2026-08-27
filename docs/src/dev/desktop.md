@@ -375,7 +375,9 @@ Two rules follow, and they are the whole of the design.
 sends a typed line; both are a `submit` on the same socket, and both are the
 same message to the service. They share the process prefix, because that is
 what makes an identifier this companion's, and they cannot share the counter:
-the service suppresses duplicates by identifier, so a `-h` goes in the HUD's.
+an identifier is how an answer is matched to the line that asked, and two
+senders naming a line the same thing would take each other's answers, so a `-h`
+goes in the HUD's.
 
 **No durable copy.** The pill persists an accepted transcript because spoken
 words cannot be typed again, and this window persists nothing: the line is

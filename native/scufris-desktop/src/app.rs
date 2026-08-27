@@ -488,6 +488,17 @@ pub struct App {
     capture_generation: AtomicU64,
     /// The capture whose stream failed before its handle could be installed.
     failed_capture: AtomicU64,
+    /// Identifies the submission attempt the runtime is waiting on.
+    ///
+    /// The identifier cannot do it. A retry reuses the identifier of the
+    /// attempt it retries - that is what makes it a retry - so the
+    /// acknowledgement timers of the two attempts are indistinguishable to
+    /// `Event::SubmissionUncertain`, which matches on the identifier alone.
+    /// The first attempt's timer would then settle the second attempt: submit
+    /// at t=0, refused at t=2, retry at t=3, and at t=15 a twelve-second-old
+    /// live submission is frozen as uncertain with a forced-send warning it
+    /// has not earned. Same shape as [`App::capture_generation`], same reason.
+    submissions: AtomicU64,
     /// Counts the changes made to the companion, so the surfaces can tell a
     /// newer decision from an older one.
     decisions: AtomicU64,
@@ -529,6 +540,7 @@ impl App {
             tick: AtomicU64::new(0),
             capture_generation: AtomicU64::new(0),
             failed_capture: AtomicU64::new(0),
+            submissions: AtomicU64::new(0),
             decisions: AtomicU64::new(0),
             surface: Ordered::default(),
             // The pill window is built hidden.
@@ -542,11 +554,20 @@ impl App {
 
     /// Returns a per-process identifier prefix.
     ///
-    /// Submission identifiers outlive the process that made them and are what
-    /// the daemon suppresses duplicates by, so a collision would have a
-    /// genuinely new request refused. A process identifier and a clock are not
-    /// enough - identifiers are reused and clocks move backwards - so the
-    /// prefix is drawn from the operating system's randomness.
+    /// Submission identifiers outlive the process that made them, and they are
+    /// how an answer is matched to the request that asked: the service echoes
+    /// the identifier and nothing else names the submission. Two live
+    /// submissions sharing one would take each other's answers. A process
+    /// identifier and a clock are not enough - identifiers are reused and
+    /// clocks move backwards - so the prefix is drawn from the operating
+    /// system's randomness.
+    ///
+    /// It is not a duplicate guard. Protocol v2 suppressed by identifier and
+    /// the inversion deleted that; the service keys its own pending table by
+    /// its own correlation and never looks the client's identifier up. What
+    /// stops a transcript reaching the conversation twice is that every resend
+    /// goes through [`crate::state::Delivery::Uncertain`], which is not
+    /// editable and takes two Enters past a warning. The person is the guard.
     pub fn process_prefix() -> String {
         let mut bytes = [0u8; 16];
         if let Err(error) = getrandom::fill(&mut bytes) {
@@ -1331,8 +1352,12 @@ impl App {
     ///
     /// A removal that keeps failing is logged rather than reopening the pill the
     /// user just finished with. The record left behind is recovered on the next
-    /// start and resent under its original identifier, which the daemon
-    /// suppresses idempotently, so it cannot reach the conversation twice.
+    /// start under its original identifier, and the identifier is not what
+    /// keeps it out of the conversation twice - nothing suppresses by it any
+    /// more. [`crate::state::Companion::restore`] is what does: a recovered
+    /// record comes back as [`crate::state::Delivery::Uncertain`], which is not
+    /// editable and needs two Enters past an explicit warning, so it is resent
+    /// only if the person says to.
     fn clear_pending(&self) {
         for attempt in 1..=CLEAR_ATTEMPTS {
             match self.ports.pending.clear() {
@@ -1479,6 +1504,9 @@ impl App {
     }
 
     fn submit(self: &Arc<Self>, id: String, text: String) {
+        // Claimed before anything can go out, so a later attempt has already
+        // retired this one's timer whichever of them the executor runs first.
+        let generation = self.submissions.fetch_add(1, Ordering::SeqCst) + 1;
         let backend = self
             .backend
             .lock()
@@ -1500,6 +1528,12 @@ impl App {
         self.ports.executor.spawn_after(
             self.ports.ack_timeout,
             Box::new(move || {
+                // This attempt's, or nobody's. A retry reuses the identifier,
+                // so the identifier cannot tell the two timers apart and the
+                // older one would settle the newer attempt.
+                if runtime.submissions.load(Ordering::SeqCst) != generation {
+                    return;
+                }
                 runtime.handle(Event::SubmissionUncertain {
                     id,
                     reason: "The backend did not confirm delivery.".into(),
@@ -1894,6 +1928,29 @@ mod tests {
             for task in tasks {
                 task();
             }
+            self.drain();
+        }
+
+        /// How many timeouts are still waiting to be fired.
+        fn pending_delays(&self) -> usize {
+            self.delayed.lock().unwrap().len()
+        }
+
+        /// Fires the oldest pending timeout only, then settles its work.
+        ///
+        /// The delay is discarded here, so two timeouts that were set fifteen
+        /// seconds apart in real time are indistinguishable to [`Self::expire`]:
+        /// it runs both, and whichever acts first decides. When what is being
+        /// tested is which of two timers may act, they have to be fired one at
+        /// a time.
+        fn expire_oldest(&self) {
+            let mut delayed = self.delayed.lock().unwrap();
+            if delayed.is_empty() {
+                return;
+            }
+            let task = delayed.remove(0);
+            drop(delayed);
+            task();
             self.drain();
         }
     }
@@ -2361,9 +2418,10 @@ mod tests {
         harness.app.handle(Event::Acknowledged("pill-1".into()));
         harness.executor.drain();
 
-        // Retried, then left for the next start to recover and resend under the
-        // same identifier, which the daemon suppresses. The resident pill
-        // stays up, at rest.
+        // Retried, then left for the next start to recover. It comes back as
+        // uncertain and is resent only if the person says to, which is what
+        // makes leaving it safe: nothing suppresses by identifier any more.
+        // The resident pill stays up, at rest.
         assert_eq!(harness.store.clears.load(Ordering::Relaxed), 2);
         assert_eq!(harness.surface.hidden.load(Ordering::Relaxed), 0);
         assert!(harness.surface.on_screen());
@@ -2619,6 +2677,36 @@ mod tests {
         let submissions = harness.backend.submissions.lock().unwrap().clone();
         assert_eq!(submissions.len(), 2);
         assert_eq!(submissions[1].0, "pill-1");
+
+        // M2. Both attempts left an acknowledgement timer behind, and the retry
+        // reused the identifier - that is what makes it a retry - so the first
+        // attempt's timer matches the second attempt's phase, and the guard at
+        // `state.rs` is the identifier alone. Unguarded, the older timer
+        // freezes a live submission as uncertain with a forced-send warning it
+        // has not earned. In real time it is worse than it reads here: the
+        // first timer fires fifteen seconds after the first attempt, which is
+        // twelve seconds into the second one, and a retry issued fourteen
+        // seconds after the original would get a one-second deadline.
+        assert_eq!(harness.surface.last().state, "sent");
+        // The live attempt's timer is the last one queued, so nothing may
+        // settle this submission before every earlier timer has run. Fired one
+        // at a time, because `expire` discards the delay and runs both, and
+        // then whichever acts first decides.
+        let waiting = harness.executor.pending_delays();
+        for fired in 1..waiting {
+            harness.executor.expire_oldest();
+            assert_eq!(
+                harness.surface.last().state,
+                "sent",
+                "timer {fired} of {waiting} settled a submission that is still running"
+            );
+        }
+
+        // The guard retires older attempts and nothing else. The live
+        // attempt's own timer still has to fire, or a service that stopped
+        // answering would leave the pill saying `sent` for good.
+        harness.executor.expire();
+        assert_eq!(harness.surface.last().state, "uncertain");
     }
 
     /// An answer can arrive before the handoff has finished running. The

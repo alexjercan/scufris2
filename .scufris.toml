@@ -1,19 +1,18 @@
-[preferences.tracking]
-keywords = { tool = "tatr", scope = "one-task-per-request" }
+# Scufris reads this file as a menu, not a workflow. Conventions are inferred
+# when the request is silent. Agents run only when the request names them.
+
+[conventions]
+keywords = { tracking = "tatr", scope = "one-task-per-request", workspace = "sprout", base = "master", typescript = "npm run check", packaging = "nix flake check", landing = "explicit" }
 guidance = """
 Use Tatr for substantial tracked work. Keep one task for one request and its
 follow-up work. Record decisions and verification evidence under the task.
-Skip task creation when the user explicitly requests untracked work.
+Keep the main checkout on master and do project work in a Sprout worktree.
+Run the cheapest relevant focused check first. Land a Sprout only when the
+request asks for it.
 """
 
-[preferences.workspace]
-keywords = { workspace = "sprout", base = "master" }
-guidance = """
-Use a Sprout workspace for project implementation. Keep the main checkout on
-master and land the completed Sprout explicitly.
-"""
-
-[preferences.implementation]
+[agents.work]
+description = "Implement a change in the project."
 keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
 guidance = """
 Keep orchestration narrow. Prefer product skills and small deterministic
@@ -21,32 +20,24 @@ helpers over extension complexity. Follow repository AGENTS.md instructions and
 existing conventions.
 """
 
-[preferences.independent-review]
-keywords = { review = "independent-review", order = "first", harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
+[agents.review]
+description = "Read finished work independently and report findings."
+keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium", spawn = "review_of" }
 guidance = """
-Repeat the implementation -> independent read-only review cycle, resolving its
-findings each round, until the reviewer approves.
+Read-only against the implementation job's exact workspace. Report concrete
+findings with paths and lines. Keep one review job for the work: spawn it for
+the first round, then steer that same job with scufris_job_send for each later
+round, because a fresh reviewer has no record of what it already accepted.
+Spawn a second review job only when no owned review job covers this work.
+Repeat the implement-then-review cycle only for as long as the request asked
+for.
 """
 
-[preferences.quick-review]
-keywords = { review = "quick-review", order = "second", harness = "pi", mode = "rpc", model = "openai-codex/gpt-5.6-sol", thinking = "medium", extension = "npm:@alexjercan/quick-review@0.1.1" }
+[agents.quick-review]
+description = "Open the Quick Review walkthrough page for the user to approve."
+keywords = { tool = "scufris_job_quick_review", harness = "pi", mode = "rpc", model = "openai-codex/gpt-5.6-sol", thinking = "medium", extension = "npm:@alexjercan/quick-review@0.1.1" }
 guidance = """
-After independent review approves, start the standalone Quick Review extension
-in its separate Pi RPC agent once as the final user approval gate. Keep
+Start the standalone Quick Review extension in its separate Pi RPC agent. Keep
 foreground Scufris responsive while that agent writes the walkthrough and
-answers page questions. Do not use these Pi RPC settings for independent review.
-"""
-
-[preferences.verification]
-keywords = { verification = "focused", typescript = "npm run check", packaging = "nix flake check" }
-guidance = """
-Run the cheapest relevant focused checks first. Use focused integration tests
-and small end-to-end examples where practical.
-"""
-
-[preferences.landing]
-keywords = { landing = "sprout", gate = "quick-review-approval" }
-guidance = """
-Land the approved Sprout with the guarded Sprout landing operation. Never infer
-landing from worker completion or independent review.
+answers page questions. Do not use these Pi RPC settings for the review agent.
 """

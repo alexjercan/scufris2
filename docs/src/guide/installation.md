@@ -9,7 +9,7 @@ Install Nix with flakes enabled.
 Run the normal package from the current release tag:
 
 ```bash
-nix run github:alexjercan/scufris2/v0.3.0#scufris
+nix run github:alexjercan/scufris2/v0.4.0#scufris
 ```
 
 There is one launcher and no voice variant of it. Nothing in the agent's
@@ -31,7 +31,7 @@ Pin a release tag and share `nixpkgs` with the parent flake:
 ```nix
 {
   inputs.scufris = {
-    url = "github:alexjercan/scufris2/v0.3.0";
+    url = "github:alexjercan/scufris2/v0.4.0";
     inputs.nixpkgs.follows = "nixpkgs";
   };
 }
@@ -42,8 +42,12 @@ Release tags are immutable inputs. Update the tag deliberately.
 Packages:
 
 - `default` and `scufris`: the launcher.
-- `scufris-desktop`: the Linux-only voice pill and tray companion. It is a
-  separate output, so nothing else pulls Tauri into its closure.
+- `scufris-service`: the background service that owns the conversation. It
+  builds with no graphical dependency, so a machine with no display can run it.
+- `scufris-ctl`: the terminal client of that service.
+- `scufris-desktop`: the Linux-only companion - the voice pill, the
+  conversation window, the widget runtime, and the tray. It is a separate
+  output, so nothing else pulls Tauri into its closure.
 - `scufris-speak`: the Linux-only synthesiser the companion runs, with the
   voice pinned by the package.
 - `resources`: extensions, skills, and deterministic tools. No synthesiser is
@@ -65,8 +69,8 @@ Import the module from the pinned flake input:
 }
 ```
 
-This installs the rendered launcher in `home.packages`. The workflow,
-response, Calm, and desktop extensions are always present.
+This installs the rendered launcher in `home.packages`. All six extensions are
+always present: workflow, response, Calm, service, widgets, and conversation.
 
 The default Pi package comes from the pinned `llm-agents.nix` input. A
 configuration that manages Pi itself can pass its own package:

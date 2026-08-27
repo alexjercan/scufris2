@@ -1,6 +1,6 @@
 # Bring the documentation up to the inverted tree
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 65
 - TAGS: documentation
 
@@ -64,3 +64,61 @@ also still describes the product without the service.
 - Read the rendered mdBook rather than trusting exit status. Every claim
   changed here should be checked against the tree it describes, not
   against another document.
+
+## Outcome (2026-08-27)
+
+Landed as two commits: the five findings, then a vocabulary sweep the
+third of them turned out to be one instance of.
+
+### M7, m10, m11, m12, m14
+
+All five as written. Beyond them:
+
+- `architecture.md` also described a resources derivation with a normal
+  and a voice variant. There is one, and it removes the development
+  launcher and `tools/voice`. It also said the companion is absent from
+  "the default and voice launcher closures"; there is one launcher.
+- The `orchestrator` role no longer activates a speech module.
+- m11's second half was the more interesting one. `nix/checks/home.nix`
+  said "Voice changes which resources the agent is handed and nothing
+  else", and it changes nothing about the agent at all: it asserts the
+  platform and appends `SCUFRIS_DESKTOP_SPEAK_COMMAND` to the desktop
+  unit. The check below the comment is still worth having - it proves
+  the voice-enabled launcher carries no synthesiser - so the check
+  stands and the reason is rewritten.
+- The chat hook opened "the full popup chat" in three comments. The
+  popup is gone; it opens a terminal, usually around
+  `scufris-ctl debug`.
+
+### What reading the rendered book found
+
+The proof said to read the render rather than trust exit status, and it
+paid:
+
+- `installation.md` pinned `v0.3.0` in two places, one release behind.
+- Its package list omitted `scufris-service` and `scufris-ctl`, which
+  are the halves this range is about, and called the companion the
+  "voice pill and tray companion".
+- "The workflow, response, Calm, and desktop extensions are always
+  present" named the deleted `desktop` extension and left out three.
+
+### The sweep
+
+m12's fourth bullet was `config.rs` calling the service socket the
+"Daemon control socket". Fixing it showed the word fifty-odd more times
+across the companion. The daemon was version 2's popup Pi process, so a
+reader looking for it finds nothing.
+
+Replaced by what each site actually means: mostly the service, the agent
+where the comment is about naming a widget or typing a tool from the
+catalog, and Scufris where the contrast is with the person acting on
+their own desktop. `scufris-control` keeps the word where it describes
+version 2 as history. Two log lines and one test name changed with it.
+
+### Proof
+
+- `nix flake check`: all checks passed.
+- `nix build .#docs`: builds, and the three changed chapters were read
+  as rendered text rather than as source.
+- `npm run check`: typecheck, 79 tests, format, clean.
+- `cargo test --workspace`: 336 passed. `cargo clippy`: clean.

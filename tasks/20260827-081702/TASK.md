@@ -479,3 +479,39 @@ It is unrelated to this increment, which touches nothing in the widget
 runtime, and it is a real gap rather than only a slow test: a panel that
 subscribes to an already-running shared backend is never handed the last
 reading. Filed as `20260827-142259` (p80).
+
+## The silent agent (2026-08-27)
+
+An afternoon went to this, so the service now says it.
+
+The service reads Pi's own RPC event stream for the state and the transcript.
+An agent carrying none of the Scufris extensions therefore holds a working
+conversation: it answers, the transcript fills, `send` works. What it cannot do
+is everything only the agent reports - what it said, the paragraph to speak,
+and every widget command - and none of that fails loudly. The symptom is a pill
+that goes straight to idle and a speaker that never makes a sound, which is
+indistinguishable from a broken synthesiser.
+
+The cause here was an older `scufris` earlier on `PATH`, built before the
+inversion, with no `service/index.ts` in its extension list.
+
+`Service::start_agent` now clears `agent_joined` and starts a watcher thread.
+Ten seconds later `report_a_silent_agent` warns if that generation's agent is
+still running and has never registered in the `agent` role, and names the
+binary. Ten seconds because this is a Node process loading extensions, and the
+cost of saying it too early is a warning about nothing.
+
+`agent_is_silent(generation)` is the predicate, split out so a test does not
+have to wait for the grace. The generation is what makes a late watcher
+harmless: an agent that has already been replaced is not the one anybody is
+waiting on.
+
+### Verification
+
+- `cargo test -p scufris-service` - pass, 43, including the new
+  `an_agent_that_never_connects_back_is_noticed`. It starts a real `/bin/sh`
+  agent that reads its stdin, so the running-agent case is reachable, and
+  asserts both directions plus the stale generation.
+- `cargo test --workspace`, `cargo clippy --workspace --all-targets -D
+warnings`, `cargo fmt --all` - clean.
+- `nix flake check --offline` - pass.

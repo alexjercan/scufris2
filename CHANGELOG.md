@@ -22,6 +22,12 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   its session where you are; closing the terminal gives it back, so there is no
   way to be left detached with nothing to put it back. `scufris-ctl` is now its
   own package, installed by whichever half of Scufris you enable.
+- The service says so when the agent it started never connects back to it. Such
+  an agent still holds a conversation, because the service reads Pi's own
+  events, but it can report nothing it said, nothing to speak, and no widget,
+  which looks exactly like a broken speaker. The usual cause is a `scufris` from
+  somewhere else on `PATH`, built without the service extension, so the warning
+  names the binary it started.
 
 - Native widgets. Scufris can open a small panel on the desktop while it
   answers: an exhibit on a shelf above the pill, which ages out on its own, or

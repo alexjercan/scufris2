@@ -62,7 +62,10 @@ cargo run --manifest-path native/scufris-desktop/Cargo.toml
 `--agent` is optional when a `scufris` is already on `PATH`; the service takes
 the first one it finds. It must be a program the service can start in RPC mode
 on a session directory of its choosing, so `scripts/scufris-dev`, which picks
-its own session directory, is not one.
+its own session directory, is not one. Name the build explicitly while a stale
+`scufris` is on `PATH`: one without the `service` extension answers normally and
+speaks nothing, and the service says so ten seconds in. See
+[Background service](service.md).
 
 Then press `Super+D`, speak, and press it again. The take stops and the words
 arrive in a textbox above the pill, where `Enter` sends them to the agent the

@@ -159,6 +159,14 @@ Both must be absolute; a relative path is refused rather than resolved against
 the working directory. `RUST_LOG` sets the log directives. Logs go to journald
 under systemd and to stderr from a terminal.
 
+`--agent` must name a Scufris that carries the `service` extension. One that
+does not still holds a working conversation, because the state and the
+transcript come off Pi's own event stream, but it reports nothing it said,
+nothing to speak, and no widget, which looks exactly like a broken speaker. The
+service warns about it, and names the binary it started, ten seconds after the
+agent has not connected back. The usual cause is an older `scufris` earlier on
+`PATH`.
+
 ## Running it by hand
 
 ```bash

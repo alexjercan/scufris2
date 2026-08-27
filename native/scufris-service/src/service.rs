@@ -65,6 +65,12 @@ const RESTART_DELAY: Duration = Duration::from_secs(1);
 /// How many quick deaths in a row stop the service from trying again.
 const MAX_FAILURES: u32 = 3;
 
+/// How long the agent has to connect back before the service says it has not.
+///
+/// Generous, because this is a Node process loading extensions and the cost of
+/// saying it too early is a warning about nothing.
+const HELLO_GRACE: Duration = Duration::from_secs(10);
+
 /// What a widget command is answered with when there is no screen to open it
 /// on. The agent is waiting on an answer, so silence would hang it.
 const NO_FRONTEND: &str = "no_frontend";
@@ -88,6 +94,13 @@ struct Inner {
     generation: u64,
     /// When the current agent started, for telling a crash loop from a crash.
     started: Instant,
+    /// Whether the current agent has connected back as a client.
+    ///
+    /// The service reads Pi's own event stream, so an agent carrying none of
+    /// the Scufris extensions still holds a working conversation. What is
+    /// missing is only what the agent alone can say, so nothing fails and
+    /// nothing is reported. This is what makes that visible.
+    agent_joined: bool,
     failures: u32,
     state: ScufrisState,
     detail: String,
@@ -241,6 +254,7 @@ impl Service {
                 agent: None,
                 generation: 0,
                 started: Instant::now(),
+                agent_joined: false,
                 failures: 0,
                 state: ScufrisState::Starting,
                 detail: String::new(),
@@ -260,6 +274,40 @@ impl Service {
         self.inner.lock().unwrap_or_else(|held| held.into_inner())
     }
 
+    /// Says so when the agent this service started never connected to it.
+    ///
+    /// It is not a fault and nothing is stopped: the state, the transcript and
+    /// `send` all come off Pi's own event stream, so the conversation works.
+    /// What silently does not is everything only the agent can report - what
+    /// it answered, the paragraph to speak, and every widget command - and the
+    /// result looks exactly like a broken speaker. The binary is named because
+    /// the usual cause is a `scufris` from somewhere else on `PATH`, built
+    /// without the service extension.
+    fn report_a_silent_agent(&self, generation: u64) {
+        if !self.agent_is_silent(generation) {
+            return;
+        }
+        warn!(
+            agent = %self.config.agent.display(),
+            "the agent has not connected to the service: it cannot report what it said, \
+             what to speak, or any widget. It is probably built without the Scufris \
+             service extension. Point --agent or SCUFRIS_SERVICE_AGENT at one that has it."
+        );
+    }
+
+    /// Whether the agent of `generation` is the one running and has never
+    /// connected.
+    ///
+    /// The generation is what makes a late watcher harmless: an agent that has
+    /// already been replaced is not the one anybody is waiting on.
+    fn agent_is_silent(&self, generation: u64) -> bool {
+        let inner = self.lock();
+        !inner.stopping
+            && inner.generation == generation
+            && inner.agent.is_some()
+            && !inner.agent_joined
+    }
+
     /// Starts the agent, unless one is running, a lease holds it, or the
     /// service is shutting down.
     pub fn start_agent(self: &Arc<Self>) {
@@ -269,6 +317,7 @@ impl Service {
         }
         inner.generation += 1;
         inner.started = Instant::now();
+        inner.agent_joined = false;
         let generation = inner.generation;
         let (agent, streams) = match Agent::start(&self.config) {
             Ok(started) => started,
@@ -300,6 +349,15 @@ impl Service {
             .name("scufris-agent-stderr".into())
             .spawn(move || drain_stderr(streams.stderr))
             .expect("the stderr thread starts");
+
+        let waiting = Arc::clone(self);
+        thread::Builder::new()
+            .name("scufris-agent-hello".into())
+            .spawn(move || {
+                thread::sleep(HELLO_GRACE);
+                waiting.report_a_silent_agent(generation);
+            })
+            .expect("the hello thread starts");
 
         // The one command nobody asked for. Its answer is how the service
         // learns which session file the conversation is in, which is the one
@@ -490,6 +548,10 @@ impl Service {
                 }
             }
             Role::Agent => {
+                if !inner.agent_joined {
+                    inner.agent_joined = true;
+                    info!("the agent is a client of the service");
+                }
                 // The agent is replaced under the frontend every time a debug
                 // lease ends, and the catalog was announced once, long before
                 // that. Remembering it is what makes the new agent's widget
@@ -1298,5 +1360,50 @@ mod tests {
         service.start_agent();
         assert_eq!(service.lock().state, ScufrisState::Error);
         assert_eq!(service.lock().failures, 1);
+    }
+
+    #[test]
+    fn an_agent_that_never_connects_back_is_noticed() {
+        // A running agent is what makes this reachable, and a `/bin/sh` script
+        // that reads its stdin is one: it stays up until the service says
+        // goodbye and it connects to nothing, which is the whole case.
+        let home = std::env::temp_dir().join(format!("scufris-silent-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let script = home.join("scufris");
+        std::fs::write(&script, "#!/bin/sh\ncat >/dev/null\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let service = Service::new(Config {
+            agent: script,
+            session_dir: home.join("sessions"),
+            socket: home.join("service.sock"),
+            working_dir: home.clone(),
+        });
+        service.start_agent();
+        let generation = service.lock().generation;
+        assert!(
+            service.agent_is_silent(generation),
+            "an agent that has said nothing was taken for one that had"
+        );
+
+        // Connecting in the agent role is the hello. Nothing else counts: a
+        // frontend is not the half that reports what was said.
+        connect(&service, 1, Role::Frontend);
+        assert!(service.agent_is_silent(generation));
+        connect(&service, 2, Role::Agent);
+        assert!(
+            !service.agent_is_silent(generation),
+            "the agent connected and was still called silent"
+        );
+
+        // The watcher for an agent that has been replaced says nothing, so a
+        // restart is never reported against whoever is running now.
+        assert!(!service.agent_is_silent(generation - 1));
+
+        service.shutdown();
+        std::fs::remove_dir_all(&home).unwrap();
     }
 }

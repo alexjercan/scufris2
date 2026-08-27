@@ -790,17 +790,10 @@ impl Service {
     /// The lease belongs to this connection from here until it closes.
     pub fn begin_debug(&self, client: u64, id: String) {
         let mut inner = self.lock();
-        if inner.lease.is_some() {
-            inner.send(
-                client,
-                ServiceBody::Refused {
-                    id,
-                    code: refusal::DEBUG_HELD.into(),
-                    detail: "a terminal already has the session".into(),
-                },
-            );
-            return;
-        }
+        // The role first: a frontend could never hold the lease, so telling it
+        // somebody else has one answers a question it did not ask and hides the
+        // one thing it needs to know. With no lease held the same client is
+        // already told the truth.
         if inner.clients.get(&client).map(|held| held.role) != Some(Role::Control) {
             inner.send(
                 client,
@@ -808,6 +801,17 @@ impl Service {
                     id,
                     code: refusal::WRONG_ROLE.into(),
                     detail: "only a control client may take the session".into(),
+                },
+            );
+            return;
+        }
+        if inner.lease.is_some() {
+            inner.send(
+                client,
+                ServiceBody::Refused {
+                    id,
+                    code: refusal::DEBUG_HELD.into(),
+                    detail: "a terminal already has the session".into(),
                 },
             );
             return;
@@ -1220,6 +1224,28 @@ mod tests {
             }]
         );
         assert_eq!(service.lock().state, ScufrisState::Starting);
+    }
+
+    #[test]
+    fn a_frontend_is_told_its_role_rather_than_who_holds_the_lease() {
+        let service = service();
+        let holder = connect(&service, 1, Role::Control);
+        let inbox = connect(&service, 2, Role::Frontend);
+        service.begin_debug(1, "c-1".into());
+        drain(&holder);
+        drain(&inbox);
+        // The same refusal either way. A frontend could never hold the lease,
+        // so `debug_held` would answer a question it did not ask and hide the
+        // one thing it needs to know about itself.
+        service.begin_debug(2, "c-2".into());
+        assert_eq!(
+            drain(&inbox),
+            [ServiceBody::Refused {
+                id: "c-2".into(),
+                code: refusal::WRONG_ROLE.into(),
+                detail: "only a control client may take the session".into(),
+            }]
+        );
     }
 
     #[test]

@@ -21,6 +21,12 @@ HELPER = REPOSITORY / "tools" / "jobs" / "scufris-jobs"
 REPORTER = REPOSITORY / "tools" / "jobs" / "scufris-report"
 MENU_FIXTURE = "scufris-menu.toml"
 
+#: Sprout is a separate tool on the person's own path and not something this
+#: repository builds. The tests that make a Sprout workspace run it for real,
+#: so on a machine without it they say they were skipped rather than failing
+#: on a program they were never given.
+SPROUT = shutil.which("sprout")
+
 FAKE_PI = """#!/usr/bin/env python3
 import os
 import pathlib
@@ -1919,6 +1925,7 @@ with (directory / 'status').open('a') as stream:
             "Use the safe default.", (directory / "conversation.md").read_text()
         )
 
+    @unittest.skipUnless(SPROUT, "sprout is not installed")
     def test_project_configuration_drift_refuses_sprout_cleanup(self) -> None:
         context = self.call("context", {"project": "projects/nova-protocol"})["result"]
         job_id = "901122334455"
@@ -2008,6 +2015,7 @@ with (directory / 'status').open('a') as stream:
                 jobs_module.stop_execution(hijacked, snapshot)
             call.assert_not_called()
 
+    @unittest.skipUnless(SPROUT, "sprout is not installed")
     def test_sprout_job_has_explicit_review_target_and_guarded_landing(self) -> None:
         context = self.call("context", {"project": "projects/nova-protocol"})["result"]
         job_id = "999aaa888bbb"

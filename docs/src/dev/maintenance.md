@@ -168,7 +168,10 @@ with a short `TMPDIR` such as `/tmp`.
 
 `npm run check` runs strict TypeScript, the Node test suite, and Prettier.
 `nix flake check` builds the launcher, resources, Home Manager
-configurations, closure separation, the real Piper fixture, and this manual.
+configurations, closure separation, the real Piper fixture, and this manual,
+and its `helper-tests` derivation runs the Python suite above. Sprout is not
+part of the flake, so the two tests that make a Sprout workspace skip where it
+is not installed.
 
 Test ownership:
 
@@ -189,6 +192,10 @@ Test ownership:
 - `tests/test_quick_review_agent.py`: the strict RPC adapter, pinned npm
   extension invocation, resource isolation, and completion relay.
 - `tests/test_scufris_artifacts_prune.py`: sidecar pruning.
+- `tests/test_usage_backends.py`: what the subscription backends make of an
+  answer. Nothing here reaches the network, and one test names the only three
+  fields a window may carry, because the answers behind them carry the account
+  as well.
 
 ## Documentation
 

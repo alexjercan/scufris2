@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  MAX_TRANSCRIPT_TEXT_BYTES,
   ProtocolError,
   decodeServiceMessage,
   encodeClientMessage,
@@ -63,6 +64,23 @@ class FakeService {
   /** Waits until at least `count` lines have arrived. */
   async until(count: number): Promise<string[]> {
     while (this.lines.length < count) {
+      await new Promise<void>((resolve) => {
+        this.waiting = resolve;
+      });
+    }
+    this.waiting = undefined;
+    return this.lines;
+  }
+
+  /**
+   * Waits until one line contains `needle`, and returns every line so far.
+   *
+   * For a test where a line before the marker may or may not be sent. Counting
+   * would wait for a total that a dropped line never reaches, so the test that
+   * meant to fail would hang instead.
+   */
+  async untilLine(needle: string): Promise<string[]> {
+    while (!this.lines.some((line) => line.includes(needle))) {
       await new Promise<void>((resolve) => {
         this.waiting = resolve;
       });
@@ -245,6 +263,49 @@ test("the client says hello as an agent and carries what it is told to say", asy
       '{"v":3,"type":"said","text":"the harness is green"}',
       '{"v":3,"type":"speak","text":"the harness is green"}',
     ]);
+  } finally {
+    client.stop();
+    await listening.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a line too long to send is cut without breaking a character", async () => {
+  const root = await scratch("bounded");
+  const socketPath = join(root, "service.sock");
+  const listening = await FakeService.listen(socketPath);
+  const raised: string[] = [];
+  const client = new ServiceClient({
+    socketPath,
+    widgetTimeoutMs: 200,
+    log: (message, level) => {
+      if (level === "error") raised.push(message);
+    },
+  });
+  try {
+    client.start();
+    await listening.until(1);
+
+    // Four UTF-8 bytes each and two UTF-16 units each, so a cut taken on
+    // `string.length` lands between the halves of one of them and the encoder
+    // refuses the lone surrogate that leaves. The line this exists to preserve
+    // would be the thing it dropped.
+    const astral = "\u{1F600}".repeat(2000);
+    client.said(astral);
+    // A second line, and the one waited for, so a dropped first one fails on
+    // the count below rather than on a line that never arrives.
+    client.said("after");
+    const sent = (await listening.untilLine('"after"')).slice(1);
+    assert.equal(sent.length, 2);
+    const text = JSON.parse(sent[0]!).text as string;
+
+    assert.ok(Buffer.byteLength(text, "utf8") <= MAX_TRANSCRIPT_TEXT_BYTES);
+    // Every code point survived whole. A cut through one would have left an
+    // unpaired half, which the encoder refuses, so the line would not be here.
+    assert.equal(text, "\u{1F600}".repeat([...text].length));
+    assert.ok(text.length > 0);
+    // And nothing was dropped in silence.
+    assert.deepEqual(raised, []);
   } finally {
     client.stop();
     await listening.close();

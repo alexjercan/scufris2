@@ -36,5 +36,6 @@ Global `~/AGENTS.md` applies. This file defines project-specific instructions.
 - Keep `README.md` to the description and Quickstart. Put durable documentation
   in the mdBook under `docs/`.
 - Prefer focused integration tests and small end-to-end examples.
-- Run the cheapest relevant check. Use `npm run check` for TypeScript behavior
-  and `nix flake check` for broad package integration.
+- Run the cheapest relevant check. Use `npm run check` for TypeScript behavior,
+  `python3 -m unittest discover -s tests -p 'test_*.py'` for the Python
+  helpers, and `nix flake check` for broad package integration.

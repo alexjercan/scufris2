@@ -16,7 +16,10 @@
 use std::{
     fs,
     io::BufReader,
-    os::unix::{fs::PermissionsExt, net::UnixListener},
+    os::unix::{
+        fs::PermissionsExt,
+        net::{UnixListener, UnixStream},
+    },
     path::{Path, PathBuf},
     thread,
 };
@@ -60,7 +63,8 @@ pub fn listen(
     Ok(listening)
 }
 
-/// Makes the socket, replacing one an earlier run left behind.
+/// Makes the socket, replacing one an earlier run left behind and refusing to
+/// displace a companion that is still answering on it.
 fn bind(path: &Path) -> Result<UnixListener, String> {
     let directory = path
         .parent()
@@ -73,6 +77,19 @@ fn bind(path: &Path) -> Result<UnixListener, String> {
     // killed leaves one behind that nothing is listening on. Removed rather
     // than refused: the alternative is a companion that will not start until
     // the person deletes a file.
+    //
+    // One that still answers is a companion that is running, and taking its
+    // socket is worse than not starting. It would answer every verb the window
+    // manager sends from then on, and `unbind` at the end of the shorter life
+    // would take the file with it, leaving the first companion running and
+    // unreachable. The same policy as the service's own socket
+    // (`scufris-service`'s `server::bind`), and for the same reason.
+    if UnixStream::connect(path).is_ok() {
+        return Err(format!(
+            "another companion is already listening on {}",
+            path.display()
+        ));
+    }
     match fs::remove_file(path) {
         Ok(()) => debug!(socket = %path.display(), "an earlier command socket was removed"),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -124,9 +141,12 @@ fn read(stream: &mut std::os::unix::net::UnixStream) -> Result<Verb, String> {
 
 /// Removes the socket file. The companion is going away.
 ///
-/// Not required for correctness - the next start clears whatever it finds -
-/// but a socket file with nothing behind it makes `scufris-ctl` report a
-/// connection refused rather than a companion that is not running.
+/// Not required for correctness - the next start clears a socket nothing
+/// answers on - but a socket file with nothing behind it makes `scufris-ctl`
+/// report a connection refused rather than a companion that is not running.
+///
+/// Only ever the socket this companion bound. A companion that was refused the
+/// name never managed one, so the file it would remove here is somebody else's.
 pub fn unbind(path: &Path) {
     match fs::remove_file(path) {
         Ok(()) => debug!(socket = %path.display(), "the command socket was removed"),
@@ -254,15 +274,43 @@ mod tests {
 
     #[test]
     fn a_socket_an_earlier_run_left_behind_is_replaced_rather_than_refused() {
-        let socket = Listening::new("stale", Outcome::Taken);
-        // The file is there and something is behind it. A second listener on
-        // the same path is what a companion restarting looks like.
-        let second = listen(socket.path.clone(), |_| Outcome::Taken).expect("it binds again");
-        assert_eq!(second, socket.path);
+        let path = std::env::temp_dir()
+            .join(format!(
+                "scufris-command-{}-{}-stale",
+                std::process::id(),
+                SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            ))
+            .join("desktop.sock");
+        // What a companion that was killed leaves: the file is there and
+        // nothing is behind it. Dropping the listener closes the socket and
+        // keeps the name, which is the same thing the process going away does.
+        std::fs::create_dir_all(path.parent().expect("it has a directory")).expect("it is made");
+        drop(UnixListener::bind(&path).expect("the stale socket is made"));
+        assert!(path.exists());
+
+        let second = listen(path.clone(), |_| Outcome::Taken).expect("it binds again");
+        assert_eq!(second, path);
+        assert!(UnixStream::connect(&path).is_ok());
+        unbind(&path);
+    }
+
+    /// The companion that has the socket is the one the window manager reaches.
+    /// Taking the name from it would answer every verb from then on, and give
+    /// the file back on the shorter life's way out, leaving the first
+    /// companion running and unreachable.
+    #[test]
+    fn a_socket_a_companion_is_still_answering_on_is_left_to_it() {
+        let socket = Listening::new("live", Outcome::Taken);
+        let refused =
+            listen(socket.path.clone(), |_| Outcome::Taken).expect_err("the socket still answers");
+        assert!(
+            refused.contains("already listening"),
+            "it says why: {refused}"
+        );
+        // The first companion kept it, and still hears what arrives.
         let line = serde_json::to_string(&Command::new(Verb::Open)).expect("it encodes");
         assert_eq!(socket.say(&line).outcome, Outcome::Taken);
-        // The first listener no longer has the name, so it heard nothing.
-        assert!(socket.verbs().is_empty());
+        assert_eq!(socket.verbs(), vec![Verb::Open]);
     }
 
     #[test]

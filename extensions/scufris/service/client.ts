@@ -323,7 +323,12 @@ export class ServiceClient implements DesktopControl {
     try {
       socket.write(encodeClientMessage(message));
     } catch (error) {
-      this.log(`${message.type} was not sent: ${String(error)}`, "info");
+      // Raised rather than noted. This is the one place a message Scufris
+      // meant to send is dropped with nothing left to say it was, and the
+      // socket having gone away is already handled above - what reaches here
+      // is the encoder refusing what this side built, which is a fault worth
+      // seeing.
+      this.log(`${message.type} was not sent: ${String(error)}`, "error");
     }
   }
 
@@ -494,11 +499,20 @@ function rest(command: WidgetRequest): Record<string, unknown> {
  *
  * A long answer is worth saying most of. Refusing it outright would drop the
  * only record of what Scufris said, so it is cut at the bound instead.
+ *
+ * Cut on code points, not on `string.length`. A UTF-16 index can land between
+ * the halves of an astral character, and `encodeClientMessage` refuses a lone
+ * surrogate - so the cut meant to preserve the line would be what drops it.
  */
 function bounded(text: string): string {
-  let cut = text.trim();
-  while (Buffer.byteLength(cut, "utf8") > MAX_TRANSCRIPT_TEXT_BYTES) {
-    cut = cut.slice(0, Math.floor(cut.length * 0.9));
+  const points = [...text.trim()];
+  let cut = points.join("");
+  while (
+    points.length &&
+    Buffer.byteLength(cut, "utf8") > MAX_TRANSCRIPT_TEXT_BYTES
+  ) {
+    points.length = Math.floor(points.length * 0.9);
+    cut = points.join("");
   }
   return cut;
 }

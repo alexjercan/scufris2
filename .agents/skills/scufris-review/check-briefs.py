@@ -35,17 +35,37 @@ BASES = [
 # this script does not check, so keep it short and keep it honest.
 SKIP = {
     # Severities and report headings.
-    "BLOCKER", "MAJOR", "MINOR", "Checked:", "Not checked:",
+    "BLOCKER",
+    "MAJOR",
+    "MINOR",
+    "Checked:",
+    "Not checked:",
     # X11, window manager, and browser vocabulary.
-    "PointerRoot", "None", "WM_HINTS.input", "_NET_WM_STATE_ABOVE",
-    "focus_follows_mouse", "focus_follows_mouse yes", "prefers-reduced-motion",
-    "activeElement", "Object.assign", "<textarea>", "xprop", "xwininfo",
-    "xdotool", "xmessage",
+    "PointerRoot",
+    "None",
+    "WM_HINTS.input",
+    "_NET_WM_STATE_ABOVE",
+    "focus_follows_mouse",
+    "focus_follows_mouse yes",
+    "prefers-reduced-motion",
+    "activeElement",
+    "Object.assign",
+    "<textarea>",
+    "xprop",
+    "xwininfo",
+    "xdotool",
+    "xmessage",
     # TypeScript and Cargo vocabulary.
-    "any", "strict", "noUncheckedIndexedAccess", "dependencies",
-    "peerDependencies", "std::thread",
+    "any",
+    "strict",
+    "noUncheckedIndexedAccess",
+    "dependencies",
+    "peerDependencies",
+    "std::thread",
     # Nix and npm option names, checked by the nix build rather than here.
-    "programs.scufris.*", "pi.extensions", "pi.skills",
+    "programs.scufris.*",
+    "pi.extensions",
+    "pi.skills",
     # Runtime artifacts, not tree paths.
     "pending.json",
 }
@@ -95,6 +115,8 @@ def symbol_resolves(token: str) -> bool:
         cwd=ROOT,
         capture_output=True,
         text=True,
+        # A symbol nothing mentions is exit 1 and is the answer, not a failure.
+        check=False,
     )
     for line in found.stdout.splitlines():
         if not line.startswith("tasks/") and not line.startswith(".agents/"):

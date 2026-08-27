@@ -61,6 +61,13 @@ fn build_frontend() {
 /// The table holds each widget's manifest and its compiled module, so what the
 /// companion can open is exactly what was built. A widget whose TypeScript does
 /// not compile fails the build rather than the first person who asks for it.
+///
+/// One module per widget, embedded whole, and that is the constraint behind the
+/// duplication between them: a widget is delivered as one text with no
+/// directory behind it, so an import of a shared file has nothing to resolve
+/// against and would fail in the surface rather than here. Two widgets that
+/// want the same code copy it. A shared prelude concatenated in below is
+/// possible and is not what is built - until it is, the copies are the price.
 fn build_widgets() {
     let widgets = Path::new("..").join("widgets");
     let status = tsc(&widgets.join("tsconfig.json")).expect("tsc was not found");
@@ -125,6 +132,10 @@ fn build_widgets() {
 /// in rather than installed beside the binary: a backend that shipped as a file
 /// on disk would be a file that can go missing, be edited, or disagree with the
 /// widget that names it.
+///
+/// The same constraint as the widgets, and the same consequence. One file is
+/// the whole backend, so `deaf()` and the driver around it are copied between
+/// them rather than imported from one place.
 fn build_backends() {
     let backends = Path::new("..").join("backends");
     let mut directories: Vec<String> = fs::read_dir(&backends)

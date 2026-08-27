@@ -1,8 +1,8 @@
 # Minor findings from the inversion review
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 55
-- TAGS: cleanup,desktop,service
+- TAGS: cleanup, desktop, service
 
 ## Source
 
@@ -100,3 +100,105 @@ time. If the constraint is permanent, say so in `build.rs`.
 Whichever are taken: `cd native && TMPDIR=/tmp nix develop --offline -c
 cargo test --workspace`, `TMPDIR=/tmp npm test`, and `TMPDIR=/tmp nix
 flake check` for m8 and m13.
+
+## Outcome (2026-08-27)
+
+All eight, in one commit. Each is small; what follows is only where the
+fix was not the one the finding named, or reached further than it.
+
+### m1
+
+Cut on code points, as written. The level is `"error"` and not `"warn"`:
+the sink is `(message, level: "info" | "error")` and `service/index.ts`
+surfaces only `"error"`, so `"warn"` is not in the vocabulary and would
+have been the same silence under another name.
+
+The test that proves it needed a second line to wait for, because with
+the bug the first one is never sent. Waiting for a total of three lines
+hung instead of failing - the hello counts - so `FakeService` gained
+`untilLine`, which waits for the marker rather than for a count. Against
+the UTF-16 cut the test now fails on `expected 2, actual 1`.
+
+### m3
+
+The liveness probe, mirroring `server::bind`. That settled `unbind` as
+well: the file is only ever removed by the companion that bound it,
+because `CommandSocket` is managed only when `listen` returned `Ok`.
+
+`a_socket_an_earlier_run_left_behind_is_replaced_rather_than_refused`
+asserted the old policy with a live listener, which is the case that
+changed. It now builds a genuinely stale socket - bind and drop, which
+keeps the name and closes the socket, exactly as a killed process leaves
+it - and a second test covers the live one.
+
+### m4
+
+The directory is opened and fsynced after the rename. Not covered by a
+test: what it prevents is a machine losing power between the rename and
+the writeback, and nothing here can produce that.
+
+### m7
+
+`chosen` refuses a key equal to the hotkey, on both roads in: a
+deployment can name it, and a hotkey of `Super+Escape` derives to
+itself. The hotkey is parsed with `.ok()` rather than through `parse`,
+which logs, so a hotkey that will not parse is not reported twice by a
+function that is not about it.
+
+Beyond the finding: cancel and stop can also be each other, with the
+same shape - the handler matches cancel first, so stop is what silently
+goes. The two keys are now settled together in `arrange`, which is what
+`PillKeys::new` calls and what the tests can reach without an
+`AppHandle`.
+
+### m8
+
+`hud` added to the loop.
+
+### m13
+
+`nix/checks/helpers.nix` runs `python3 -m unittest discover`, and
+AGENTS.md names the runner beside `npm run check`. Three things the
+sandbox needed:
+
+- `git` and `tmux`, which the job runner shells out to.
+- `patchShebangs`, because every helper is `#!/usr/bin/env python3` and
+  the sandbox has no `/usr/bin/env`. Linking one in is not open: the
+  chroot root is read-only.
+- The same rewrite by `sed` over `tests/*.py`, because the fake agents
+  are written into a scratch directory during the run and are past every
+  patch. This is the one way the check differs from running the suite by
+  hand.
+
+Two tests make a real Sprout workspace, and Sprout is on the person's
+own path rather than in this flake. They now skip when it is absent,
+which is also the right answer for a machine without it. 46 tests, 2
+skipped, in about 17 seconds.
+
+### m15
+
+Recorded in `build.rs` on both tables. The constraint is one file per
+widget and per backend with no directory behind it, so an import has
+nothing to resolve against. Noted as the current shape rather than a law:
+a prelude concatenated in at build time would lift it.
+
+### Beside the findings
+
+`ruff check .` and `ruff format --check .` were failing on three things
+the documented local contract covers: two nested `with` statements in
+`test_usage_backends.py` from the reviewed range, and the missing
+`check=False` and formatting in the `check-briefs.py` this session
+added. Fixed. `dev/maintenance.md` also had no entry for
+`test_usage_backends.py` in its test-ownership list, and now names it
+and the one field rule it asserts.
+
+### Proof
+
+- `cargo test --workspace`: 341 passed, up from 336. `cargo clippy
+--workspace --all-targets -- -D warnings`: clean.
+- `npm run check`: typecheck, 80 tests, format, clean.
+- `python3 -m unittest discover -s tests -p 'test_*.py'`: 46 passed.
+- `ruff check .` and `ruff format --check .`: clean.
+- `nix flake check`: all checks passed, `helper-tests` among them.
+- Both new test groups were run against the unfixed code first: m1 fails
+  on the line count, m7 on both of its tests.

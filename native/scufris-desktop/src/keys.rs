@@ -87,8 +87,7 @@ pub struct PillKeys {
 impl PillKeys {
     /// Builds the arrangement this configuration allows.
     pub fn new(handle: AppHandle, hotkey: &str, wanted: Wanted<'_>) -> Self {
-        let cancel = chosen(wanted.cancel, hotkey, CANCEL);
-        let stop = chosen(wanted.stop, hotkey, STOP);
+        let (cancel, stop) = arrange(hotkey, wanted);
         let wanted: Vec<Shortcut> = [cancel, stop].into_iter().flatten().collect();
         let grabs = (!wanted.is_empty()).then(|| grabber(handle, wanted));
         Self {
@@ -179,6 +178,24 @@ impl Keys for PillKeys {
     }
 }
 
+/// The two keys this configuration leaves, with every collision refused.
+///
+/// A key is worth less than what it collides with. The handler matches cancel,
+/// then stop, then falls through to activation, so a key that repeats an
+/// earlier one does not gain a meaning: it takes the later meaning away, and
+/// nothing on the desktop says so. Refusing the second one leaves a key that
+/// does nothing and a line in the log, which is what the rest of this module
+/// does with a key it cannot honour.
+fn arrange(hotkey: &str, wanted: Wanted<'_>) -> (Option<Shortcut>, Option<Shortcut>) {
+    let cancel = chosen(wanted.cancel, hotkey, CANCEL);
+    let mut stop = chosen(wanted.stop, hotkey, STOP);
+    if stop.is_some() && stop == cancel {
+        let taken = stop.take().expect("it is the key just compared");
+        warn!("{taken} already puts the pill away and does not stop Scufris");
+    }
+    (cancel, stop)
+}
+
 /// The accelerator one key ends up on: what was asked for, or what it derives
 /// to, or nothing.
 ///
@@ -186,12 +203,25 @@ impl Keys for PillKeys {
 /// quietly derived. Falling back would leave the person with a working key on
 /// the wrong accelerator, which is harder to notice than a key that does
 /// nothing and says why in the log.
+///
+/// The hotkey is checked against for the same reason, and it reaches both
+/// roads in: a deployment can name it outright, and a hotkey of `Super+Escape`
+/// derives to itself. Either way the pill stops opening, which is the one key
+/// nothing else on the desktop can stand in for.
 fn chosen(wanted: Option<&str>, hotkey: &str, key: &str) -> Option<Shortcut> {
-    match wanted {
+    let shortcut = match wanted {
         Some(NONE) => None,
         Some(accelerator) => parse(accelerator),
         None => beside(hotkey, key),
+    }?;
+    // Parsed here rather than through `parse`, which logs: a hotkey that will
+    // not parse is not this function's news to report, and it would report it
+    // twice.
+    if hotkey.parse::<Shortcut>().ok() == Some(shortcut) {
+        warn!("{shortcut} is what opens the pill and is left doing that");
+        return None;
     }
+    Some(shortcut)
 }
 
 /// One accelerator beside the activation hotkey, on the hotkey's own modifiers.
@@ -296,5 +326,70 @@ mod tests {
     fn an_accelerator_that_will_not_parse_leaves_no_key_rather_than_the_default() {
         assert_eq!(chosen(Some("Hyper+Nonsense"), "Super+D", CANCEL), None);
         assert_eq!(chosen(Some(""), "Super+D", STOP), None);
+    }
+
+    /// The handler matches cancel and stop before it falls through to
+    /// activation, so a key that is also the hotkey does not add a meaning to
+    /// it. It removes the only way the pill opens, and nothing on the desktop
+    /// would say why.
+    #[test]
+    fn a_key_that_is_the_hotkey_is_refused_rather_than_taking_activation() {
+        assert_eq!(chosen(Some("Super+D"), "Super+D", CANCEL), None);
+        assert_eq!(chosen(Some("Super+D"), "Super+D", STOP), None);
+        // Spelled differently and the same key. The comparison is between two
+        // parsed accelerators for exactly this.
+        assert_eq!(chosen(Some("SUPER+d"), "Super+D", CANCEL), None);
+        // And it reaches the derived road too: this hotkey derives to itself.
+        assert_eq!(chosen(None, "Super+Escape", CANCEL), None);
+        assert_eq!(
+            chosen(None, "Super+Escape", STOP),
+            Some(accelerator("Super+Delete")),
+            "the other key is untouched by the one that collided"
+        );
+    }
+
+    /// Cancel is matched first, so a shared accelerator means cancel and stop
+    /// is what was lost. Refused where it can be said, rather than in a handler
+    /// that has no way to.
+    #[test]
+    fn the_stop_key_is_refused_when_it_is_already_the_cancel_key() {
+        let shared = Wanted {
+            cancel: Some("Control+Q"),
+            stop: Some("Control+Q"),
+        };
+        assert_eq!(
+            arrange("Super+D", shared),
+            (Some(accelerator("Control+Q")), None)
+        );
+        // Two keys that differ are both kept, and so is the derived pair.
+        let apart = Wanted {
+            cancel: Some("Control+Q"),
+            stop: Some("Control+W"),
+        };
+        assert_eq!(
+            arrange("Super+D", apart),
+            (
+                Some(accelerator("Control+Q")),
+                Some(accelerator("Control+W"))
+            )
+        );
+        assert_eq!(
+            arrange("Super+D", Wanted::default()),
+            (
+                Some(accelerator("Super+Escape")),
+                Some(accelerator("Super+Delete"))
+            )
+        );
+    }
+
+    /// Both off is not a collision. `NONE` twice is a desktop that wants both
+    /// keys for itself, and the log has nothing to report about it.
+    #[test]
+    fn two_keys_turned_off_are_not_read_as_one_key_repeated() {
+        let off = Wanted {
+            cancel: Some(NONE),
+            stop: Some(NONE),
+        };
+        assert_eq!(arrange("Super+D", off), (None, None));
     }
 }

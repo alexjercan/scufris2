@@ -97,14 +97,16 @@ class ClaudeTests(unittest.TestCase):
         self.assertEqual(claude.windows(None), [])
 
     def test_a_machine_that_never_signed_in_says_so_without_asking(self) -> None:
-        with tempfile.TemporaryDirectory() as empty:
-            with unittest.mock.patch.dict(
+        with (
+            tempfile.TemporaryDirectory() as empty,
+            unittest.mock.patch.dict(
                 "os.environ", {"CLAUDE_CONFIG_DIR": empty}, clear=False
-            ):
-                self.assertEqual(
-                    claude.reading(),
-                    {"plan": None, "windows": [], "error": "not signed in"},
-                )
+            ),
+        ):
+            self.assertEqual(
+                claude.reading(),
+                {"plan": None, "windows": [], "error": "not signed in"},
+            )
 
 
 class CodexTests(unittest.TestCase):
@@ -160,14 +162,14 @@ class CodexTests(unittest.TestCase):
         self.assertEqual(codex.windows(None), [])
 
     def test_a_machine_that_never_signed_in_says_so_without_asking(self) -> None:
-        with tempfile.TemporaryDirectory() as empty:
-            with unittest.mock.patch.dict(
-                "os.environ", {"CODEX_HOME": empty}, clear=False
-            ):
-                self.assertEqual(
-                    codex.reading(),
-                    {"plan": None, "windows": [], "error": "not signed in"},
-                )
+        with (
+            tempfile.TemporaryDirectory() as empty,
+            unittest.mock.patch.dict("os.environ", {"CODEX_HOME": empty}, clear=False),
+        ):
+            self.assertEqual(
+                codex.reading(),
+                {"plan": None, "windows": [], "error": "not signed in"},
+            )
 
 
 if __name__ == "__main__":

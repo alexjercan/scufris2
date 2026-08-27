@@ -212,7 +212,14 @@ impl FilePendingStore {
                 .open(&temporary)?;
             file.write_all(&encoded)?;
             file.sync_all()?;
-            fs::rename(&temporary, &self.path)
+            fs::rename(&temporary, &self.path)?;
+            // The rename is what gives the record the name a restart looks
+            // under, and that name lives in the directory rather than in the
+            // file. Syncing the file alone leaves the bytes on the disk under
+            // a name only the page cache holds, so a power loss after `save()`
+            // returned would lose an accepted transcript - which is the one
+            // thing the module header promises cannot happen.
+            File::open(parent)?.sync_all()
         })();
         if let Err(error) = result {
             let _ = fs::remove_file(&temporary);

@@ -202,11 +202,11 @@ impl Surface {
 /// One thing the runtime is asked to do.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cmd {
-    /// Open one widget. The daemon asked.
+    /// Open one widget. Scufris asked.
     Open {
         /// Correlation identifier the answer echoes, when a request is waiting
         /// on one. A summon from the tray is the person acting on their own
-        /// desktop rather than an answer the daemon asked for, so it carries
+        /// desktop rather than an answer Scufris asked for, so it carries
         /// none and nothing is reported: a `widget_opened` for a request that
         /// was never made is a reply to a question nobody asked.
         id: Option<String>,
@@ -219,7 +219,7 @@ pub enum Cmd {
         /// Widget-defined spawn payload.
         data: Value,
     },
-    /// Send new data to one open surface. The daemon asked.
+    /// Send new data to one open surface. Scufris asked.
     Update {
         /// Correlation identifier the answer echoes.
         id: String,
@@ -228,14 +228,14 @@ pub enum Cmd {
         /// Widget-defined payload.
         data: Value,
     },
-    /// Close one open surface. The daemon asked.
+    /// Close one open surface. Scufris asked.
     Close {
         /// Correlation identifier the answer echoes.
         id: String,
         /// Surface to close.
         surface: SurfaceId,
     },
-    /// Close every surface the runtime still owns. The daemon asked.
+    /// Close every surface the runtime still owns. Scufris asked.
     Clear {
         /// Correlation identifier the answer echoes.
         id: String,
@@ -425,14 +425,14 @@ pub enum Act {
     /// Unmount a surface and destroy the shell it was in.
     ///
     /// Destroyed rather than handed back: the shell's label was the surface
-    /// identifier the daemon was answered with, and a label reused would let a
+    /// identifier the service was answered with, and a label reused would let a
     /// late update land on whatever took its place. The pool builds the
     /// replacement.
     Retire {
         /// The surface that goes away.
         surface: SurfaceId,
     },
-    /// Say something to the daemon.
+    /// Say something to the service.
     Report(WidgetReport),
 }
 
@@ -810,7 +810,7 @@ impl Runtime {
 
     fn close(&mut self, id: String, surface: SurfaceId) -> Vec<Act> {
         // Closing a surface that is already gone is not a failure. The person
-        // may have used the close tick a moment before the daemon asked, and
+        // may have used the close tick a moment before Scufris asked, and
         // what was asked for - that surface is not on screen - is the case.
         let mut acts = self.retire(&surface);
         acts.push(Act::Report(WidgetReport::Done { id }));
@@ -841,7 +841,7 @@ impl Runtime {
             // - is the pool's business rather than the conversation's.
             return acts;
         }
-        // The daemon is told rather than asked: the person has already closed
+        // The service is told rather than asked: the person has already closed
         // the window, and this is what keeps the conversation's idea of what is
         // on screen from drifting away from what is.
         acts.push(Act::Report(WidgetReport::Closed { surface }));
@@ -1240,7 +1240,7 @@ cadence = 500
         // It opened for real: the window is adopted and its backend subscribed.
         assert!(acts.iter().any(|act| matches!(act, Act::Adopt { .. })));
         assert!(acts.iter().any(|act| matches!(act, Act::Subscribe { .. })));
-        // And said nothing to the daemon, which never asked for it.
+        // And said nothing to the service, which never asked for it.
         assert!(!acts.iter().any(|act| matches!(act, Act::Report(_))));
     }
 
@@ -1342,7 +1342,7 @@ cadence = 500
 
     #[test]
     fn the_panel_going_away_is_what_stops_reading_its_backend() {
-        // However it goes: closed by the daemon, closed by the person, aged
+        // However it goes: closed by Scufris, closed by the person, aged
         // out, or pushed off the shelf. A process left writing to a window that
         // is gone is the failure the supervisor exists to prevent, and the
         // runtime is where every one of those paths meets.
@@ -1460,7 +1460,7 @@ cadence = 500
     #[test]
     fn a_surface_the_display_refused_goes_quietly() {
         // The open that asked for it is answered where it failed. A
-        // `surface_closed` on top of that answer would be the daemon told twice
+        // `surface_closed` on top of that answer would be the service told twice
         // about one thing, the second time about a panel it never learned had
         // opened.
         let catalog = catalog();
@@ -1721,7 +1721,7 @@ cadence = 500
 
     #[test]
     fn closing_a_surface_that_is_already_gone_is_done_rather_than_failed() {
-        // The person's close tick and the daemon's close race by design. What
+        // The person's close tick and Scufris's close race by design. What
         // was asked for - that surface is not on screen - is the case either
         // way, and a failure here would be a tool error for nothing.
         let catalog = catalog();
@@ -1939,7 +1939,7 @@ cadence = 500
         );
         assert!(runtime.surface(&surface).is_some());
         let acts = runtime.apply(&catalog, Cmd::Sweep { elapsed: GRACE / 2 });
-        // Silently: the daemon is told nothing, because an exhibit needs no
+        // Silently: the service is told nothing, because an exhibit needs no
         // closing and a report for every one of them would be a transcript full
         // of panels going quiet.
         assert_eq!(

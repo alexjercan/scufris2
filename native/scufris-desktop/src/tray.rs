@@ -2,7 +2,7 @@
 //!
 //! The icon is drawn from the state name so every state has a distinct colour
 //! without shipping one image per state. Recording always draws the red privacy
-//! ring, whatever the daemon reports.
+//! ring, whatever the service reports.
 
 use tauri::{
     AppHandle,

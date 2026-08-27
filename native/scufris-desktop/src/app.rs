@@ -3,10 +3,11 @@
 //! Every decision lives in [`crate::state::Companion`]. This module runs the
 //! actions the machine returns and keeps the window and the pill on the phase
 //! those actions left behind, which is not the same thing: the person's key and
-//! the daemon's answer arrive on different threads, and the phase from the
+//! the service's answer arrive on different threads, and the phase from the
 //! change that ran last is the one they must both end up looking at. Each
 //! outside effect is a port, so the failure paths that matter - a microphone
-//! that never starts, a capture stream that dies, a submission the daemon never
+//! that never starts, a capture stream that dies, a submission the service
+//! never
 //! confirms, an answer that overtakes the handoff that asked for it, a companion
 //! that is restarted with an accepted transcript still in hand - are all
 //! exercised in tests without a display, a microphone, or a backend.
@@ -610,7 +611,7 @@ impl App {
         );
     }
 
-    /// Installs the daemon connection.
+    /// Installs the service connection.
     pub fn set_backend(&self, backend: Arc<dyn Backend>) {
         *self
             .backend
@@ -618,7 +619,7 @@ impl App {
             .unwrap_or_else(|error| error.into_inner()) = Some(backend);
     }
 
-    /// Records whether the daemon connection is open.
+    /// Records whether the service connection is open.
     pub fn set_connected(self: &Arc<Self>, connected: bool) {
         {
             let mut companion = self
@@ -630,9 +631,9 @@ impl App {
             }
             companion.set_connected(connected);
             if connected {
-                info!("daemon connected");
+                info!("service connected");
             } else {
-                warn!("daemon disconnected");
+                warn!("service disconnected");
             }
         }
         // The phase is untouched, so the window has nothing to catch up to.
@@ -841,7 +842,7 @@ impl App {
 
     /// Puts the surfaces where one decision wants them, then runs `follow`.
     ///
-    /// The person's key and the daemon's answer change the companion from two
+    /// The person's key and the service's answer change the companion from two
     /// threads, and either can be the one that runs last. Whichever it is owns
     /// the surfaces: an older decision that finds a newer one already recorded
     /// changes nothing rather than hiding a pill that is now asking for the
@@ -2134,7 +2135,7 @@ mod tests {
         aborts: Mutex<Vec<String>>,
         refuse: Mutex<Option<String>>,
         /// Runs once, with the submission on the wire and the handoff not yet
-        /// finished. That is exactly where a fast daemon answer arrives.
+        /// finished. That is exactly where a fast service answer arrives.
         during_submit: Mutex<Option<Interleave>>,
     }
 
@@ -2612,7 +2613,7 @@ mod tests {
     fn a_delivered_submission_with_no_acknowledgment_is_retried_under_one_identifier() {
         let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
         say(&harness);
-        // The connection drops after the daemon accepted the text but before
+        // The connection drops after the service accepted the text but before
         // the acknowledgment arrives, so the timeout is what fires.
         harness.executor.expire();
 
@@ -2652,7 +2653,7 @@ mod tests {
     }
 
     #[test]
-    fn a_daemon_refusal_keeps_the_words_editable_and_ordinarily_retriable() {
+    fn a_service_refusal_keeps_the_words_editable_and_ordinarily_retriable() {
         let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
         say(&harness);
         assert_eq!(harness.surface.last().state, "sent");
@@ -3215,7 +3216,7 @@ mod tests {
         *harness.surface.at_present.lock().unwrap() = Some(Box::new(move || {
             // On another thread, and joined here, so the interleaving is real
             // and the test is still deterministic: the person's key arrives
-            // while the daemon's state change is still on the surface.
+            // while the service's state change is still on the surface.
             let runtime = Arc::clone(&runtime);
             let recorder = Arc::clone(&recorder);
             let recorded = Arc::clone(&recorded);
@@ -3453,7 +3454,7 @@ mod tests {
         harness.executor.expire();
         assert_eq!(harness.surface.last().state, "uncertain");
 
-        // The daemon confirms after the companion gave up waiting.
+        // The service confirms after the companion gave up waiting.
         harness.app.handle(Event::Acknowledged("pill-1".into()));
         harness.executor.drain();
         assert_eq!(harness.surface.last().state, "idle");

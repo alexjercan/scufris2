@@ -6,7 +6,7 @@
 //! loaded, and hidden; opening a widget takes one of them and sends it a single
 //! message.
 //!
-//! A shell is used once. Its label is the surface identifier the daemon is
+//! A shell is used once. Its label is the surface identifier the service is
 //! answered with, and a label handed out twice would let an update meant for a
 //! widget that is gone land on whatever took its place. So a retired shell is
 //! destroyed rather than re-adopted, and the pool builds its replacement in the
@@ -41,7 +41,7 @@ pub const WARM_SHELLS: usize = 2;
 /// How long taking a shell waits for one to finish loading.
 ///
 /// Only ever spent when the pool is empty - at the very first widget of a
-/// session, or after several opened at once. The daemon waits five seconds for
+/// session, or after several opened at once. The agent waits five seconds for
 /// its answer, so this leaves room for the answer to travel.
 const WARM_WAIT: Duration = Duration::from_secs(3);
 
@@ -138,7 +138,7 @@ pub struct Pool {
     /// What this run of the companion stamps into every label it mints.
     ///
     /// The counter alone starts at one with the process, so a companion that
-    /// restarts hands out the identifiers the last one already gave the daemon.
+    /// restarts hands out the identifiers the last one already gave the service.
     /// An update written for a panel that is gone would then land on whatever
     /// took its place, which is the one thing this module promises cannot
     /// happen.
@@ -293,7 +293,7 @@ impl Pool {
 
     /// Unmounts one shell, closes its window, and starts its replacement.
     ///
-    /// The label goes with it. It was the surface identifier the daemon was
+    /// The label goes with it. It was the surface identifier the service was
     /// answered with, and reusing it would let a late update land on a widget
     /// that has nothing to do with the one it was written for.
     pub fn discard(&self, label: &str) {
@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn a_label_carries_the_run_that_minted_it() {
-        // The counter restarts at one with the process. A daemon that outlives
+        // The counter restarts at one with the process. A service that outlives
         // the companion still holds the identifiers the last run handed out,
         // and an update written for a panel that is gone must not find a new
         // one wearing its name.

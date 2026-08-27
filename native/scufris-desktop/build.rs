@@ -77,7 +77,7 @@ fn build_widgets() {
                 .then(|| entry.file_name().to_string_lossy().into_owned())
         })
         .collect();
-    // Sorted so the generated table - and with it the catalog the daemon is
+    // Sorted so the generated table - and with it the catalog the agent is
     // told about - does not depend on the order the filesystem hands back.
     directories.sort();
     assert!(!directories.is_empty(), "no widget has a widget.toml");

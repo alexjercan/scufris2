@@ -7,7 +7,7 @@
 //!
 //! The split follows the pill's: [`runtime`] decides and is pure, this module
 //! carries the decisions out. What it carries them out against is [`pool`] -
-//! warm shell windows - and the daemon link, which is where the answers go.
+//! warm shell windows - and the service link, which is where the answers go.
 
 pub mod backends;
 pub mod catalog;
@@ -63,7 +63,7 @@ const SWEEP: Duration = Duration::from_secs(1);
 /// fast enough that a number on screen still reads as live.
 const BEAT: Duration = Duration::from_millis(250);
 
-/// The runtime, its windows, its backends, and the way back to the daemon.
+/// The runtime, its windows, its backends, and the way back to the service.
 pub struct Widgets {
     catalog: Catalog,
     pool: Pool,
@@ -72,7 +72,7 @@ pub struct Widgets {
     ///
     /// The runtime decides under its own lock and releases it before the host
     /// carries the decisions out, which is what keeps a window move off the
-    /// runtime's lock. Three threads arrive here - the daemon's reader, the
+    /// runtime's lock. Three threads arrive here - the service's reader, the
     /// aging clock by way of the event loop, and Tauri's command pool - and two
     /// of them interleaving a shelf reflow with a widget opening would put two
     /// windows in one column. This is the queue that stops it.
@@ -227,12 +227,12 @@ impl Widgets {
         self.decide(Cmd::Sent { surface, action });
     }
 
-    /// Records the assistant state the daemon reported.
+    /// Records the assistant state the service reported.
     ///
     /// Two things are read off it. Falling back to idle after working or
     /// speaking is one turn of the conversation ending, which is what tells an
     /// exhibit the subject has moved on: it costs no message of its own, and
-    /// the daemon already sends this one. And time spent speaking is time the
+    /// the service already sends this one. And time spent speaking is time the
     /// person is listening rather than reading, so the grace does not run.
     pub fn assistant(&self, state: Assistant) {
         let previous = {
@@ -302,10 +302,11 @@ impl Widgets {
         }
     }
 
-    /// Tells the daemon what widgets are installed.
+    /// Tells the service what widgets are installed.
     ///
-    /// Sent once per connection, right after the daemon welcomes the hello. The
-    /// daemon types its widget tool from this, so a companion that never sends
+    /// Sent once per connection, right after the service welcomes the hello.
+    /// The agent types its widget tool from this, so a companion that never
+    /// sends
     /// it is a companion whose widgets cannot be named.
     pub fn announce(&self) {
         if self.link.get().is_none() {
@@ -345,7 +346,7 @@ impl Widgets {
         self.catalog.get(&widget).map(|found| found.script.clone())
     }
 
-    /// Carries out one command from the daemon.
+    /// Carries out one command from the service.
     pub fn command(&self, command: WidgetCommand) {
         match command {
             WidgetCommand::Open {
@@ -379,7 +380,7 @@ impl Widgets {
 
     /// Opens one instrument because the person asked the tray for it.
     ///
-    /// Nothing about it goes back to the daemon. Scufris finds out the way it
+    /// Nothing about it goes back to the service. Scufris finds out the way it
     /// finds out about a widget the person closed: by being told, if it ever
     /// asks. The desktop is the person's, and a panel they put up themselves
     /// is not a turn in the conversation.
@@ -395,7 +396,7 @@ impl Widgets {
     ///
     /// The shell is reserved first because its label is the surface identifier:
     /// the pool mints labels and never hands one out twice, so a surface the
-    /// daemon has been told about can never be confused with a later one. A
+    /// service has been told about can never be confused with a later one. A
     /// runtime that then refuses the open leaves the shell unused, and it is
     /// discarded rather than kept, for the same reason.
     fn open(&self, id: Option<String>, widget: String, posture: Posture, data: Value) {
@@ -476,7 +477,7 @@ impl Widgets {
     /// Carries out one batch of decisions, and answers with the surfaces whose
     /// windows never reached the screen.
     ///
-    /// A placement that fails is not a log line. The daemon is answered from
+    /// A placement that fails is not a log line. The service is answered from
     /// this same batch, and a panel reported open and never shown is one Scufris
     /// talks about and nobody can read, so the surfaces that failed come back
     /// for the caller to retire.

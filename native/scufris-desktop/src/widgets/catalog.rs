@@ -65,7 +65,7 @@ struct Manifest {
 /// One installed widget.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Widget {
-    /// The identifier the daemon opens it by.
+    /// The identifier the agent opens it by.
     pub id: String,
     /// The name the chrome prints, in the window's micro-title.
     pub name: String,
@@ -193,9 +193,9 @@ impl Catalog {
         self.widgets.get(id)
     }
 
-    /// Returns the catalog as the daemon reads it.
+    /// Returns the catalog as the agent reads it.
     ///
-    /// The script is left behind: the daemon types a tool from these entries
+    /// The script is left behind: the agent types a tool from these entries
     /// and never runs the module.
     pub fn entries(&self) -> Vec<CatalogEntry> {
         self.widgets
@@ -376,7 +376,7 @@ height = 110
     }
 
     #[test]
-    fn a_manifest_becomes_the_widget_the_daemon_opens_by_name() {
+    fn a_manifest_becomes_the_widget_the_agent_opens_by_name() {
         let catalog =
             Catalog::build(&[source("note", NOTE)], BACKENDS).expect("the manifest is well formed");
         let widget = catalog.get("note").expect("note is installed");
@@ -386,7 +386,7 @@ height = 110
     }
 
     #[test]
-    fn the_catalog_the_daemon_reads_carries_the_names_and_not_the_code() {
+    fn the_catalog_the_agent_reads_carries_the_names_and_not_the_code() {
         let catalog =
             Catalog::build(&[source("note", NOTE)], BACKENDS).expect("the manifest is well formed");
         let entries = catalog.entries();

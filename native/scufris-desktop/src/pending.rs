@@ -356,7 +356,7 @@ mod tests {
         let store = scratch.store();
         // Characters that are one UTF-16 unit but three UTF-8 bytes, and one
         // that is two UTF-16 units and four bytes. A store that measured a
-        // different way from the daemon would accept these and then refuse to
+        // different way from the service would accept these and then refuse to
         // read them back, losing the transcript at the worst moment.
         let text = format!("{}{}", "\u{4f60}\u{597d}".repeat(1_000), "\u{1f600}");
         assert!(text.len() > text.chars().count());

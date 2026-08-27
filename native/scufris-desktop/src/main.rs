@@ -2,8 +2,8 @@
 //!
 //! The companion owns activation, the microphone, local transcription, the
 //! textbox the words pass through, and health presentation. It never owns the
-//! conversation: accepted transcripts go to the Scufris daemon as ordinary user
-//! messages over the control socket, and the daemon stays the only writer of
+//! conversation: accepted transcripts go to `scufris-service` as ordinary user
+//! messages over its socket, and the service stays the only writer of
 //! session files.
 
 mod app;

@@ -33,8 +33,8 @@ use std::{
 };
 
 use scufris_control::service::{
-    CatalogEntry, Role, ScufrisState, ServiceBody, ServiceMessage, Speaker, TranscriptEntry,
-    WidgetCommand, WidgetReport, refusal,
+    CatalogEntry, MAX_DETAIL_BYTES, Role, ScufrisState, ServiceBody, ServiceMessage, Speaker,
+    TranscriptEntry, WidgetCommand, WidgetReport, refusal,
 };
 use tracing::{debug, error, info, warn};
 
@@ -163,7 +163,13 @@ impl Inner {
     }
 
     /// Records a new state and tells the frontends, if anything changed.
+    ///
+    /// The detail is bounded here as well as on the wire. Most of these come
+    /// from the agent, over a stream that accepts megabytes, and this one is
+    /// kept: `register` replays it to every frontend that connects. Storing
+    /// the whole of it would hold the memory and re-cut it on every replay.
     fn set_state(&mut self, state: ScufrisState, detail: String) {
+        let detail = scufris_control::truncate(&detail, MAX_DETAIL_BYTES);
         // A held lease owns the state. Events from an agent that is on its way
         // out must not report the conversation as running again.
         if self.lease.is_some() && state != ScufrisState::Detached {
@@ -969,6 +975,40 @@ mod tests {
         // it is never handed a backlog it did not ask for.
         let control = connect(&service, 2, Role::Control);
         assert!(drain(&control).is_empty());
+    }
+
+    #[test]
+    fn an_oversize_agent_error_does_not_become_a_message_no_client_can_read() {
+        // B1. The agent's stream accepts 4 MiB and the socket accepts 64 KiB.
+        // Unbounded, this error is stored, replayed to every frontend that
+        // connects, and fails to write every time, which closes the
+        // connection right after the welcome.
+        let service = service();
+        let howl = "x".repeat(MAX_EVENT_BYTES / 2);
+        service.apply(Event::Response {
+            id: Some(BOOT.into()),
+            success: false,
+            error: Some(howl.clone()),
+            data: json!(null),
+        });
+        service.apply(Event::Response {
+            id: Some("c-1".into()),
+            success: false,
+            error: Some(howl),
+            data: json!(null),
+        });
+
+        // The kept copy is bounded, so the replay is bounded on every later
+        // connection rather than being cut again each time.
+        assert_eq!(service.lock().detail.len(), MAX_DETAIL_BYTES);
+
+        let inbox = connect(&service, 1, Role::Frontend);
+        for body in drain(&inbox) {
+            let name = body.name();
+            let mut written = Vec::new();
+            scufris_control::write_message(&mut written, &ServiceMessage::new(body))
+                .unwrap_or_else(|error| panic!("{name} reaches the frontend: {error}"));
+        }
     }
 
     #[test]

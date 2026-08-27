@@ -115,6 +115,22 @@ pub fn is_submission_text(value: &str) -> bool {
         && !value.contains(['\r', '\0'])
 }
 
+/// Shortens text to a byte bound without splitting a character.
+///
+/// The one implementation. Both protocols bound their free text in UTF-8
+/// bytes, and cutting at an arbitrary index inside a multi-byte character
+/// produces a string that is not text at all.
+pub fn truncate(text: &str, bound: usize) -> String {
+    if text.len() <= bound {
+        return text.to_string();
+    }
+    let mut end = bound;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_string()
+}
+
 /// Reads one bounded LF-terminated line, without decoding it.
 ///
 /// Split out from [`read_message`] so a reader can look at the version before
@@ -225,6 +241,18 @@ mod tests {
             &"é".repeat(MAX_SUBMISSION_TEXT_BYTES / 2 + 1)
         ));
         assert!(!is_submission_text("carriage\rreturn"));
+    }
+
+    #[test]
+    fn truncation_cuts_on_a_character_boundary_and_never_inside_one() {
+        assert_eq!(truncate("short", 64), "short");
+        assert_eq!(truncate("abcdef", 3), "abc");
+        // Three bytes each. A cut at 4 lands inside the second one and has to
+        // walk back to 3, not produce half a character.
+        assert_eq!(truncate("日本語", 4), "日");
+        assert_eq!(truncate("日本語", 3), "日");
+        assert_eq!(truncate("日本語", 2), "");
+        assert_eq!(truncate("", 8), "");
     }
 
     #[test]

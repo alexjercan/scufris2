@@ -29,7 +29,7 @@ use scufris_control::{
     MessageError,
     service::{ClientBody, ServiceMessage, read_client_message},
 };
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 use crate::service::Service;
 
@@ -99,7 +99,21 @@ fn handle(service: Arc<Service>, stream: UnixStream, client: u64) {
             let mut writing = writing;
             while let Ok(message) = inbox.recv() {
                 if let Err(error) = scufris_control::write_message(&mut writing, &message) {
-                    debug!(client, %error, "a client could not be written to");
+                    // A peer that went away is ordinary and says nothing at
+                    // the default level. A message this service built and
+                    // cannot send is a defect in the service, and it closes
+                    // every connection it is replayed on, so it is said out
+                    // loud. `ServiceBody::bounded` exists to keep this from
+                    // happening; reaching it means a field escaped it.
+                    if matches!(error, MessageError::TooLarge) {
+                        error!(
+                            client,
+                            body = message.body.name(),
+                            "the service built a message it cannot send"
+                        );
+                    } else {
+                        debug!(client, %error, "a client could not be written to");
+                    }
                     break;
                 }
             }

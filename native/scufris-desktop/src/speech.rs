@@ -233,15 +233,9 @@ fn bounded(text: String) -> String {
         .chars()
         .filter(|character| !character.is_control() && *character != '\u{7f}')
         .collect();
-    let text = text.trim();
-    if text.len() <= MAX_SPOKEN_BYTES {
-        return text.to_string();
-    }
-    let mut end = MAX_SPOKEN_BYTES;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    text[..end].trim_end().to_string()
+    scufris_control::truncate(text.trim(), MAX_SPOKEN_BYTES)
+        .trim_end()
+        .to_string()
 }
 
 #[cfg(test)]

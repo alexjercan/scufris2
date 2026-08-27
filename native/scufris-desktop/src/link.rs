@@ -20,7 +20,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use scufris_control::{
@@ -37,6 +37,15 @@ pub const MIN_BACKOFF: Duration = Duration::from_millis(250);
 
 /// Longest wait before reconnecting.
 pub const MAX_BACKOFF: Duration = Duration::from_secs(5);
+
+/// How long a connection has to last before it counts as having worked.
+///
+/// A clean end is not the same as a useful one. A service that welcomes a
+/// client and immediately hangs up ends every connection cleanly, and reading
+/// only that would reset the wait and reconnect four times a second. The
+/// conversation window is cleared on each reconnect, so the storm is visible
+/// to the person as well as expensive.
+const SETTLED: Duration = Duration::from_secs(5);
 
 /// Message shown wherever the service cannot be reached.
 pub const UNAVAILABLE: &str = "The Scufris service is unavailable.";
@@ -93,9 +102,15 @@ impl ServiceLink {
         thread::spawn(move || {
             let mut backoff = MIN_BACKOFF;
             while !supervisor_stopped.load(Ordering::Relaxed) {
-                match serve(&socket, &supervisor_writer, supervisor_observe.as_ref()) {
-                    Ok(()) => backoff = MIN_BACKOFF,
-                    Err(()) => backoff = next_backoff(backoff),
+                let began = Instant::now();
+                let outcome = serve(&socket, &supervisor_writer, supervisor_observe.as_ref());
+                // The wait is reset by a connection that lasted, not by one
+                // that ended tidily. Both are `Ok(())`, and only the first is
+                // evidence that reconnecting at once is worth doing.
+                if outcome.is_ok() && began.elapsed() >= SETTLED {
+                    backoff = MIN_BACKOFF;
+                } else {
+                    backoff = next_backoff(backoff);
                 }
                 set_writer(&supervisor_writer, None);
                 supervisor_observe(LinkEvent::Disconnected);

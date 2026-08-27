@@ -50,6 +50,14 @@ pub const MAX_TRANSCRIPT_TEXT_BYTES: usize = 4 * 1024;
 /// Maximum number of arguments in a debug command line.
 pub const MAX_DEBUG_ARGS: usize = 16;
 
+/// Maximum accepted size of one human-readable detail, in UTF-8 bytes.
+///
+/// A detail is prose for a person, and most of it is one sentence. The bound
+/// exists because the service adopts strings it did not write: an agent error
+/// arrives on a stream that accepts megabytes, and the socket the service
+/// would relay it on accepts [`crate::MAX_MESSAGE_BYTES`].
+pub const MAX_DETAIL_BYTES: usize = 4 * 1024;
+
 /// Maximum accepted size of one encoded widget payload, in UTF-8 bytes.
 ///
 /// Well below the message cap: the same payload crosses the frontend's own
@@ -439,10 +447,17 @@ pub struct ServiceMessage {
 
 impl ServiceMessage {
     /// Creates a message carrying the current protocol version.
+    ///
+    /// The body is bounded on the way in. The service adopts strings it did
+    /// not write - an agent error, a refusal reason - and the one invariant
+    /// that keeps a bad one from closing every connection is that the service
+    /// never emits a message its own reader would reject. Holding it here
+    /// rather than at each construction site is what makes it hold at the
+    /// sites nobody has written yet.
     pub fn new(body: ServiceBody) -> Self {
         Self {
             v: SERVICE_VERSION,
-            body,
+            body: body.bounded(),
         }
     }
 }
@@ -541,6 +556,55 @@ impl ServiceBody {
             Self::Report { .. } => "report",
         }
     }
+
+    /// Clamps every free-text field to the bound its reader enforces.
+    ///
+    /// Only the fields nothing else validates on the way out. Identifiers,
+    /// codes and widget payloads are checked at their own boundaries and are
+    /// refused rather than shortened, because a truncated identifier names the
+    /// wrong thing where a truncated sentence is still the sentence.
+    #[must_use]
+    pub fn bounded(self) -> Self {
+        match self {
+            Self::Refused { id, code, detail } => Self::Refused {
+                id,
+                code,
+                detail: crate::truncate(&detail, MAX_DETAIL_BYTES),
+            },
+            Self::State { id, state, detail } => Self::State {
+                id,
+                state,
+                detail: crate::truncate(&detail, MAX_DETAIL_BYTES),
+            },
+            Self::Transcript { entry } => Self::Transcript {
+                entry: TranscriptEntry {
+                    speaker: entry.speaker,
+                    text: crate::truncate(&entry.text, MAX_TRANSCRIPT_TEXT_BYTES),
+                },
+            },
+            Self::Speak { text } => Self::Speak {
+                text: crate::truncate(&text, MAX_TRANSCRIPT_TEXT_BYTES),
+            },
+            Self::Report {
+                report: WidgetReport::Failed { id, code, detail },
+            } => Self::Report {
+                report: WidgetReport::Failed {
+                    id,
+                    code,
+                    detail: crate::truncate(&detail, MAX_DETAIL_BYTES),
+                },
+            },
+            other => other,
+        }
+    }
+}
+
+/// Returns true when the detail is within [`MAX_DETAIL_BYTES`].
+///
+/// Empty is allowed: most messages have nothing to add, and the field is
+/// present so a reader never has to branch on whether it exists.
+pub fn is_detail_text(value: &str) -> bool {
+    value.len() <= MAX_DETAIL_BYTES
 }
 
 /// Returns true when the entry is within the bound the ring is built for.
@@ -602,12 +666,15 @@ fn check_widget_report(report: &WidgetReport) -> Result<(), MessageError> {
                 return Err(MessageError::InvalidSubmission("id"));
             }
         }
-        WidgetReport::Failed { id, code, .. } => {
+        WidgetReport::Failed { id, code, detail } => {
             if !is_identifier(id) {
                 return Err(MessageError::InvalidSubmission("id"));
             }
             if !is_identifier(code) {
                 return Err(MessageError::InvalidSubmission("code"));
+            }
+            if !is_detail_text(detail) {
+                return Err(MessageError::InvalidSubmission("detail"));
             }
         }
         WidgetReport::Closed { surface } => {
@@ -699,14 +766,20 @@ pub fn read_service_message(
                 return Err(MessageError::InvalidSubmission("id"));
             }
         }
-        ServiceBody::Refused { id, code, .. } => {
+        ServiceBody::Refused { id, code, detail } => {
             if !is_identifier(id) || !is_identifier(code) {
                 return Err(MessageError::InvalidSubmission("id"));
             }
+            if !is_detail_text(detail) {
+                return Err(MessageError::InvalidSubmission("detail"));
+            }
         }
-        ServiceBody::State { id, .. } => {
+        ServiceBody::State { id, detail, .. } => {
             if id.as_deref().is_some_and(|id| !is_identifier(id)) {
                 return Err(MessageError::InvalidSubmission("id"));
+            }
+            if !is_detail_text(detail) {
+                return Err(MessageError::InvalidSubmission("detail"));
             }
         }
         ServiceBody::Transcript { entry } => {
@@ -924,16 +997,80 @@ mod tests {
             "{\"v\":3,\"type\":\"transcript\",\"entry\":{\"speaker\":\"assistant\",\
              \"text\":\"the harness is green\"}}\n"
         );
-        let oversized = encoded(&ServiceMessage::new(ServiceBody::Transcript {
-            entry: TranscriptEntry {
-                speaker: Speaker::User,
-                text: "x".repeat(MAX_TRANSCRIPT_TEXT_BYTES + 1),
+        // Built without `new`, which clamps. This is the reader's own rule,
+        // and it has to hold against a peer that did not clamp.
+        let oversized = encoded(&ServiceMessage {
+            v: SERVICE_VERSION,
+            body: ServiceBody::Transcript {
+                entry: TranscriptEntry {
+                    speaker: Speaker::User,
+                    text: "x".repeat(MAX_TRANSCRIPT_TEXT_BYTES + 1),
+                },
             },
-        }));
+        });
         assert!(matches!(
             read_service_message(&mut Cursor::new(oversized)),
             Err(MessageError::InvalidSubmission("text"))
         ));
+    }
+
+    #[test]
+    fn the_service_cannot_build_a_message_its_own_reader_would_reject() {
+        // B1: an oversize agent error string, adopted into `detail` and
+        // replayed to every frontend that connects. Unbounded it exceeds the
+        // message cap, the write fails, and the connection is shut down.
+        let howl = "x".repeat(crate::MAX_MESSAGE_BYTES * 2);
+        for body in [
+            ServiceBody::State {
+                id: None,
+                state: ScufrisState::Error,
+                detail: howl.clone(),
+            },
+            ServiceBody::Refused {
+                id: "c-1".into(),
+                code: refusal::AGENT_REFUSED.into(),
+                detail: howl.clone(),
+            },
+            ServiceBody::Speak { text: howl.clone() },
+            ServiceBody::Transcript {
+                entry: TranscriptEntry {
+                    speaker: Speaker::Assistant,
+                    text: howl.clone(),
+                },
+            },
+            ServiceBody::Report {
+                report: WidgetReport::Failed {
+                    id: "c-1".into(),
+                    code: "widget_failed".into(),
+                    detail: howl.clone(),
+                },
+            },
+        ] {
+            let name = body.name();
+            let message = ServiceMessage::new(body);
+            let mut written = Vec::new();
+            crate::write_message(&mut written, &message)
+                .unwrap_or_else(|error| panic!("{name} stays writable: {error}"));
+            // And the far end takes back what this end sent.
+            read_service_message(&mut Cursor::new(written))
+                .unwrap_or_else(|error| panic!("{name} stays readable: {error}"));
+        }
+    }
+
+    #[test]
+    fn a_detail_is_cut_on_a_character_boundary_and_kept_readable() {
+        let message = ServiceMessage::new(ServiceBody::State {
+            id: None,
+            state: ScufrisState::Error,
+            // Two bytes each, so a cut at the byte bound lands inside one.
+            detail: "é".repeat(MAX_DETAIL_BYTES),
+        });
+        let ServiceBody::State { detail, .. } = &message.body else {
+            panic!("the body is still a state");
+        };
+        assert_eq!(detail.len(), MAX_DETAIL_BYTES);
+        assert!(detail.chars().all(|character| character == 'é'));
+        assert!(is_detail_text(detail));
     }
 
     #[test]

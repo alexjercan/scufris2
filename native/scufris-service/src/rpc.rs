@@ -193,7 +193,7 @@ pub fn transcript_entry(message: &Value) -> Option<TranscriptEntry> {
     }
     Some(TranscriptEntry {
         speaker,
-        text: truncate(text, MAX_TRANSCRIPT_TEXT_BYTES),
+        text: scufris_control::truncate(text, MAX_TRANSCRIPT_TEXT_BYTES),
     })
 }
 
@@ -209,18 +209,6 @@ fn text_of(content: &Value) -> String {
             .join("\n"),
         _ => String::new(),
     }
-}
-
-/// Shortens text to a byte bound without splitting a character.
-fn truncate(text: &str, bound: usize) -> String {
-    if text.len() <= bound {
-        return text.to_string();
-    }
-    let mut end = bound;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    text[..end].to_string()
 }
 
 #[cfg(test)]

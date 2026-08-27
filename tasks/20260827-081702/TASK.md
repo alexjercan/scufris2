@@ -1,6 +1,6 @@
 # Scufris as a service: the architecture inversion
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 90
 - TAGS: architecture, desktop
 
@@ -908,3 +908,31 @@ independent, so `w-3` and `c-3` can be in flight at once, and a
 
 Neither the new key nor the tool has been exercised on the i3 desktop. This
 needs a home-manager rebuild first.
+
+## Closed (2026-08-27)
+
+Eight increments, then one review round over the whole range
+(`185034a..a13cb38`, recorded in `REVIEW.md`). Everything the panel
+raised was queued as its own task and every one of them has landed:
+
+- `20260827-205332` bound every string the service emits.
+- `20260827-205335` finished the conversation window: focus, stacking,
+  tests. The textbox draws on top and the HUD sits above it.
+- `20260827-205337` settled the submission identifier and its timer.
+- `20260827-205340` routed or retired what the inversion left behind.
+- `20260827-205342` refreshed the review lane briefs.
+- `20260827-205346` brought the documentation up to the inverted tree.
+- `20260827-205350` took the eight minor findings.
+
+Two things the review surfaced were deliberately not folded back in
+here, because they are new work rather than repair:
+
+- `20260827-212938`, an ambient signal for an unattended job. The
+  removed `workerAttentionSignal` answers a different question from
+  `ScufrisState` and needs a channel of its own.
+- `20260827-212118`, the staging stack, which the parallel-instance
+  finding raised the priority of.
+
+The service is what runs Scufris now: `pi --mode rpc` is a client of it,
+the companion is a client of it, and `scufris-ctl` is how a terminal or
+a window manager reaches it.

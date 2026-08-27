@@ -1,6 +1,6 @@
 # Scufris does what is asked, not a workflow
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 75
 - TAGS: identity, workflow
 
@@ -192,3 +192,17 @@ entry's keywords.
 - The repository's own `.scufris.toml` was rendered with the new parser
   and returns the retired-shape diagnostic, as expected until Alex
   pastes the snippet above.
+
+## Closed (2026-08-27)
+
+The last open item was the one this task deliberately left to Alex: the
+repository's own `.scufris.toml` still had the retired `preferences`
+shape, so the project rendered the diagnostic and Scufris inferred.
+
+Converted in `3333ea4`, and `35326a7` pointed `agents.review` at
+`/scufris-review`, this project's own panel, rather than at a bare
+read-only reviewer. `context` now renders the menu with no diagnostic.
+
+Nothing else was outstanding. The parser, the identity, the delegation
+policy, and the documentation landed with the verification recorded
+above.

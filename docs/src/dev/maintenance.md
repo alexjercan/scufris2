@@ -22,9 +22,16 @@ npm run dev
 There is no voice mode of it. This process makes no sound whatever it is
 given, so hearing a working tree means running the companion; see below.
 
-`scufris-dev` strips the repository `node_modules/.bin` from `PATH` so the
-system Pi runs, sets the orchestrator role and default project roots, and
-passes the working-tree extensions and skills.
+`scufris-dev` picks a resumable session directory and hands the rest to
+`scripts/scufris-agent`, which strips the repository `node_modules/.bin` from
+`PATH` so the system Pi runs, sets the orchestrator role, and passes the
+working-tree extensions and skills. The launcher is its own script because the
+background service starts an agent with a session directory of its own
+choosing; see [staging](staging.md), which points `SCUFRIS_SERVICE_AGENT` at
+it.
+
+To run the whole stack from the working tree beside the deployed one, use
+[staging](staging.md) rather than assembling the isolation by hand.
 
 ## The desktop companion
 
@@ -154,7 +161,7 @@ npm run check
 python3 -m unittest discover -s tests -p 'test_*.py'
 ruff check .
 ruff format --check .
-shellcheck scripts/scufris-dev
+shellcheck scripts/scufris-agent scripts/scufris-dev scripts/scufris-staging
 (cd native && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace)
 nix fmt -- --check .
 nix flake check -L
@@ -196,6 +203,12 @@ Test ownership:
   answer. Nothing here reaches the network, and one test names the only three
   fields a window may carry, because the answers behind them carry the account
   as well.
+- `tests/test_scufris_staging.py`: what `scufris-staging up` arranges. Both
+  binaries are stubs, so what is under test is the script: the environment, the
+  seeded root, the lock that refuses a second stack, and a Ctrl+C that stops
+  exactly the processes it started. Every path is inside a temporary directory,
+  `HOME` and `XDG_RUNTIME_DIR` included, so a test that got isolation wrong
+  fails rather than writing into the deployed Scufris.
 
 ## Documentation
 

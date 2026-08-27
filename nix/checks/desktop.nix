@@ -146,6 +146,21 @@ in
       EOF
       diff -u expected-overridden overridden
 
+      # One knob moves both sockets, which is what puts a staging Scufris
+      # beside the deployed one. The directory is used as named, with no
+      # `scufris` below it, and `SCUFRIS_DESKTOP_SOCKET` still outranks it.
+      # `SCUFRIS_DESKTOP_SOCKET` is exported above and would hide the first
+      # half of this, and `XDG_RUNTIME_DIR` is unset, so the override is
+      # answering on its own.
+      env -u SCUFRIS_DESKTOP_SOCKET SCUFRIS_RUNTIME_DIR=/run/user/1000/scufris-staging \
+        ${desktop}/bin/scufris-desktop --print-config > staged
+      grep -Fx 'socket=/run/user/1000/scufris-staging/service.sock' staged
+      grep -Fx 'command_socket=/run/user/1000/scufris-staging/desktop.sock' staged
+      # A path named outright still outranks the directory.
+      SCUFRIS_RUNTIME_DIR=/run/user/1000/scufris-staging \
+        ${desktop}/bin/scufris-desktop --print-config | grep -Fx \
+        'socket=/run/user/1000/scufris/service.sock'
+
       # A relative hook would let the working directory choose the executable.
       ! SCUFRIS_DESKTOP_CHAT_COMMAND=scufris-chat \
         ${desktop}/bin/scufris-desktop --print-config

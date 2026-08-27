@@ -17,7 +17,10 @@ export const SERVICE_VERSION = 3;
 /** Maximum encoded message size, including its LF terminator. */
 export const MAX_MESSAGE_BYTES = 64 * 1024;
 
-/** Directory below XDG_RUNTIME_DIR that holds the service socket. */
+/**
+ * Directory below XDG_RUNTIME_DIR that holds the service socket. Not used when
+ * `SCUFRIS_RUNTIME_DIR` names the directory itself.
+ */
 export const SOCKET_DIRECTORY_NAME = "scufris";
 
 /** Socket name below the socket directory. */

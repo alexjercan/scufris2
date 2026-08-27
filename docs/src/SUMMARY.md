@@ -18,6 +18,7 @@
 - [Messaging](dev/messaging.md)
 - [Tmux](dev/tmux.md)
 - [Operation](dev/operation.md)
+- [Staging](dev/staging.md)
 - [Maintenance](dev/maintenance.md)
 
 # Reference

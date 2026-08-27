@@ -25,6 +25,8 @@ in {
     test ! -e ${resources}/share/scufris/extensions/scufris/voice
     test ! -e ${resources}/share/scufris/tools/voice
     test ! -e ${resources}/share/scufris/scripts/scufris-dev
+    test ! -e ${resources}/share/scufris/scripts/scufris-agent
+    test ! -e ${resources}/share/scufris/scripts/scufris-staging
     test ! -e ${resources}/share/scufris/prompts
     test -x ${resources}/share/scufris/tools/jobs/scufris-jobs
     test -x ${resources}/share/scufris/tools/jobs/scufris-report

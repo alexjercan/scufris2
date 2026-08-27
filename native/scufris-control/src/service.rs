@@ -29,7 +29,10 @@ use std::{env, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ControlPathError, MessageError, in_runtime_dir, is_identifier, is_submission_text};
+use crate::{
+    ControlPathError, MessageError, chosen_runtime_dir, in_runtime_dir, is_identifier,
+    is_submission_text,
+};
 
 /// Wire protocol version accepted by the service and its clients.
 pub const SERVICE_VERSION: u32 = 3;
@@ -72,7 +75,11 @@ pub const MAX_CATALOG_TEXT_BYTES: usize = 512;
 
 /// Returns the service socket path for the current user session.
 pub fn service_socket_path() -> Result<PathBuf, ControlPathError> {
-    in_runtime_dir(env::var_os("XDG_RUNTIME_DIR"), SERVICE_FILE_NAME)
+    in_runtime_dir(
+        chosen_runtime_dir(),
+        env::var_os("XDG_RUNTIME_DIR"),
+        SERVICE_FILE_NAME,
+    )
 }
 
 /// The kind of client one connection is, declared in its `hello`.
@@ -1296,9 +1303,9 @@ mod tests {
     fn the_service_socket_is_one_named_path_in_the_session_runtime_directory() {
         let run = Some(std::ffi::OsString::from("/run/user/1000"));
         assert_eq!(
-            in_runtime_dir(run, SERVICE_FILE_NAME).expect("the runtime directory is set"),
+            in_runtime_dir(None, run, SERVICE_FILE_NAME).expect("the runtime directory is set"),
             std::path::Path::new("/run/user/1000/scufris/service.sock")
         );
-        assert!(in_runtime_dir(None, SERVICE_FILE_NAME).is_err());
+        assert!(in_runtime_dir(None, None, SERVICE_FILE_NAME).is_err());
     }
 }

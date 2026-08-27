@@ -31,6 +31,14 @@ pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 /// Directory below `XDG_RUNTIME_DIR` that holds the Scufris sockets.
 pub const SOCKET_DIRECTORY_NAME: &str = "scufris";
 
+/// Variable that names the socket directory outright.
+///
+/// One knob for the whole stack. The service, the companion and `scufris-ctl`
+/// resolve their sockets through the same function, so setting this once puts
+/// a second Scufris beside the deployed one without either of them finding the
+/// other. Nothing sets it in an ordinary session.
+pub const RUNTIME_DIR_VARIABLE: &str = "SCUFRIS_RUNTIME_DIR";
+
 /// Maximum accepted length of one protocol identifier.
 ///
 /// Correlation, widget, and surface identifiers share one rule, so a peer that
@@ -43,21 +51,40 @@ pub const MAX_IDENTIFIER_LENGTH: usize = 64;
 /// side accepts is text both sides accept.
 pub const MAX_SUBMISSION_TEXT_BYTES: usize = 8 * 1024;
 
-/// Returns one socket path below the session runtime directory.
+/// Returns one socket path for the Scufris this process belongs to.
 ///
-/// The directory is taken rather than read, so the rule can be tested without
-/// a test setting a variable every other test in the process can see.
+/// [`RUNTIME_DIR_VARIABLE`] names the directory itself, with no `scufris`
+/// below it: an override worth having says where the sockets are rather than
+/// where to look for them. Unset, they are in `$XDG_RUNTIME_DIR/scufris`,
+/// which is what ships and what every deployed unit uses.
+///
+/// Both directories are taken rather than read, so the rule can be tested
+/// without a test setting a variable every other test in the process can see.
 pub(crate) fn in_runtime_dir(
+    chosen: Option<std::ffi::OsString>,
     runtime_dir: Option<std::ffi::OsString>,
     name: &str,
 ) -> Result<PathBuf, ControlPathError> {
-    let runtime_dir = runtime_dir.ok_or(ControlPathError::MissingRuntimeDir)?;
-    if runtime_dir.is_empty() {
-        return Err(ControlPathError::MissingRuntimeDir);
+    // Empty is unset, on both. A variable exported with no value is one a
+    // shell left behind, and reading it as a path puts a socket at the root of
+    // the filesystem.
+    if let Some(chosen) = chosen.filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(chosen).join(name));
     }
+    let runtime_dir = runtime_dir
+        .filter(|value| !value.is_empty())
+        .ok_or(ControlPathError::MissingRuntimeDir)?;
     Ok(PathBuf::from(runtime_dir)
         .join(SOCKET_DIRECTORY_NAME)
         .join(name))
+}
+
+/// Reads the socket directory override from the environment.
+///
+/// One place, so the service, the companion and `scufris-ctl` cannot disagree
+/// about which Scufris they belong to.
+pub(crate) fn chosen_runtime_dir() -> Option<std::ffi::OsString> {
+    std::env::var_os(RUNTIME_DIR_VARIABLE)
 }
 
 /// Failure to resolve one of the current user's socket paths.
@@ -258,16 +285,50 @@ mod tests {
     #[test]
     fn a_socket_path_needs_a_runtime_directory() {
         assert_eq!(
-            in_runtime_dir(Some("/run/user/1000".into()), "service.sock").unwrap(),
+            in_runtime_dir(None, Some("/run/user/1000".into()), "service.sock").unwrap(),
             PathBuf::from("/run/user/1000/scufris/service.sock")
         );
         assert!(matches!(
-            in_runtime_dir(None, "service.sock"),
+            in_runtime_dir(None, None, "service.sock"),
             Err(ControlPathError::MissingRuntimeDir)
         ));
         assert!(matches!(
-            in_runtime_dir(Some("".into()), "service.sock"),
+            in_runtime_dir(None, Some("".into()), "service.sock"),
             Err(ControlPathError::MissingRuntimeDir)
         ));
+    }
+
+    /// The whole point of the override: a second Scufris on the same machine
+    /// puts its sockets somewhere the deployed one will never look.
+    #[test]
+    fn a_chosen_directory_is_where_the_sockets_are() {
+        let staging = Some("/run/user/1000/scufris-staging".into());
+        assert_eq!(
+            in_runtime_dir(
+                staging.clone(),
+                Some("/run/user/1000".into()),
+                "service.sock"
+            )
+            .unwrap(),
+            PathBuf::from("/run/user/1000/scufris-staging/service.sock"),
+            "the directory named is the directory used, with no `scufris` below it"
+        );
+        // It answers on its own. A session that has one and not the other is
+        // the systemd unit case, where `XDG_RUNTIME_DIR` may not be exported.
+        assert_eq!(
+            in_runtime_dir(staging, None, "desktop.sock").unwrap(),
+            PathBuf::from("/run/user/1000/scufris-staging/desktop.sock")
+        );
+        // Exported empty is a shell leaving something behind, not a request to
+        // put a socket at the root of the filesystem.
+        assert_eq!(
+            in_runtime_dir(
+                Some("".into()),
+                Some("/run/user/1000".into()),
+                "service.sock"
+            )
+            .unwrap(),
+            PathBuf::from("/run/user/1000/scufris/service.sock")
+        );
     }
 }

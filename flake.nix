@@ -49,6 +49,7 @@
             scufris-desktop = scufris.desktop;
             scufris-service = scufris.service;
             scufris-ctl = scufris.ctl;
+            scufris-staging = scufris.staging;
           };
 
         apps =
@@ -74,6 +75,11 @@
               type = "app";
               program = "${scufris.ctl}/bin/scufris-ctl";
               meta.description = "Talk to Scufris from a terminal";
+            };
+            staging = {
+              type = "app";
+              program = "${scufris.staging}/bin/scufris-staging";
+              meta.description = "Run this source tree's Scufris beside the deployed one";
             };
           };
 

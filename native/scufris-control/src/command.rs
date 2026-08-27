@@ -25,7 +25,7 @@ use std::{env, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ControlPathError, in_runtime_dir};
+use crate::{ControlPathError, chosen_runtime_dir, in_runtime_dir};
 
 /// Wire version of the command protocol.
 ///
@@ -39,7 +39,11 @@ pub const COMMAND_FILE_NAME: &str = "desktop.sock";
 
 /// Returns the companion's command socket path for the current user session.
 pub fn command_socket_path() -> Result<PathBuf, ControlPathError> {
-    in_runtime_dir(env::var_os("XDG_RUNTIME_DIR"), COMMAND_FILE_NAME)
+    in_runtime_dir(
+        chosen_runtime_dir(),
+        env::var_os("XDG_RUNTIME_DIR"),
+        COMMAND_FILE_NAME,
+    )
 }
 
 /// One versioned verb sent to the companion.
@@ -179,9 +183,9 @@ mod tests {
     #[test]
     fn the_command_socket_sits_beside_the_service_socket_and_is_not_it() {
         let run = Some(std::ffi::OsString::from("/run/user/1000"));
-        let command =
-            in_runtime_dir(run.clone(), COMMAND_FILE_NAME).expect("the runtime directory is set");
-        let service = in_runtime_dir(run, crate::service::SERVICE_FILE_NAME)
+        let command = in_runtime_dir(None, run.clone(), COMMAND_FILE_NAME)
+            .expect("the runtime directory is set");
+        let service = in_runtime_dir(None, run, crate::service::SERVICE_FILE_NAME)
             .expect("the runtime directory is set");
         assert_eq!(command.parent(), service.parent());
         assert_ne!(command, service);
@@ -190,9 +194,9 @@ mod tests {
 
     #[test]
     fn a_session_with_no_runtime_directory_has_no_command_socket() {
-        assert!(in_runtime_dir(None, COMMAND_FILE_NAME).is_err());
+        assert!(in_runtime_dir(None, None, COMMAND_FILE_NAME).is_err());
         assert!(
-            in_runtime_dir(Some(std::ffi::OsString::new()), COMMAND_FILE_NAME).is_err(),
+            in_runtime_dir(None, Some(std::ffi::OsString::new()), COMMAND_FILE_NAME).is_err(),
             "an empty runtime directory is no runtime directory"
         );
     }

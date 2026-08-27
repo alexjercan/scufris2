@@ -14,8 +14,9 @@
       # commit in it, and spawn a worker in a pane. The runner reports either
       # one as a missing executable rather than assuming it, so a machine
       # without them gets a clear refusal - which is why they are named here
-      # and not in the package.
-      nativeBuildInputs = [pkgs.python3 pkgs.git pkgs.tmux];
+      # and not in the package. `util-linux` is for `flock`, which the staging
+      # tests skip without, and a check that skips is a check that says nothing.
+      nativeBuildInputs = [pkgs.python3 pkgs.git pkgs.tmux pkgs.util-linux];
     } ''
       # Copied rather than run in place: every test resolves what it exercises
       # relative to its own file, and the store is read-only while some of them

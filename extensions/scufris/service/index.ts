@@ -11,12 +11,25 @@ import {
   type DesktopControlSignal,
 } from "./client.ts";
 
-/** Resolves the service socket path for this user session. */
+/**
+ * Resolves the service socket path for this user session.
+ *
+ * The same three steps `scufris-control` takes in Rust, and it has to be the
+ * same three: this is the fourth resolver of one path, and an agent that
+ * disagreed with the service that started it would report its answers into
+ * another Scufris's conversation. `SCUFRIS_RUNTIME_DIR` is the directory as
+ * named, with no `scufris` below it, and is what runs a staging stack beside a
+ * deployed one.
+ */
 export function resolveSocketPath(
   environment: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
   const configured = environment.SCUFRIS_SERVICE_SOCKET;
   if (configured) return configured;
+  // Exported empty is a shell leaving something behind, on both, and reading
+  // it as a path puts a socket at the root of the filesystem.
+  const chosen = environment.SCUFRIS_RUNTIME_DIR;
+  if (chosen) return join(chosen, SERVICE_FILE_NAME);
   const runtimeDirectory = environment.XDG_RUNTIME_DIR;
   if (!runtimeDirectory) return undefined;
   return join(runtimeDirectory, SOCKET_DIRECTORY_NAME, SERVICE_FILE_NAME);

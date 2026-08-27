@@ -10,6 +10,11 @@ pkgs.runCommand "scufris-resources" {} ''
   cp -R ${../skills} "$out/share/scufris/skills"
   cp -R ${../tools} "$out/share/scufris/tools"
   chmod -R u+w "$out/share/scufris"
+  # The development launchers. What a deployment runs is built from the store,
+  # so a copy of the working tree's launcher here would be a second answer to
+  # which Scufris this is.
   rm "$out/share/scufris/scripts/scufris-dev"
+  rm "$out/share/scufris/scripts/scufris-agent"
+  rm "$out/share/scufris/scripts/scufris-staging"
   rm -R "$out/share/scufris/tools/voice"
 ''

@@ -22,7 +22,11 @@ keeps the conversation and a terminal over ssh reaches it.
 - **One socket.** `$XDG_RUNTIME_DIR/scufris/service.sock`, under a private
   directory, mode 0600. A socket that still answers is another service and the
   bind fails; a socket with nothing behind it is what a crash leaves, so that
-  one is removed.
+  one is removed. `SCUFRIS_RUNTIME_DIR` names the directory outright, with no
+  `scufris` below it: the service, the companion, `scufris-ctl` and the agent
+  extension all resolve the path the same way, so one export moves a whole
+  stack and none of them can end up in another Scufris's conversation. That is
+  [staging](staging.md).
 - **The last screenful of the conversation.** A ring of 200 text entries, so a
   frontend that connects has something to show before the next thing is said.
 

@@ -246,6 +246,42 @@ test("the socket is named beside the runtime directory, and configurable", () =>
   assert.equal(resolveSocketPath({} as NodeJS.ProcessEnv), undefined);
 });
 
+test("a chosen runtime directory is where the agent looks for the service", () => {
+  // The directory named is the directory used, with no `scufris` below it, and
+  // it outranks XDG_RUNTIME_DIR. This is what keeps a staging agent's answers
+  // out of the deployed conversation: the service, the companion, `scufris-ctl`
+  // and this all read the same variable, so they cannot disagree about which
+  // Scufris they belong to.
+  assert.equal(
+    resolveSocketPath({
+      XDG_RUNTIME_DIR: "/run/user/1000",
+      SCUFRIS_RUNTIME_DIR: "/run/user/1000/scufris-staging",
+    } as NodeJS.ProcessEnv),
+    "/run/user/1000/scufris-staging/service.sock",
+  );
+  // A socket named outright still outranks the directory.
+  assert.equal(
+    resolveSocketPath({
+      SCUFRIS_RUNTIME_DIR: "/run/user/1000/scufris-staging",
+      SCUFRIS_SERVICE_SOCKET: "/tmp/one.sock",
+    } as NodeJS.ProcessEnv),
+    "/tmp/one.sock",
+  );
+  // Exported empty is a shell leaving something behind, not a request to put a
+  // socket at the root of the filesystem.
+  assert.equal(
+    resolveSocketPath({
+      XDG_RUNTIME_DIR: "/run/user/1000",
+      SCUFRIS_RUNTIME_DIR: "",
+    } as NodeJS.ProcessEnv),
+    "/run/user/1000/scufris/service.sock",
+  );
+  assert.equal(
+    resolveSocketPath({ SCUFRIS_RUNTIME_DIR: "" } as NodeJS.ProcessEnv),
+    undefined,
+  );
+});
+
 test("the client says hello as an agent and carries what it is told to say", async () => {
   const root = await scratch("client");
   const socketPath = join(root, "service.sock");

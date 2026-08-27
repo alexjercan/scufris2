@@ -213,8 +213,9 @@ the environment:
 
 | Variable                          | Default                                        |
 | --------------------------------- | ---------------------------------------------- |
-| `SCUFRIS_DESKTOP_SOCKET`          | `$XDG_RUNTIME_DIR/scufris/service.sock`        |
-| `SCUFRIS_DESKTOP_COMMAND_SOCKET`  | `$XDG_RUNTIME_DIR/scufris/desktop.sock`        |
+| `SCUFRIS_RUNTIME_DIR`             | `$XDG_RUNTIME_DIR/scufris`                     |
+| `SCUFRIS_DESKTOP_SOCKET`          | `$SCUFRIS_RUNTIME_DIR/service.sock`            |
+| `SCUFRIS_DESKTOP_COMMAND_SOCKET`  | `$SCUFRIS_RUNTIME_DIR/desktop.sock`            |
 | `SCUFRIS_DESKTOP_STATE_FILE`      | `$XDG_STATE_HOME/scufris-desktop/pending.json` |
 | `SCUFRIS_STT_ENDPOINT`            | `http://127.0.0.1:10301/inference`             |
 | `SCUFRIS_DESKTOP_HOTKEY`          | `Super+D`                                      |
@@ -223,6 +224,12 @@ the environment:
 | `SCUFRIS_DESKTOP_CHAT_COMMAND`    | none                                           |
 | `SCUFRIS_DESKTOP_RESTART_COMMAND` | none                                           |
 | `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | none, and the companion stays silent           |
+
+`SCUFRIS_RUNTIME_DIR` is the socket directory, used as named with no `scufris`
+below it. The service and `scufris-ctl` read the same variable, so one export
+moves the whole stack together; a socket named outright still outranks it.
+Nothing sets it in an ordinary session. It is what runs a second Scufris
+beside this one, which is [staging](../dev/staging.md).
 
 The companion starts without a backend and reports it as unavailable in the
 tray. It answers the pill only when `scufris-service` is on the same socket;

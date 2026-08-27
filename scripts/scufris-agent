@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# The working tree's agent launcher: what `nix/launcher.nix` is for the built
+# package. It puts the extensions on the command line and forwards everything
+# else, so whoever runs it chooses the session and the mode - a terminal
+# through `scufris-dev`, or `scufris-service` through `--agent`.
+#
+# Not packaged. `nix/resources.nix` removes it beside `scufris-dev`, because
+# what a deployment runs is the launcher built from the store.
+
+set -euo pipefail
+
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
+if [[ -z "${SCUFRIS_PROJECT_ROOTS+x}" ]]; then
+  export SCUFRIS_PROJECT_ROOTS='["~/personal","~/work","~/third-party"]'
+fi
+
+# The repository's own `node_modules/.bin` holds a `pi` shim, and running the
+# working tree against it is not running the managed Pi. Dropped from PATH so
+# `type -P pi` answers with the one the deployment would use.
+repository_npm_bin="$root/node_modules/.bin"
+repository_npm_bin_physical=""
+if [[ -d "$repository_npm_bin" ]]; then
+  repository_npm_bin_physical="$(CDPATH='' cd -- "$repository_npm_bin" && pwd -P)"
+fi
+
+path_remainder="$PATH"
+system_path_entries=()
+while true; do
+  if [[ "$path_remainder" == *:* ]]; then
+    entry="${path_remainder%%:*}"
+    path_remainder="${path_remainder#*:}"
+    final_entry=false
+  else
+    entry="$path_remainder"
+    final_entry=true
+  fi
+
+  is_repository_npm_bin=false
+  if [[ "$entry" == "$repository_npm_bin" || "$entry" == "$repository_npm_bin/" ]]; then
+    is_repository_npm_bin=true
+  elif [[ -n "$entry" && -n "$repository_npm_bin_physical" && -d "$entry" ]]; then
+    entry_physical="$(CDPATH='' cd -- "$entry" && pwd -P)"
+    if [[ "$entry_physical" == "$repository_npm_bin_physical" ]]; then
+      is_repository_npm_bin=true
+    fi
+  fi
+  if [[ "$is_repository_npm_bin" == false ]]; then
+    system_path_entries+=("$entry")
+  fi
+
+  if [[ "$final_entry" == true ]]; then
+    break
+  fi
+done
+system_path="$(
+  IFS=:
+  printf %s "${system_path_entries[*]}"
+)"
+if ! system_pi="$(PATH="$system_path" type -P pi)"; then
+  printf 'scufris-agent: system Pi is unavailable\n' >&2
+  exit 2
+fi
+export PATH="$system_path"
+
+extensions=(
+  "$root/extensions/scufris/workflow/index.ts"
+  "$root/extensions/scufris/response.ts"
+  "$root/extensions/scufris/calm.ts"
+  "$root/extensions/scufris/service/index.ts"
+  "$root/extensions/scufris/widgets/index.ts"
+  "$root/extensions/scufris/conversation.ts"
+)
+skills=(
+  "$root/skills/workflow"
+  "$root/skills/widgets"
+)
+# No Piper. This process makes no sound whatever it is given: the agent shapes
+# the answer and the frontend synthesises it, so there is nothing here for a
+# voice mode to turn on.
+unset SCUFRIS_PIPER_MODEL SCUFRIS_PIPER_CONFIG
+
+args=()
+for extension in "${extensions[@]}"; do
+  args+=(--extension "$extension")
+done
+for skill in "${skills[@]}"; do
+  args+=(--skill "$skill")
+done
+
+export SCUFRIS_ROLE=orchestrator
+exec "$system_pi" "${args[@]}" "$@"

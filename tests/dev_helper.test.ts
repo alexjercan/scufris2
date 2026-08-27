@@ -17,6 +17,9 @@ import test from "node:test";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const helper = join(root, "scripts", "scufris-dev");
+// The runner picks a session directory and hands the rest to the launcher, so
+// the fixture is only a runner where both are beside each other.
+const launcher = join(root, "scripts", "scufris-agent");
 
 interface Result {
   code: number | null;
@@ -40,6 +43,9 @@ async function fixture() {
   await mkdir(repositoryNpmBin, { recursive: true });
   await copyFile(helper, fixtureHelper);
   await chmod(fixtureHelper, 0o755);
+  const fixtureLauncher = join(directory, "scripts", "scufris-agent");
+  await copyFile(launcher, fixtureLauncher);
+  await chmod(fixtureLauncher, 0o755);
   await executable(
     join(repositoryNpmBin, "pi"),
     "#!/usr/bin/env bash\nexit 99\n",

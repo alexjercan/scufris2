@@ -114,6 +114,16 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - `packages.scufris-speak`, the synthesiser the companion runs. It binds the
   pinned Piper package, model, and configuration, so the voice is a property of
   the package rather than a run-time setting.
+- `SCUFRIS_RUNTIME_DIR` names the socket directory outright, used as named with
+  no `scufris` below it. The service, the companion, `scufris-ctl` and the
+  agent's own service extension resolve their sockets through it, so one export
+  moves a whole stack together and none of them can end up in another Scufris's
+  conversation. A socket named outright still outranks it, and nothing sets it
+  in an ordinary session.
+- `nix run .#staging -- up` runs this source tree's Scufris beside the deployed
+  one: its own sockets, state, sessions, and `Super+G`, against a disposable
+  root under `/tmp`. It stays in the foreground and Ctrl+C stops both halves.
+  See the [staging](docs/src/dev/staging.md) chapter.
 
 ### Changed
 

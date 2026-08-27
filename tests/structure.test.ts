@@ -47,8 +47,13 @@ test("package loads only capability-owned Scufris extensions", async () => {
   await access(join(root, "tools", "jobs", "scufris-report"));
   await access(join(root, "tools", "voice", "scufris-speak"));
   assert.deepEqual((await readdir(join(root, "scripts"))).sort(), [
+    // The launcher `scufris-dev` and `scufris-staging` both run. It is its own
+    // script because the service starts an agent on a session directory of its
+    // own choosing, which a runner that picks one cannot be.
+    "scufris-agent",
     "scufris-artifacts-prune",
     "scufris-dev",
     "scufris-jobs",
+    "scufris-staging",
   ]);
 });

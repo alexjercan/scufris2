@@ -1,6 +1,6 @@
 # Build scufris-staging: one-command parallel staging stack
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 80
 - TAGS: staging, deploy
 
@@ -98,3 +98,81 @@ Record under this task directory:
 - Evidence production was untouched: `systemctl --user status` of the real
   units and mtimes of `~/.local/state/scufris` unchanged across the run.
 - `npm run check` and `nix flake check` output.
+
+## Outcome
+
+`scufris-staging up` runs the working tree's service and companion beside the
+deployed Scufris. `nix run .#staging -- up` is the same thing with both
+binaries built from this source tree.
+
+### What was built
+
+1. `SCUFRIS_RUNTIME_DIR` in `scufris-control`. One `in_runtime_dir` that the
+   command socket and the service socket both go through, so the service, the
+   companion and `scufris-ctl` cannot disagree about which Scufris they belong
+   to. The directory is used as named, with no
+   `scufris` below it. Empty is unset on both variables: a variable a shell
+   left behind must not put a socket at the root of the filesystem. A socket
+   named outright still outranks the directory. `nix/checks/desktop.nix`
+   asserts both halves of that ranking against `--print-config`.
+2. `scripts/scufris-agent`, extracted from `scripts/scufris-dev`. The working
+   tree's twin of `nix/launcher.nix`: PATH surgery, the six extensions, the two
+   skills, `SCUFRIS_ROLE=orchestrator`, then `exec pi "${args[@]}" "$@"`. It
+   forwards its arguments and adds nothing, which is what lets the service run
+   it with a session directory of the service's own choosing.
+   `scufris-dev` is now the session-directory half and calls it. This replaced
+   duplication rather than adding a third copy of the extension list.
+3. `scripts/scufris-staging`. `up` is the only subcommand. Ctrl+C is the
+   teardown and there is no `down`. A second `up` exits 3 on a `flock` held by
+   the running process, so a crash leaves nothing to clear by hand. Children
+   are stopped by recorded PID.
+4. `nix/staging.nix`, `packages.scufris-staging` and `apps.staging`.
+5. `tests/test_scufris_staging.py`, four tests against the real script with
+   stub binaries, every path inside a temporary directory.
+6. `docs/src/dev/staging.md`, plus `SCUFRIS_RUNTIME_DIR` in the companion's
+   environment table and the new test in the ownership list.
+
+### The fourth resolver
+
+The live run found what the unit tests could not: the agent's own service
+extension resolved its socket from `XDG_RUNTIME_DIR` alone
+(`extensions/scufris/service/index.ts`). Steps 1 to 4 were all correct and the
+staging service still received no answers, because the staging agent was
+connecting to the deployed socket path. Had the deployed service been running,
+a staging agent would have reported its answers into the deployed conversation.
+
+Fixed by giving `resolveSocketPath` the same three steps as the Rust side, with
+a test that names why the two must agree. The task listed three resolvers; it
+was four. Nothing but a real run would have found it, which is the argument for
+the live transcript being part of the verification rather than an afterthought.
+
+### Verification
+
+`tasks/20260827-212118/staging-run.md` has the run: `up`, the environment it
+prints, `scufris-ctl state`/`hud`/`send` through `SCUFRIS_RUNTIME_DIR`, a
+Ctrl+C teardown that exits 0 with both children gone, the second-stack refusal,
+and `ls` plus mtimes before and after.
+
+The agent answered "I can see one project: hello" - the seeded staging project,
+not the deployed project roots, which is the isolation working end to end.
+
+The deployed side was untouched across the run: both user units still inactive,
+`~/.local/state/scufris`, `~/.local/share/scufris` and `~/.pi/agent/settings.json`
+at the same mtimes, and nothing new under `/run/user/1000/scufris`.
+
+Green: `npm run check` (81), `cargo test --workspace` (342),
+`cargo clippy --workspace --all-targets -- -D warnings`,
+`python3 -m unittest discover -s tests` (50, 2 skipped without Sprout),
+`ruff check`, `ruff format --check`, `shellcheck` on the three scripts,
+`nix fmt -- --check`, `nix flake check`. `util-linux` was added to the
+`helper-tests` derivation so the staging tests run there rather than skipping
+on a missing `flock`.
+
+The one step not scripted is the `Super+G` keypress itself, which is a key and
+a microphone. What it drives after the transcription is the `send` in the
+transcript.
+
+### Not done here
+
+Out of scope as recorded above: the nix.dotfiles phases, the `Mod4+Shift+s`
+staging keybind, and `scufris-staging run -- <cmd>`.

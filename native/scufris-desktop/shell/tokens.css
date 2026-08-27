@@ -22,14 +22,22 @@
     ui-monospace, monospace;
 
   /* The panel's own measurements, so a widget can lay out inside the padding
-   * the chrome leaves it rather than guessing at it. */
-  --sw-pad-x: 14px;
-  --sw-pad-top: 26px;
-  --sw-pad-bottom: 20px;
+   * the chrome leaves it rather than guessing at it.
+   *
+   * The top and bottom strips are as tall as a tick plus the gap it sits in,
+   * because the chrome draws over the widget rather than beside it: a strip
+   * one pixel short is a row of a widget's own with a tick through it. */
+  --sw-pad-x: 16px;
+  --sw-pad-top: 34px;
+  --sw-pad-bottom: 34px;
 
-  --sw-size-big: 26px;
-  --sw-size-body: 11.5px;
-  --sw-size-small: 9.5px;
+  /* A panel is read from across the room rather than leaned into: it is on a
+   * desktop beside the work, not in it. Every size here went up a step for
+   * that, and the panels went up with them - type that grew inside a window
+   * that did not would only have less room to say the same thing. */
+  --sw-size-big: 34px;
+  --sw-size-body: 13.5px;
+  --sw-size-small: 11px;
   --sw-lead: 1.6;
   --sw-track: 0.16em;
 }

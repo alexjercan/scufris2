@@ -734,9 +734,9 @@ mod tests {
             Cmd::Open {
                 id: Some("w-1".into()),
                 surface: "widget-1".into(),
-                widget: "note".into(),
+                widget: "cpu".into(),
                 posture: Posture::Exhibit,
-                data: serde_json::json!({ "text": "hello" }),
+                data: serde_json::json!({ "every": 1 }),
             },
         );
         assert!(matches!(acts.first(), Some(Act::Adopt { .. })));

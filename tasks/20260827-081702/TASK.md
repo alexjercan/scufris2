@@ -601,3 +601,90 @@ before this one had the same shape and now uses the fixture too.
 still fails about one run in four. That one is not this: it is
 `20260827-142259` (p80), a late subscriber to a running shared backend never
 being handed the last reading.
+
+## Widgets: bigger panels and useful ones (2026-08-27)
+
+Asked for with increment 4: keep the style, change the content. The gruber
+palette, the square high-contrast frame, the pill and the textbox are
+untouched. What changed is how large a panel is and what is on it.
+
+### Bigger
+
+`--sw-size-big` 26 -> 34, `--sw-size-body` 11.5 -> 13.5, `--sw-size-small`
+9.5 -> 11, and every panel grew with them. Type that grew inside a window that
+did not would only have less room to say the same thing.
+
+The padding grew for a second reason. `--sw-pad-top` and `--sw-pad-bottom` are
+now 34px, the height of a tick plus the gap it sits in. The chrome draws over
+the widget rather than beside it, and at the old 24px bottom the `pin` tick
+sat on top of the CPU widget's own last row. A strip one pixel short is a row
+of a widget's own with a tick through it.
+
+### `cpu`
+
+The graph stays and takes whatever height the panel leaves it. Beside the
+headline is the package temperature, which turns `--sw-warn` at 85C; under the
+graph are memory in use and the one-minute load average.
+
+The `system` backend finds its thermometer once at start: hwmon by chip name
+(`k10temp`, `zenpower`, `coretemp`), then the input whose label is the package
+rather than one core, then the `x86_pkg_temp` thermal zone. A machine with
+none reports `null` and the panel shows a dash, which is not the same as zero
+degrees.
+
+### `claude` and `codex`
+
+Every usage window is a meter; the one closest to its limit is the headline,
+with how long until it starts over. Accent under 75 percent, `--sw-warn` at
+75, `--sw-alarm` at 90.
+
+They read the token the vendor's own CLI already keeps on this machine, and
+read it again on every poll rather than holding it, because the CLI refreshes
+that file in place. Nothing to sign in to and nothing to configure. A machine
+that never signed in gets "not signed in" rather than a stale number.
+
+Claude's usage is `GET https://api.anthropic.com/api/oauth/usage` with the
+OAuth bearer and `anthropic-beta: oauth-2025-04-20`. Its `limits` array is
+read rather than the named fields beside it: the named ones come and go with
+whatever is offered that month, and every one of them appears in `limits` too.
+A scoped weekly limit is labelled with the model it scopes, because "weekly"
+twice says nothing about which is about to bite.
+
+Codex's is `GET https://chatgpt.com/backend-api/codex/usage` with the bearer
+and `chatgpt-account-id`. It refuses the interpreter's default user agent with
+a 403 whatever the token is, so the backend sends one of its own that says
+what it is rather than dressing up as the CLI. Its two windows are sorted
+shortest first, because which of `primary` and `secondary` is the short one
+depends on the plan.
+
+The answer carries the account behind it, an email address among it. Three
+fields leave the backend - the window's label, its percentage, and the seconds
+until it resets - and a unit test asserts that a window carries nothing else.
+
+Polling is once a minute, clamped to [15s, 3600s], with a `refresh` action
+behind the panel's `rfr` tick for the moment after a long run. The first
+reading goes out at once rather than after an interval: a percentage is whole
+on its own.
+
+### Gone
+
+`note` and `tasks`, and the `tasks` backend with them. Nothing migrated. The
+tray now offers every shipped widget, because every shipped widget fills
+itself.
+
+### Verification
+
+- `cargo test -p scufris-desktop` - 241 pass.
+- `python3 -m unittest discover -s tests` - 45 pass, 12 of them new in
+  `tests/test_usage_backends.py`. Nothing there reaches the network: the two
+  tests that call `reading()` point the backend at an empty directory.
+- Both backends run live on this machine and answer with the shape above.
+- `npm run check` and `nix flake check --offline` - pass.
+- The four panels rendered in the real shell markup with the real stylesheets
+  and screenshotted, which is how the tick collision was found. Not seen on
+  the i3 desktop yet.
+
+### Note
+
+`tests/*.py` are not run by any check. They pass, and this adds to them, but
+nothing in CI or `nix flake check` calls them. Worth wiring up separately.

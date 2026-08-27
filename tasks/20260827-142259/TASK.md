@@ -1,6 +1,6 @@
 # A panel joining a shared backend gets nothing until the next beat
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 80
 - TAGS: widgets,desktop,bug
 
@@ -42,6 +42,30 @@ and did not fix the failure, which is how the real cause above was found.
 - The test must then be deterministic in the sandbox: run
   `nix flake check` several times, not once.
 
+## Decision
+
+A late subscriber is replayed the last reading the shared process produced.
+That is what the sharing claim implies: a backend answers a question, not a
+panel, and what it last said is true of whoever asks next. Waiting for the
+next line costs a beat on a sampler and five minutes on a backend that asks
+the network, which the `claude` and `codex` widgets now do.
+
+## Change
+
+`Running` keeps `last`, the line it wrote most recently. `subscribe` hands it
+to a surface joining a process that is already up, along with the health
+marker if it is not fresh. `hear` in the tests now drains until the news stops
+rather than until it starts: two pieces of news that belong to one moment can
+land in two drains, and returning on the first read the second as a miss.
+
 ## Verification
 
-Not started.
+- `cargo test -p scufris-desktop widgets::backends`, six consecutive runs, all
+  16 green.
+- `cargo test -p scufris-desktop`, 241 green.
+- `nix flake check --offline` twice and `nix build .#scufris-desktop --rebuild`
+  once, all green - three runs of the suite in the sandbox where it used to
+  fail.
+- New test `a_panel_that_joins_late_is_handed_what_the_backend_last_said`
+  covers the behaviour directly, rather than leaving it to the timing of
+  `two_widgets_asking_the_same_question_share_one_process`.

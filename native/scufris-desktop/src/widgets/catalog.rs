@@ -497,17 +497,17 @@ height = 110
         let catalog = Catalog::build(super::super::INSTALLED, &super::super::backends::names())
             .expect("the shipped widgets install");
         assert!(!catalog.entries().is_empty(), "no widget is shipped");
-        assert!(catalog.get("note").is_some(), "the note widget is missing");
         // And every backend a shipped widget names is a backend that shipped.
         let cpu = catalog.get("cpu").expect("the cpu widget is missing");
         assert_eq!(cpu.backend.as_deref(), Some("system"));
-        // The tray offers the ones that fill themselves and not the note,
-        // which would summon as an empty panel.
+        // Every shipped widget stands up on its own now, so the tray offers
+        // all of them. One that only showed what it was handed would summon as
+        // an empty panel, which is why none is shipped.
         let offered: Vec<_> = catalog.summonable().into_iter().map(|(id, _)| id).collect();
-        for id in ["cpu", "tasks", "timer"] {
+        for id in ["claude", "codex", "cpu", "timer"] {
             assert!(offered.contains(&id.to_string()), "{id} is not offered");
         }
-        assert!(!offered.contains(&"note".to_string()));
+        assert_eq!(offered.len(), catalog.entries().len());
     }
 
     #[test]

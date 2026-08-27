@@ -153,6 +153,14 @@ struct Running {
     cadence: Duration,
     /// What was last said about it.
     health: Health,
+    /// The last line it wrote, kept for whoever joins next.
+    ///
+    /// A panel that subscribes to a process already running would otherwise sit
+    /// empty until the next line, which is a beat for a sampler and five
+    /// minutes for something that asks the network. The reading is the
+    /// backend's answer to a question, not a message to one panel, so a second
+    /// panel asking the same question is owed the same answer.
+    last: Option<Value>,
 }
 
 #[derive(Default)]
@@ -207,7 +215,18 @@ impl Backends {
         let mut held = self.state();
         held.readers.insert(surface.clone(), key.clone());
         if let Some(running) = held.running.get_mut(&key) {
-            running.refs.insert(surface);
+            running.refs.insert(surface.clone());
+            // Caught up on the next beat, rather than left blank until the
+            // backend happens to write again. What it last said and what it is
+            // are both true of the panel that just joined.
+            let last = running.last.clone();
+            let health = running.health;
+            if let Some(data) = last {
+                held.data.insert(surface.clone(), data);
+            }
+            if health != Health::Fresh {
+                held.health.push((surface, health));
+            }
             return;
         }
         let refs = BTreeSet::from([surface]);
@@ -391,6 +410,7 @@ impl Backends {
                 quiet: Duration::ZERO,
                 cadence,
                 health: Health::Fresh,
+                last: None,
             },
         );
     }
@@ -432,6 +452,7 @@ fn read(id: &str, key: &Key, stdout: ChildStdout, state: &Arc<Mutex<State>>) {
         running.quiet = Duration::ZERO;
         let revived = running.health != Health::Fresh;
         running.health = Health::Fresh;
+        running.last = Some(data.clone());
         let refs: Vec<SurfaceId> = running.refs.iter().cloned().collect();
         for surface in refs {
             if revived {
@@ -565,15 +586,31 @@ mod tests {
     ///
     /// Drained with no time on it, so waiting for a process to write its first
     /// line does not itself age the process into silence.
+    /// Drains until the news stops rather than until it starts.
+    ///
+    /// Two pieces of news that belong to one moment can still land in two
+    /// drains - a reader thread delivers between them - and a helper that
+    /// returned on the first drain would read the second as a miss. Two empty
+    /// drains after something arrived is the end of it.
     fn hear(backends: &Backends) -> Vec<News> {
+        let mut heard: Vec<News> = Vec::new();
+        let mut quiet = 0;
         for _ in 0..100 {
             let news = backends.drain(Duration::ZERO);
-            if !news.is_empty() {
-                return news;
+            if news.is_empty() {
+                if !heard.is_empty() {
+                    quiet += 1;
+                    if quiet == 2 {
+                        break;
+                    }
+                }
+            } else {
+                quiet = 0;
+                heard.extend(news);
             }
             thread::sleep(Duration::from_millis(20));
         }
-        Vec::new()
+        heard
     }
 
     fn source(script: &str) -> Backend<'_> {
@@ -631,6 +668,32 @@ mod tests {
             surface: "widget-2".into(),
             data: serde_json::json!({ "load": 1 }),
         }));
+    }
+
+    /// A backend answers a question, not a panel. What it last said is true of
+    /// whoever asks next, and a panel that had to wait for the next line would
+    /// wait a beat for a sampler and five minutes for something that asks the
+    /// network.
+    #[test]
+    fn a_panel_that_joins_late_is_handed_what_the_backend_last_said() {
+        let backends = Backends::with_launch(shell());
+        let script = source("echo '{\"load\":1}'; sleep 30");
+        let spawn = serde_json::json!({ "every": 1 });
+        backends.subscribe("widget-1".into(), order(script, &spawn));
+        // One line is all this backend writes, so the second panel has nothing
+        // to wait for.
+        assert!(hear(&backends).contains(&News::Data {
+            surface: "widget-1".into(),
+            data: serde_json::json!({ "load": 1 }),
+        }));
+        backends.subscribe("widget-2".into(), order(script, &spawn));
+        assert_eq!(
+            backends.drain(Duration::ZERO),
+            vec![News::Data {
+                surface: "widget-2".into(),
+                data: serde_json::json!({ "load": 1 }),
+            }]
+        );
     }
 
     #[test]

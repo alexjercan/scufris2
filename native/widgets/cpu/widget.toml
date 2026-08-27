@@ -1,7 +1,7 @@
 id = "cpu"
 name = "CPU"
-description = "Show what this machine is doing right now: processor load as a live graph, with memory in use beside it. Data comes from the system backend rather than from the caller. The spawn payload is { every: number }, the sampling interval in seconds, and 1 is the usual answer."
-width = 250
-height = 130
+description = "Show what this machine is doing right now: processor load as a live graph over the last minute, with the package temperature, the memory in use, and the one-minute load average beside it. Data comes from the system backend rather than from the caller. The spawn payload is { every: number }, the sampling interval in seconds, and 1 is the usual answer."
+width = 340
+height = 225
 backend = "system"
 cadence = 1000

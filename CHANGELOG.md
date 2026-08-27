@@ -34,8 +34,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   an instrument in one of four edge slots when you ask to keep it. A widget
   window never takes the keyboard. The `widgets` extension registers
   `scufris_widget_open`, `scufris_widget_update`, `scufris_widget_close`, and
-  `scufris_widget_clear`, typed from what the companion says it has installed,
-  and ships with the `note` widget. See the
+  `scufris_widget_clear`, typed from what the companion says it has installed.
+  Four widgets ship with it: `cpu`, `timer`, `claude`, and `codex`. See the
   [widgets](docs/src/dev/widgets.md) chapter.
 - Exhibits age out on their own. A panel the conversation has moved past dims
   and retires a minute later, and an update or the pointer over it brings it
@@ -49,12 +49,15 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   down onto the workspace you are on and parks it in a screen-edge slot of its
   own, so nothing the shelf does afterwards lands on top of it. A pin with no
   free slot says so on the panel instead of doing nothing.
-- Widgets that show live numbers, and the `cpu` widget on the first of them.
-  A widget can name a backend, a small program that reports readings, and two
-  panels asking for the same numbers share one process. A backend that goes
-  quiet says so on the panel; one that dies turns the frame red and offers a
-  restart tick, rather than leaving a frozen number that looks live. Nothing is
-  left running when the last panel closes or when the companion exits.
+- Widgets that show live numbers, and the `cpu` widget on the first of them. It
+  draws the last minute of processor load as a graph, with the package
+  temperature beside it - in the warning colour once it is hot - and the memory
+  in use and the load average under it. A widget can name a backend, a small
+  program that reports readings, and two panels asking for the same numbers
+  share one process. A backend that goes quiet says so on the panel; one that
+  dies turns the frame red and offers a restart tick, rather than leaving a
+  frozen number that looks live. Nothing is left running when the last panel
+  closes or when the companion exits.
 - Widgets you can act on, and the `timer` widget on the first of them. A panel's
   own buttons write back to its backend, which answers with the refreshed
   reading, so what the panel shows is always what the backend knows. Ask for a
@@ -63,11 +66,17 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - Put a widget up yourself. The tray menu offers the widgets that fill
   themselves, and one you open from there is yours: it goes in an edge slot,
   stays until you close it, and Scufris is not told about it.
-- The `tasks` widget. It shows a plain-text list - one task per line, `x ` in
-  front of a finished one - from your own data directory, and its ticks mark a
-  task done or take it off the list. The file is the truth, so a task you add
-  in an editor appears on the panel on its own. Typing a new one into the panel
-  waits for keyboard routing.
+- The `claude` and `codex` widgets, which say how much of each subscription is
+  spent. Every usage window is a meter, the one closest to its limit is the
+  headline, and the panel says how long until it starts over. They read the
+  token the vendor's own CLI already keeps on this machine, so there is nothing
+  to sign in to and nothing to configure, and a machine that never signed in
+  gets a panel that says so rather than a stale number. The `rfr` tick asks
+  again without waiting out the poll.
+- Panels are bigger and their type is larger. A widget sits on the desktop
+  beside the work rather than in it, and is read from across the room; the type
+  scale went up a step and every panel went up with it, because type that grew
+  inside a window that did not would only have less room to say the same thing.
 - `SCUFRIS_WIDGET_PATH` names extra widget roots, separated the way `PATH` is,
   so another project can ship a widget for the desktop. Widgets that shipped
   with Scufris always win, and one that will not install is reported in the log

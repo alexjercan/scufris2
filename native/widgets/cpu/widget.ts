@@ -1,4 +1,5 @@
-// Processor load as a line that moves, with memory in use beside it.
+// What this machine is doing: load as a line that moves, and the three numbers
+// worth reading beside it.
 //
 // The first widget with a backend behind it. Everything on screen came from a
 // line the `system` backend wrote, which is what makes this the widget to check
@@ -13,15 +14,39 @@
 const SPAN = 48;
 
 /** The drawing's own coordinates. CSS scales it to whatever the panel is. */
-const WIDE = 240;
-const TALL = 56;
+const WIDE = 300;
+const TALL = 78;
+
+/** Degrees Celsius at which the temperature stops being worth ignoring. */
+const HOT = 85;
 
 interface Reading {
   cpu: number;
   memory: number;
+  temperature: number | undefined;
+  load: number | undefined;
+}
+
+/** One small uppercase figure in the row under the graph. */
+function figure(): HTMLSpanElement {
+  const span = document.createElement("span");
+  span.style.fontSize = "var(--sw-size-small)";
+  span.style.letterSpacing = "var(--sw-track)";
+  span.style.textTransform = "uppercase";
+  span.style.fontVariantNumeric = "tabular-nums";
+  span.style.color = "var(--sw-muted)";
+  return span;
 }
 
 export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
+  // A column the height of the panel, so the graph takes whatever room the
+  // figures above and below it leave rather than a height fixed here. The
+  // shell owns the element this goes in; a widget lays out inside its own.
+  const frame = document.createElement("div");
+  frame.style.display = "flex";
+  frame.style.flexDirection = "column";
+  frame.style.height = "100%";
+
   const figures = document.createElement("div");
   figures.style.display = "flex";
   figures.style.alignItems = "baseline";
@@ -34,15 +59,16 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
   load.style.color = "var(--sw-fg)";
   load.textContent = "--";
 
-  const used = document.createElement("span");
-  used.style.fontSize = "var(--sw-size-small)";
-  used.style.letterSpacing = "var(--sw-track)";
-  used.style.textTransform = "uppercase";
-  used.style.fontVariantNumeric = "tabular-nums";
-  used.style.color = "var(--sw-muted)";
-  used.textContent = "mem --";
+  // Beside the headline rather than in the row below, because a processor that
+  // is hot is the one number here that is worth interrupting a glance for.
+  const heat = document.createElement("span");
+  heat.style.fontSize = "var(--sw-size-body)";
+  heat.style.letterSpacing = "var(--sw-track)";
+  heat.style.fontVariantNumeric = "tabular-nums";
+  heat.style.color = "var(--sw-muted)";
+  heat.textContent = "--";
 
-  figures.append(load, used);
+  figures.append(load, heat);
 
   const graph = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   graph.setAttribute("viewBox", `0 0 ${WIDE} ${TALL}`);
@@ -50,8 +76,9 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
   graph.setAttribute("role", "img");
   graph.setAttribute("aria-label", "Processor load over the last minute");
   graph.style.width = "100%";
-  graph.style.height = `${TALL}px`;
-  graph.style.marginTop = "6px";
+  graph.style.flex = "1";
+  graph.style.minHeight = "0";
+  graph.style.margin = "8px 0";
   graph.style.display = "block";
 
   // Under the line, so the shape reads at a glance rather than only the line.
@@ -60,7 +87,7 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     "polygon",
   );
   fill.setAttribute("fill", "var(--sw-accent)");
-  fill.setAttribute("opacity", "0.18");
+  fill.setAttribute("opacity", "0.22");
 
   const line = document.createElementNS(
     "http://www.w3.org/2000/svg",
@@ -73,17 +100,40 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
   line.setAttribute("vector-effect", "non-scaling-stroke");
 
   graph.append(fill, line);
-  root.append(figures, graph);
+
+  const row = document.createElement("div");
+  row.style.display = "flex";
+  row.style.justifyContent = "space-between";
+  row.style.gap = "8px";
+
+  const used = figure();
+  used.textContent = "mem --";
+  const average = figure();
+  average.textContent = "load --";
+  row.append(used, average);
+
+  frame.append(figures, graph, row);
+  root.append(frame);
 
   const history: number[] = [];
 
   const read = (data: unknown): Reading | undefined => {
     if (typeof data !== "object" || data === null) return undefined;
-    const fields = data as { cpu?: unknown; memory?: unknown };
+    const fields = data as {
+      cpu?: unknown;
+      memory?: unknown;
+      temperature?: unknown;
+      load?: unknown;
+    };
     if (typeof fields.cpu !== "number") return undefined;
     return {
       cpu: fields.cpu,
       memory: typeof fields.memory === "number" ? fields.memory : 0,
+      // Absent rather than zero: a machine that reports no temperature is not
+      // a machine at zero degrees, and the panel says so with a dash.
+      temperature:
+        typeof fields.temperature === "number" ? fields.temperature : undefined,
+      load: typeof fields.load === "number" ? fields.load : undefined,
     };
   };
 
@@ -112,13 +162,24 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
       if (reading === undefined) return;
       load.textContent = `${reading.cpu.toFixed(0)}%`;
       used.textContent = `mem ${reading.memory.toFixed(0)}%`;
+      average.textContent =
+        reading.load === undefined
+          ? "load --"
+          : `load ${reading.load.toFixed(2)}`;
+      if (reading.temperature === undefined) {
+        heat.textContent = "--";
+        heat.style.color = "var(--sw-muted)";
+      } else {
+        heat.textContent = `${reading.temperature.toFixed(0)}°C`;
+        heat.style.color =
+          reading.temperature >= HOT ? "var(--sw-warn)" : "var(--sw-muted)";
+      }
       history.push(reading.cpu);
       if (history.length > SPAN) history.shift();
       draw();
     },
     destroy(): void {
-      figures.remove();
-      graph.remove();
+      frame.remove();
     },
   };
 

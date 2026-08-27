@@ -250,9 +250,10 @@ nothing else: it draws no chrome, asks who sent nothing, and runs on no clock.
 
 The widget draws its first frame from `ctx.spawn`, inside `mount`. The shell
 never hands that payload to `update`, because the two are not the same shape:
-a note's spawn payload is its data, while a timer's is the request its data
-answers. What the shell does hold is an update that arrived while the module was
-still importing, which is that widget's first data rather than a lost message.
+a widget handed its own text is handed its data, while a timer's payload is the
+request its data answers. What the shell does hold is an update that arrived
+while the module was still importing, which is that widget's first data rather
+than a lost message.
 
 `native/widgets/widget.d.ts` is the whole contract and the only copy of it.
 The shell's own tsconfig reads that same file rather than declaring the types a
@@ -337,23 +338,24 @@ Three rules make this safe to leave running all day.
   wins, and handed over four times a second. A webview given a raw tick stream
   is the documented way to make one hold gigabytes.
 
-A backend that owns something writable answers an action by changing it and
-then reporting what it says. The `tasks` backend owns a plain-text list, one
-task per line with `x ` in front of a finished one, at the path the spawn
-payload names or in the person's own data directory. It watches the file rather
-than holding a copy, so a task an editor added and a task the panel ticked off
-arrive on the panel the same way.
+A backend that owns something answers an action by changing it and then
+reporting what it says, which is what makes the panel and the backend agree
+whatever else acted on it. The `timer` backend owns a countdown; pausing it
+from the panel and pausing it from anywhere else look identical afterwards.
 
-An action on that list carries the line and the text the panel is showing, and
-is refused when the two no longer agree. The file can change under an open
-panel, and a click on a line that now says something else is a click on the
-wrong task.
+An action can also ask for nothing but the next reading. The `claude` and
+`codex` backends poll a subscription's usage once a minute, which is as often
+as an hours-long window is worth asking about, and their one action is
+`refresh`: the panel's `rfr` tick wakes the poll instead of waiting out the
+interval, which is what you want after a long run.
 
-Writing a new task is not the panel's job yet. The window is unfocusable so that
-one landing mid-sentence never takes the keyboard, which also means nothing
-typed can land in it. Until a widget window can ask for the keyboard the way the
-textbox does, the panel acts on what is already on the list, and anything that
-writes the file puts things there.
+Those two read the token the vendor's own CLI already keeps on this machine,
+and read it again on every poll rather than holding it, because the CLI
+refreshes that file in place. A machine that never signed in has no token and
+the panel says so rather than showing a stale number. What comes back names the
+account it belongs to, an email address among it; the backend reads past all of
+it, and the only fields that ever leave the process are the window's label, its
+percentage, and the seconds until it starts over.
 
 A reading is not a citation. Scufris naming a panel is what says the
 conversation is still about it; a sampler writing its line every second says

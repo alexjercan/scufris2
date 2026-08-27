@@ -1,0 +1,7 @@
+id = "claude"
+name = "Claude"
+description = "Show how much of the Claude subscription is spent: every usage window as a meter, with the one closest to its limit as the headline and the time until it starts over. Data comes from the claude backend, which reads the token the Claude Code CLI keeps on this machine, rather than from the caller. The spawn payload is { every: number }, the poll interval in seconds, and 60 is the usual answer."
+width = 320
+height = 215
+backend = "claude"
+cadence = 60000

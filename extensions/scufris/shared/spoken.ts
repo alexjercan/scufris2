@@ -20,6 +20,6 @@ export const SPOKEN_EVENT = "scufris:spoken";
 export interface SpokenSignal {
   /** The whole answer, for the transcript. */
   said?: string;
-  /** The paragraph to synthesise, when the speech mode asks for one. */
+  /** The paragraph to synthesise, when the answer has one worth saying. */
   speak?: string;
 }

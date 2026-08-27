@@ -37,7 +37,7 @@ pub const RESTART_WINDOW_SECONDS: u64 = 600;
 /// Resolved companion configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
-    /// Daemon control socket the companion connects to.
+    /// Service socket the companion connects to.
     pub socket: PathBuf,
     /// Command socket the companion listens on, for the desktop's own verbs.
     ///
@@ -56,7 +56,8 @@ pub struct Config {
     pub cancel_key: Option<String>,
     /// Accelerator that stops Scufris, on the same terms.
     pub stop_key: Option<String>,
-    /// Executable that opens the full popup chat, when one is configured.
+    /// Executable that opens the conversation in a terminal, when one is
+    /// configured. Usually a wrapper around `scufris-ctl debug`.
     pub chat_command: Option<PathBuf>,
     /// Executable that restarts the owned backend service, when configured.
     pub restart_command: Option<PathBuf>,
@@ -312,7 +313,7 @@ mod tests {
 
     #[test]
     fn defaults_target_the_bundled_loopback_endpoint() {
-        let config = resolve("/run/user/1000/scufris/daemon.sock", None, None).unwrap();
+        let config = resolve("/run/user/1000/scufris/service.sock", None, None).unwrap();
         assert_eq!(config.stt_endpoint, DEFAULT_STT_ENDPOINT);
         assert_eq!(config.hotkey, DEFAULT_HOTKEY);
         assert_eq!(config.chat_command, None);
@@ -323,11 +324,11 @@ mod tests {
     /// The command socket is what a window manager binding reaches the pill
     /// through, and a session that has nowhere to put one is a session with no
     /// binding to make. So an unresolvable command socket is left absent rather
-    /// than refused: the daemon socket is what the companion cannot do without.
+    /// than refused: the service socket is what the companion cannot do without.
     #[test]
     fn a_command_socket_that_cannot_be_placed_is_absent_rather_than_fatal() {
         let config = Config::resolve(
-            Some(OsString::from("/run/user/1000/scufris/daemon.sock")),
+            Some(OsString::from("/run/user/1000/scufris/service.sock")),
             None,
             None,
             unset(),
@@ -341,7 +342,7 @@ mod tests {
         .expect("the companion still resolves");
         assert_eq!(
             config.socket,
-            PathBuf::from("/run/user/1000/scufris/daemon.sock")
+            PathBuf::from("/run/user/1000/scufris/service.sock")
         );
         assert_eq!(
             config.command_socket,
@@ -353,7 +354,7 @@ mod tests {
     #[test]
     fn a_configured_endpoint_overrides_the_bundled_one() {
         let config = resolve(
-            "/run/user/1000/scufris/daemon.sock",
+            "/run/user/1000/scufris/service.sock",
             Some("http://127.0.0.1:9000/inference"),
             None,
         )
@@ -376,7 +377,7 @@ mod tests {
     #[test]
     fn the_description_names_every_outside_effect() {
         let config = resolve(
-            "/run/user/1000/scufris/daemon.sock",
+            "/run/user/1000/scufris/service.sock",
             None,
             Some("/nix/store/x/bin/scufris-chat"),
         )
@@ -384,7 +385,7 @@ mod tests {
         assert_eq!(
             config.describe(),
             concat!(
-                "socket=/run/user/1000/scufris/daemon.sock\n",
+                "socket=/run/user/1000/scufris/service.sock\n",
                 "command_socket=/run/user/1000/scufris/desktop.sock\n",
                 "state_file=/run/user/1000/scufris-desktop/pending.json\n",
                 "stt_endpoint=http://127.0.0.1:10301/inference\n",
@@ -406,7 +407,7 @@ mod tests {
     #[test]
     fn the_keys_beside_the_hotkey_are_reported_as_the_deployment_named_them() {
         let config = Config::resolve(
-            Some(OsString::from("/run/user/1000/scufris/daemon.sock")),
+            Some(OsString::from("/run/user/1000/scufris/service.sock")),
             Some(OsString::from("/run/user/1000/scufris/desktop.sock")),
             None,
             Keys {
@@ -435,7 +436,7 @@ mod tests {
     #[test]
     fn a_key_set_to_nothing_is_a_key_that_was_not_named() {
         let config = Config::resolve(
-            Some(OsString::from("/run/user/1000/scufris/daemon.sock")),
+            Some(OsString::from("/run/user/1000/scufris/service.sock")),
             None,
             None,
             Keys {

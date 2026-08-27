@@ -210,6 +210,7 @@ the environment:
 | Variable                          | Default                                        |
 | --------------------------------- | ---------------------------------------------- |
 | `SCUFRIS_DESKTOP_SOCKET`          | `$XDG_RUNTIME_DIR/scufris/service.sock`        |
+| `SCUFRIS_DESKTOP_COMMAND_SOCKET`  | `$XDG_RUNTIME_DIR/scufris/desktop.sock`        |
 | `SCUFRIS_DESKTOP_STATE_FILE`      | `$XDG_STATE_HOME/scufris-desktop/pending.json` |
 | `SCUFRIS_STT_ENDPOINT`            | `http://127.0.0.1:10301/inference`             |
 | `SCUFRIS_DESKTOP_HOTKEY`          | `Super+D`                                      |

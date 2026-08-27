@@ -1,6 +1,8 @@
 # Scufris
 
-Scufris is a Pi-based assistant with a project workflow engine, delegated agents, Calm mode, optional local voice, and a desktop voice pill.
+Scufris is a Pi-based assistant with a project workflow engine, delegated
+agents, Calm mode, a background service that owns the conversation, and a
+desktop companion with a voice pill and a conversation window.
 
 ## Quickstart
 
@@ -25,13 +27,10 @@ nix run .#scufris-ctl -- watch              # follow the conversation
 nix run .#scufris-ctl -- debug              # open the session in this terminal
 ```
 
-`debug` takes the agent from the service and gives it back when the terminal
-closes, so there is no way to be left detached with nothing to put it back.
-
 The rest of the flake:
 
 ```bash
-nix run .#scufris-desktop   # the voice pill and tray companion, a client
+nix run .#scufris-desktop   # the pill, the conversation window, and the tray
 nix run .#scufris           # one Pi session with the Scufris extensions
 nix build .#docs
 nix develop
@@ -50,13 +49,6 @@ programs.scufris = {
   desktop.enable = true;
 };
 ```
-
-`service.enable` gives the service a systemd user unit wanted by
-`default.target`, so a machine with no display keeps the conversation.
-`desktop.enable` adds the voice pill and tray companion, which is a client of
-the service and requires it; `Super+D` opens the pill and starts recording.
-`voice.enable` lets the agent decide what is worth saying aloud and hands the
-companion the synthesiser that says it.
 
 The service logs to journald: `journalctl --user -t scufris-service -f`.
 

@@ -466,7 +466,8 @@ pub struct Ports {
     pub executor: Arc<dyn Executor>,
     /// Prefix that makes this process's submission identifiers unique.
     pub prefix: String,
-    /// Executable that opens the full popup chat, when one is configured.
+    /// Executable that opens the conversation in a terminal, when one is
+    /// configured.
     pub chat_command: Option<PathBuf>,
     /// Executable that restarts the owned backend service, when configured.
     pub restart_command: Option<PathBuf>,
@@ -1593,7 +1594,7 @@ impl App {
         );
     }
 
-    /// Opens the full popup chat through the configured hook.
+    /// Opens the conversation in a terminal through the configured hook.
     pub fn open_chat(&self) {
         let Some(command) = &self.ports.chat_command else {
             warn!("no chat command is configured");

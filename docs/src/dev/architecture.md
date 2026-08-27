@@ -4,9 +4,11 @@
 
 Repository ownership follows the runtime architecture:
 
-- `extensions/scufris/` contains the Pi extensions: `workflow/`, `voice/`,
-  `service/`, `widgets/`, and the small independent `calm.ts`. Extensions own
-  lifecycle events, native tools, session state, and notifications.
+- `extensions/scufris/` contains the Pi extensions: `workflow/`, `service/`,
+  `widgets/`, and the independent `response.ts`, `calm.ts` and
+  `conversation.ts`. Extensions own lifecycle events, native tools, session
+  state, and notifications. `shared/` holds what more than one of them needs
+  and is not an extension itself.
 - `native/` is a cargo workspace holding `scufris-control`, the wire protocols,
   `scufris-desktop`, the Tauri voice pill, widget runtime, and tray companion,
   and `scufris-service`, the headless background service and its `scufris-ctl`
@@ -38,8 +40,7 @@ process and filesystem work lives in the small owning helper scripts.
 One codebase serves two roles selected by `SCUFRIS_ROLE`:
 
 - `orchestrator`: the foreground Scufris session. The launcher sets this. The
-  identity, orchestration, response, and speech modules activate only in this
-  role.
+  identity, orchestration, and response modules activate only in this role.
 - `worker`: a delegated job execution. The jobs helper sets this when it
   launches a harness inside a tmux pane. Pi workers load only the
   `worker-report.ts` extension, which registers the `scufris_report` tool.
@@ -113,10 +114,11 @@ and exit codes instead of JSON.
 under the `pi` key, so a checkout also works as a Pi package. Pi APIs are
 `peerDependencies`; pinned copies are `devDependencies`.
 
-The flake builds a `resources` derivation that copies `extensions`, `scripts`,
-`skills`, and `tools` into the store. The normal variant removes the speech
-module and voice tool so they cannot enter the closure. The launcher is a
-shell application that:
+The flake builds one `resources` derivation that copies `extensions`,
+`scripts`, `skills`, and `tools` into the store, then removes the development
+launcher and `tools/voice`. Nothing in the agent's process tree makes sound, so
+the synthesiser is not among what the agent is handed; `scufris-speak` takes it
+from the source tree instead. The launcher is a shell application that:
 
 1. Sets `SCUFRIS_PROJECT_ROOTS` when unset and `SCUFRIS_ROLE=orchestrator`.
 2. Prefers a system `pi` from `PATH` and falls back to the pinned flake Pi.
@@ -140,8 +142,8 @@ check groups under `nix/checks/` assert the exact rendered arguments
 headless service and its client (`service.nix`).
 
 `scufris-desktop` is built from the `native/` cargo workspace by
-`nix/desktop.nix` as a separate package output. It is absent from the default
-and voice launcher closures, which the desktop closure check enforces.
+`nix/desktop.nix` as a separate package output. It is absent from the launcher
+closure, which the desktop closure check enforces.
 `scufris-service` and `scufris-ctl` come from the same workspace by
 `nix/service.nix`, and the service closure check enforces that neither pulls in
 GTK or WebKitGTK.

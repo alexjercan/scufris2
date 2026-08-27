@@ -4,8 +4,8 @@
  * The inversion from version 2 is the whole point: the popup Pi process used to
  * be the server and the companion its client. Now `scufris-service` is the
  * server, and this extension, the desktop companion and `scufris-ctl` are all
- * clients of it. So this file decodes what the service sends and encodes what an
- * agent may say, which is the opposite of what `desktop/protocol.ts` did.
+ * clients of it. So this file decodes what the service sends and encodes what
+ * an agent may say, which is the opposite of what the deleted v2 extension did.
  *
  * The Rust side of the same protocol is `native/scufris-control/src/service.rs`,
  * and the two are meant to be read side by side.

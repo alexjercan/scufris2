@@ -1,8 +1,8 @@
 # Focus-free pill keys via i3 binding mode
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 80
-- TAGS: voice, desktop, ux
+- TAGS: voice,desktop,ux,wontdo
 
 ## Goal
 
@@ -127,3 +127,13 @@ on its own when the pill stops wanting the keys.
   asks for and it is not done. It needs a fourth distinction in
   `Posture` - up, wants the bare keys, does not want the keyboard -
   because the mode must be on while recording and off while resting.
+
+## Not doing (2026-08-27)
+
+Superseded by increment 3 of `20260827-081702`. The binding mode is
+deleted, not built: the textbox is an ordinary focused window and holds
+the keyboard itself, so `Escape` and `Enter` are its own keys and need no
+window manager routing. The `no_focus` rule this task wanted for the pill
+is in, by a different route - the pill refuses the keyboard on every
+raise. `scufris-ctl accept` and `cancel`, the verbs this whole scope
+rests on, no longer exist.

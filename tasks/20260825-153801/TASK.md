@@ -1,8 +1,8 @@
 # Session HUD widget over session mirroring
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 55
-- TAGS: voice, desktop, hud
+- TAGS: voice,desktop,hud,wontdo
 
 ## Goal
 
@@ -33,3 +33,16 @@ pi demotes to the debug view.
 
 Decisions: `tasks/20260822-132001/RESEARCH.md` design review section
 (session HUD promoted; escalation unification).
+
+## Not doing (2026-08-27)
+
+The idea lives, the task does not. Every mechanism in this scope is gone:
+the daemon that was "the only writer of session files", protocol v1 and
+v2, and the Kitty popup this task planned to keep authoritative during a
+gradual transition. `20260827-081702` deleted all three at once, and the
+service is the session owner now.
+
+The HUD returns as increment 6 of `20260827-081702`, built on the service
+and protocol v3. Read this file for the shape that was wanted - the
+session surface as one more widget, escalation from a line in the pill to
+exhibits to a raised surface - not for the plan.

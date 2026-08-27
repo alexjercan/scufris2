@@ -28,3 +28,12 @@ the copy-paste loop, which is the actual current friction.
 - No capture happens without the explicit verb.
 
 Backlog item 3 in `tasks/20260822-132001/RESEARCH.md` section 5.
+
+## Still wanted, plan is stale (2026-08-27)
+
+The feature stands: the copy-paste loop is real friction and nothing in
+`20260827-081702` addresses it. The delivery in Scope does not. There is
+no daemon and no v1 protocol to extend compatibly; the capture message
+belongs on protocol v3, sent by the companion to the service, which puts
+it in the session beside the transcript. The trigger is the textbox or a
+`scufris-ctl` verb, not a pill take.

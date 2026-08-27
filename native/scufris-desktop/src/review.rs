@@ -446,7 +446,9 @@ mod tests {
             "working",
             "speaking",
             "attention",
+            "detached",
             "error",
+            "starting",
             "disconnected",
         ] {
             assert!(!RAISED.contains(&bare), "{bare} raises the transcript box");

@@ -4,9 +4,58 @@
 //! produces the actions the host must run. It holds no window, audio, socket, or
 //! file handle so the whole interaction is testable without a desktop session.
 
-use scufris_control::AssistantState;
+use scufris_control::service::ScufrisState;
 
 use crate::pending::Pending;
+
+/// What the companion shows the assistant is doing.
+///
+/// Not the service's [`ScufrisState`], and one variant wider. The service
+/// reports what the agent is doing; speaking is what the companion itself is
+/// doing with the paragraph it was handed, and only the companion knows when
+/// the speaker stops. Everything else is the service's word, taken as given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Assistant {
+    /// The agent is spawned and has not answered yet.
+    Starting,
+    /// The agent is up and no run is in progress.
+    Idle,
+    /// An agent run is in progress.
+    Working,
+    /// The companion is speaking an answer it was handed.
+    Speaking,
+    /// A debug lease is held, so the conversation is a terminal somebody else
+    /// owns.
+    Detached,
+    /// The agent could not be kept running.
+    Error,
+}
+
+impl Assistant {
+    /// Short stable name used by the pill and the tray.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Idle => "idle",
+            Self::Working => "working",
+            Self::Speaking => "speaking",
+            Self::Detached => "detached",
+            Self::Error => "error",
+        }
+    }
+}
+
+impl From<ScufrisState> for Assistant {
+    fn from(state: ScufrisState) -> Self {
+        match state {
+            ScufrisState::Starting => Self::Starting,
+            ScufrisState::Idle => Self::Idle,
+            ScufrisState::Working => Self::Working,
+            ScufrisState::Detached => Self::Detached,
+            ScufrisState::Error => Self::Error,
+        }
+    }
+}
 
 /// Reason shown for a transcript recovered from a previous process.
 pub const RESTORED_REASON: &str = "Recovered after a restart. Whether it was sent is unknown.";
@@ -40,19 +89,19 @@ pub enum Phase {
         /// Why the durable copy is missing, empty when it is present.
         notice: String,
     },
-    /// A transcript was accepted and is on its way to the daemon.
+    /// A transcript was accepted and is on its way to the service.
     Sent {
-        /// Exact text handed to the daemon.
+        /// Exact text handed to the service.
         transcript: String,
         /// Submission identifier awaiting its acknowledgment.
         id: String,
         /// What was already known about these words before this send. A send
-        /// the daemon refuses says nothing about an earlier one that may
+        /// the service refuses says nothing about an earlier one that may
         /// already be in the conversation, so this is what the transcript
         /// falls back to rather than becoming editable again.
         prior: Delivery,
     },
-    /// An accepted transcript that the daemon did not take.
+    /// An accepted transcript that the service did not take.
     Retained {
         /// Transcript kept in the pill so it is never lost.
         transcript: String,
@@ -60,7 +109,7 @@ pub enum Phase {
         id: String,
         /// Why the submission did not land.
         reason: String,
-        /// Whether the daemon might already hold this transcript.
+        /// Whether the service might already hold this transcript.
         delivery: Delivery,
         /// True once the person has asked to send an uncertain transcript and
         /// has been told what that risks. Only then may it be sent again.
@@ -135,9 +184,9 @@ pub enum Event {
     PersistFailed(String),
     /// A transcript the user discarded could not be removed or tombstoned.
     DiscardFailed(String),
-    /// The daemon acknowledged a submission.
+    /// The service acknowledged a submission.
     Acknowledged(String),
-    /// The submission never reached the daemon, or the daemon refused it
+    /// The submission never reached the service, or the service refused it
     /// before any of its words could leave.
     SubmissionFailed {
         /// Identifier of the submission this answers.
@@ -145,11 +194,16 @@ pub enum Event {
         /// Why it was not sent.
         reason: String,
     },
-    /// The submission left the companion and its outcome is unknown.
+    /// The submission left the companion and nothing came back in time.
+    ///
+    /// Raised by the companion's own timeout, never by the service: the
+    /// service answers every submission one way or the other, so this is what
+    /// a service that stopped answering looks like from here. The bytes left
+    /// this process, so the request may already have run.
     SubmissionUncertain {
         /// Identifier of the submission this answers.
         id: String,
-        /// What the daemon said about the uncertainty.
+        /// Why its outcome is unknown.
         reason: String,
     },
     /// The transcript was asked to be copied to the clipboard.
@@ -179,7 +233,7 @@ pub enum Action {
         /// Transcript text to keep.
         text: String,
     },
-    /// Forget the durable transcript after the daemon acknowledged it.
+    /// Forget the durable transcript after the service acknowledged it.
     ClearPending,
     /// Throw away a transcript the user explicitly discarded.
     ///
@@ -190,15 +244,12 @@ pub enum Action {
         /// Identifier of the transcript being thrown away.
         id: String,
     },
-    /// Submit one accepted transcript to the daemon.
+    /// Submit one accepted transcript to the service.
     Submit {
-        /// Submission identifier the acknowledgment must echo.
+        /// Submission identifier the answer must echo.
         id: String,
         /// Accepted transcript text.
         text: String,
-        /// The person's own decision to send words that may already be in the
-        /// conversation. Never set by anything but that decision.
-        force: bool,
     },
     /// Put one transcript on the clipboard so it is not lost when the pill closes.
     CopyTranscript {
@@ -207,7 +258,7 @@ pub enum Action {
     },
 }
 
-/// Everything the pill renders, derived from the phase and the daemon state.
+/// Everything the pill renders, derived from the phase and the service state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Presentation {
     /// Stable state name used by the pill and the tray.
@@ -239,8 +290,12 @@ pub enum Posture {
 #[derive(Debug)]
 pub struct Companion {
     phase: Phase,
-    assistant: AssistantState,
+    assistant: Assistant,
     assistant_detail: String,
+    /// True while the companion is speaking an answer. Its own doing, and not
+    /// the service's word, so it sits beside the reported state rather than
+    /// replacing it: what the agent is doing is still what it was doing.
+    speaking: bool,
     connected: bool,
     prefix: String,
     submissions: u64,
@@ -259,16 +314,17 @@ pub struct Companion {
 }
 
 impl Companion {
-    /// Creates a closed pill with an unreachable daemon.
+    /// Creates a closed pill with an unreachable service.
     ///
     /// `prefix` must be unique per process. Identifiers survive a restart, so a
-    /// reused prefix could collide with an identifier the daemon already
+    /// reused prefix could collide with an identifier the service already
     /// acknowledged and would then suppress a genuinely new submission.
     pub fn new(prefix: impl Into<String>) -> Self {
         Self {
             phase: Phase::Resting,
-            assistant: AssistantState::Idle,
+            assistant: Assistant::Idle,
             assistant_detail: String::new(),
+            speaking: false,
             connected: false,
             prefix: prefix.into(),
             submissions: 0,
@@ -288,8 +344,8 @@ impl Companion {
         self.phase.name()
     }
 
-    /// Returns the assistant state last reported by the daemon.
-    pub fn assistant(&self) -> AssistantState {
+    /// Returns the assistant state last reported by the service.
+    pub fn assistant(&self) -> Assistant {
         self.assistant
     }
 
@@ -315,11 +371,11 @@ impl Companion {
     ///
     /// The host reads this after every change instead of being handed show and
     /// hide actions. Two changes can be in flight at once - the person's key
-    /// and the daemon's answer - and the one that ran last is the one whose
+    /// and the service's answer - and the one that ran last is the one whose
     /// window the person must end up looking at.
     ///
     /// A transcript handed off for submission gives the keyboard back at once:
-    /// the words are the daemon's now, and waiting for an acknowledgment would
+    /// the words are the service's now, and waiting for an acknowledgment would
     /// hold the keyboard in an always-on-top pill for as long as the backend
     /// takes. The window itself stays, passively, and goes on reporting what
     /// the assistant does - sent, working, speaking, then resting - because
@@ -393,7 +449,7 @@ impl Companion {
     /// Reopens the pill on a transcript recovered from a previous process.
     ///
     /// The recovered identifier is kept, so resending cannot duplicate a
-    /// request the daemon already accepted.
+    /// request the service already accepted.
     pub fn restore(&mut self, pending: Pending) {
         if !matches!(self.phase, Phase::Resting) {
             return;
@@ -410,24 +466,38 @@ impl Companion {
         };
     }
 
-    /// Records whether the daemon connection is currently open.
+    /// Records whether the service connection is currently open.
     pub fn set_connected(&mut self, connected: bool) {
         self.connected = connected;
         if !connected {
-            self.assistant = AssistantState::Idle;
+            self.assistant = Assistant::Idle;
             self.assistant_detail.clear();
         }
     }
 
-    /// Returns true while the daemon connection is open.
+    /// Returns true while the service connection is open.
     pub fn connected(&self) -> bool {
         self.connected
     }
 
-    /// Records the assistant state the daemon reported.
-    pub fn set_assistant(&mut self, state: AssistantState, detail: String) {
+    /// Records the assistant state the service reported.
+    pub fn set_assistant(&mut self, state: Assistant, detail: String) {
         self.assistant = state;
         self.assistant_detail = detail;
+    }
+
+    /// Records whether the companion is speaking an answer.
+    pub fn set_speaking(&mut self, speaking: bool) {
+        self.speaking = speaking;
+    }
+
+    /// Returns the assistant state the companion is showing, speech included.
+    pub fn shown_assistant(&self) -> Assistant {
+        if self.speaking {
+            Assistant::Speaking
+        } else {
+            self.assistant
+        }
     }
 
     /// Applies one event and returns the actions the host must run.
@@ -701,14 +771,19 @@ impl Companion {
         format!("{}-{}", self.prefix, self.submissions)
     }
 
-    fn submit(&mut self, transcript: String, id: String, force: bool) -> Vec<Action> {
+    /// Sends one transcript and records what was already known about it.
+    ///
+    /// `forced` is the person's own decision to send words that may already be
+    /// in the conversation. It never reaches the wire: the service takes every
+    /// submission at face value, so the confirmation above is the whole of what
+    /// stands between an uncertain transcript and a second run. What it does
+    /// here is set what this send falls back to, because a refusal now says
+    /// nothing about the send that may already have landed.
+    fn submit(&mut self, transcript: String, id: String, forced: bool) -> Vec<Action> {
         self.phase = Phase::Sent {
             transcript: transcript.clone(),
             id: id.clone(),
-            // A forced send is the only send of words that may already be in
-            // the conversation, so it is the only one with anything to fall
-            // back to.
-            prior: if force {
+            prior: if forced {
                 Delivery::Uncertain
             } else {
                 Delivery::Refused
@@ -717,7 +792,6 @@ impl Companion {
         vec![Action::Submit {
             id,
             text: transcript,
-            force,
         }]
     }
 
@@ -814,7 +888,7 @@ impl Companion {
         }
     }
 
-    /// Returns the tray state name for the current companion and daemon state.
+    /// Returns the tray state name for the current companion and service state.
     pub fn tray_state(&self) -> &'static str {
         if self.blind.is_some() {
             return "error";
@@ -823,8 +897,8 @@ impl Companion {
             Phase::Listening => "listening",
             Phase::Transcribing { .. } => "transcribing",
             Phase::Failed { .. } => "error",
-            // An accepted transcript the daemon has not taken needs the user,
-            // whatever the daemon itself is doing.
+            // An accepted transcript the service has not taken needs the user,
+            // whatever the service itself is doing.
             Phase::Retained { .. } => "attention",
             _ => self.resting_state(),
         }
@@ -834,18 +908,12 @@ impl Companion {
         if !self.connected {
             return "disconnected";
         }
-        match self.assistant {
-            AssistantState::Idle => "idle",
-            AssistantState::Working => "working",
-            AssistantState::Speaking => "speaking",
-            AssistantState::Attention => "attention",
-            AssistantState::Error => "error",
-        }
+        self.shown_assistant().name()
     }
 
     fn resting_detail(&self) -> String {
         if !self.connected {
-            return "The Scufris backend is unavailable.".into();
+            return "The Scufris service is unavailable.".into();
         }
         self.assistant_detail.clone()
     }
@@ -899,20 +967,20 @@ mod tests {
     #[test]
     fn the_pill_rests_on_screen_through_and_after_a_turn() {
         let mut companion = handed_off();
-        // The daemon picks the turn up: the pill reports it, passively.
-        companion.set_assistant(AssistantState::Working, String::new());
+        // The service picks the turn up: the pill reports it, passively.
+        companion.set_assistant(Assistant::Working, String::new());
         assert_eq!(companion.posture(), Posture::Passive);
         assert_eq!(companion.presentation().state, "working");
-        companion.set_assistant(AssistantState::Speaking, String::new());
+        companion.set_assistant(Assistant::Speaking, String::new());
         assert_eq!(companion.posture(), Posture::Passive);
         assert_eq!(companion.presentation().state, "speaking");
         // The pill is a resident HUD: an idle assistant is something to show,
         // not a reason to leave.
-        companion.set_assistant(AssistantState::Idle, String::new());
+        companion.set_assistant(Assistant::Idle, String::new());
         assert_eq!(companion.posture(), Posture::Passive);
         assert_eq!(companion.presentation().state, "idle");
         // A turn started somewhere else is shown like any other.
-        companion.set_assistant(AssistantState::Working, String::new());
+        companion.set_assistant(Assistant::Working, String::new());
         assert_eq!(companion.posture(), Posture::Passive);
         assert_eq!(companion.presentation().state, "working");
     }
@@ -921,16 +989,16 @@ mod tests {
     fn assistant_activity_never_raises_a_dismissed_pill() {
         let mut companion = Companion::new("pill");
         companion.set_connected(true);
-        companion.set_assistant(AssistantState::Working, String::new());
+        companion.set_assistant(Assistant::Working, String::new());
         assert_eq!(companion.posture(), Posture::Off);
-        companion.set_assistant(AssistantState::Attention, "job 1 is blocked".into());
+        companion.set_assistant(Assistant::Error, "the agent stopped".into());
         assert_eq!(companion.posture(), Posture::Off);
     }
 
     #[test]
     fn only_the_persons_escape_dismisses_the_resting_pill() {
         let mut companion = handed_off();
-        companion.set_assistant(AssistantState::Working, String::new());
+        companion.set_assistant(Assistant::Working, String::new());
         assert_eq!(companion.posture(), Posture::Passive);
         // The socket closing is something the resident pill reports, not a
         // reason for it to leave.
@@ -938,7 +1006,7 @@ mod tests {
         assert_eq!(companion.posture(), Posture::Passive);
         assert_eq!(companion.presentation().state, "disconnected");
         companion.set_connected(true);
-        companion.set_assistant(AssistantState::Working, String::new());
+        companion.set_assistant(Assistant::Working, String::new());
         assert_eq!(companion.posture(), Posture::Passive);
 
         // Escape is the one road off the screen, and the next activation is
@@ -947,7 +1015,7 @@ mod tests {
         assert_eq!(companion.posture(), Posture::Focused);
         companion.apply(Event::Escape);
         assert_eq!(companion.posture(), Posture::Off);
-        companion.set_assistant(AssistantState::Speaking, String::new());
+        companion.set_assistant(Assistant::Speaking, String::new());
         assert_eq!(
             companion.posture(),
             Posture::Off,
@@ -968,15 +1036,6 @@ mod tests {
         Action::Submit {
             id: id.into(),
             text: text.into(),
-            force: false,
-        }
-    }
-
-    fn forced(id: &str, text: &str) -> Action {
-        Action::Submit {
-            id: id.into(),
-            text: text.into(),
-            force: true,
         }
     }
 
@@ -1124,7 +1183,7 @@ mod tests {
     fn the_desktop_comes_back_when_the_words_are_handed_off() {
         let mut companion = opened();
         companion.apply(Event::Enter { text: None });
-        // Handing the words to the daemon is where the keyboard comes back. It
+        // Handing the words to the service is where the keyboard comes back. It
         // must not be held until an acknowledgment that can take a whole turn
         // to arrive, or never arrive at all. The window itself stays, passive,
         // to report the turn it started.
@@ -1188,7 +1247,7 @@ mod tests {
         let presentation = companion.presentation();
         assert_eq!(presentation.state, "retained");
         assert_eq!(presentation.text, "remember the milk");
-        // The send was refused outright, so the daemon never saw it and the
+        // The send was refused outright, so the service never saw it and the
         // text is still safe to change.
         assert!(presentation.editable);
         assert!(companion.holds_unsent_transcript());
@@ -1314,7 +1373,7 @@ mod tests {
             }),
             vec![
                 persist("pill-1", "book the flight"),
-                forced("pill-1", "book the flight"),
+                submit("pill-1", "book the flight"),
             ],
             "the forced send must carry the accepted words, never an edit"
         );
@@ -1362,7 +1421,7 @@ mod tests {
         let mut companion = opened();
         companion.apply(Event::Enter { text: None });
         companion.apply(Event::Transcribed("remember the milk".into()));
-        // The daemon refused before anything left it, and said which
+        // The service refused before anything left it, and said which
         // submission it was refusing.
         assert_eq!(
             companion.apply(refused(
@@ -1419,7 +1478,7 @@ mod tests {
             companion.apply(Event::Enter { text: None }),
             vec![
                 persist("pill-1", "book the flight"),
-                forced("pill-1", "book the flight"),
+                submit("pill-1", "book the flight"),
             ]
         );
         assert_eq!(companion.posture(), Posture::Passive);
@@ -1490,7 +1549,7 @@ mod tests {
         companion.apply(Event::Transcribed("open the tasks widget".into()));
         companion.apply(uncertain("pill-1", "no confirmation"));
         assert_eq!(companion.presentation().state, "uncertain");
-        // The daemon confirms after the companion gave up waiting. The
+        // The service confirms after the companion gave up waiting. The
         // transcript is retired; the pill settles back to resting on screen.
         assert_eq!(
             companion.apply(Event::Acknowledged("pill-1".into())),
@@ -1520,7 +1579,7 @@ mod tests {
         companion.apply(Event::Enter {
             text: Some("second draft".into()),
         });
-        // A refused send never reached the daemon, so a further edit is safe.
+        // A refused send never reached the service, so a further edit is safe.
         companion.apply(refused("pill-1", "offline"));
         assert_eq!(
             companion.apply(Event::Enter {
@@ -1576,7 +1635,7 @@ mod tests {
             companion.apply(Event::Enter { text: None }),
             vec![
                 persist("pill-7", "survived the crash"),
-                forced("pill-7", "survived the crash"),
+                submit("pill-7", "survived the crash"),
             ]
         );
         // A new recording in this process cannot reuse the recovered identifier.
@@ -1627,11 +1686,11 @@ mod tests {
         assert_eq!(companion.tray_state(), "disconnected");
         companion.set_connected(true);
         assert_eq!(companion.tray_state(), "idle");
-        companion.set_assistant(AssistantState::Working, String::new());
+        companion.set_assistant(Assistant::Working, String::new());
         assert_eq!(companion.tray_state(), "working");
-        companion.set_assistant(AssistantState::Attention, "job blocked".into());
-        assert_eq!(companion.tray_state(), "attention");
-        companion.set_assistant(AssistantState::Speaking, String::new());
+        companion.set_assistant(Assistant::Detached, "a terminal has the session".into());
+        assert_eq!(companion.tray_state(), "detached");
+        companion.set_assistant(Assistant::Speaking, String::new());
         assert_eq!(companion.tray_state(), "speaking");
         companion.apply(Event::Activate);
         assert_eq!(companion.tray_state(), "listening");
@@ -1642,7 +1701,7 @@ mod tests {
         assert_eq!(companion.tray_state(), "disconnected");
         assert_eq!(
             companion.presentation().detail,
-            "The Scufris backend is unavailable."
+            "The Scufris service is unavailable."
         );
     }
 

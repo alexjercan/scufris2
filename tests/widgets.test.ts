@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { CatalogEntry } from "../extensions/scufris/desktop/protocol.ts";
+import type { CatalogEntry } from "../extensions/scufris/service/protocol.ts";
 import {
   WIDGET_CONTROL_EVENT,
   WidgetCommandError,
   type WidgetAnswer,
-  type WidgetCommand,
   type WidgetControl,
   type WidgetNotice,
-} from "../extensions/scufris/desktop/server.ts";
+  type WidgetRequest,
+} from "../extensions/scufris/service/client.ts";
 import widgets, {
   WIDGET_EVENT_MESSAGE,
 } from "../extensions/scufris/widgets/index.ts";
@@ -34,15 +34,15 @@ const clock: CatalogEntry = {
   description: "The time, in one panel.",
 };
 
-/** The control the daemon would hand over, with the socket taken out. */
+/** The control the service link hands over, with the socket taken out. */
 class FakeControl implements WidgetControl {
-  readonly sent: WidgetCommand[] = [];
+  readonly sent: WidgetRequest[] = [];
   listener?: (notice: WidgetNotice) => void;
-  answer: (command: WidgetCommand) => Promise<WidgetAnswer> = async () => ({
+  answer: (command: WidgetRequest) => Promise<WidgetAnswer> = async () => ({
     surface: "widget-1",
   });
 
-  async request(command: WidgetCommand): Promise<WidgetAnswer> {
+  async request(command: WidgetRequest): Promise<WidgetAnswer> {
     this.sent.push(command);
     return await this.answer(command);
   }
@@ -51,7 +51,7 @@ class FakeControl implements WidgetControl {
     this.listener = listener;
   }
 
-  /** Delivers one unsolicited companion message, as the socket would. */
+  /** Delivers one unsolicited frontend message, as the socket would. */
   notice(notice: WidgetNotice): void {
     assert.ok(this.listener, "the extension is watching the control");
     this.listener(notice);
@@ -97,11 +97,13 @@ function harness() {
     },
   };
 
-  process.env.SCUFRIS_DAEMON = "1";
+  const role = process.env.SCUFRIS_ROLE;
+  process.env.SCUFRIS_ROLE = "orchestrator";
   try {
     widgets(api);
   } finally {
-    delete process.env.SCUFRIS_DAEMON;
+    if (role === undefined) delete process.env.SCUFRIS_ROLE;
+    else process.env.SCUFRIS_ROLE = role;
   }
 
   const emit = async (event: string, value: unknown = {}) => {
@@ -114,7 +116,7 @@ function harness() {
     notices,
     sent,
     emit,
-    /** Hands the extension one control, the way the desktop extension does. */
+    /** Hands the extension one control, the way the service extension does. */
     serve(control: FakeControl | undefined) {
       api.events.emit(WIDGET_CONTROL_EVENT, { control });
     },
@@ -140,14 +142,14 @@ async function serving(catalog: CatalogEntry[] = [note]) {
   return { pi, control };
 }
 
-test("no widget tool exists until a companion says what it has", async () => {
+test("no widget tool exists until a frontend says what it has", async () => {
   const pi = harness();
   const control = new FakeControl();
   await pi.emit("session_start");
   pi.serve(control);
-  // The socket is served and nothing has announced anything yet. Registering
-  // now would offer the model widget names picked by this repository rather
-  // than by the desktop it is talking to.
+  // The link is up and nothing has announced anything yet. Registering now
+  // would offer the model widget names picked by this repository rather than by
+  // the desktop it is talking to.
   assert.equal(pi.tools.size, 0);
 
   control.notice({ type: "catalog", widgets: [note, clock] });
@@ -186,20 +188,20 @@ test("an open names its surface and later commands carry that name", async () =>
   assert.equal(updated.isError, undefined);
   assert.deepEqual(control.sent, [
     {
-      type: "widget_open",
+      type: "open",
       widget: "note",
       posture: "exhibit",
       data: { text: "the harness is green" },
     },
     {
-      type: "widget_update",
+      type: "update",
       surface: "widget-1",
       data: { text: "141 tests pass" },
     },
   ]);
 });
 
-test("a refused command is a tool error carrying the companion's own code", async () => {
+test("a refused command is a tool error carrying the frontend's own code", async () => {
   const { pi, control } = await serving();
   control.answer = async () => {
     throw new WidgetCommandError("surface_not_found", "widget-9 is not open");
@@ -221,11 +223,7 @@ test("a surface the person closed reaches the conversation without starting a tu
   const { pi, control } = await serving();
   await pi.call("scufris_widget_open", { widget: "note" });
 
-  control.notice({
-    type: "widget_event",
-    surface: "widget-1",
-    event: "closed",
-  });
+  control.notice({ type: "closed", surface: "widget-1" });
 
   assert.equal(pi.sent.length, 1);
   const event = pi.sent[0] as Sent;
@@ -244,23 +242,23 @@ test("a surface the person closed reaches the conversation without starting a tu
 
 test("a command with nothing to carry it is refused rather than sent", async () => {
   const { pi } = await serving();
-  // What a session shutdown looks like from here: the desktop extension gives
-  // back the control before it closes the socket under it.
+  // What a session shutdown looks like from here: the service extension gives
+  // back the control before it closes the link under it.
   pi.serve(undefined);
 
   const result = await pi.call("scufris_widget_open", { widget: "note" });
   assert.equal(result.isError, true);
-  assert.equal(result.details.error_code, "companion_unavailable");
+  assert.equal(result.details.error_code, "service_unavailable");
 });
 
-test("a companion that announces different widgets is said out loud, not retyped", async () => {
+test("a frontend that announces different widgets is said out loud, not retyped", async () => {
   const { pi, control } = await serving();
   const open = pi.tools.get("scufris_widget_open");
 
   control.notice({ type: "catalog", widgets: [note, clock] });
 
   // Pi cannot withdraw a registered tool, so the names the model sees stay the
-  // ones the first companion announced. Silently keeping them would leave the
+  // ones the first frontend announced. Silently keeping them would leave the
   // person with no way to learn why a widget they installed cannot be opened.
   assert.equal(pi.tools.get("scufris_widget_open"), open);
   assert.deepEqual(open.parameters.properties.widget.enum, ["note"]);

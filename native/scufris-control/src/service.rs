@@ -1,22 +1,28 @@
 //! Control protocol version 3 between `scufris-service` and its clients.
 //!
-//! Version 2 faces the other way. There the popup Pi process is the server and
-//! the companion is the client, so the protocol is named for a daemon that is
-//! really an agent. Here the service is the server, `pi --mode rpc` is one of
-//! its clients, and every surface is a client too. That inversion is the whole
-//! design; this module is where it becomes a wire format.
+//! Version 2 faced the other way. There the popup Pi process was the server
+//! and the companion was the client, so the protocol was named for a daemon
+//! that was really an agent. Here the service is the server, `pi --mode rpc`
+//! is one of its clients, and every surface is a client too. That inversion is
+//! the whole design; this module is where it becomes a wire format. Version 2
+//! itself is gone: nothing speaks it, and nothing converts to it.
 //!
 //! One socket, and the client says in its `hello` which kind it is. A
-//! `frontend` is a surface: it submits text and is pushed the state and the
-//! transcript as they change. A `control` client is `scufris-ctl`: it asks one
-//! thing, reads the answer, and goes away. By L1 there is at most one frontend
-//! at a time and a second one replaces the first, but there may be any number
-//! of control clients because that is just a person in a terminal.
+//! `frontend` is a surface: it submits text and is pushed the state, the
+//! transcript, and the widget commands. An `agent` is the Pi process itself,
+//! through its Scufris extensions: it says what it said and it opens widgets.
+//! A `control` client is `scufris-ctl`: it asks one thing, reads the answer,
+//! and goes away. By L1 there is at most one frontend and one agent at a time
+//! and a second one replaces the first, but there may be any number of control
+//! clients because that is just a person in a terminal.
 //!
-//! The `agent` role is not here yet. It arrives with the surface protocol in
-//! the increment that turns `extensions/scufris/desktop/` into a client.
+//! Widgets are the one thing the service does not decide. The agent asks and
+//! the frontend answers, and the service is a relay that knows which role may
+//! say what. It has to be in the middle because neither end knows where the
+//! other one is, and because the agent is replaced under the frontend every
+//! time a debug lease ends.
 //!
-//! Framing is version 2's: one LF-terminated JSON line each way, bounded by
+//! Framing is the shared one: one LF-terminated JSON line each way, bounded by
 //! [`MAX_MESSAGE_BYTES`](crate::MAX_MESSAGE_BYTES).
 
 use std::{env, path::PathBuf};
@@ -30,9 +36,9 @@ pub const SERVICE_VERSION: u32 = 3;
 
 /// Socket name below [`crate::SOCKET_DIRECTORY_NAME`].
 ///
-/// Its own name rather than version 2's `daemon.sock`. The two servers stand
-/// side by side until the switch, and a client that connects to the wrong one
-/// should fail at connect rather than at hello.
+/// Its own name rather than version 2's `daemon.sock`, which it does not
+/// replace in place: a client left over from before finds nothing at the old
+/// path and fails at connect rather than at hello.
 pub const SERVICE_FILE_NAME: &str = "service.sock";
 
 /// Maximum accepted size of one transcript entry, in UTF-8 bytes.
@@ -44,6 +50,18 @@ pub const MAX_TRANSCRIPT_TEXT_BYTES: usize = 4 * 1024;
 /// Maximum number of arguments in a debug command line.
 pub const MAX_DEBUG_ARGS: usize = 16;
 
+/// Maximum accepted size of one encoded widget payload, in UTF-8 bytes.
+///
+/// Well below the message cap: the same payload crosses the frontend's own
+/// per-window channel, where small ordered messages are the contract.
+pub const MAX_WIDGET_DATA_BYTES: usize = 8 * 1024;
+
+/// Maximum number of widgets one catalog may announce.
+pub const MAX_CATALOG_ENTRIES: usize = 64;
+
+/// Maximum accepted length of one catalog name or description.
+pub const MAX_CATALOG_TEXT_BYTES: usize = 512;
+
 /// Returns the service socket path for the current user session.
 pub fn service_socket_path() -> Result<PathBuf, ControlPathError> {
     in_runtime_dir(env::var_os("XDG_RUNTIME_DIR"), SERVICE_FILE_NAME)
@@ -53,8 +71,12 @@ pub fn service_socket_path() -> Result<PathBuf, ControlPathError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
-    /// A surface. Submits text, and is pushed state and transcript changes.
+    /// A surface. Submits text, and is pushed state, transcript and widget
+    /// commands.
     Frontend,
+    /// The Pi process, through its Scufris extensions. Says what it said and
+    /// asks for widgets.
+    Agent,
     /// `scufris-ctl`. Asks one thing and reads the answer.
     Control,
 }
@@ -64,6 +86,7 @@ impl Role {
     pub fn name(self) -> &'static str {
         match self {
             Self::Frontend => "frontend",
+            Self::Agent => "agent",
             Self::Control => "control",
         }
     }
@@ -126,6 +149,147 @@ pub struct TranscriptEntry {
     pub text: String,
 }
 
+/// Where a surface lives once it is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Posture {
+    /// Scufris opened it to show something. It ages and retires on its own.
+    Exhibit,
+    /// The person owns it. It stays until they close it.
+    Instrument,
+}
+
+/// One installed widget, as the frontend announces it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogEntry {
+    /// Widget identifier, equal to its directory name.
+    pub id: String,
+    /// Short display name shown in the window chrome.
+    pub name: String,
+    /// One line telling the model what the widget is for.
+    pub description: String,
+}
+
+/// What the agent asks the frontend to do with a widget.
+///
+/// Every variant carries the correlation identifier the answer echoes. The
+/// agent may have several in flight, and an answer nobody can match is an
+/// answer that can act on the wrong surface.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WidgetCommand {
+    /// Open one widget from the announced catalog.
+    Open {
+        /// Correlation identifier the answer echoes.
+        id: String,
+        /// Widget to open.
+        widget: String,
+        /// Where the surface lives once it is open.
+        posture: Posture,
+        /// Widget-defined spawn payload, bounded by [`MAX_WIDGET_DATA_BYTES`].
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+    /// Send new data to one open surface.
+    Update {
+        /// Correlation identifier the answer echoes.
+        id: String,
+        /// Surface to update.
+        surface: String,
+        /// Widget-defined payload, bounded by [`MAX_WIDGET_DATA_BYTES`].
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+    /// Close one open surface.
+    Close {
+        /// Correlation identifier the answer echoes.
+        id: String,
+        /// Surface to close.
+        surface: String,
+    },
+    /// Close every surface the runtime opened and leave the person's own.
+    Clear {
+        /// Correlation identifier the answer echoes.
+        id: String,
+    },
+}
+
+impl WidgetCommand {
+    /// Returns the correlation identifier the answer must echo.
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Open { id, .. }
+            | Self::Update { id, .. }
+            | Self::Close { id, .. }
+            | Self::Clear { id } => id,
+        }
+    }
+
+    /// Returns the stable wire name used in logs.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Open { .. } => "open",
+            Self::Update { .. } => "update",
+            Self::Close { .. } => "close",
+            Self::Clear { .. } => "clear",
+        }
+    }
+}
+
+/// What the frontend tells the agent about its widgets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WidgetReport {
+    /// Answers [`WidgetCommand::Open`] with the surface that was created.
+    Opened {
+        /// Correlation identifier copied from the command.
+        id: String,
+        /// Surface the runtime created. It doubles as the window label.
+        surface: String,
+    },
+    /// Answers every command that names no new surface. It was carried out.
+    Done {
+        /// Correlation identifier copied from the command.
+        id: String,
+    },
+    /// Answers any command the runtime could not carry out.
+    Failed {
+        /// Correlation identifier copied from the command.
+        id: String,
+        /// Stable machine-readable reason, shaped like an identifier.
+        code: String,
+        /// Short human-readable explanation.
+        #[serde(default)]
+        detail: String,
+    },
+    /// One surface went away without the agent asking. The person closed it,
+    /// or it aged off the shelf.
+    Closed {
+        /// Surface that is gone.
+        surface: String,
+    },
+    /// Announces the widgets this frontend can open, so the agent can type its
+    /// tools. Sent once per connection, and remembered by the service for an
+    /// agent that connects later.
+    Catalog {
+        /// Every installed widget, ordered by identifier.
+        widgets: Vec<CatalogEntry>,
+    },
+}
+
+impl WidgetReport {
+    /// Returns the stable wire name used in logs.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Opened { .. } => "opened",
+            Self::Done { .. } => "done",
+            Self::Failed { .. } => "failed",
+            Self::Closed { .. } => "closed",
+            Self::Catalog { .. } => "catalog",
+        }
+    }
+}
+
 /// Stable refusal codes. A caller branches on these; `detail` is for a person.
 pub mod refusal {
     /// There is no agent to send to.
@@ -141,7 +305,7 @@ pub mod refusal {
 }
 
 /// One versioned message sent by a client to the service.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ClientMessage {
     /// Wire protocol version used to encode the message.
     pub v: u32,
@@ -164,7 +328,7 @@ impl ClientMessage {
 ///
 /// Every request carries an `id` and every answer echoes it, so a client that
 /// pipelines two requests can tell the answers apart without counting.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientBody {
     /// Opens the connection and declares what kind of client this is. It must
@@ -198,6 +362,35 @@ pub enum ClientBody {
         /// Client-owned identifier the answer echoes.
         id: String,
     },
+    /// One line the assistant said. Agents only. It goes on the transcript.
+    ///
+    /// The service cannot read this off the event stream: Scufris answers
+    /// through a tool call rather than an assistant text block, and what it
+    /// meant to say is the agent's to report.
+    Said {
+        /// What was said.
+        text: String,
+    },
+    /// One line the assistant wants spoken. Agents only.
+    ///
+    /// Separate from `said` because they are different strings: the transcript
+    /// holds the whole answer and speech holds a paragraph shaped for it. The
+    /// agent decides what is worth saying aloud and the frontend, which owns
+    /// the speaker, decides whether to say it.
+    Speak {
+        /// What to synthesise.
+        text: String,
+    },
+    /// Asks the frontend for something on the screen. Agents only.
+    Widget {
+        /// What to do.
+        command: WidgetCommand,
+    },
+    /// Tells the agent what became of its widgets. Frontends only.
+    Report {
+        /// What happened.
+        report: WidgetReport,
+    },
 }
 
 impl ClientBody {
@@ -209,12 +402,16 @@ impl ClientBody {
             Self::Abort { .. } => "abort",
             Self::GetState { .. } => "get_state",
             Self::Debug { .. } => "debug",
+            Self::Said { .. } => "said",
+            Self::Speak { .. } => "speak",
+            Self::Widget { .. } => "widget",
+            Self::Report { .. } => "report",
         }
     }
 }
 
 /// One versioned message sent by the service to a client.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ServiceMessage {
     /// Wire protocol version used to encode the message.
     pub v: u32,
@@ -234,7 +431,7 @@ impl ServiceMessage {
 }
 
 /// Service messages defined by protocol version 3.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServiceBody {
     /// Answers `hello`, echoing the role the connection was given.
@@ -284,6 +481,22 @@ pub enum ServiceBody {
         /// Its arguments, naming the session the service was using.
         args: Vec<String>,
     },
+    /// One line the assistant wants spoken. Pushed to frontends only, and not
+    /// kept: speech that arrived late is speech nobody asked for.
+    Speak {
+        /// What to synthesise.
+        text: String,
+    },
+    /// One widget command from the agent. Pushed to the frontend.
+    Widget {
+        /// What to do.
+        command: WidgetCommand,
+    },
+    /// One widget answer or notice from the frontend. Pushed to the agent.
+    Report {
+        /// What happened.
+        report: WidgetReport,
+    },
 }
 
 impl ServiceBody {
@@ -296,6 +509,9 @@ impl ServiceBody {
             Self::State { .. } => "state",
             Self::Transcript { .. } => "transcript",
             Self::Debug { .. } => "debug",
+            Self::Speak { .. } => "speak",
+            Self::Widget { .. } => "widget",
+            Self::Report { .. } => "report",
         }
     }
 }
@@ -303,6 +519,93 @@ impl ServiceBody {
 /// Returns true when the entry is within the bound the ring is built for.
 pub fn is_transcript_text(value: &str) -> bool {
     !value.is_empty() && value.len() <= MAX_TRANSCRIPT_TEXT_BYTES
+}
+
+/// Returns true when the payload encodes within [`MAX_WIDGET_DATA_BYTES`].
+pub fn is_widget_data(value: &serde_json::Value) -> bool {
+    serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= MAX_WIDGET_DATA_BYTES)
+}
+
+/// Checks one widget command. The service relays these without reading them,
+/// so this is the only place either end is protected from the other.
+fn check_widget_command(command: &WidgetCommand) -> Result<(), MessageError> {
+    if !is_identifier(command.id()) {
+        return Err(MessageError::InvalidSubmission("id"));
+    }
+    match command {
+        WidgetCommand::Open { widget, data, .. } => {
+            if !is_identifier(widget) {
+                return Err(MessageError::InvalidSubmission("widget"));
+            }
+            if !is_widget_data(data) {
+                return Err(MessageError::InvalidSubmission("data"));
+            }
+        }
+        WidgetCommand::Update { surface, data, .. } => {
+            if !is_identifier(surface) {
+                return Err(MessageError::InvalidSubmission("surface"));
+            }
+            if !is_widget_data(data) {
+                return Err(MessageError::InvalidSubmission("data"));
+            }
+        }
+        WidgetCommand::Close { surface, .. } => {
+            if !is_identifier(surface) {
+                return Err(MessageError::InvalidSubmission("surface"));
+            }
+        }
+        WidgetCommand::Clear { .. } => {}
+    }
+    Ok(())
+}
+
+/// Checks one widget report, the answer half of the same relay.
+fn check_widget_report(report: &WidgetReport) -> Result<(), MessageError> {
+    match report {
+        WidgetReport::Opened { id, surface } => {
+            if !is_identifier(id) {
+                return Err(MessageError::InvalidSubmission("id"));
+            }
+            if !is_identifier(surface) {
+                return Err(MessageError::InvalidSubmission("surface"));
+            }
+        }
+        WidgetReport::Done { id } => {
+            if !is_identifier(id) {
+                return Err(MessageError::InvalidSubmission("id"));
+            }
+        }
+        WidgetReport::Failed { id, code, .. } => {
+            if !is_identifier(id) {
+                return Err(MessageError::InvalidSubmission("id"));
+            }
+            if !is_identifier(code) {
+                return Err(MessageError::InvalidSubmission("code"));
+            }
+        }
+        WidgetReport::Closed { surface } => {
+            if !is_identifier(surface) {
+                return Err(MessageError::InvalidSubmission("surface"));
+            }
+        }
+        WidgetReport::Catalog { widgets } => {
+            if widgets.len() > MAX_CATALOG_ENTRIES {
+                return Err(MessageError::InvalidSubmission("widgets"));
+            }
+            for widget in widgets {
+                if !is_identifier(&widget.id) {
+                    return Err(MessageError::InvalidSubmission("id"));
+                }
+                if widget.name.is_empty() || widget.name.len() > MAX_CATALOG_TEXT_BYTES {
+                    return Err(MessageError::InvalidSubmission("name"));
+                }
+                if widget.description.len() > MAX_CATALOG_TEXT_BYTES {
+                    return Err(MessageError::InvalidSubmission("description"));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Reads one bounded line and refuses it unless it is this protocol version.
@@ -343,6 +646,13 @@ pub fn read_client_message(
                 return Err(MessageError::InvalidSubmission("id"));
             }
         }
+        ClientBody::Said { text } | ClientBody::Speak { text } => {
+            if !is_transcript_text(text) {
+                return Err(MessageError::InvalidSubmission("text"));
+            }
+        }
+        ClientBody::Widget { command } => check_widget_command(command)?,
+        ClientBody::Report { report } => check_widget_report(report)?,
         ClientBody::Hello { .. } => {}
     }
     Ok(message)
@@ -390,6 +700,13 @@ pub fn read_service_message(
                 return Err(MessageError::InvalidSubmission("args"));
             }
         }
+        ServiceBody::Speak { text } => {
+            if !is_transcript_text(text) {
+                return Err(MessageError::InvalidSubmission("text"));
+            }
+        }
+        ServiceBody::Widget { command } => check_widget_command(command)?,
+        ServiceBody::Report { report } => check_widget_report(report)?,
         ServiceBody::Welcome { .. } => {}
     }
     Ok(message)
@@ -627,14 +944,189 @@ mod tests {
     }
 
     #[test]
-    fn the_service_socket_is_not_the_version_two_socket() {
+    fn the_agent_reports_what_it_said_and_what_it_wants_spoken_separately() {
+        // Two strings, not one. The transcript holds the whole answer and
+        // speech holds the paragraph shaped for a speaker, and the agent is
+        // the only thing that knows which is which.
+        let said = ClientMessage::new(ClientBody::Said {
+            text: "the harness is green, 140 of 140".into(),
+        });
+        assert_eq!(
+            encoded(&said),
+            "{\"v\":3,\"type\":\"said\",\"text\":\"the harness is green, 140 of 140\"}\n"
+        );
+        assert_eq!(
+            read_client_message(&mut Cursor::new(encoded(&said))).unwrap(),
+            said
+        );
+        let speak = ServiceMessage::new(ServiceBody::Speak {
+            text: "the harness is green".into(),
+        });
+        assert_eq!(
+            read_service_message(&mut Cursor::new(encoded(&speak))).unwrap(),
+            speak
+        );
+        let oversized = encoded(&ClientMessage::new(ClientBody::Speak {
+            text: "x".repeat(MAX_TRANSCRIPT_TEXT_BYTES + 1),
+        }));
+        assert!(matches!(
+            read_client_message(&mut Cursor::new(oversized)),
+            Err(MessageError::InvalidSubmission("text"))
+        ));
+    }
+
+    #[test]
+    fn a_widget_command_is_relayed_whole_and_its_answer_carries_the_same_id() {
+        // The service does not read these. It relays them because neither end
+        // knows where the other one is, so the wire shape is the only check
+        // either end gets.
+        let command = WidgetCommand::Open {
+            id: "w-1".into(),
+            widget: "clock".into(),
+            posture: Posture::Exhibit,
+            data: json!({ "zone": "Europe/Bucharest" }),
+        };
+        assert_eq!(
+            encoded(&ClientMessage::new(ClientBody::Widget {
+                command: command.clone()
+            })),
+            "{\"v\":3,\"type\":\"widget\",\"command\":{\"type\":\"open\",\"id\":\"w-1\",\
+             \"widget\":\"clock\",\"posture\":\"exhibit\",\
+             \"data\":{\"zone\":\"Europe/Bucharest\"}}}\n"
+        );
+        let pushed = ServiceMessage::new(ServiceBody::Widget { command });
+        assert_eq!(
+            read_service_message(&mut Cursor::new(encoded(&pushed))).unwrap(),
+            pushed
+        );
+        let opened = ClientMessage::new(ClientBody::Report {
+            report: WidgetReport::Opened {
+                id: "w-1".into(),
+                surface: "clock-1".into(),
+            },
+        });
+        assert_eq!(
+            read_client_message(&mut Cursor::new(encoded(&opened))).unwrap(),
+            opened
+        );
+        for report in [
+            WidgetReport::Done { id: "w-2".into() },
+            WidgetReport::Failed {
+                id: "w-3".into(),
+                code: "unknown_widget".into(),
+                detail: "no widget named lamp".into(),
+            },
+            WidgetReport::Closed {
+                surface: "clock-1".into(),
+            },
+        ] {
+            let message = ServiceMessage::new(ServiceBody::Report { report });
+            assert_eq!(
+                read_service_message(&mut Cursor::new(encoded(&message))).unwrap(),
+                message
+            );
+        }
+    }
+
+    #[test]
+    fn widget_payloads_are_bounded_and_every_name_is_an_identifier() {
+        let oversized = encoded(&ClientMessage::new(ClientBody::Widget {
+            command: WidgetCommand::Update {
+                id: "w-1".into(),
+                surface: "clock-1".into(),
+                data: json!({ "text": "x".repeat(MAX_WIDGET_DATA_BYTES) }),
+            },
+        }));
+        assert!(matches!(
+            read_client_message(&mut Cursor::new(oversized)),
+            Err(MessageError::InvalidSubmission("data"))
+        ));
+        let named = encoded(&ClientMessage::new(ClientBody::Widget {
+            command: WidgetCommand::Close {
+                id: "w-1".into(),
+                surface: "clock 1".into(),
+            },
+        }));
+        assert!(matches!(
+            read_client_message(&mut Cursor::new(named)),
+            Err(MessageError::InvalidSubmission("surface"))
+        ));
+        let clear = ClientMessage::new(ClientBody::Widget {
+            command: WidgetCommand::Clear { id: "w-9".into() },
+        });
+        assert_eq!(
+            read_client_message(&mut Cursor::new(encoded(&clear))).unwrap(),
+            clear
+        );
+    }
+
+    #[test]
+    fn the_catalog_is_bounded_because_it_types_the_agents_tools() {
+        let catalog = ClientMessage::new(ClientBody::Report {
+            report: WidgetReport::Catalog {
+                widgets: vec![CatalogEntry {
+                    id: "clock".into(),
+                    name: "Clock".into(),
+                    description: "Shows the time in one zone.".into(),
+                }],
+            },
+        });
+        assert_eq!(
+            read_client_message(&mut Cursor::new(encoded(&catalog))).unwrap(),
+            catalog
+        );
+        let many = encoded(&ClientMessage::new(ClientBody::Report {
+            report: WidgetReport::Catalog {
+                widgets: vec![
+                    CatalogEntry {
+                        id: "clock".into(),
+                        name: "Clock".into(),
+                        description: String::new(),
+                    };
+                    MAX_CATALOG_ENTRIES + 1
+                ],
+            },
+        }));
+        assert!(matches!(
+            read_client_message(&mut Cursor::new(many)),
+            Err(MessageError::InvalidSubmission("widgets"))
+        ));
+        let nameless = encoded(&ClientMessage::new(ClientBody::Report {
+            report: WidgetReport::Catalog {
+                widgets: vec![CatalogEntry {
+                    id: "clock".into(),
+                    name: String::new(),
+                    description: String::new(),
+                }],
+            },
+        }));
+        assert!(matches!(
+            read_client_message(&mut Cursor::new(nameless)),
+            Err(MessageError::InvalidSubmission("name"))
+        ));
+    }
+
+    #[test]
+    fn every_role_has_a_stable_name_and_reads_back_as_itself() {
+        for role in [Role::Frontend, Role::Control, Role::Agent] {
+            let line = format!(
+                "{{\"v\":3,\"type\":\"hello\",\"role\":\"{}\"}}\n",
+                role.name()
+            );
+            assert_eq!(
+                read_client_message(&mut Cursor::new(line)).unwrap().body,
+                ClientBody::Hello { role }
+            );
+        }
+    }
+
+    #[test]
+    fn the_service_socket_is_one_named_path_in_the_session_runtime_directory() {
         let run = Some(std::ffi::OsString::from("/run/user/1000"));
-        let service =
-            in_runtime_dir(run.clone(), SERVICE_FILE_NAME).expect("the runtime directory is set");
-        let daemon =
-            in_runtime_dir(run, crate::SOCKET_FILE_NAME).expect("the runtime directory is set");
-        assert_eq!(service.parent(), daemon.parent());
-        assert_ne!(service, daemon);
-        assert!(service.ends_with(SERVICE_FILE_NAME));
+        assert_eq!(
+            in_runtime_dir(run, SERVICE_FILE_NAME).expect("the runtime directory is set"),
+            std::path::Path::new("/run/user/1000/scufris/service.sock")
+        );
+        assert!(in_runtime_dir(None, SERVICE_FILE_NAME).is_err());
     }
 }

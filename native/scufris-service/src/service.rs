@@ -33,7 +33,8 @@ use std::{
 };
 
 use scufris_control::service::{
-    Role, ScufrisState, ServiceBody, ServiceMessage, TranscriptEntry, refusal,
+    CatalogEntry, Role, ScufrisState, ServiceBody, ServiceMessage, Speaker, TranscriptEntry,
+    WidgetCommand, WidgetReport, refusal,
 };
 use tracing::{debug, error, info, warn};
 
@@ -64,6 +65,10 @@ const RESTART_DELAY: Duration = Duration::from_secs(1);
 /// How many quick deaths in a row stop the service from trying again.
 const MAX_FAILURES: u32 = 3;
 
+/// What a widget command is answered with when there is no screen to open it
+/// on. The agent is waiting on an answer, so silence would hang it.
+const NO_FRONTEND: &str = "no_frontend";
+
 /// One connected client, as the service holds it.
 struct Client {
     role: Role,
@@ -88,6 +93,10 @@ struct Inner {
     detail: String,
     session_file: Option<PathBuf>,
     transcript: VecDeque<TranscriptEntry>,
+    /// The widgets the frontend last announced, kept for an agent that
+    /// connects after it. The agent types its tools from this, and an agent
+    /// that restarted has to be told again.
+    catalog: Vec<CatalogEntry>,
     clients: HashMap<u64, Client>,
     /// The connection holding the debug lease, when one does.
     lease: Option<u64>,
@@ -98,7 +107,7 @@ struct Inner {
 
 impl Inner {
     /// Sends one message to one client, dropping a client that cannot keep up.
-    fn to_client(&mut self, client: u64, body: ServiceBody) {
+    fn send(&mut self, client: u64, body: ServiceBody) {
         let message = ServiceMessage::new(body);
         let deliverable = match self.clients.get(&client) {
             Some(held) => held.outbox.try_send(message),
@@ -110,7 +119,7 @@ impl Inner {
     }
 
     /// Sends one message to every frontend.
-    fn to_frontends(&mut self, body: ServiceBody) {
+    fn push_frontends(&mut self, body: ServiceBody) {
         let message = ServiceMessage::new(body);
         let mut failed = Vec::new();
         for (id, client) in &self.clients {
@@ -153,17 +162,59 @@ impl Inner {
         info!(state = state.name(), detail, "state");
         self.state = state;
         self.detail = detail.clone();
-        self.to_frontends(ServiceBody::State {
+        self.push_frontends(ServiceBody::State {
             id: None,
             state,
             detail,
         });
     }
 
+    /// Sends one message to the connected agent, if one is connected.
+    ///
+    /// Returns false when there is nothing in the agent role, so the caller can
+    /// decide whether that is worth answering.
+    fn push_agent(&mut self, body: ServiceBody) -> bool {
+        let Some(agent) = self.of_role(Role::Agent).first().copied() else {
+            return false;
+        };
+        self.send(agent, body);
+        true
+    }
+
+    /// Returns every connected client in one role.
+    fn of_role(&self, role: Role) -> Vec<u64> {
+        self.clients
+            .iter()
+            .filter(|(_, held)| held.role == role)
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    /// Puts one line on the ring and pushes it to the frontends.
+    fn record(&mut self, entry: TranscriptEntry) {
+        if self.transcript.len() == TRANSCRIPT_ENTRIES {
+            self.transcript.pop_front();
+        }
+        self.transcript.push_back(entry.clone());
+        self.push_frontends(ServiceBody::Transcript { entry });
+    }
+
+    /// Returns true when this client is the connected agent.
+    ///
+    /// These messages carry no request identifier, so a wrong sender is logged
+    /// and dropped rather than refused: there is nothing to echo a refusal on.
+    fn is_agent(&self, client: u64) -> bool {
+        let agent = self.clients.get(&client).map(|held| held.role) == Some(Role::Agent);
+        if !agent {
+            warn!(client, "an agent-only message came from another role");
+        }
+        agent
+    }
+
     /// Answers every command the departing agent will never answer.
     fn fail_pending(&mut self, detail: &str) {
         for (_, waiting) in std::mem::take(&mut self.pending) {
-            self.to_client(
+            self.send(
                 waiting.client,
                 ServiceBody::Refused {
                     id: waiting.id,
@@ -195,6 +246,7 @@ impl Service {
                 detail: String::new(),
                 session_file: None,
                 transcript: VecDeque::new(),
+                catalog: Vec::new(),
                 clients: HashMap::new(),
                 lease: None,
                 pending: HashMap::new(),
@@ -305,7 +357,7 @@ impl Service {
                         detail: error.unwrap_or_else(|| "the agent refused it".into()),
                     }
                 };
-                inner.to_client(waiting.client, body);
+                inner.send(waiting.client, body);
             }
             Event::Response { id: None, .. } => {}
             Event::AgentStart => self.lock().set_state(ScufrisState::Working, String::new()),
@@ -314,12 +366,7 @@ impl Service {
                 let Some(entry) = rpc::transcript_entry(&message) else {
                     return;
                 };
-                let mut inner = self.lock();
-                if inner.transcript.len() == TRANSCRIPT_ENTRIES {
-                    inner.transcript.pop_front();
-                }
-                inner.transcript.push_back(entry.clone());
-                inner.to_frontends(ServiceBody::Transcript { entry });
+                self.lock().record(entry);
             }
             Event::ExtensionUiRequest {
                 id,
@@ -408,41 +455,136 @@ impl Service {
 
     /// Registers one connected client and gives it what its role is owed.
     ///
-    /// A second frontend replaces the first rather than being fanned out to.
-    /// By L1 there is one surface, so a second connection is that surface
-    /// having restarted, and holding the old one open would leave the new one
-    /// talking to a socket nobody reads.
+    /// A second frontend replaces the first rather than being fanned out to,
+    /// and so does a second agent. By L1 there is one surface and one agent, so
+    /// a second connection is that one having restarted, and holding the old
+    /// one open would leave the new one talking to a socket nobody reads.
     pub fn register(&self, client: u64, role: Role, outbox: SyncSender<ServiceMessage>) {
         let mut inner = self.lock();
-        if role == Role::Frontend {
-            let previous: Vec<u64> = inner
-                .clients
-                .iter()
-                .filter(|(_, held)| held.role == Role::Frontend)
-                .map(|(id, _)| *id)
-                .collect();
-            for id in previous {
-                info!(client = id, "a second frontend took the first one's place");
+        if role != Role::Control {
+            for id in inner.of_role(role) {
+                info!(
+                    client = id,
+                    role = role.name(),
+                    "a second client took the first one's place"
+                );
                 inner.clients.remove(&id);
             }
         }
         inner.clients.insert(client, Client { role, outbox });
         debug!(client, role = role.name(), "a client connected");
-        inner.to_client(client, ServiceBody::Welcome { role });
-        if role != Role::Frontend {
+        inner.send(client, ServiceBody::Welcome { role });
+        match role {
+            Role::Frontend => {
+                let (state, detail) = (inner.state, inner.detail.clone());
+                inner.send(
+                    client,
+                    ServiceBody::State {
+                        id: None,
+                        state,
+                        detail,
+                    },
+                );
+                for entry in inner.transcript.clone() {
+                    inner.send(client, ServiceBody::Transcript { entry });
+                }
+            }
+            Role::Agent => {
+                // The agent is replaced under the frontend every time a debug
+                // lease ends, and the catalog was announced once, long before
+                // that. Remembering it is what makes the new agent's widget
+                // tools exist without the frontend having to reconnect.
+                if inner.catalog.is_empty() {
+                    return;
+                }
+                let widgets = inner.catalog.clone();
+                inner.send(
+                    client,
+                    ServiceBody::Report {
+                        report: WidgetReport::Catalog { widgets },
+                    },
+                );
+            }
+            Role::Control => {}
+        }
+    }
+
+    /// Puts one line the assistant said on the transcript.
+    ///
+    /// The agent reports this rather than the service reading it off the event
+    /// stream: Scufris answers through a tool call, not an assistant text
+    /// block, and what it meant to say is the agent's to know.
+    pub fn said(&self, client: u64, text: String) {
+        let mut inner = self.lock();
+        if !inner.is_agent(client) {
             return;
         }
-        let (state, detail) = (inner.state, inner.detail.clone());
-        inner.to_client(
-            client,
-            ServiceBody::State {
-                id: None,
-                state,
-                detail,
-            },
-        );
-        for entry in inner.transcript.clone() {
-            inner.to_client(client, ServiceBody::Transcript { entry });
+        inner.record(TranscriptEntry {
+            speaker: Speaker::Assistant,
+            text,
+        });
+    }
+
+    /// Hands one line to whatever owns the speaker.
+    ///
+    /// Not kept and not queued. Speech that arrived while nothing was listening
+    /// is speech nobody asked for, and the transcript already has the words.
+    pub fn speak(&self, client: u64, text: String) {
+        let mut inner = self.lock();
+        if !inner.is_agent(client) {
+            return;
+        }
+        inner.push_frontends(ServiceBody::Speak { text });
+    }
+
+    /// Relays one widget command from the agent to the frontend.
+    ///
+    /// The service does not read the command. It relays it because neither end
+    /// knows where the other one is: the agent is a child it starts and the
+    /// frontend is a window that comes and goes.
+    pub fn relay_widget(&self, client: u64, command: WidgetCommand) {
+        let mut inner = self.lock();
+        if !inner.is_agent(client) {
+            return;
+        }
+        if inner.of_role(Role::Frontend).is_empty() {
+            // The agent is waiting on an answer to this, so it gets one.
+            let id = command.id().to_string();
+            debug!(command = command.name(), "a widget command has no screen");
+            inner.send(
+                client,
+                ServiceBody::Report {
+                    report: WidgetReport::Failed {
+                        id,
+                        code: NO_FRONTEND.into(),
+                        detail: "there is no frontend connected".into(),
+                    },
+                },
+            );
+            return;
+        }
+        inner.push_frontends(ServiceBody::Widget { command });
+    }
+
+    /// Relays one widget report from the frontend to the agent.
+    pub fn relay_report(&self, client: u64, report: WidgetReport) {
+        let mut inner = self.lock();
+        if inner.clients.get(&client).map(|held| held.role) != Some(Role::Frontend) {
+            warn!(
+                client,
+                "a widget report came from something that is not a frontend"
+            );
+            return;
+        }
+        if let WidgetReport::Catalog { widgets } = &report {
+            info!(
+                widgets = widgets.len(),
+                "the frontend announced its widgets"
+            );
+            inner.catalog = widgets.clone();
+        }
+        if !inner.push_agent(ServiceBody::Report { report }) {
+            debug!(client, "a widget report arrived with no agent to take it");
         }
     }
 
@@ -465,7 +607,7 @@ impl Service {
     pub fn report_state(&self, client: u64, id: String) {
         let mut inner = self.lock();
         let (state, detail) = (inner.state, inner.detail.clone());
-        inner.to_client(
+        inner.send(
             client,
             ServiceBody::State {
                 id: Some(id),
@@ -503,7 +645,7 @@ impl Service {
     fn command(&self, client: u64, id: String, build: impl FnOnce(String) -> Command) {
         let mut inner = self.lock();
         if inner.lease.is_some() {
-            inner.to_client(
+            inner.send(
                 client,
                 ServiceBody::Refused {
                     id,
@@ -514,7 +656,7 @@ impl Service {
             return;
         }
         let Some(writer) = inner.agent.as_ref().map(Agent::writer) else {
-            inner.to_client(
+            inner.send(
                 client,
                 ServiceBody::Refused {
                     id,
@@ -540,7 +682,7 @@ impl Service {
             let mut inner = self.lock();
             inner.pending.remove(&correlation);
             warn!(%error, "the agent would not take a command");
-            inner.to_client(
+            inner.send(
                 client,
                 ServiceBody::Refused {
                     id,
@@ -558,7 +700,7 @@ impl Service {
     pub fn begin_debug(&self, client: u64, id: String) {
         let mut inner = self.lock();
         if inner.lease.is_some() {
-            inner.to_client(
+            inner.send(
                 client,
                 ServiceBody::Refused {
                     id,
@@ -569,7 +711,7 @@ impl Service {
             return;
         }
         if inner.clients.get(&client).map(|held| held.role) != Some(Role::Control) {
-            inner.to_client(
+            inner.send(
                 client,
                 ServiceBody::Refused {
                     id,
@@ -591,7 +733,7 @@ impl Service {
             info!(?status, "the agent was handed to a terminal");
         }
         let mut inner = self.lock();
-        inner.to_client(
+        inner.send(
             client,
             ServiceBody::Debug {
                 id,
@@ -672,7 +814,7 @@ mod tests {
         sync::mpsc::{Receiver, sync_channel},
     };
 
-    use scufris_control::service::Speaker;
+    use scufris_control::service::Posture;
     use serde_json::json;
 
     use super::*;
@@ -980,6 +1122,172 @@ mod tests {
         service.apply(Event::AgentStart);
         assert!(!service.lock().clients.contains_key(&1));
         drop(inbox);
+    }
+
+    #[test]
+    fn the_agent_puts_its_own_answer_on_the_transcript() {
+        // The service cannot read this off the event stream: Scufris answers
+        // through a tool call rather than an assistant text block.
+        let service = service();
+        let frontend = connect(&service, 1, Role::Frontend);
+        let agent = connect(&service, 2, Role::Agent);
+        drain(&frontend);
+        service.said(2, "the harness is green".into());
+        assert_eq!(
+            drain(&frontend),
+            [ServiceBody::Transcript {
+                entry: TranscriptEntry {
+                    speaker: Speaker::Assistant,
+                    text: "the harness is green".into(),
+                },
+            }]
+        );
+        assert_eq!(service.lock().transcript.len(), 1);
+        assert!(drain(&agent).is_empty());
+    }
+
+    #[test]
+    fn speech_goes_to_the_speaker_and_is_never_kept() {
+        let service = service();
+        let frontend = connect(&service, 1, Role::Frontend);
+        drain(&frontend);
+        connect(&service, 2, Role::Agent);
+        service.speak(2, "the harness is green".into());
+        assert_eq!(
+            drain(&frontend),
+            [ServiceBody::Speak {
+                text: "the harness is green".into(),
+            }]
+        );
+        // Speech that arrived while nothing was listening is speech nobody
+        // asked for, so a frontend that connects later is not handed it.
+        assert!(service.lock().transcript.is_empty());
+        let later = connect(&service, 3, Role::Frontend);
+        assert_eq!(
+            drain(&later),
+            [ServiceBody::State {
+                id: None,
+                state: ScufrisState::Starting,
+                detail: String::new(),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_control_client_cannot_speak_for_the_agent() {
+        let service = service();
+        let frontend = connect(&service, 1, Role::Frontend);
+        let control = connect(&service, 2, Role::Control);
+        drain(&frontend);
+        service.said(2, "I am the assistant".into());
+        service.speak(2, "I am the assistant".into());
+        service.relay_widget(2, WidgetCommand::Clear { id: "w-1".into() });
+        assert!(drain(&frontend).is_empty());
+        assert!(drain(&control).is_empty());
+        assert!(service.lock().transcript.is_empty());
+    }
+
+    #[test]
+    fn widgets_are_relayed_both_ways_between_the_agent_and_the_frontend() {
+        let service = service();
+        let frontend = connect(&service, 1, Role::Frontend);
+        let agent = connect(&service, 2, Role::Agent);
+        drain(&frontend);
+        let command = WidgetCommand::Open {
+            id: "w-1".into(),
+            widget: "clock".into(),
+            posture: Posture::Exhibit,
+            data: json!({}),
+        };
+        service.relay_widget(2, command.clone());
+        assert_eq!(drain(&frontend), [ServiceBody::Widget { command }]);
+        let report = WidgetReport::Opened {
+            id: "w-1".into(),
+            surface: "clock-1".into(),
+        };
+        service.relay_report(1, report.clone());
+        assert_eq!(drain(&agent), [ServiceBody::Report { report }]);
+    }
+
+    #[test]
+    fn a_widget_command_with_no_screen_is_answered_rather_than_dropped() {
+        // The agent waits on an answer to every command it sends. Silence here
+        // is a tool call that never returns.
+        let service = service();
+        let agent = connect(&service, 1, Role::Agent);
+        service.relay_widget(
+            1,
+            WidgetCommand::Update {
+                id: "w-1".into(),
+                surface: "clock-1".into(),
+                data: json!({}),
+            },
+        );
+        assert_eq!(
+            drain(&agent),
+            [ServiceBody::Report {
+                report: WidgetReport::Failed {
+                    id: "w-1".into(),
+                    code: NO_FRONTEND.into(),
+                    detail: "there is no frontend connected".into(),
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn the_catalog_is_remembered_for_the_agent_that_comes_after_it() {
+        // The agent is replaced under the frontend every time a debug lease
+        // ends, and the catalog was announced once, before any of that.
+        let service = service();
+        connect(&service, 1, Role::Frontend);
+        let widgets = vec![CatalogEntry {
+            id: "clock".into(),
+            name: "Clock".into(),
+            description: "Shows the time in one zone.".into(),
+        }];
+        service.relay_report(
+            1,
+            WidgetReport::Catalog {
+                widgets: widgets.clone(),
+            },
+        );
+        let agent = connect(&service, 2, Role::Agent);
+        assert_eq!(
+            drain(&agent),
+            [ServiceBody::Report {
+                report: WidgetReport::Catalog {
+                    widgets: widgets.clone()
+                },
+            }]
+        );
+        // And a restarted agent is told again, because it kept nothing.
+        let restarted = connect(&service, 3, Role::Agent);
+        assert_eq!(
+            drain(&restarted),
+            [ServiceBody::Report {
+                report: WidgetReport::Catalog { widgets },
+            }]
+        );
+    }
+
+    #[test]
+    fn a_second_agent_takes_the_first_one_s_place() {
+        let service = service();
+        let first = connect(&service, 1, Role::Agent);
+        let second = connect(&service, 2, Role::Agent);
+        connect(&service, 3, Role::Frontend);
+        service.relay_report(
+            3,
+            WidgetReport::Closed {
+                surface: "clock-1".into(),
+            },
+        );
+        assert!(
+            drain(&first).is_empty(),
+            "the displaced agent is no longer written to"
+        );
+        assert_eq!(drain(&second).len(), 1);
     }
 
     #[test]

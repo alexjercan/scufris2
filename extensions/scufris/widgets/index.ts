@@ -8,15 +8,15 @@ import { toolResult } from "../shared/runtime.ts";
 import {
   MAX_IDENTIFIER_LENGTH,
   type CatalogEntry,
-} from "../desktop/protocol.ts";
+} from "../service/protocol.ts";
 import {
   WIDGET_CONTROL_EVENT,
   WidgetCommandError,
-  type WidgetCommand,
   type WidgetControl,
   type WidgetControlSignal,
   type WidgetNotice,
-} from "../desktop/server.ts";
+  type WidgetRequest,
+} from "../service/client.ts";
 
 /** The custom message type a surface the person closed arrives as. */
 export const WIDGET_EVENT_MESSAGE = "scufris-widget-event";
@@ -31,7 +31,7 @@ export function catalogSummary(widgets: CatalogEntry[]): string {
 /**
  * Turns one refused command into the tool result the model reads.
  *
- * The companion's own code is kept, because it is the difference between a
+ * The frontend's own code is kept, because it is the difference between a
  * widget name that does not exist, a surface that is already gone, and a
  * desktop that is not running. Each one calls for something different.
  */
@@ -49,15 +49,16 @@ function failure(error: unknown) {
 /**
  * Opens, updates, and closes the desktop companion's widgets.
  *
- * This is the only place the daemon originates a request rather than answering
- * one, and the tools are typed from what the companion says it has: the widget
+ * This is the only place the agent originates a request rather than answering
+ * one, and the tools are typed from what the frontend says it has: the widget
  * names the model can use are the widget names that are installed, and a
- * session that never met a companion offers none of them.
+ * session that never met a frontend offers none of them.
  */
 export default function widgets(pi: ExtensionAPI): void {
-  // Only the daemon has a companion to command. A worker Pi that registered
-  // these tools would offer the model four verbs that answer nothing.
-  if (process.env.SCUFRIS_DAEMON !== "1") return;
+  // Only the foreground Scufris has a screen to command. A worker Pi that
+  // registered these tools would offer the model four verbs that answer
+  // nothing.
+  if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
 
   let control: WidgetControl | undefined;
   let context: ExtensionContext | undefined;
@@ -68,11 +69,11 @@ export default function widgets(pi: ExtensionAPI): void {
     else if (level === "error") console.error(`scufris widgets: ${message}`);
   };
 
-  const ask = async (command: WidgetCommand) => {
+  const ask = async (command: WidgetRequest) => {
     if (!control) {
       throw new WidgetCommandError(
-        "companion_unavailable",
-        "The Scufris desktop control socket is not being served.",
+        "service_unavailable",
+        "The Scufris service link is not open.",
       );
     }
     return await control.request(command);
@@ -118,7 +119,7 @@ export default function widgets(pi: ExtensionAPI): void {
           const posture = params.posture ?? "exhibit";
           try {
             const answer = await ask({
-              type: "widget_open",
+              type: "open",
               widget: params.widget,
               posture,
               data: params.data ?? {},
@@ -127,7 +128,7 @@ export default function widgets(pi: ExtensionAPI): void {
             if (surface === undefined) {
               throw new WidgetCommandError(
                 "invalid_answer",
-                "The companion opened a widget and did not name its surface.",
+                "The frontend opened a widget and did not name its surface.",
               );
             }
             return toolResult(
@@ -155,7 +156,7 @@ export default function widgets(pi: ExtensionAPI): void {
         async execute(_id, params) {
           try {
             await ask({
-              type: "widget_update",
+              type: "update",
               surface: params.surface,
               data: params.data,
             });
@@ -183,7 +184,7 @@ export default function widgets(pi: ExtensionAPI): void {
         ),
         async execute(_id, params) {
           try {
-            await ask({ type: "widget_close", surface: params.surface });
+            await ask({ type: "close", surface: params.surface });
             return toolResult(
               { surface: params.surface, state: "closed" },
               false,
@@ -205,7 +206,7 @@ export default function widgets(pi: ExtensionAPI): void {
         parameters: Type.Object({}, { additionalProperties: false }),
         async execute() {
           try {
-            await ask({ type: "widget_clear" });
+            await ask({ type: "clear" });
             return toolResult({ state: "cleared" }, false, "Cleared widgets.");
           } catch (error) {
             return failure(error);
@@ -252,7 +253,7 @@ export default function widgets(pi: ExtensionAPI): void {
         customType: WIDGET_EVENT_MESSAGE,
         content: `The widget surface ${notice.surface} was closed on the desktop.`,
         display: true,
-        details: { surface: notice.surface, event: notice.event },
+        details: { surface: notice.surface, event: "closed" },
       },
       { deliverAs: "followUp", triggerTurn: false },
     );

@@ -15,17 +15,6 @@
       "$@"
   '';
 
-  testTerminal = pkgs.writeShellScriptBin "kitty" ''
-    printf '%s\n' \
-      "speech=''${SCUFRIS_SPEECH-}" \
-      "calm=''${SCUFRIS_CALM-}" \
-      "daemon=''${SCUFRIS_DAEMON-}" \
-      "model=''${SCUFRIS_PIPER_MODEL-}" \
-      "config=''${SCUFRIS_PIPER_CONFIG-}" \
-      "stt=''${PI_STT_CONFIG-}"
-    printf 'arg=%s\n' "$@"
-  '';
-
   fakePlayer = pkgs.writeShellScriptBin "pw-play" ''
     test "$#" -eq 1
     test "$1" = -

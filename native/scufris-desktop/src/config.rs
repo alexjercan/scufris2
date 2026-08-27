@@ -49,6 +49,10 @@ pub struct Config {
     /// Executable that puts the window manager into a binding mode, when one is
     /// configured. Run with the mode name as its only argument.
     pub mode_command: Option<PathBuf>,
+    /// Executable that speaks one paragraph read from its standard input, when
+    /// one is configured. Without it the companion stays silent, which is a
+    /// deployment without a synthesiser rather than a fault.
+    pub speak_command: Option<PathBuf>,
     /// File holding an accepted transcript that has not been acknowledged.
     pub state_file: PathBuf,
 }
@@ -82,6 +86,7 @@ impl Config {
                 chat: env::var_os("SCUFRIS_DESKTOP_CHAT_COMMAND"),
                 restart: env::var_os("SCUFRIS_DESKTOP_RESTART_COMMAND"),
                 mode: env::var_os("SCUFRIS_DESKTOP_MODE_COMMAND"),
+                speak: env::var_os("SCUFRIS_DESKTOP_SPEAK_COMMAND"),
             },
             State {
                 configured: env::var_os("SCUFRIS_DESKTOP_STATE_FILE"),
@@ -101,11 +106,11 @@ impl Config {
     ) -> Result<Self, ConfigError> {
         let socket = match non_empty(socket) {
             Some(value) => PathBuf::from(value),
-            None => scufris_control::socket_path()?,
+            None => scufris_control::service::service_socket_path()?,
         };
         let command_socket = match non_empty(command_socket) {
             Some(value) => Some(PathBuf::from(value)),
-            // Not an error, unlike the daemon socket: a companion with no
+            // Not an error, unlike the service socket: a companion with no
             // command socket is one the person opens from the tray and the
             // hotkey, and a companion that refused to start over a socket they
             // may never use would be the worse trade.
@@ -129,6 +134,7 @@ impl Config {
             chat_command: absolute(hooks.chat, "SCUFRIS_DESKTOP_CHAT_COMMAND")?,
             restart_command: absolute(hooks.restart, "SCUFRIS_DESKTOP_RESTART_COMMAND")?,
             mode_command: absolute(hooks.mode, "SCUFRIS_DESKTOP_MODE_COMMAND")?,
+            speak_command: absolute(hooks.speak, "SCUFRIS_DESKTOP_SPEAK_COMMAND")?,
             state_file: state.resolve()?,
         })
     }
@@ -142,7 +148,7 @@ impl Config {
                 .unwrap_or_else(|| "none".to_string())
         };
         format!(
-            "socket={}\ncommand_socket={}\nstate_file={}\nstt_endpoint={}\nhotkey={}\nchat_command={}\nrestart_command={}\nmode_command={}\n",
+            "socket={}\ncommand_socket={}\nstate_file={}\nstt_endpoint={}\nhotkey={}\nchat_command={}\nrestart_command={}\nmode_command={}\nspeak_command={}\n",
             self.socket.display(),
             optional(&self.command_socket),
             self.state_file.display(),
@@ -151,6 +157,7 @@ impl Config {
             optional(&self.chat_command),
             optional(&self.restart_command),
             optional(&self.mode_command),
+            optional(&self.speak_command),
         )
     }
 }
@@ -164,6 +171,7 @@ struct Hooks {
     chat: Option<OsString>,
     restart: Option<OsString>,
     mode: Option<OsString>,
+    speak: Option<OsString>,
 }
 
 /// The three inputs that can name the durable state file, in priority order.
@@ -258,6 +266,7 @@ mod tests {
                 chat: chat.map(OsString::from),
                 restart: None,
                 mode: mode.map(OsString::from),
+                speak: None,
             },
             state(),
         )
@@ -271,6 +280,7 @@ mod tests {
         assert_eq!(config.chat_command, None);
         assert_eq!(config.restart_command, None);
         assert_eq!(config.mode_command, None);
+        assert_eq!(config.speak_command, None);
     }
 
     /// The command socket is what a window manager binding reaches the pill
@@ -288,6 +298,7 @@ mod tests {
                 chat: None,
                 restart: None,
                 mode: None,
+                speak: None,
             },
             state(),
         )
@@ -350,6 +361,7 @@ mod tests {
                 "chat_command=/nix/store/x/bin/scufris-chat\n",
                 "restart_command=none\n",
                 "mode_command=/nix/store/x/bin/scufris-desktop-mode\n",
+                "speak_command=none\n",
             )
         );
     }

@@ -5,8 +5,10 @@ answering. The runtime lives in the companion, next to the pill and separate
 from it: no widget reaches the pill's state machine, and the pill reaches no
 widget.
 
-The daemon side is `extensions/scufris/widgets/index.ts` and the
-`skills/widgets` skill. The companion side is
+The agent side is `extensions/scufris/widgets/index.ts` and the
+`skills/widgets` skill. Between the two sits `scufris-service`, which relays
+widget commands to its frontends and widget reports back. The companion side
+is
 `native/scufris-desktop/src/widgets/`, the shell page in
 `native/scufris-desktop/shell/`, and the widgets themselves in
 `native/widgets/`.
@@ -55,7 +57,8 @@ rules do, and all three live in the pure runtime.
   working or speaking is one turn of the conversation ending. Every exhibit that
   turn neither opened nor updated is from a subject that is over: it drops to
   forty percent and starts its grace. The signal costs no message of its own -
-  the daemon already reports assistant state, and the companion already listens.
+  the service already reports assistant state, and the companion already
+  listens.
 - **Sixty seconds of grace retires it.** Silently. A report for every panel that
   went quiet would turn the thing that needs no closing into the thing that
   reports itself.
@@ -98,9 +101,11 @@ path, because i3 places a floating window when it maps it.
 
 ## The tools
 
-The four tools are registered late, from the catalog the companion announces on
-each connection, so the widget names the model can use are the widget names that
-are installed. A session that never met a companion offers none of them.
+The four tools are registered late, from the catalog the companion announces
+when it connects, so the widget names the model can use are the widget names
+that are installed. The service remembers the catalog and hands it to the agent
+that comes after it, so an agent that restarts under a running companion is
+typed the same way. A session that never met a companion offers none of them.
 
 - `scufris_widget_open`: widget, posture, and the widget's own payload. Returns
   the surface identifier.
@@ -108,7 +113,7 @@ are installed. A session that never met a companion offers none of them.
 - `scufris_widget_close`: one surface off the screen.
 - `scufris_widget_clear`: everything Scufris opened, leaving what the user kept.
 
-Every command travels over the control socket and waits for the companion's
+Every command travels over the service socket and waits for the companion's
 answer under a correlation identifier, bounded at five seconds. A refusal
 becomes a tool error carrying the companion's own code, and the codes are the
 point: `widget_not_found`, `no_free_slot`, `surface_not_found`, `no_shell`,
@@ -120,10 +125,10 @@ the display would not size, would not raise, or would not say which monitor it
 is on is retired and answered `not_shown`, because the alternative is Scufris
 describing a panel the person cannot see. The same rule runs the other way: an
 answer that arrives after its command was given up on is a panel whose
-identifier exists nowhere, so the daemon closes it again rather than leaving it
+identifier exists nowhere, so the agent closes it again rather than leaving it
 standing with nothing able to reach it.
 
-The daemon's idea of what is open is not authoritative and is not treated as
+The agent's idea of what is open is not authoritative and is not treated as
 such. Exhibits age out on their own and a clear leaves whatever the user
 kept, so the set drifts ahead of the screen by design. Commands are sent
 regardless, and `surface_not_found` is what corrects the drift. A surface the
@@ -134,7 +139,7 @@ message, which `calm.ts` hides from the transcript.
 
 The tray carries a submenu of the widgets the person can put up without saying
 anything to Scufris. It opens an instrument, with no payload, and answers
-nobody: a `widget_opened` for a request the daemon never made would be a reply
+nobody: an opened report for a request the agent never made would be a reply
 to a question nobody asked. The desktop is the person's, and a panel they put
 there themselves is not a turn in the conversation.
 
@@ -198,11 +203,11 @@ be seen, and a widget arrives in the middle of a sentence. Two shell windows are
 therefore kept built, loaded, and hidden. Opening a widget takes one and sends
 it a single message on its own `tauri::ipc::Channel`.
 
-A shell is used once. Its label is the surface identifier the daemon is answered
+A shell is used once. Its label is the surface identifier the agent is answered
 with, so a label handed out twice would let an update meant for a widget that is
 gone land on whatever took its place. Labels are minted monotonically and carry
 a stamp of the run that minted them, because a counter that starts at one each
-process would hand `widget-1` out again to a daemon that outlived the companion.
+process would hand `widget-1` out again to an agent that outlived the companion.
 A retired shell is destroyed rather than re-adopted, and the pool builds the
 replacement as soon as one is taken rather than once the pool is dry.
 

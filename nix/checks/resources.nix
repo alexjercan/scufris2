@@ -17,9 +17,9 @@ in {
     test ! -e ${resources}/share/scufris/extensions/scufris/voice/speech.ts
     test ! -e ${resources}/share/scufris/tools/voice
     test -f ${resources}/share/scufris/extensions/scufris/calm.ts
-    test -f ${resources}/share/scufris/extensions/scufris/desktop/index.ts
-    test -f ${resources}/share/scufris/extensions/scufris/desktop/protocol.ts
-    test -f ${resources}/share/scufris/extensions/scufris/desktop/server.ts
+    test -f ${resources}/share/scufris/extensions/scufris/service/index.ts
+    test -f ${resources}/share/scufris/extensions/scufris/service/protocol.ts
+    test -f ${resources}/share/scufris/extensions/scufris/service/client.ts
     test -f ${resources}/share/scufris/extensions/scufris/widgets/index.ts
     test -f ${voiceResources}/share/scufris/extensions/scufris/voice/speech.ts
     test -x ${voiceResources}/share/scufris/tools/voice/scufris-speak
@@ -29,7 +29,6 @@ in {
     test -x ${resources}/share/scufris/tools/jobs/scufris-jobs
     test -x ${resources}/share/scufris/tools/jobs/scufris-report
     test -x ${resources}/share/scufris/tools/quick-review-agent/scufris-quick-review-agent
-    test -x ${resources}/share/scufris/tools/desktop/scufris-socket-lock
     test -x ${resources}/share/scufris/scripts/scufris-jobs
     test -x ${resources}/share/scufris/scripts/scufris-artifacts-prune
     test -f ${resources}/share/scufris/skills/workflow/SKILL.md

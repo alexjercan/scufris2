@@ -2,12 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { SPEECH_STATE_EVENT } from "../extensions/scufris/shared/assistant-state.ts";
+import { SPOKEN_EVENT } from "../extensions/scufris/shared/spoken.ts";
 import speech, {
   extractSpokenParagraph,
   lastSafeAssistantParagraph,
-  SpeechPlaybackError,
-  type SpeechPlayback,
 } from "../extensions/scufris/voice/speech.ts";
 
 const usage = {
@@ -49,33 +47,19 @@ function assistant(
   };
 }
 
-class FakePlayback implements SpeechPlayback {
-  readonly played: string[] = [];
-  cancellations = 0;
-  error?: Error;
-
-  async play(text: string): Promise<void> {
-    this.played.push(text);
-    if (this.error) throw this.error;
-  }
-
-  async cancel(): Promise<void> {
-    this.cancellations += 1;
-  }
-}
-
 type Handler = (event: any, context: any) => any;
 
-function harness(playback: FakePlayback, mode = "tui") {
+function harness(mode = "tui") {
   const handlers = new Map<string, Handler[]>();
   const commands = new Map<string, { handler: Handler }>();
   const entries: any[] = [];
   const notices: Array<{ message: string; type: string }> = [];
-  const speechSignals: boolean[] = [];
+  const spoken: string[] = [];
   const api = {
     events: {
       emit(event: string, value: any) {
-        if (event === SPEECH_STATE_EVENT) speechSignals.push(value.playing);
+        if (event !== SPOKEN_EVENT) return;
+        if (typeof value.speak === "string") spoken.push(value.speak);
       },
     },
     on(event: string, handler: Handler) {
@@ -98,6 +82,7 @@ function harness(playback: FakePlayback, mode = "tui") {
   } as unknown as ExtensionAPI;
   const context = {
     mode,
+    hasUI: mode === "tui",
     ui: {
       notify(message: string, type: string) {
         notices.push({ message, type });
@@ -109,12 +94,12 @@ function harness(playback: FakePlayback, mode = "tui") {
       },
     },
   };
-  speech(api, { playback });
+  speech(api);
   return {
     entries,
     notices,
     commands,
-    speechSignals,
+    spoken,
     async emit(event: string, value: unknown = {}) {
       let result: unknown;
       for (const handler of handlers.get(event) ?? []) {
@@ -141,10 +126,6 @@ function addAssistant(
     id: `assistant-${entries.length}`,
     message: assistant(text, options.stopReason, options.toolCall),
   });
-}
-
-async function flushPromises() {
-  await new Promise((resolve) => setImmediate(resolve));
 }
 
 test("speech extraction accepts only bounded complete plain prose", () => {
@@ -201,13 +182,13 @@ test("last response extraction never falls back from an unsafe final response", 
     customType: "scufris-response-v1",
     data: {
       version: 1,
-      spoken: "Only this paragraph reaches Piper.",
+      spoken: "Only this paragraph reaches the speaker.",
       artifact_id: "0123456789abcdef01234567",
     },
   });
   assert.deepEqual(lastSafeAssistantParagraph(entries), {
     entryId: "response",
-    paragraph: "Only this paragraph reaches Piper.",
+    paragraph: "Only this paragraph reaches the speaker.",
   });
 });
 
@@ -217,13 +198,12 @@ test("speech on, off, once, and replay have deterministic turn behavior", async 
   process.env.SCUFRIS_ROLE = "orchestrator";
   delete process.env.SCUFRIS_SPEECH;
   try {
-    const playback = new FakePlayback();
-    const app = harness(playback);
+    const app = harness();
     await app.emit("session_start");
 
     assert.equal(await app.emit("agent_start"), undefined);
     await app.emit("agent_settled");
-    assert.deepEqual(playback.played, []);
+    assert.deepEqual(app.spoken, []);
 
     await app.command("once");
     assert.equal(await app.emit("agent_start"), undefined);
@@ -232,7 +212,7 @@ test("speech on, off, once, and replay have deterministic turn behavior", async 
       "This response is spoken once.\n\nVisual detail remains here.",
     );
     await app.emit("agent_settled");
-    assert.deepEqual(playback.played, ["This response is spoken once."]);
+    assert.deepEqual(app.spoken, ["This response is spoken once."]);
     assert.equal(
       (
         app.entries.filter((entry) => entry.type === "custom").at(-1)?.data as {
@@ -245,22 +225,24 @@ test("speech on, off, once, and replay have deterministic turn behavior", async 
     assert.equal(await app.emit("agent_start"), undefined);
     addAssistant(app.entries, "This response stays silent.");
     await app.emit("agent_settled");
-    assert.equal(playback.played.length, 1);
+    assert.equal(app.spoken.length, 1);
 
     await app.command("on");
     assert.equal(await app.emit("agent_start"), undefined);
     addAssistant(app.entries, "Speech mode remains enabled.");
     await app.emit("agent_settled");
-    assert.equal(playback.played.at(-1), "Speech mode remains enabled.");
+    assert.equal(app.spoken.at(-1), "Speech mode remains enabled.");
 
     await app.command("off");
-    assert.equal(playback.cancellations >= 2, true);
     assert.equal(await app.emit("agent_start"), undefined);
     addAssistant(app.entries, "This response also stays silent.");
     await app.emit("agent_settled");
+    assert.equal(app.spoken.length, 2);
 
+    // Replay is the one verb that speaks with the mode off: the person just
+    // asked for it, which is a different thing from a turn settling.
     await app.command("replay");
-    assert.equal(playback.played.at(-1), "This response also stays silent.");
+    assert.equal(app.spoken.at(-1), "This response also stays silent.");
     assert.deepEqual(
       app.notices
         .map((notice) => notice.message)
@@ -281,8 +263,7 @@ test("ordinary and extension-triggered turns each speak only their settled respo
   process.env.SCUFRIS_ROLE = "orchestrator";
   process.env.SCUFRIS_SPEECH = "1";
   try {
-    const playback = new FakePlayback();
-    const app = harness(playback);
+    const app = harness();
     await app.emit("session_start");
 
     await app.emit("before_agent_start", { systemPrompt: "base" });
@@ -322,16 +303,10 @@ test("ordinary and extension-triggered turns each speak only their settled respo
       await app.emit("agent_settled");
     }
 
-    assert.deepEqual(playback.played, [
+    assert.deepEqual(app.spoken, [
       "The ordinary response is settled and safe.",
       ...wakes.map((wake) => wake.response),
     ]);
-    // Every played paragraph raises and clears the speaking state the desktop
-    // tray shows, so no run leaves the companion stuck on "speaking".
-    assert.deepEqual(
-      app.speechSignals.slice(-2 * (wakes.length + 1)),
-      Array.from({ length: wakes.length + 1 }, () => [true, false]).flat(),
-    );
   } finally {
     if (originalRole === undefined) delete process.env.SCUFRIS_ROLE;
     else process.env.SCUFRIS_ROLE = originalRole;
@@ -346,8 +321,7 @@ test("wake settlement without a new response never replays prior speech", async 
   process.env.SCUFRIS_ROLE = "orchestrator";
   process.env.SCUFRIS_SPEECH = "1";
   try {
-    const playback = new FakePlayback();
-    const app = harness(playback);
+    const app = harness();
     await app.emit("session_start");
 
     await app.emit("agent_start");
@@ -369,7 +343,7 @@ test("wake settlement without a new response never replays prior speech", async 
     await app.emit("agent_start");
     await app.emit("agent_settled");
 
-    assert.deepEqual(playback.played, ["The prior response is spoken once."]);
+    assert.deepEqual(app.spoken, ["The prior response is spoken once."]);
     assert.equal(
       app.notices.filter(
         (notice) => notice.message === "No safe response to speak.",
@@ -384,57 +358,42 @@ test("wake settlement without a new response never replays prior speech", async 
   }
 });
 
-test("settlement, input, reload state, unsafe output, and errors fail safely", async () => {
+test("a reloaded session resumes the mode it was left in and never speaks unsafe output", async () => {
   const originalRole = process.env.SCUFRIS_ROLE;
   const originalSpeech = process.env.SCUFRIS_SPEECH;
   process.env.SCUFRIS_ROLE = "orchestrator";
   process.env.SCUFRIS_SPEECH = "1";
   try {
-    const playback = new FakePlayback();
-    const app = harness(playback);
+    const app = harness();
     await app.emit("session_start");
-    await app.emit("input", { text: "new request", source: "interactive" });
-    assert.equal(playback.cancellations, 2);
 
     await app.emit("agent_start");
     addAssistant(app.entries, "I will inspect the result.", {
       stopReason: "toolUse",
       toolCall: true,
     });
-    assert.deepEqual(playback.played, []);
+    assert.deepEqual(app.spoken, []);
     addAssistant(app.entries, "The final result is ready.");
     await app.emit("agent_settled");
-    assert.deepEqual(playback.played, ["The final result is ready."]);
+    assert.deepEqual(app.spoken, ["The final result is ready."]);
 
     await app.command("off");
-    const reloadedPlayback = new FakePlayback();
-    const reloaded = harness(reloadedPlayback);
+    const reloaded = harness();
     reloaded.entries.push(...app.entries);
     await reloaded.emit("session_start", { reason: "reload" });
     assert.equal(await reloaded.emit("agent_start"), undefined);
     await reloaded.emit("agent_settled");
+    assert.deepEqual(reloaded.spoken, []);
 
     await reloaded.command("on");
     await reloaded.emit("agent_start");
     addAssistant(reloaded.entries, "See /tmp/private for the result.");
     await reloaded.emit("agent_settled");
-    assert.equal(reloadedPlayback.played.length, 0);
+    assert.deepEqual(reloaded.spoken, []);
     assert.equal(
       reloaded.notices.at(-1)?.message,
       "No safe response to speak.",
     );
-
-    reloadedPlayback.error = new SpeechPlaybackError(
-      "Speech synthesis failed.",
-    );
-    await reloaded.emit("agent_start");
-    addAssistant(reloaded.entries, "This safe response reaches playback.");
-    await reloaded.emit("agent_settled");
-    await flushPromises();
-    assert.deepEqual(reloaded.notices.at(-1), {
-      message: "Speech synthesis failed.",
-      type: "error",
-    });
 
     await reloaded.emit("agent_start");
     addAssistant(reloaded.entries, "See /tmp/still-private for the result.");
@@ -445,9 +404,6 @@ test("settlement, input, reload state, unsafe output, and errors fail safely", a
       ).length,
       1,
     );
-
-    await reloaded.emit("session_shutdown");
-    assert.equal(reloadedPlayback.cancellations >= 2, true);
   } finally {
     if (originalRole === undefined) delete process.env.SCUFRIS_ROLE;
     else process.env.SCUFRIS_ROLE = originalRole;
@@ -456,30 +412,24 @@ test("settlement, input, reload state, unsafe output, and errors fail safely", a
   }
 });
 
-test("normal Pi and non-TUI Scufris modes never register or speak", async () => {
+test("speech follows the role, not the mode, because the agent runs headless", async () => {
   const originalRole = process.env.SCUFRIS_ROLE;
   const originalSpeech = process.env.SCUFRIS_SPEECH;
   process.env.SCUFRIS_SPEECH = "1";
   try {
+    // Ordinary Pi is not Scufris and registers nothing.
     delete process.env.SCUFRIS_ROLE;
-    const ordinary = harness(new FakePlayback());
-    assert.equal(ordinary.commands.size, 0);
+    assert.equal(harness().commands.size, 0);
 
-    for (const mode of ["rpc", "json", "print"]) {
-      process.env.SCUFRIS_ROLE = "orchestrator";
-      const playback = new FakePlayback();
-      const app = harness(playback, mode);
-      await app.emit("session_start");
-      assert.equal(await app.emit("agent_start"), undefined);
-      addAssistant(app.entries, "This response must stay silent.");
-      await app.emit("agent_settled");
-      await app.command("on");
-      assert.deepEqual(playback.played, []);
-      assert.equal(
-        app.entries.some((entry) => entry.type === "custom"),
-        false,
-      );
-    }
+    // The service runs its agent in RPC mode, so a mode gate here would mean
+    // Scufris never speaks again. What it says goes to whoever owns a speaker.
+    process.env.SCUFRIS_ROLE = "orchestrator";
+    const app = harness("rpc");
+    await app.emit("session_start");
+    await app.emit("agent_start");
+    addAssistant(app.entries, "This response reaches the speaker.");
+    await app.emit("agent_settled");
+    assert.deepEqual(app.spoken, ["This response reaches the speaker."]);
   } finally {
     if (originalRole === undefined) delete process.env.SCUFRIS_ROLE;
     else process.env.SCUFRIS_ROLE = originalRole;

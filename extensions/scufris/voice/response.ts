@@ -28,6 +28,7 @@ import {
   appendScufrisIdentityPrompt,
   scufrisIdentityPrompt,
 } from "../workflow/identity.ts";
+import { SPOKEN_EVENT, type SpokenSignal } from "../shared/spoken.ts";
 
 export const spokenResponseInstruction =
   "The spoken field must be one short natural prose paragraph in complete sentences without Markdown, paths, hashes, URLs, or code.";
@@ -312,6 +313,11 @@ function appendResponse(
 ): ResponseEntry {
   const entry = prepareResponse(context, spoken, detail);
   pi.appendEntry(RESPONSE_ENTRY, entry);
+  // The tool-call path is the only one nothing outside this extension can read:
+  // the answer is a tool argument, not an assistant text block, so a service
+  // watching the conversation sees the question and no reply. The direct path
+  // below rewrites the message itself, which is already visible.
+  pi.events.emit(SPOKEN_EVENT, { said: entry.spoken } satisfies SpokenSignal);
   return entry;
 }
 

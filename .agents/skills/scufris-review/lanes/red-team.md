@@ -11,7 +11,7 @@ state.
 Take the states the change touches and drive them to their limits. For
 each attempt, state the sequence, what should happen, and what does.
 
-- The daemon: dead at every phase. A dead socket at accept (the record
+- The service: dead at every phase. A dead socket at accept (the record
   must persist unacknowledged), a disconnect mid-review (assistant
   state clears - what happens to the box?), a reconnect while a
   transcript is retained.

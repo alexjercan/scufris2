@@ -18,15 +18,14 @@ programs.scufris = {
   enable = true;
   piPackage = inputs.llm-agents.packages.${pkgs.system}.pi;
 
-  voice = {
-    enable = true;
-    popup.enable = true;
-  };
+  voice.enable = true;
+  service.enable = true;
 
   desktop.enable = true;
 };
 ```
 
-`desktop.enable` adds the voice pill and tray companion. It requires the popup,
-because the popup Pi process serves the control socket it talks to. `Super+D`
-opens the pill and starts recording.
+`service.enable` runs `scufris-service`, which owns the conversation and the
+socket every surface connects to. `desktop.enable` adds the voice pill and tray
+companion; it is a client of the service and requires it. `Super+D` opens the
+pill and starts recording.

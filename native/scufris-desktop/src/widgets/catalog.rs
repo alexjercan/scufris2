@@ -22,7 +22,7 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
-use scufris_control::{CatalogEntry, is_identifier};
+use scufris_control::{is_identifier, service::CatalogEntry};
 use serde::Deserialize;
 use tracing::{debug, warn};
 

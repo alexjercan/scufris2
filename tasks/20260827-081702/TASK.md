@@ -241,3 +241,57 @@ SCUFRIS_SERVICE_AGENT="$(command -v scufris)" ./target/debug/scufris-service
 ./target/debug/scufris-ctl debug          # the session opens here; leaving
                                           # gives the agent back
 ```
+
+## Increment 2 done (2026-08-27)
+
+Landed on `master`. The inversion is complete: `scufris-service` is the
+only server, and the Pi agent, the desktop companion, and `scufris-ctl`
+are all clients of it.
+
+What moved:
+
+- **The extension became a client.** `extensions/scufris/service/`
+  replaces `extensions/scufris/desktop/`. It connects in the `agent`
+  role and reports `said`, `speak`, and widget commands. It reads no
+  socket of its own and serves nothing.
+- **The frontend became a client.** `native/scufris-desktop/src/link.rs`
+  replaces `daemon.rs`. It connects out in the `frontend` role with a
+  bounded backoff and no ping thread.
+- **Piper moved into the frontend.** `native/scufris-desktop/src/speech.rs`
+  runs `SCUFRIS_DESKTOP_SPEAK_COMMAND`, which `nix/speak.nix` builds with
+  the pinned model bound inside it. No synthesiser and no player are in
+  either launcher closure any more, which `nix/checks/voice.nix` asserts
+  against all three.
+- **Speaking is a companion overlay.** `ScufrisState` has no `Speaking`.
+  `Companion.speaking` sits beside the service's word and
+  `shown_assistant()` composes them.
+- **Uncertainty is companion-local.** The wire has no `uncertain` answer
+  and no `force`. `Event::SubmissionUncertain` is raised only by the
+  companion's own 15 s `ACK_TIMEOUT` and by `restore()` of a recovered
+  transcript, and the two-Enter confirmation never crosses the socket.
+
+Deleted: protocol v2 (`native/control-protocol-v2.json`, the v2 module,
+`extensions/scufris/desktop/`), `SCUFRIS_DAEMON`,
+`tools/desktop/scufris-socket-lock`, `nix/popup.nix`, the whole
+`programs.scufris.voice.popup` option block and its unit, and
+`tests/desktop.test.ts`.
+
+### Deviation: `desktop.sock`, `command.rs` and `keys.rs` stay
+
+The increment text listed them for deletion. They are not part of
+protocol v2. `command.rs` serves the companion's own `desktop.sock` on
+`scufris_control::command`, which is a different socket with a different
+protocol, and it is how a window manager binding reaches the pill through
+`scufris-ctl open`. Deleting it now would take activation-by-binding away
+before increment 3 replaces it. Only `accept` and `cancel` retire, with
+the review state, in increment 3.
+
+### Verification
+
+```
+TMPDIR=/tmp npm run check          # tsc clean, 73 tests pass, prettier clean
+cd native && cargo test --workspace # 22 + 236 + 42 pass
+cargo clippy --workspace --all-targets  # clean
+cargo fmt --all --check            # clean
+nix flake check --offline          # all 36 checks passed
+```

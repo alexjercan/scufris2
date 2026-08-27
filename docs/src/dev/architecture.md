@@ -5,7 +5,7 @@
 Repository ownership follows the runtime architecture:
 
 - `extensions/scufris/` contains the Pi extensions: `workflow/`, `voice/`,
-  `desktop/`, `widgets/`, and the small independent `calm.ts`. Extensions own
+  `service/`, `widgets/`, and the small independent `calm.ts`. Extensions own
   lifecycle events, native tools, session state, and notifications.
 - `native/` is a cargo workspace holding `scufris-control`, the wire protocols,
   `scufris-desktop`, the Tauri voice pill, widget runtime, and tray companion,
@@ -18,15 +18,14 @@ Repository ownership follows the runtime architecture:
   [Widgets](widgets.md).
 - `tools/` contains deterministic executables called by extensions:
   `jobs/scufris-jobs`, `jobs/scufris-report`,
-  `quick-review-agent/scufris-quick-review-agent`,
-  `desktop/scufris-socket-lock`, and `voice/scufris-speak`.
+  `quick-review-agent/scufris-quick-review-agent`, and `voice/scufris-speak`.
 - `scripts/` contains commands called directly by people:
   `scufris-jobs` (inspection CLI), `scufris-artifacts-prune`, and the
   development launcher `scufris-dev`.
 - `skills/` contains the distributed model-facing skills, `workflow` and
   `widgets`. Development-only skills live in `.agents/skills/`.
 - `nix/` contains one file per build concern: `resources.nix`, `launcher.nix`,
-  `popup.nix`, `voice.nix`, `desktop.nix`, `service.nix`, `whisper.nix`,
+  `speak.nix`, `voice.nix`, `desktop.nix`, `service.nix`, `whisper.nix`,
   `dev-shell.nix`, `docs.nix`, and `home-manager.nix`. `nix/scufris.nix` composes them into the
   component set for one system, `nix/checks/` asserts that composition, and
   `flake.nix` only selects the outputs.
@@ -103,9 +102,11 @@ and exit codes instead of JSON.
 - Each active job can hold `quick-review-agent/`, the private artifact and
   completion root for its standalone review.
 - `$XDG_STATE_HOME/scufris/dev-sessions/` holds resumable development
-  sessions; the popup uses its configured session directory.
-- `$XDG_RUNTIME_DIR/scufris/daemon.sock` is the desktop control socket. Only the
-  popup process opens it, and only for the current user.
+  sessions; the service uses its configured session directory.
+- `$XDG_RUNTIME_DIR/scufris/service.sock` is the service socket. `scufris-service`
+  is the only process that binds it, and only for the current user. The
+  companion keeps its own `desktop.sock` beside it for window manager
+  bindings, which is a different socket with a different protocol.
 
 ## Package composition
 
@@ -119,12 +120,19 @@ module and voice tool so they cannot enter the closure. The launcher is a
 shell application that:
 
 1. Sets `SCUFRIS_PROJECT_ROOTS` when unset and `SCUFRIS_ROLE=orchestrator`.
-2. Exports the Piper model paths for voice variants.
+2. Sets `SCUFRIS_VOICE_AVAILABLE` for voice variants. No synthesiser and no
+   player enter the launcher closure: the agent decides what is worth saying
+   aloud, and the companion is what says it.
 3. Prefers a system `pi` from `PATH` and falls back to the pinned flake Pi.
 4. Passes `--extension` and `--skill` flags pointing into the resources.
 
+`nix/speak.nix` builds `scufris-speak`, the synthesiser the companion runs. It
+binds the pinned Piper package, model, and configuration, so the voice is a
+property of the package rather than a run-time setting.
+
 The Home Manager module renders the same launcher from its options and adds the
-optional popup, desktop companion, and bundled whisper-server services. The
+background service, the desktop companion, and the bundled whisper-server
+services. The
 check groups under `nix/checks/` assert the exact rendered arguments
 (`launcher.nix`), the distributed files (`resources.nix`), the module interface
 (`home.nix`), closure separation with a real Piper synthesis fixture

@@ -24,7 +24,7 @@
     name = "scufris-restart-backend";
     runtimeInputs = [pkgs.systemd];
     text = ''
-      exec systemctl --user restart ${lib.escapeShellArg "${cfg.voice.popup.serviceName}.service"}
+      exec systemctl --user restart ${lib.escapeShellArg "${serviceCfg.serviceName}.service"}
     '';
     meta.mainProgram = "scufris-restart-backend";
   };
@@ -36,21 +36,16 @@
       else defaults.resources;
     piPackage = cfg.piPackage;
     voice = cfg.voice.enable;
+    projectRoots = cfg.projectRoots;
+  };
+  # The frontend owns the speaker, so the synthesiser is bound here and handed
+  # to the companion. A deployment with no voice hands it nothing and the
+  # companion stays silent.
+  speak = import ./speak.nix {
+    inherit pkgs;
     piperPackage = cfg.voice.piper.package;
     piperModel = cfg.voice.piper.model;
     piperConfig = cfg.voice.piper.config;
-    projectRoots = cfg.projectRoots;
-  };
-  popupLauncher = import ./popup.nix {
-    inherit pkgs;
-    scufrisPackage = launcher;
-    piperModel = cfg.voice.piper.model;
-    piperConfig = cfg.voice.piper.config;
-    terminalPackage = cfg.voice.popup.terminalPackage;
-    sessionDirectory = cfg.voice.popup.sessionDirectory;
-    windowClass = cfg.voice.popup.class;
-    windowInstance = cfg.voice.popup.instance;
-    initialTitle = cfg.voice.popup.initialTitle;
   };
 in {
   options.programs.scufris = {
@@ -109,48 +104,6 @@ in {
           description = "Trusted immutable Piper model configuration path.";
         };
       };
-
-      popup = {
-        enable = lib.mkEnableOption "direct resumable Kitty voice popup";
-
-        sessionDirectory = lib.mkOption {
-          type = lib.types.strMatching "/.*";
-          default = "${config.home.homeDirectory}/.local/share/scufris-popup/sessions";
-          description = "Absolute directory for the dedicated popup Pi sessions.";
-        };
-        terminalPackage = lib.mkOption {
-          type = lib.types.package;
-          default = pkgs.kitty;
-          defaultText = lib.literalExpression "pkgs.kitty";
-          description = "Kitty-compatible terminal package used by the popup launcher.";
-        };
-        class = lib.mkOption {
-          type = lib.types.strMatching "[A-Za-z0-9_-]+";
-          default = "Scufris";
-          description = "Stable popup Kitty class.";
-        };
-        instance = lib.mkOption {
-          type = lib.types.strMatching "[A-Za-z0-9_-]+";
-          default = "scufris-popup";
-          description = "Stable popup Kitty instance.";
-        };
-        initialTitle = lib.mkOption {
-          type = lib.types.strMatching "[A-Za-z0-9 _-]+";
-          default = "Scufris";
-          description = "Initial popup Kitty title. Runtime title changes do not affect identity.";
-        };
-        serviceName = lib.mkOption {
-          type = lib.types.str;
-          default = "scufris-popup";
-          readOnly = true;
-          description = "Stable systemd user service identity for desktop consumers, without the unit suffix.";
-        };
-        finalLauncher = lib.mkOption {
-          type = lib.types.package;
-          readOnly = true;
-          description = "Rendered direct popup launcher for desktop consumers when the popup is enabled.";
-        };
-      };
     };
 
     service = {
@@ -169,8 +122,8 @@ in {
         defaultText = lib.literalExpression "programs.scufris.finalPackage";
         description = ''
           Launcher the service runs as its one Pi agent. The service starts it
-          in RPC mode, so this is the same Scufris the popup runs, not a
-          different agent.
+          in RPC mode, and `scufris-ctl debug` hands a terminal the same
+          session, so there is one Scufris rather than one per surface.
         '';
       };
 
@@ -213,8 +166,9 @@ in {
         type = lib.types.nullOr lib.types.package;
         default = null;
         description = ''
-          Executable that opens the full popup chat from the tray. Scufris ships
-          no window manager, so the desktop session supplies this hook.
+          Executable that opens the conversation in a terminal from the tray.
+          Scufris ships no window manager, so the desktop session supplies this
+          hook; `scufris-ctl debug` is what it is usually wrapped around.
         '';
       };
 
@@ -318,10 +272,6 @@ in {
     (lib.mkIf cfg.enable {
       assertions = [
         {
-          assertion = !cfg.voice.popup.enable || cfg.voice.enable;
-          message = "programs.scufris.voice.popup.enable requires programs.scufris.voice.enable";
-        }
-        {
           assertion = !cfg.voice.enable || (cfg.voice.piper.package.version or null) == "1.4.2";
           message = "programs.scufris.voice requires Piper 1.4.2";
         }
@@ -337,21 +287,6 @@ in {
       assertions = [
         (lib.hm.assertions.assertPlatform "programs.scufris.voice" pkgs lib.platforms.linux)
       ];
-    })
-    (lib.mkIf (cfg.enable && cfg.voice.enable && cfg.voice.popup.enable) {
-      assertions = [
-        (lib.hm.assertions.assertPlatform "programs.scufris.voice.popup" pkgs lib.platforms.linux)
-      ];
-      programs.scufris.voice.popup.finalLauncher = popupLauncher;
-      systemd.user.services.${cfg.voice.popup.serviceName} = {
-        Unit.Description = "Direct Scufris Kitty voice popup";
-        Service = {
-          Type = "simple";
-          ExecStart = lib.getExe popupLauncher;
-          Restart = "no";
-          WorkingDirectory = "%h";
-        };
-      };
     })
     (lib.mkIf (cfg.enable && serviceCfg.enable) {
       assertions = [
@@ -371,10 +306,15 @@ in {
         Service = {
           Type = "simple";
           ExecStart = lib.getExe serviceCfg.package;
-          Environment = [
-            "SCUFRIS_SERVICE_AGENT=${lib.getExe serviceCfg.agentPackage}"
-            "SCUFRIS_SERVICE_SESSION_DIR=${serviceCfg.sessionDirectory}"
-          ];
+          Environment =
+            [
+              "SCUFRIS_SERVICE_AGENT=${lib.getExe serviceCfg.agentPackage}"
+              "SCUFRIS_SERVICE_SESSION_DIR=${serviceCfg.sessionDirectory}"
+            ]
+            # Inherited by the agent, which decides what is worth saying aloud.
+            # Saying it is the frontend's, and a session with no frontend
+            # simply has nowhere for the paragraph to go.
+            ++ lib.optional cfg.voice.enable "SCUFRIS_SPEECH=1";
           # The service restarts its own agent, so it going down is a fault of
           # the service itself and the conversation is on disk either way.
           Restart = "on-failure";
@@ -389,8 +329,8 @@ in {
       assertions = [
         (lib.hm.assertions.assertPlatform "programs.scufris.desktop" pkgs lib.platforms.linux)
         {
-          assertion = cfg.voice.popup.enable;
-          message = "programs.scufris.desktop.enable requires programs.scufris.voice.popup.enable, because the popup Pi process serves the control socket";
+          assertion = serviceCfg.enable;
+          message = "programs.scufris.desktop.enable requires programs.scufris.service.enable, because the companion is a client of the service that owns the conversation";
         }
         {
           assertion = !(desktopCfg.stt.endpoint != null && whisperCfg.enable);
@@ -418,7 +358,9 @@ in {
             ++ lib.optional (desktopCfg.chatCommand != null)
             "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe desktopCfg.chatCommand}"
             ++ lib.optional (desktopCfg.modeCommand != null)
-            "SCUFRIS_DESKTOP_MODE_COMMAND=${lib.getExe desktopCfg.modeCommand}";
+            "SCUFRIS_DESKTOP_MODE_COMMAND=${lib.getExe desktopCfg.modeCommand}"
+            ++ lib.optional cfg.voice.enable
+            "SCUFRIS_DESKTOP_SPEAK_COMMAND=${lib.getExe speak}";
           # The companion must survive its own faults; a backend crash is
           # reported in the tray instead of taking the companion down.
           Restart = "on-failure";

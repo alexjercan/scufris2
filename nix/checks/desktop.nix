@@ -4,13 +4,11 @@
 {
   pkgs,
   scufris,
-  fixtures,
   homes,
   ...
 }: let
   inherit (pkgs) lib;
   inherit (scufris) launcher voiceLauncher desktop;
-  inherit (fixtures) testTerminal;
   inherit (homes) mkHome;
   # Stand-ins keep the checks from realising the pinned whisper model and the
   # real whisper.cpp build; only the wiring is under test here.
@@ -24,17 +22,20 @@
   testMode = pkgs.writeShellScriptBin "scufris-desktop-mode" ''
     printf 'mode %s\n' "$1"
   '';
-  popupSettings = {
+  testAgent = pkgs.writeShellScriptBin "scufris" ''
+    printf 'scufris %s\n' "$@"
+  '';
+  # The companion is a client, so every desktop configuration under test also
+  # runs the service that owns the conversation.
+  serviceSettings = {
     enable = true;
-    popup = {
-      enable = true;
-      terminalPackage = testTerminal;
-      sessionDirectory = "/build/scufris-desktop-sessions";
-    };
+    package = scufris.service;
+    agentPackage = testAgent;
   };
   desktopHome = mkHome {
     settings = {
-      voice = popupSettings;
+      voice.enable = true;
+      service = serviceSettings;
       desktop = {
         enable = true;
         package = desktop;
@@ -49,7 +50,7 @@
   };
   configuredEndpointHome = mkHome {
     settings = {
-      voice = popupSettings;
+      service = serviceSettings;
       desktop = {
         enable = true;
         package = desktop;
@@ -57,7 +58,7 @@
       };
     };
   };
-  desktopWithoutPopupHome = mkHome {
+  desktopWithoutServiceHome = mkHome {
     settings.desktop = {
       enable = true;
       package = desktop;
@@ -68,7 +69,7 @@
   desktopUnit = desktopHome.config.systemd.user.services.${desktopConfig.serviceName};
   whisperUnit = desktopHome.config.systemd.user.services.${desktopConfig.stt.whisper.serviceName};
   configuredDesktop = configuredEndpointHome.config;
-  desktopWithoutPopupEvaluation = builtins.tryEval (builtins.deepSeq desktopWithoutPopupHome.activationPackage true);
+  desktopWithoutServiceEvaluation = builtins.tryEval (builtins.deepSeq desktopWithoutServiceHome.activationPackage true);
   normalClosure = pkgs.closureInfo {rootPaths = [launcher];};
   voiceClosure = pkgs.closureInfo {rootPaths = [voiceLauncher];};
   desktopClosure = pkgs.closureInfo {rootPaths = [desktop];};
@@ -102,7 +103,7 @@ in
     '';
 
     desktop-configuration = pkgs.runCommand "scufris-desktop-configuration-check" {} ''
-      export SCUFRIS_DESKTOP_SOCKET=/run/user/1000/scufris/daemon.sock
+      export SCUFRIS_DESKTOP_SOCKET=/run/user/1000/scufris/service.sock
       export HOME=/home/scufris-test
       unset XDG_STATE_HOME
       # A build sandbox has no session runtime directory, which is exactly the
@@ -110,7 +111,7 @@ in
       unset XDG_RUNTIME_DIR
       ${desktop}/bin/scufris-desktop --print-config > defaults
       cat > expected-defaults <<'EOF'
-      socket=/run/user/1000/scufris/daemon.sock
+      socket=/run/user/1000/scufris/service.sock
       command_socket=none
       state_file=/home/scufris-test/.local/state/scufris-desktop/pending.json
       stt_endpoint=http://127.0.0.1:10301/inference
@@ -118,6 +119,7 @@ in
       chat_command=none
       restart_command=none
       mode_command=none
+      speak_command=none
       EOF
       diff -u expected-defaults defaults
 
@@ -132,9 +134,10 @@ in
         SCUFRIS_DESKTOP_CHAT_COMMAND=/nix/store/fake/bin/scufris-chat \
         SCUFRIS_DESKTOP_RESTART_COMMAND=/nix/store/fake/bin/scufris-restart-backend \
         SCUFRIS_DESKTOP_MODE_COMMAND=/nix/store/fake/bin/scufris-desktop-mode \
+        SCUFRIS_DESKTOP_SPEAK_COMMAND=/nix/store/fake/bin/scufris-speak \
         ${desktop}/bin/scufris-desktop --print-config > overridden
       cat > expected-overridden <<'EOF'
-      socket=/run/user/1000/scufris/daemon.sock
+      socket=/run/user/1000/scufris/service.sock
       command_socket=/run/user/1000/scufris/desktop.sock
       state_file=/run/user/1000/scufris-desktop/pending.json
       stt_endpoint=http://127.0.0.1:10302/inference
@@ -142,6 +145,7 @@ in
       chat_command=/nix/store/fake/bin/scufris-chat
       restart_command=/nix/store/fake/bin/scufris-restart-backend
       mode_command=/nix/store/fake/bin/scufris-desktop-mode
+      speak_command=/nix/store/fake/bin/scufris-speak
       EOF
       diff -u expected-overridden overridden
 
@@ -169,7 +173,7 @@ in
     desktop-home = desktopHome.activationPackage;
 
     desktop-interface = assert !(mkHome {}).config.programs.scufris.desktop.enable;
-    assert !desktopWithoutPopupEvaluation.success;
+    assert !desktopWithoutServiceEvaluation.success;
     assert desktopConfig.endpoint == "http://127.0.0.1:10302/inference";
     assert desktopConfig.stt.whisper.enable;
     assert desktopConfig.serviceName == "scufris-desktop";
@@ -183,6 +187,10 @@ in
     assert lib.elem "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe testChat}" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_MODE_COMMAND=${lib.getExe testMode}" desktopUnit.Service.Environment;
     assert !(lib.any (lib.hasPrefix "SCUFRIS_DESKTOP_MODE_COMMAND=") configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment);
+    # The speaker is the companion's. Voice hands it a synthesiser, and a
+    # deployment without voice hands it nothing and it stays silent.
+    assert lib.any (lib.hasPrefix "SCUFRIS_DESKTOP_SPEAK_COMMAND=") desktopUnit.Service.Environment;
+    assert !(lib.any (lib.hasPrefix "SCUFRIS_DESKTOP_SPEAK_COMMAND=") configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment);
     assert lib.hasInfix "--port 10302" (builtins.head whisperUnit.Service.ExecStart);
     assert lib.hasInfix "--host 127.0.0.1" (builtins.head whisperUnit.Service.ExecStart);
     assert lib.hasInfix "--inference-path /inference" (builtins.head whisperUnit.Service.ExecStart);
@@ -192,7 +200,7 @@ in
       pkgs.runCommand "scufris-desktop-interface-check" {} ''
         restart=${lib.getExe desktopConfig.restartCommand}
         # The companion may only restart the backend service this module owns.
-        grep -F 'systemctl --user restart scufris-popup.service' "$restart"
+        grep -F 'systemctl --user restart scufris-service.service' "$restart"
         ! grep -Ei 'whisper|kitty' "$restart"
         touch "$out"
       '';

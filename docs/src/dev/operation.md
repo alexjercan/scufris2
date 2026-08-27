@@ -9,11 +9,16 @@ The launcher and helpers communicate through a small set of variables:
 - `SCUFRIS_PROJECT_ROOTS`: JSON array of directories searched recursively for
   workflow projects. The launcher sets the packaged default when unset.
 - `SCUFRIS_VOICE_AVAILABLE=1`: the speech module may load (voice packages).
-- `SCUFRIS_SPEECH=1`: the initial speech mode is on (popup and `dev:voice`).
-- `SCUFRIS_CALM`: reserved by the popup and development launcher; Calm itself
-  defaults on.
-- `SCUFRIS_PIPER_MODEL`, `SCUFRIS_PIPER_CONFIG`: trusted immutable Piper
-  model paths for `scufris-speak`.
+- `SCUFRIS_SPEECH=1`: the initial speech mode is on. The service unit sets it
+  when voice is enabled, and `dev:voice` sets it too.
+- `SCUFRIS_CALM`: reserved by the development launcher; Calm itself defaults
+  on.
+- `SCUFRIS_PIPER_MODEL`, `SCUFRIS_PIPER_CONFIG`: trusted immutable Piper model
+  paths. They are bound inside `scufris-speak` by the package, and nothing in
+  the agent's process tree sets them.
+- `SCUFRIS_DESKTOP_SPEAK_COMMAND`: the synthesiser the companion runs. The
+  desktop unit sets it when voice is enabled; a companion without it stays
+  silent, which is not a fault.
 
 The worker launch wrapper removes `SCUFRIS_ROLE`, `SCUFRIS_SPEECH`,
 `SCUFRIS_CALM`, both Piper paths, `SCUFRIS_REPORT_CAPABILITY`, and the `PI_*`
@@ -27,8 +32,8 @@ unchanged.
 - `$XDG_STATE_HOME/scufris/jobs/`: active job directories, `jobs.lock`, and
   `jobs/_archive/` with archived workflows.
 - `$XDG_STATE_HOME/scufris/dev-sessions/`: resumable `npm run dev` sessions.
-- `~/.local/share/scufris-popup/sessions` (default): dedicated popup
-  sessions.
+- `~/.local/share/scufris/sessions` (default): the conversation the background
+  service owns.
 - `<session>.jsonl.scufris/`: private detail artifact sidecars beside each Pi
   session file.
 
@@ -59,25 +64,24 @@ context, and the prompt.
 - `scripts/scufris-artifacts-prune` removes detail artifact sidecars whose
   owning session file is gone. It touches only sidecars with the exact
   private layout, ownership, and modes, and stops beyond a bounded scan.
-- The popup service is diagnosed like any user service:
+- The background service is diagnosed like any user service:
 
 ```bash
-systemctl --user start scufris-popup.service
-journalctl --user -u scufris-popup.service
+systemctl --user start scufris-service.service
+journalctl --user -u scufris-service.service
 ```
 
 ## Troubleshooting
 
-- Popup evaluation fails: `voice.popup.enable` requires both
-  `programs.scufris.enable` and `voice.enable`; voice and the popup are
-  Linux-only.
+- Desktop evaluation fails: `desktop.enable` requires `service.enable`,
+  because the companion is a client of the service that owns the conversation.
+  Voice, the service, and the companion are all Linux-only.
 - Piper assertion fails: overrides must keep Piper 1.4.2 and the
   configuration adjacent to the model as `model.onnx.json`.
-- The popup does not start automatically: expected. The module defines the
-  service without an install target; the desktop owns startup and toggling.
-- Speech produces no audio: confirm a voice-capable package, then
-  `/speech on`. Check the service log for Piper or PipeWire errors. Speech
-  failures never fail the assistant turn.
+- Speech produces no audio: confirm a voice-capable package and an enabled
+  companion, then `/speech on`. The companion is what makes sound, so check
+  its log for Piper or PipeWire errors. Speech failures never fail the
+  assistant turn.
 - Voice input does not work: speech-to-text is Pi configuration, not
   Scufris.
 - A job shows `failed: worker execution was lost`: startup reconciliation

@@ -16,7 +16,7 @@ use std::{
     time::Duration,
 };
 
-use scufris_control::{ClientBody, Posture, SurfaceEvent};
+use scufris_control::service::{Posture, WidgetReport};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::PhysicalPosition;
@@ -433,7 +433,7 @@ pub enum Act {
         surface: SurfaceId,
     },
     /// Say something to the daemon.
-    Report(ClientBody),
+    Report(WidgetReport),
 }
 
 /// The surfaces, the shelf, and the edges.
@@ -592,7 +592,7 @@ impl Runtime {
             acts.extend(self.reflow());
         }
         if let Some(id) = id {
-            acts.push(Act::Report(ClientBody::WidgetOpened { id, surface }));
+            acts.push(Act::Report(WidgetReport::Opened { id, surface }));
         }
         acts
     }
@@ -621,7 +621,7 @@ impl Runtime {
             });
         }
         acts.push(Act::Update { surface, data });
-        acts.push(Act::Report(ClientBody::WidgetDone { id }));
+        acts.push(Act::Report(WidgetReport::Done { id }));
         acts
     }
 
@@ -813,7 +813,7 @@ impl Runtime {
         // may have used the close tick a moment before the daemon asked, and
         // what was asked for - that surface is not on screen - is the case.
         let mut acts = self.retire(&surface);
-        acts.push(Act::Report(ClientBody::WidgetDone { id }));
+        acts.push(Act::Report(WidgetReport::Done { id }));
         acts
     }
 
@@ -828,7 +828,7 @@ impl Runtime {
         for surface in ours {
             acts.extend(self.retire(&surface));
         }
-        acts.push(Act::Report(ClientBody::WidgetDone { id }));
+        acts.push(Act::Report(WidgetReport::Done { id }));
         acts
     }
 
@@ -844,10 +844,7 @@ impl Runtime {
         // The daemon is told rather than asked: the person has already closed
         // the window, and this is what keeps the conversation's idea of what is
         // on screen from drifting away from what is.
-        acts.push(Act::Report(ClientBody::WidgetEvent {
-            surface,
-            event: SurfaceEvent::Closed,
-        }));
+        acts.push(Act::Report(WidgetReport::Closed { surface }));
         acts
     }
 
@@ -963,10 +960,7 @@ impl Runtime {
             // will say it: the shell is destroyed rather than closed, so no
             // window event follows it, and Scufris would go on updating a panel
             // that a fourth exhibit quietly pushed off the shelf.
-            acts.push(Act::Report(ClientBody::WidgetEvent {
-                surface: oldest,
-                event: SurfaceEvent::Closed,
-            }));
+            acts.push(Act::Report(WidgetReport::Closed { surface: oldest }));
         }
         acts
     }
@@ -1026,7 +1020,7 @@ impl Runtime {
 
 /// Returns the answer for a command the runtime could not carry out.
 fn failed(id: String, code: &str, detail: String) -> Act {
-    Act::Report(ClientBody::WidgetFailed {
+    Act::Report(WidgetReport::Failed {
         id,
         code: code.to_string(),
         detail,
@@ -1232,7 +1226,7 @@ cadence = 500
     fn opened(acts: &[Act]) -> String {
         acts.iter()
             .find_map(|act| match act {
-                Act::Report(ClientBody::WidgetOpened { surface, .. }) => Some(surface.clone()),
+                Act::Report(WidgetReport::Opened { surface, .. }) => Some(surface.clone()),
                 _ => None,
             })
             .expect("the open was answered with a surface")
@@ -1423,9 +1417,8 @@ cadence = 500
             open(&mut runtime, &catalog, "note", Posture::Exhibit);
         }
         let acts = open(&mut runtime, &catalog, "note", Posture::Exhibit);
-        assert!(acts.contains(&Act::Report(ClientBody::WidgetEvent {
+        assert!(acts.contains(&Act::Report(WidgetReport::Closed {
             surface: first.clone(),
-            event: SurfaceEvent::Closed,
         })));
         // And the report comes after the window is gone, so the conversation
         // never hears about a panel that is still on screen.
@@ -1439,7 +1432,7 @@ cadence = 500
             .expect("the crowded-out exhibit retires");
         let told = acts
             .iter()
-            .position(|act| matches!(act, Act::Report(ClientBody::WidgetEvent { surface, .. }) if surface == &first))
+            .position(|act| matches!(act, Act::Report(WidgetReport::Closed { surface }) if surface == &first))
             .expect("the crowded-out exhibit is reported");
         assert!(retired < told);
     }
@@ -1692,7 +1685,7 @@ cadence = 500
         let acts = open(&mut runtime, &catalog, "clock", Posture::Instrument);
         assert!(matches!(
             acts.as_slice(),
-            [Act::Report(ClientBody::WidgetFailed { code, .. })] if code == "no_free_slot"
+            [Act::Report(WidgetReport::Failed { code, .. })] if code == "no_free_slot"
         ));
     }
 
@@ -1703,7 +1696,7 @@ cadence = 500
         let acts = open(&mut runtime, &catalog, "weather", Posture::Exhibit);
         assert!(matches!(
             acts.as_slice(),
-            [Act::Report(ClientBody::WidgetFailed { code, .. })] if code == "widget_not_found"
+            [Act::Report(WidgetReport::Failed { code, .. })] if code == "widget_not_found"
         ));
         assert!(runtime.surfaces.is_empty());
     }
@@ -1722,7 +1715,7 @@ cadence = 500
         );
         assert!(matches!(
             acts.as_slice(),
-            [Act::Report(ClientBody::WidgetFailed { code, .. })] if code == "surface_not_found"
+            [Act::Report(WidgetReport::Failed { code, .. })] if code == "surface_not_found"
         ));
     }
 
@@ -1742,7 +1735,7 @@ cadence = 500
         );
         assert_eq!(
             acts,
-            vec![Act::Report(ClientBody::WidgetDone { id: "w-1".into() })]
+            vec![Act::Report(WidgetReport::Done { id: "w-1".into() })]
         );
     }
 
@@ -1871,9 +1864,8 @@ cadence = 500
                 surface: surface.clone(),
             },
         );
-        assert!(acts.contains(&Act::Report(ClientBody::WidgetEvent {
+        assert!(acts.contains(&Act::Report(WidgetReport::Closed {
             surface: surface.clone(),
-            event: SurfaceEvent::Closed,
         })));
         assert!(runtime.surface(&surface).is_none());
     }

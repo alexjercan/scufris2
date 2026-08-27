@@ -77,16 +77,40 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   built from whatever modifier your activation hotkey uses. That is the
   fallback on a desktop with no binding modes, and it is what puts a resting
   pill away without opening the microphone on the way.
+- `packages.scufris-speak`, the synthesiser the companion runs. It binds the
+  pinned Piper package, model, and configuration, so the voice is a property of
+  the package rather than a run-time setting.
 
 ### Changed
 
-- Control protocol version 2. It adds the widget commands, the first messages
-  the daemon originates, plus the companion's answers, surface events, and
-  widget catalog. A version 1 peer is refused at hello, so the companion and
-  the Scufris package must be updated together.
+- Scufris is a background service with clients now, which is the whole shape of
+  this release. `scufris-service` owns the conversation, the session, and the
+  socket; the Pi agent, the desktop companion, and `scufris-ctl` are all
+  clients of it. There is no terminal that owns the conversation any more, so
+  putting the pill away, closing the terminal, or a companion crash leave the
+  conversation exactly where it was, and a machine with no display still has
+  one.
+- `programs.scufris.desktop.enable` requires `programs.scufris.service.enable`.
+  The tray's restart hook restarts `scufris-service.service`.
+- Control protocol version 3, which replaces version 2 outright. It adds the
+  `agent` role, so the Pi process reports what it said, the paragraph it wants
+  spoken, and the widgets it asks for, and it carries stable refusal codes a
+  caller branches on. There is no conversion from version 2: the companion, the
+  service, and the Scufris package must be updated together.
+- Speech is two decisions in two places. The agent decides which paragraph of
+  an answer is worth saying aloud; the desktop companion owns the speaker and
+  says it. Nothing in the agent's process tree makes sound, and a session with
+  no companion simply stays silent. Enabling `voice` hands the companion the
+  synthesiser and turns speech on in the service.
 
 ### Removed
 
+- The Kitty popup. `programs.scufris.voice.popup.*` and the
+  `scufris-popup.service` unit are gone; use `programs.scufris.service.enable`
+  and reach the conversation with `scufris-ctl debug`. Nothing is migrated: a
+  configuration that set the popup options fails to evaluate.
+- Control protocol version 2, the `desktop` Pi extension that served it,
+  `SCUFRIS_DAEMON`, and `tools/desktop/scufris-socket-lock`.
 - Dashboardd widget control. The `dashboard` extension, its skill, the
   `scufris-dashboard` helper, the `dashboardd` flake input, and the
   `programs.scufris.dashboard.*` options are gone. Widgets return as a native

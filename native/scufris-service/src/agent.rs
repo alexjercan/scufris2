@@ -36,14 +36,6 @@ const GOODBYE: Duration = Duration::from_secs(5);
 /// How often the wait for a stopping agent looks again.
 const GOODBYE_STEP: Duration = Duration::from_millis(50);
 
-/// Environment variables the agent must not inherit.
-///
-/// `SCUFRIS_DAEMON` turns the desktop extension into a server that binds the
-/// version 2 socket. This agent is not that: it is a child of the service, and
-/// letting it bind would put two servers on one socket for as long as the old
-/// arrangement stands beside the new one.
-const STRIPPED: [&str; 1] = ["SCUFRIS_DAEMON"];
-
 /// One running agent.
 pub struct Agent {
     child: Child,
@@ -72,9 +64,6 @@ impl Agent {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        for name in STRIPPED {
-            command.env_remove(name);
-        }
         // Its own group, so one signal reaches everything the agent started.
         command.process_group(0);
         let mut child = command.spawn()?;
@@ -299,8 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn the_agent_never_inherits_the_variable_that_makes_it_a_version_two_server() {
-        assert!(STRIPPED.contains(&"SCUFRIS_DAEMON"));
+    fn the_agent_is_started_in_rpc_mode_on_its_own_session_directory() {
         let described = described(&config("/bin/scufris", PathBuf::from("/srv/sessions")));
         assert_eq!(
             described,

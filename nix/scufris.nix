@@ -21,6 +21,11 @@
     inherit pkgs piPackage;
     resources = voiceResources;
     voice = true;
+  };
+  # The synthesiser belongs to whoever is sitting in front of the machine, so
+  # it is its own program rather than part of the agent's launcher.
+  speak = import ./speak.nix {
+    inherit pkgs;
     inherit (voice) piperPackage;
     piperModel = voice.model;
     piperConfig = voice.config;
@@ -47,6 +52,7 @@ in {
     piPackage
     launcher
     voiceLauncher
+    speak
     desktop
     service
     ctl

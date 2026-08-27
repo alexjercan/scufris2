@@ -41,8 +41,9 @@ pub fn summoned(id: &str) -> Option<&str> {
 /// Returns the opaque colour that identifies one tray state.
 ///
 /// The gruber state grammar the pill uses: yellow listening, brown
-/// transcribing, niagara working, green speaking, wisteria attention, red
-/// reserved for error and the mic ring.
+/// transcribing, niagara working, green speaking, wisteria attention, quartz
+/// detached, red reserved for error and the mic ring. The two states nobody
+/// is waiting on, starting and disconnected, wear the two dim greys.
 pub fn state_color(state: &str) -> [u8; 3] {
     match state {
         "listening" => [0xFF, 0xDD, 0x33],
@@ -50,7 +51,9 @@ pub fn state_color(state: &str) -> [u8; 3] {
         "working" => [0x96, 0xA6, 0xC8],
         "speaking" => [0x73, 0xC9, 0x36],
         "attention" => [0x9E, 0x95, 0xC7],
+        "detached" => [0x6F, 0x62, 0x8C],
         "error" => [0xF4, 0x38, 0x41],
+        "starting" => [0x6C, 0x77, 0x72],
         "disconnected" => [0x52, 0x49, 0x4E],
         _ => [0x95, 0xA9, 0x9F],
     }
@@ -97,8 +100,10 @@ pub fn tooltip(state: &str, detail: &str) -> String {
         "working" => "Scufris is working",
         "speaking" => "Scufris is speaking",
         "attention" => "Scufris needs you",
+        "detached" => "Scufris is attached to a terminal",
         "error" => "Scufris reported an error",
-        "disconnected" => "Scufris backend unavailable",
+        "starting" => "Scufris is starting",
+        "disconnected" => "Scufris service unavailable",
         _ => "Scufris is idle",
     };
     if detail.is_empty() {
@@ -223,13 +228,15 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    const STATES: [&str; 7] = [
+    const STATES: [&str; 9] = [
         "idle",
+        "starting",
         "listening",
         "transcribing",
         "working",
         "speaking",
         "attention",
+        "detached",
         "error",
     ];
 
@@ -315,8 +322,12 @@ mod tests {
         );
         assert_eq!(tooltip("idle", ""), "Scufris is idle");
         assert_eq!(
-            tooltip("disconnected", "The Scufris backend is unavailable."),
-            "Scufris backend unavailable: The Scufris backend is unavailable."
+            tooltip("disconnected", "The Scufris service is unavailable."),
+            "Scufris service unavailable: The Scufris service is unavailable."
+        );
+        assert_eq!(
+            tooltip("detached", "a terminal has the session"),
+            "Scufris is attached to a terminal: a terminal has the session"
         );
     }
 }

@@ -5,7 +5,6 @@ import { constants } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
-import { OwnedSpeechPlayback } from "../extensions/scufris/voice/speech.ts";
 
 const helper = new URL("../tools/voice/scufris-speak", import.meta.url)
   .pathname;
@@ -212,90 +211,6 @@ test("private speech helper rejects malformed input and fixed runtime failures",
     SCUFRIS_PIPER_MODEL: join(item.root, "missing"),
   };
   assert.equal((await runHelper("Safe response.", missingModel)).code, 2);
-});
-
-test("owned playback replacement cancels only the exact helper process", async () => {
-  const item = await fixture();
-  const ownedHelper = join(item.root, "owned-helper");
-  await fakeProgram(
-    ownedHelper,
-    `const fs = require("node:fs");
-process.stdin.resume();
-process.on("SIGTERM", () => {
-  fs.appendFileSync(process.env.TEST_LOG, JSON.stringify({ event: "term", pid: process.pid }) + "\\n");
-  process.exit(143);
-});
-fs.appendFileSync(process.env.TEST_LOG, JSON.stringify({ event: "start", pid: process.pid }) + "\\n");
-setInterval(() => {}, 1000);
-`,
-  );
-  const originalLog = process.env.TEST_LOG;
-  process.env.TEST_LOG = item.log;
-  const playback = new OwnedSpeechPlayback(ownedHelper, 10_000);
-  const unrelated = spawn(
-    process.execPath,
-    ["-e", "setInterval(() => {}, 1000)"],
-    { stdio: "ignore" },
-  );
-
-  try {
-    const first = playback.play("First safe response.");
-    await waitFor(async () => {
-      try {
-        return (await readFile(item.log, "utf8")).includes('"event":"start"');
-      } catch {
-        return false;
-      }
-    });
-    const second = playback.play("Second safe response.");
-    await first;
-    await waitFor(async () => {
-      const records = (await readFile(item.log, "utf8")).split("\n");
-      return (
-        records.filter((line) => line.includes('"event":"start"')).length === 2
-      );
-    });
-    await playback.cancel();
-    await second;
-
-    const records = (await readFile(item.log, "utf8"))
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line) as { event: string; pid: number });
-    assert.deepEqual(
-      records
-        .filter((record) => record.event === "term")
-        .map((record) => record.pid),
-      records
-        .filter((record) => record.event === "start")
-        .map((record) => record.pid),
-    );
-    assert.equal(unrelated.exitCode, null);
-  } finally {
-    await playback.cancel();
-    unrelated.kill("SIGTERM");
-    await new Promise((resolve) => unrelated.once("close", resolve));
-    if (originalLog === undefined) delete process.env.TEST_LOG;
-    else process.env.TEST_LOG = originalLog;
-  }
-});
-
-test("owned playback enforces a bounded deadline", async () => {
-  const item = await fixture();
-  const ownedHelper = join(item.root, "timeout-helper");
-  await fakeProgram(
-    ownedHelper,
-    `process.stdin.resume();
-process.on("SIGTERM", () => process.exit(143));
-setInterval(() => {}, 1000);
-`,
-  );
-  const playback = new OwnedSpeechPlayback(ownedHelper, 25);
-  await assert.rejects(
-    playback.play("This response reaches the deadline."),
-    /Speech playback timed out\./,
-  );
-  await playback.cancel();
 });
 
 test("helper cancellation signals only its exact synthesis and playback child", async () => {

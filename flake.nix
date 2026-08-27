@@ -47,6 +47,7 @@
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             scufris-voice = scufris.voiceLauncher;
+            scufris-speak = scufris.speak;
             scufris-desktop = scufris.desktop;
             scufris-service = scufris.service;
             scufris-ctl = scufris.ctl;

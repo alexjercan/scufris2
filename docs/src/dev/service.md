@@ -1,25 +1,21 @@
 # Background service
 
-`scufris-service` is the headless half of Scufris. It owns three things nothing
-else may own: one `pi --mode rpc` agent, the session directory that agent
-writes, and the socket every surface connects to. The voice pill, the tray, a
-terminal and `scufris-ctl` are all clients of it.
+`scufris-service` is the half of Scufris that owns the conversation. It owns
+three things nothing else may own: one `pi --mode rpc` agent, the session
+directory that agent writes, and the socket every surface connects to. The
+agent itself, the voice pill, the tray, and `scufris-ctl` in a terminal are all
+clients of it.
 
 It builds and runs with no graphical dependency, so a machine with no display
 keeps the conversation and a terminal over ssh reaches it.
-
-> The companion still serves its own version 2 socket for the popup Pi process.
-> The two arrangements stand beside each other; nothing graphical uses the
-> service yet.
 
 ## What it owns
 
 - **One agent.** Started as
   `<agent> --session-dir <dir> --continue --mode rpc`, in its own process
-  group, with `SCUFRIS_DAEMON` stripped so it never becomes a version 2 server
-  of its own. Stopping it is a sequence: stdin closes first, because that is
-  how an RPC client says goodbye, then `SIGTERM`, then `SIGKILL`, then the exit
-  status is collected.
+  group. Stopping it is a sequence: stdin closes first, because that is how an
+  RPC client says goodbye, then `SIGTERM`, then `SIGKILL`, then the exit status
+  is collected.
 - **One session directory.** `--continue` rather than a named session, so the
   newest session in the directory is the conversation, including right after a
   terminal handed it back.
@@ -43,9 +39,15 @@ second one:
 {"v":3,"type":"hello","role":"control"}  ->  {"v":3,"type":"welcome","role":"control"}
 ```
 
-Two roles. `frontend` is a surface: it submits text and is pushed every state
-change and every transcript entry. `control` is `scufris-ctl`: it asks one
-thing, reads the answer, and is pushed nothing.
+Three roles.
+
+- `agent` is the Pi process, through its `service` extension. It reports what
+  Scufris said, the paragraph Scufris wants spoken, and the widgets it asks
+  for. There is one, and a second one takes the first one's place.
+- `frontend` is a surface. It submits text, and is pushed every state change,
+  every transcript entry, every spoken paragraph, and every widget command.
+- `control` is `scufris-ctl`. It asks one thing, reads the answer, and is
+  pushed nothing.
 
 Requests carry an `id` and answers echo it, so a client that pipelines two
 requests tells the answers apart without counting.
@@ -64,13 +66,33 @@ are what a caller branches on: `agent_unavailable`, `detached`, `debug_held`,
 
 A submission while the agent is working is delivered as a steer, not refused.
 
+The agent pushes rather than asks, so its messages carry no `id` and get no
+answer:
+
+| Message                             | Where it goes                           |
+| ----------------------------------- | --------------------------------------- |
+| `{"type":"said","text":"..."}`      | the transcript ring, and every frontend |
+| `{"type":"speak","text":"..."}`     | every frontend, and is never kept       |
+| `{"type":"widget","command":{...}}` | every frontend                          |
+
+`said` and `speak` are two different strings and two different decisions. The
+transcript holds the whole answer; speech holds one paragraph shaped for it.
+The agent decides what is worth saying aloud, and the frontend, which owns the
+speaker, decides whether to say it. A session with no frontend has nowhere for
+the paragraph to go, which is not a fault.
+
+A frontend answers a widget command with `{"type":"report","report":{...}}`,
+which the service hands to the agent.
+
 ## State
 
 `starting`, `idle`, `working`, `detached`, `error`. That is the whole
 vocabulary, and it is deliberately small: a frontend never parses a Pi event
 and never learns Pi's vocabulary, so an event Pi adds tomorrow is a service
 change and nothing else. Speaking and listening are not in it, because those
-are what a frontend is doing rather than what Scufris is doing.
+are what a frontend is doing rather than what Scufris is doing. A companion
+that is speaking shows that over the state the service reported; the service
+never hears about it.
 
 A frontend is pushed `state` whenever it changes, and `transcript` for each
 line that was said. Both arrive unasked and neither carries an `id`.
@@ -114,8 +136,9 @@ scufris-ctl abort             end the run that is in progress
 scufris-ctl debug             take the agent and open its session here
 ```
 
-`open`, `cancel` and `accept` still go to the companion's own socket. They go
-away with the pill's keys. See [Desktop companion](desktop.md).
+`open`, `cancel` and `accept` go to the companion's own `desktop.sock`, which
+is a different socket with a different protocol. That is how a window manager
+binding reaches the pill. See [Desktop companion](desktop.md).
 
 Exit status is what a binding branches on without parsing anything: 0 it
 worked, 1 it did not, 2 the run was wrong. `debug` exits with whatever `pi`

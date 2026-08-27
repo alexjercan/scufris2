@@ -23,7 +23,7 @@ test("package loads only capability-owned Scufris extensions", async () => {
     "./extensions/scufris/workflow/index.ts",
     "./extensions/scufris/voice/index.ts",
     "./extensions/scufris/calm.ts",
-    "./extensions/scufris/desktop/index.ts",
+    "./extensions/scufris/service/index.ts",
     "./extensions/scufris/widgets/index.ts",
   ]);
 

@@ -80,10 +80,11 @@ Explicit `/speech`, `/calm`, and `/wake` values are restored with the session.
 ## Voice
 
 The ordinary voice-capable launcher stays silent until speech is enabled. The
-popup launcher starts with speech and Calm on and resumes its dedicated
-session. Enabled speech plays each safe settled response once, including
-automatic wake turns. Speech input inside the popup is Pi configuration, not
-Scufris.
+background service starts with speech on when voice is enabled. Enabled speech
+sends one shaped paragraph of each safe settled response, including automatic
+wake turns, to whatever is on screen. The desktop companion is what owns the
+speaker and says it, so a session with no companion stays silent. Speech input
+is Pi configuration, not Scufris.
 
 ## The voice pill
 
@@ -110,8 +111,8 @@ harmless. You choose: `Ctrl+C` copies the words, `Escape` discards them, and
 `Enter` tells you what sending again could repeat before a second `Enter` sends
 it anyway.
 
-Pill messages and their answers are part of the one conversation the popup
-shows. There is no second session.
+Pill messages and their answers are part of the one conversation the service
+owns. There is no second session, so the same words are there in a terminal.
 
 ### Keys that reach the pill from anywhere
 

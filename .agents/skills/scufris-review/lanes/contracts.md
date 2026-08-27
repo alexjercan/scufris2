@@ -8,12 +8,12 @@ checks, and the documents that describe them.
 
 Grep both sides of every pair the change touches:
 
-- Protocol: `native/control-protocol-v*.json` fixtures are read by
-  the Rust suite (`native/scufris-control/src/lib.rs`, `include_str`)
-  and the TS suite (`tests/desktop.test.ts`); `PROTOCOL_VERSION` lives
-  in both `scufris-control` and
-  `extensions/scufris/desktop/protocol.ts`. A message shape changed on
-  one side only is a broken pair.
+- Protocol: version 3 is implemented three times.
+  `native/scufris-control/src/service.rs` is the service and the
+  companion, and `extensions/scufris/service/protocol.ts` is the
+  agent; `PROTOCOL_VERSION` lives in both. A message shape, a role
+  name, or a refusal code changed on one side only is a broken pair,
+  and `tests/service.test.ts` is the TS side's own guard.
 - Identity: the sentence in `extensions/scufris/workflow/identity.ts`
   is asserted byte-for-byte in `tests/identity.test.ts`.
 - Launcher: the argv built in `nix/launcher.nix` is asserted exactly

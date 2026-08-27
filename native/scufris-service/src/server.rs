@@ -169,6 +169,10 @@ fn act(service: &Arc<Service>, client: u64, body: ClientBody) {
         ClientBody::Abort { id } => service.abort(client, id),
         ClientBody::GetState { id } => service.report_state(client, id),
         ClientBody::Debug { id } => service.begin_debug(client, id),
+        ClientBody::Said { text } => service.said(client, text),
+        ClientBody::Speak { text } => service.speak(client, text),
+        ClientBody::Widget { command } => service.relay_widget(client, command),
+        ClientBody::Report { report } => service.relay_report(client, report),
     }
 }
 

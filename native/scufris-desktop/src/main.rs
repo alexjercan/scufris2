@@ -10,14 +10,15 @@ mod audio;
 mod blob;
 mod command;
 mod config;
-mod daemon;
 mod display;
 mod focus;
 mod keys;
+mod link;
 mod logging;
 mod pending;
 mod pill;
 mod review;
+mod speech;
 mod state;
 mod stt;
 mod tray;
@@ -42,10 +43,11 @@ use app::{
 };
 use audio::{CpalRecorder, Recorder};
 use config::Config;
-use daemon::{DaemonEvent, DaemonLink};
 use focus::FocusTracker;
+use link::{LinkEvent, ServiceLink};
 use pending::{FilePendingStore, PendingStore};
 use scufris_control::command::{Outcome, Verb};
+use speech::Speaker;
 use state::Event;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent, http, ipc::Channel, menu::Menu};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -117,6 +119,7 @@ struct DesktopSurface {
     handle: AppHandle,
     menu: Menu<tauri::Wry>,
     focus: FocusTracker,
+    speaker: Arc<Speaker>,
 }
 
 impl DesktopSurface {
@@ -207,6 +210,12 @@ impl Surface for DesktopSurface {
         if let Some(widgets) = self.handle.try_state::<Arc<widgets::Widgets>>() {
             widgets.recording(payload.recording);
         }
+        // And a person who has started talking is not waiting for the rest of
+        // the sentence. Barge-in belongs here for the same reason: it is the
+        // one place that sees the microphone on every presentation.
+        if payload.recording {
+            self.speaker.hush();
+        }
         self.handle
             .emit(PRESENTATION_EVENT, payload)
             .map_err(|error| format!("the pill would not render: {error}"))
@@ -257,9 +266,9 @@ impl Transcriber for HttpTranscriber {
     }
 }
 
-impl Backend for DaemonLink {
-    fn submit(&self, id: String, text: String, force: bool) -> Result<(), String> {
-        DaemonLink::submit(self, id, text, force)
+impl Backend for ServiceLink {
+    fn submit(&self, id: String, text: String) -> Result<(), String> {
+        ServiceLink::submit(self, id, text)
     }
 }
 
@@ -358,7 +367,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                 &handle,
                 chat_available,
                 restart_available,
-                &app::status_line("disconnected", "The Scufris backend is unavailable."),
+                &app::status_line("disconnected", "The Scufris service is unavailable."),
                 &widgets.summonable(),
             )?;
             tauri.manage(CueSwitch(AtomicBool::new(true)));
@@ -407,11 +416,16 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             ));
             tauri.manage(Arc::clone(&pill_keys));
 
+            // Before the runtime, because the runtime holds the surface that
+            // cuts speech on barge-in; the runtime is given back to it below.
+            let speaker = Speaker::new(config.speak_command.clone());
+
             let runtime = Arc::new(App::new(Ports {
                 surface: Arc::new(DesktopSurface {
                     handle: handle.clone(),
                     menu,
                     focus: FocusTracker::new(),
+                    speaker: Arc::clone(&speaker),
                 }) as Arc<dyn Surface>,
                 keys: Arc::clone(&pill_keys) as Arc<dyn Keys>,
                 recorder: Arc::new(CpalRecorder) as Arc<dyn Recorder>,
@@ -428,28 +442,44 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             }));
             tauri.manage(Arc::clone(&runtime));
 
+            // Both siblings hear it. The pill shows speech over whatever the
+            // service is reporting, and the widgets runtime holds an exhibit's
+            // grace while the person is listening rather than reading.
+            let speaking_runtime = Arc::clone(&runtime);
+            let speaking_surfaces = Arc::clone(&widgets);
+            speaker.attach(move |speaking| {
+                speaking_runtime.set_speaking(speaking);
+                speaking_surfaces.assistant(speaking_runtime.shown_assistant());
+            });
+            tauri.manage(Arc::clone(&speaker));
+
             let observer = Arc::clone(&runtime);
             let surfaces = Arc::clone(&widgets);
-            let link = Arc::new(DaemonLink::start(
+            let voice = Arc::clone(&speaker);
+            let link = Arc::new(ServiceLink::start(
                 config.socket.clone(),
                 move |event| match event {
                     // Routed away from the pill before it can reach the state
                     // machine. The runtime is the pill's sibling, and a widget
                     // command has nothing to say about a conversation.
-                    DaemonEvent::Widget(command) => surfaces.command(command),
+                    LinkEvent::Widget(command) => surfaces.command(command),
+                    // The agent decided this is worth saying aloud. What
+                    // becomes of it is the companion's: it owns the speaker,
+                    // and a deployment with no synthesiser configured drops it.
+                    LinkEvent::Speak(text) => voice.say(text),
                     // The catalog goes out once per connection, as soon as
-                    // there is a daemon to read it: it is what the daemon types
-                    // its widget tools from.
-                    DaemonEvent::Connected(session) => {
+                    // there is a service to relay it: it is what the agent
+                    // types its widget tools from.
+                    LinkEvent::Connected => {
                         surfaces.announce();
-                        observer.observe(DaemonEvent::Connected(session));
+                        observer.observe(LinkEvent::Connected);
                     }
                     // Both siblings read this one. The pill shows the state;
                     // the widgets runtime reads the turn boundary off it, which
                     // is what ages an exhibit out when the subject changes.
-                    DaemonEvent::State(state, detail) => {
-                        surfaces.assistant(state);
-                        observer.observe(DaemonEvent::State(state, detail));
+                    LinkEvent::State(state, detail) => {
+                        observer.observe(LinkEvent::State(state, detail));
+                        surfaces.assistant(observer.shown_assistant());
                     }
                     event => observer.observe(event),
                 },
@@ -516,7 +546,10 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
         RunEvent::ExitRequested { api, code, .. } if code.is_none() => api.prevent_exit(),
         RunEvent::Exit => {
             info!("stopping");
-            handle.state::<Arc<DaemonLink>>().stop();
+            handle.state::<Arc<ServiceLink>>().stop();
+            // Before the windows go, so a paragraph in flight does not outlive
+            // the companion that asked for it.
+            handle.state::<Arc<Speaker>>().hush();
             // Before the app's own shutdown, because a widget backend is its
             // own process group and so does not die with the companion. One
             // left behind is a sampler running until the machine is rebooted.

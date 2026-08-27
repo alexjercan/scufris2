@@ -7,7 +7,7 @@
   ...
 }: let
   inherit (pkgs) lib;
-  inherit (scufris) resources voiceResources launcher voiceLauncher voice piPackage;
+  inherit (scufris) resources voiceResources launcher voiceLauncher piPackage;
   inherit (fixtures) systemPi;
 in
   {
@@ -35,7 +35,7 @@ in
         --extension
         ${resources}/share/scufris/extensions/scufris/calm.ts
         --extension
-        ${resources}/share/scufris/extensions/scufris/desktop/index.ts
+        ${resources}/share/scufris/extensions/scufris/service/index.ts
         --extension
         ${resources}/share/scufris/extensions/scufris/widgets/index.ts
         --skill
@@ -56,6 +56,9 @@ in
     '';
   }
   // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+    # The voice launcher differs only in which resources it hands Pi. Every
+    # speech variable and both speech programs stay empty here, because the
+    # agent decides what is worth saying and the companion is what says it.
     launcher-voice =
       pkgs.runCommand "scufris-launcher-voice-check" {
         nativeBuildInputs = [voiceLauncher systemPi];
@@ -66,10 +69,10 @@ in
         orchestrator
 
 
-        ${voice.model}
-        ${voice.config}
-        ${voice.piperPackage}/bin/piper
-        ${pkgs.pipewire}/bin/pw-play
+
+
+
+
         system-pi
         --extension
         ${voiceResources}/share/scufris/extensions/scufris/workflow/index.ts
@@ -80,7 +83,7 @@ in
         --extension
         ${voiceResources}/share/scufris/extensions/scufris/calm.ts
         --extension
-        ${voiceResources}/share/scufris/extensions/scufris/desktop/index.ts
+        ${voiceResources}/share/scufris/extensions/scufris/service/index.ts
         --extension
         ${voiceResources}/share/scufris/extensions/scufris/widgets/index.ts
         --skill

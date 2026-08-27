@@ -24,14 +24,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-use scufris_control::{AssistantState, ClientBody, Posture};
+use scufris_control::service::{Posture, WidgetCommand, WidgetReport};
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, ipc::Channel};
 use tracing::{debug, info, warn};
 
 use crate::{
-    daemon::{DaemonLink, WidgetCommand},
     display,
+    link::ServiceLink,
+    state::Assistant,
     widgets::{
         backends::{Backends, News, Order},
         catalog::{Catalog, CatalogError, Source},
@@ -82,13 +83,13 @@ pub struct Widgets {
     /// decides while it runs.
     turn: Mutex<()>,
     backends: Backends,
-    link: OnceLock<Arc<DaemonLink>>,
-    /// Whether a daemon welcomed this companion before there was a link to
+    link: OnceLock<Arc<ServiceLink>>,
+    /// Whether the service welcomed this companion before there was a link to
     /// answer on.
     owed_catalog: AtomicBool,
-    /// The last assistant state the daemon reported. The turn boundary is read
+    /// The last assistant state the companion showed. The turn boundary is read
     /// off the change rather than off a message of its own.
-    assistant: Mutex<AssistantState>,
+    assistant: Mutex<Assistant>,
     app: AppHandle,
 }
 
@@ -115,7 +116,7 @@ impl Widgets {
             backends: Backends::new(),
             link: OnceLock::new(),
             owed_catalog: AtomicBool::new(false),
-            assistant: Mutex::new(AssistantState::Idle),
+            assistant: Mutex::new(Assistant::Idle),
             app,
         });
         widgets.pool.warm();
@@ -233,7 +234,7 @@ impl Widgets {
     /// exhibit the subject has moved on: it costs no message of its own, and
     /// the daemon already sends this one. And time spent speaking is time the
     /// person is listening rather than reading, so the grace does not run.
-    pub fn assistant(&self, state: AssistantState) {
+    pub fn assistant(&self, state: Assistant) {
         let previous = {
             let mut held = self
                 .assistant
@@ -248,10 +249,10 @@ impl Widgets {
         }
         self.decide(Cmd::Freeze {
             reason: Still::Speech,
-            stopped: state == AssistantState::Speaking,
+            stopped: state == Assistant::Speaking,
         });
-        let turned = matches!(previous, AssistantState::Working | AssistantState::Speaking)
-            && state == AssistantState::Idle;
+        let turned = matches!(previous, Assistant::Working | Assistant::Speaking)
+            && state == Assistant::Idle;
         if turned {
             self.decide(Cmd::TurnEnded);
         }
@@ -288,11 +289,11 @@ impl Widgets {
     /// Separate from [`Widgets::start`] because the link is started with a
     /// closure that already routes commands here: one of the two has to exist
     /// first, and it is this one.
-    pub fn attach(&self, link: Arc<DaemonLink>) {
+    pub fn attach(&self, link: Arc<ServiceLink>) {
         if self.link.set(link).is_err() {
             return;
         }
-        // The link's reader thread starts inside `DaemonLink::start`, which
+        // The link's reader thread starts inside `ServiceLink::start`, which
         // returns before this runs, so a welcome can arrive with nowhere to
         // answer it. What that welcome wanted is the catalog, and this is the
         // first moment there is a way to send it.
@@ -315,7 +316,7 @@ impl Widgets {
             self.owed_catalog.store(true, Ordering::SeqCst);
             return;
         }
-        self.report(ClientBody::Catalog {
+        self.report(WidgetReport::Catalog {
             widgets: self.catalog.entries(),
         });
     }
@@ -436,7 +437,7 @@ impl Widgets {
     /// that happen before the runtime is ever asked.
     fn refuse(&self, id: Option<String>, code: &str, detail: String) {
         match id {
-            Some(id) => self.report(ClientBody::WidgetFailed {
+            Some(id) => self.report(WidgetReport::Failed {
                 id,
                 code: code.into(),
                 detail,
@@ -584,7 +585,7 @@ impl Widgets {
                     self.pool.send(&surface, ShellMsg::Refused { detail });
                 }
                 Act::Retire { surface } => self.pool.discard(&surface),
-                Act::Report(ClientBody::WidgetOpened { id, surface })
+                Act::Report(WidgetReport::Opened { id, surface })
                     if lost.iter().any(|(gone, _)| gone == &surface) =>
                 {
                     // The open is answered where it happened. A `widget_opened`
@@ -596,7 +597,7 @@ impl Widgets {
                         .find(|(gone, _)| gone == &surface)
                         .map_or_else(String::new, |(_, why)| why.clone());
                     warn!(surface, "a widget never reached the screen: {detail}");
-                    self.report(ClientBody::WidgetFailed {
+                    self.report(WidgetReport::Failed {
                         id,
                         code: "not_shown".into(),
                         detail,
@@ -681,13 +682,13 @@ impl Widgets {
         windows::settle(&window, runtime::place(slot, size, &monitor))
     }
 
-    fn report(&self, body: ClientBody) {
+    fn report(&self, report: WidgetReport) {
         let Some(link) = self.link.get() else {
             debug!("a widget answer had no link to travel on");
             return;
         };
-        if let Err(error) = link.report(body) {
-            debug!("a widget answer did not reach the daemon: {error}");
+        if let Err(error) = link.report(report) {
+            debug!("a widget answer did not reach the agent: {error}");
         }
     }
 

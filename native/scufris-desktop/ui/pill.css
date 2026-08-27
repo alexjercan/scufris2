@@ -5,7 +5,8 @@
  * mark is the listening timer, one dim line under it.
  *
  * Color follows the state grammar: yellow listening, brown transcribing,
- * quartz review, niagara working, green speaking, wisteria attention, red only
+ * quartz review, niagara working, green speaking, wisteria attention and
+ * detached, red only
  * for error. Motion pattern, not hue, separates states, so everything survives
  * grayscale. */
 
@@ -157,14 +158,22 @@ body {
     opacity: 0;
   }
 }
+/* The conversation is a terminal somebody else owns. The pill still reports,
+ * dimmed, because nothing it does reaches that conversation. */
+.pill[data-state="detached"] {
+  --acc: var(--wisteria);
+  filter: saturate(0.5);
+}
 .pill[data-state="error"] {
   --acc: var(--red);
   filter: saturate(0.85);
 }
+.pill[data-state="starting"],
 .pill[data-state="disconnected"] {
   --acc: var(--bg4);
   filter: saturate(0.4);
 }
+.pill[data-state="starting"] .orb canvas,
 .pill[data-state="disconnected"] .orb canvas {
   opacity: 0.7;
 }

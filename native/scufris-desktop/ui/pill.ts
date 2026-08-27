@@ -191,7 +191,9 @@ const BASELINE: Record<string, number> = {
   working: 0.3,
   speaking: 0.5,
   attention: 0.3,
+  detached: 0.12,
   error: 0.22,
+  starting: 0.12,
   disconnected: 0.1,
 };
 
@@ -244,7 +246,9 @@ const ORB_LOOKS: Record<string, OrbLook> = {
   working: { state: "working", speed: 1 },
   speaking: { state: "listening", speed: 1 },
   uncertain: { state: "shaping", speed: 1 },
+  detached: { state: "breathing", speed: 0.35 },
   error: { state: "breathing", speed: 0.35 },
+  starting: { state: "connecting", speed: 1 },
   disconnected: { state: "connecting", speed: 1 },
 };
 

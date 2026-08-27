@@ -161,14 +161,14 @@ mod tests {
     }
 
     #[test]
-    fn the_command_socket_sits_beside_the_daemon_socket_and_is_not_it() {
+    fn the_command_socket_sits_beside_the_service_socket_and_is_not_it() {
         let run = Some(std::ffi::OsString::from("/run/user/1000"));
         let command =
             in_runtime_dir(run.clone(), COMMAND_FILE_NAME).expect("the runtime directory is set");
-        let daemon =
-            in_runtime_dir(run, crate::SOCKET_FILE_NAME).expect("the runtime directory is set");
-        assert_eq!(command.parent(), daemon.parent());
-        assert_ne!(command, daemon);
+        let service = in_runtime_dir(run, crate::service::SERVICE_FILE_NAME)
+            .expect("the runtime directory is set");
+        assert_eq!(command.parent(), service.parent());
+        assert_ne!(command, service);
         assert!(command.ends_with(COMMAND_FILE_NAME));
     }
 

@@ -49,6 +49,6 @@ show/hide paths; otherwise reason from the code and say the judgement
 is unharnessed. The harness is Xvfb plus i3 configured like the real
 desktop (`focus_follows_mouse yes`, `focus_on_window_activation
 smart`, a terminal holding the keyboard, the pointer over it), a fake
-daemon on a scratch socket, and a fake transcriber. Instruments: the
+service on a scratch socket, and a fake transcriber. Instruments: the
 i3 debug log, `xprop`, `xwininfo`, `xdotool`, focus sampled from the X
 server. Stop everything by recorded PID.

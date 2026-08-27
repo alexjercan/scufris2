@@ -28,9 +28,9 @@ use tracing::{debug, error, info, warn};
 use crate::{
     audio::{Capture, MAX_RECORDING, Recorder},
     config::RestartBudget,
-    daemon::DaemonEvent,
+    link::LinkEvent,
     pending::{Pending, PendingStore},
-    state::{Action, Companion, Event, Posture},
+    state::{Action, Assistant, Companion, Event, Posture},
     tray,
 };
 
@@ -218,10 +218,10 @@ pub trait Transcriber: Send + Sync {
     fn transcribe(&self, wav: Vec<u8>) -> Result<String, String>;
 }
 
-/// The daemon end of the control protocol.
+/// The client end of the service protocol.
 pub trait Backend: Send + Sync {
     /// Submits one accepted transcript.
-    fn submit(&self, id: String, text: String, force: bool) -> Result<(), String>;
+    fn submit(&self, id: String, text: String) -> Result<(), String>;
 }
 
 /// Where deferred work runs.
@@ -611,43 +611,63 @@ impl App {
         self.publish();
     }
 
-    /// Applies one thing the daemon link observed.
+    /// Applies one thing the service link observed.
     ///
     /// Every answer about a submission carries the identifier it answers, and
     /// the state machine applies it only to that submission: a slow answer for
     /// one transcript must not settle the transcript that replaced it.
-    pub fn observe(self: &Arc<Self>, event: DaemonEvent) {
+    pub fn observe(self: &Arc<Self>, event: LinkEvent) {
         match event {
-            DaemonEvent::Connected(session) => {
-                debug!(session = %session, "daemon welcome");
-                self.set_connected(true)
-            }
-            DaemonEvent::Disconnected => self.set_connected(false),
-            DaemonEvent::State(state, detail) => self.set_assistant(state, detail),
-            DaemonEvent::Acknowledged(id) => {
-                debug!(id = %id, "submission acknowledged");
+            LinkEvent::Connected => self.set_connected(true),
+            LinkEvent::Disconnected => self.set_connected(false),
+            LinkEvent::State(state, detail) => self.set_assistant(state.into(), detail),
+            LinkEvent::Accepted(id) => {
+                debug!(id = %id, "submission accepted");
                 self.handle(Event::Acknowledged(id))
             }
-            DaemonEvent::Refused(id, detail) => {
+            LinkEvent::Refused(id, detail) => {
                 debug!(id = %id, detail = %detail, "submission refused");
                 self.handle(Event::SubmissionFailed { id, reason: detail })
             }
-            DaemonEvent::Uncertain(id, detail) => {
-                debug!(id = %id, detail = %detail, "submission uncertain");
-                self.handle(Event::SubmissionUncertain { id, reason: detail })
-            }
+            // Two things the pill is not the audience for. The transcript
+            // belongs to whatever shows the conversation, and the speaker is
+            // wired up where the speech is played.
+            LinkEvent::Transcript(_) | LinkEvent::Speak(_) => {}
             // Widget commands belong to the widgets runtime, which is a
             // sibling of this state machine rather than a part of it. The
             // wiring routes them there before they reach the pill, so a
             // command that arrives here is one nothing is listening for.
-            DaemonEvent::Widget(command) => {
+            LinkEvent::Widget(command) => {
                 debug!(id = %command.id(), "widget command reached the pill")
             }
         }
     }
 
-    /// Records the assistant state the daemon reported.
-    pub fn set_assistant(self: &Arc<Self>, state: scufris_control::AssistantState, detail: String) {
+    /// Records whether the companion is speaking an answer.
+    ///
+    /// Its own doing, not the service's word: the paragraph arrived over the
+    /// link, but only the companion knows when the speaker stops.
+    pub fn set_speaking(self: &Arc<Self>, speaking: bool) {
+        {
+            let mut companion = self
+                .companion
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            companion.set_speaking(speaking);
+        }
+        self.publish();
+    }
+
+    /// Returns the assistant state the companion is showing, speech included.
+    pub fn shown_assistant(&self) -> Assistant {
+        self.companion
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .shown_assistant()
+    }
+
+    /// Records what the companion shows the assistant is doing.
+    pub fn set_assistant(self: &Arc<Self>, state: Assistant, detail: String) {
         {
             let mut companion = self
                 .companion
@@ -1253,7 +1273,7 @@ impl App {
             }
             Action::ClearPending => self.clear_pending(),
             Action::DiscardPending { id } => return self.discard_pending(&id),
-            Action::Submit { id, text, force } => self.submit(id, text, force),
+            Action::Submit { id, text } => self.submit(id, text),
             Action::CopyTranscript { text } => self.ports.surface.copy(text),
         }
         Ok(())
@@ -1407,17 +1427,17 @@ impl App {
         }));
     }
 
-    fn submit(self: &Arc<Self>, id: String, text: String, force: bool) {
+    fn submit(self: &Arc<Self>, id: String, text: String) {
         let backend = self
             .backend
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .clone();
         let Some(backend) = backend else {
-            self.fail_submission(id, "The Scufris backend is unavailable.".into());
+            self.fail_submission(id, "The Scufris service is unavailable.".into());
             return;
         };
-        if let Err(reason) = backend.submit(id.clone(), text, force) {
+        if let Err(reason) = backend.submit(id.clone(), text) {
             self.fail_submission(id, reason);
             return;
         }
@@ -1971,7 +1991,7 @@ mod tests {
     }
 
     impl Backend for RecordingBackend {
-        fn submit(&self, id: String, text: String, _force: bool) -> Result<(), String> {
+        fn submit(&self, id: String, text: String) -> Result<(), String> {
             if let Some(reason) = self.refuse.lock().unwrap().clone() {
                 return Err(reason);
             }
@@ -2435,9 +2455,9 @@ mod tests {
         harness.executor.drain();
         assert_eq!(harness.surface.last().state, "sent");
 
-        // What the daemon answers when its own preflight refused the send:
-        // nothing left it, and it says which submission that was.
-        harness.app.observe(DaemonEvent::Refused(
+        // What the service answers when it refused the send before any of the
+        // words could leave: it says which submission that was.
+        harness.app.observe(LinkEvent::Refused(
             "pill-1".into(),
             "submission pill-1 was not sent: the Scufris session is not ready".into(),
         ));
@@ -2458,41 +2478,48 @@ mod tests {
         assert_eq!(submissions[1].0, "pill-1");
     }
 
-    /// The daemon can answer before the handoff has finished running. The
+    /// An answer can arrive before the handoff has finished running. The
     /// answer is the newer decision, and both of its outcomes need the person,
     /// so the pill it reopens must not then be closed by the handoff that was
     /// already under way.
+    ///
+    /// The two outcomes reach the runtime by two different roads. A refusal is
+    /// the service's word, on the link's thread; an uncertainty is the
+    /// companion's own timeout, and nothing on the wire ever says it.
     #[test]
     fn an_answer_that_arrives_during_the_handoff_leaves_the_pill_on_screen() {
-        let refused = || {
-            DaemonEvent::Refused(
-                "pill-1".into(),
-                "submission pill-1 was not sent: the Scufris session is not ready".into(),
-            )
-        };
-        let uncertain = || {
-            DaemonEvent::Uncertain(
-                "pill-1".into(),
-                "The backend did not confirm delivery.".into(),
-            )
-        };
+        #[derive(Clone, Copy)]
+        enum Answer {
+            Refused,
+            Uncertain,
+        }
         for (answers, expected) in [
-            (vec![refused()], "retained"),
-            (vec![uncertain()], "uncertain"),
+            (vec![Answer::Refused], "retained"),
+            (vec![Answer::Uncertain], "uncertain"),
             // A refusal settles those words, so the uncertainty behind it
             // answers nothing and cannot freeze them.
-            (vec![refused(), uncertain()], "retained"),
+            (vec![Answer::Refused, Answer::Uncertain], "retained"),
         ] {
             let harness = harness(FakeRecorder::default(), Ok("book the flight".into()));
             let runtime = Arc::clone(&harness.app);
             *harness.backend.during_submit.lock().unwrap() = Some(Box::new(move |_id| {
-                // On the daemon link's own thread, and joined here, so the
-                // interleaving is real and the test is still deterministic:
-                // the answers are fully applied while the submitting thread
-                // is stopped at the write.
+                // On a thread of its own, and joined here, so the interleaving
+                // is real and the test is still deterministic: the answers are
+                // fully applied while the submitting thread is stopped at the
+                // write.
                 thread::spawn(move || {
                     for answer in answers {
-                        runtime.observe(answer);
+                        match answer {
+                            Answer::Refused => runtime.observe(LinkEvent::Refused(
+                                "pill-1".into(),
+                                "submission pill-1 was not sent: the Scufris session is not ready"
+                                    .into(),
+                            )),
+                            Answer::Uncertain => runtime.handle(Event::SubmissionUncertain {
+                                id: "pill-1".into(),
+                                reason: "The service did not confirm delivery.".into(),
+                            }),
+                        }
                     }
                 })
                 .join()
@@ -2964,7 +2991,7 @@ mod tests {
 
         harness
             .app
-            .set_assistant(scufris_control::AssistantState::Working, "packing".into());
+            .set_assistant(Assistant::Working, "packing".into());
 
         assert_eq!(
             on_return.load(Ordering::SeqCst),
@@ -3037,7 +3064,7 @@ mod tests {
             // with the pill while the tray is still refusing the state before.
             let runtime = Arc::clone(&runtime);
             thread::spawn(move || {
-                runtime.set_assistant(scufris_control::AssistantState::Working, "packing".into());
+                runtime.set_assistant(Assistant::Working, "packing".into());
                 runtime.handle(Event::Escape);
             })
             .join()
@@ -3092,9 +3119,7 @@ mod tests {
         harness.app.handle(Event::Activate);
         harness.app.handle(Event::Enter { text: None });
         harness.executor.drain();
-        harness
-            .app
-            .observe(DaemonEvent::Acknowledged("pill-1".into()));
+        harness.app.observe(LinkEvent::Accepted("pill-1".into()));
         harness.executor.drain();
 
         // A second recording is under way when the first submission's slow
@@ -3104,20 +3129,18 @@ mod tests {
         harness.executor.drain();
         assert_eq!(harness.surface.last().state, "sent");
 
-        harness.app.observe(DaemonEvent::Uncertain(
+        harness.app.observe(LinkEvent::Refused(
             "pill-1".into(),
-            "The backend did not confirm delivery.".into(),
+            "the Scufris session is not ready".into(),
         ));
         harness.executor.drain();
         assert_eq!(
             harness.surface.last().state,
             "sent",
-            "an answer about a retired submission froze the one that replaced it"
+            "an answer about a retired submission reopened the one that replaced it"
         );
 
-        harness
-            .app
-            .observe(DaemonEvent::Acknowledged("pill-2".into()));
+        harness.app.observe(LinkEvent::Accepted("pill-2".into()));
         harness.executor.drain();
         assert_eq!(harness.surface.last().state, "idle");
     }
@@ -3257,24 +3280,31 @@ mod tests {
         assert!(first.editable);
         assert!(harness.surface.focused());
 
-        // Enter sends, the daemon takes it, and the assistant runs the turn out.
+        // Enter sends, the service takes it, and the assistant runs the turn out.
         harness.app.handle(Event::Enter {
             text: Some("open the tasks widget".into()),
         });
         harness.executor.drain();
         assert_eq!(harness.surface.last().state, "sent");
-        harness
-            .app
-            .observe(DaemonEvent::Acknowledged("pill-1".into()));
+        harness.app.observe(LinkEvent::Accepted("pill-1".into()));
         harness.executor.drain();
-        for state in [
-            scufris_control::AssistantState::Working,
-            scufris_control::AssistantState::Speaking,
-            scufris_control::AssistantState::Idle,
-        ] {
-            harness.app.set_assistant(state, String::new());
-            harness.executor.drain();
-        }
+        harness.app.set_assistant(Assistant::Working, String::new());
+        harness.executor.drain();
+        assert_eq!(harness.surface.last().state, "working");
+        // Speech is the companion's own, and it shows over whatever the
+        // service is reporting underneath.
+        harness.app.set_speaking(true);
+        harness.executor.drain();
+        assert_eq!(harness.surface.last().state, "speaking");
+        harness.app.set_assistant(Assistant::Idle, String::new());
+        harness.executor.drain();
+        assert_eq!(
+            harness.surface.last().state,
+            "speaking",
+            "an idle agent was shown while the companion was still talking"
+        );
+        harness.app.set_speaking(false);
+        harness.executor.drain();
         assert_eq!(harness.surface.last().state, "idle");
         // The pill is resident: it stayed up and gave the keyboard back.
         assert!(harness.surface.on_screen());

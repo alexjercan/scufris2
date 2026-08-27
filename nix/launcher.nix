@@ -3,12 +3,8 @@
   resources,
   piPackage,
   voice ? false,
-  piperPackage ? null,
-  piperModel ? null,
-  piperConfig ? null,
   projectRoots ? ["~/personal" "~/work" "~/third-party"],
-}:
-assert !voice || (piperPackage != null && piperModel != null && piperConfig != null); let
+}: let
   extensionArgs = [
     "--extension"
     "${resources}/share/scufris/extensions/scufris/workflow/index.ts"
@@ -19,7 +15,7 @@ assert !voice || (piperPackage != null && piperModel != null && piperConfig != n
     "--extension"
     "${resources}/share/scufris/extensions/scufris/calm.ts"
     "--extension"
-    "${resources}/share/scufris/extensions/scufris/desktop/index.ts"
+    "${resources}/share/scufris/extensions/scufris/service/index.ts"
     "--extension"
     "${resources}/share/scufris/extensions/scufris/widgets/index.ts"
     "--skill"
@@ -29,15 +25,12 @@ assert !voice || (piperPackage != null && piperModel != null && piperConfig != n
 in
   pkgs.writeShellApplication {
     name = "scufris";
-    runtimeInputs =
-      [
-        pkgs.python3
-        pkgs.tmux
-      ]
-      ++ pkgs.lib.optionals voice [
-        piperPackage
-        pkgs.pipewire
-      ];
+    # No Piper here. The agent decides what is worth saying aloud and the
+    # frontend synthesises it, so nothing in this process tree makes sound.
+    runtimeInputs = [
+      pkgs.python3
+      pkgs.tmux
+    ];
     text = ''
       if [[ -z "''${SCUFRIS_PROJECT_ROOTS+x}" ]]; then
         export SCUFRIS_PROJECT_ROOTS=${pkgs.lib.escapeShellArg (builtins.toJSON projectRoots)}
@@ -45,8 +38,6 @@ in
       export SCUFRIS_ROLE=orchestrator
       ${pkgs.lib.optionalString voice ''
         export SCUFRIS_VOICE_AVAILABLE=1
-        export SCUFRIS_PIPER_MODEL=${pkgs.lib.escapeShellArg (toString piperModel)}
-        export SCUFRIS_PIPER_CONFIG=${pkgs.lib.escapeShellArg (toString piperConfig)}
       ''}
 
       pi=${pkgs.lib.escapeShellArg "${piPackage}/bin/pi"}

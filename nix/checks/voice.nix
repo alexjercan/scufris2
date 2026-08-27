@@ -1,5 +1,6 @@
-# Voice is Linux only. Speech runtime and assets must reach the voice closures
-# and no other, and the private Piper must really synthesise.
+# Voice is Linux only. The speaker is the companion's: the speech runtime and
+# the assets reach the synthesiser and the development shell and no launcher at
+# all, and the private Piper must really synthesise.
 {
   pkgs,
   scufris,
@@ -7,25 +8,43 @@
   ...
 }: let
   inherit (pkgs) lib;
-  inherit (scufris) voice voiceResources launcher voiceLauncher devShell;
+  inherit (scufris) voice voiceResources launcher voiceLauncher speak devShell;
   inherit (fixtures) fakePlayer;
   normalClosure = pkgs.closureInfo {rootPaths = [launcher];};
   voiceClosure = pkgs.closureInfo {rootPaths = [voiceLauncher];};
+  speakClosure = pkgs.closureInfo {rootPaths = [speak];};
   devShellClosure = pkgs.closureInfo {rootPaths = [devShell];};
 in
   lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
     closures = pkgs.runCommand "scufris-voice-closures-check" {} ''
       normal=${normalClosure}/store-paths
       voice=${voiceClosure}/store-paths
+      speak=${speakClosure}/store-paths
 
-      ! grep -Fx ${lib.escapeShellArg (toString voice.piperPackage)} "$normal"
-      ! grep -Fx ${lib.escapeShellArg (toString pkgs.piper-tts)} "$normal"
-      ! grep -Fx ${lib.escapeShellArg (toString pkgs.pipewire)} "$normal"
-      ! grep -Fx ${lib.escapeShellArg (toString voice.assets)} "$normal"
-      grep -Fx ${lib.escapeShellArg (toString voice.piperPackage)} "$voice"
-      grep -Fx ${lib.escapeShellArg (toString pkgs.pipewire)} "$voice"
-      grep -Fx ${lib.escapeShellArg (toString voice.assets)} "$voice"
-      ! grep -Fx ${lib.escapeShellArg (toString pkgs.piper-tts)} "$voice"
+      # Nothing in the agent's process tree makes sound, whichever resources it
+      # was handed. The voice launcher differs only in what it hands Pi.
+      for launcher in "$normal" "$voice"; do
+        ! grep -Fx ${lib.escapeShellArg (toString voice.piperPackage)} "$launcher"
+        ! grep -Fx ${lib.escapeShellArg (toString pkgs.piper-tts)} "$launcher"
+        ! grep -Fx ${lib.escapeShellArg (toString pkgs.pipewire)} "$launcher"
+        ! grep -Fx ${lib.escapeShellArg (toString voice.assets)} "$launcher"
+      done
+
+      grep -Fx ${lib.escapeShellArg (toString voice.piperPackage)} "$speak"
+      grep -Fx ${lib.escapeShellArg (toString pkgs.pipewire)} "$speak"
+      grep -Fx ${lib.escapeShellArg (toString voice.assets)} "$speak"
+      ! grep -Fx ${lib.escapeShellArg (toString pkgs.piper-tts)} "$speak"
+      touch "$out"
+    '';
+
+    # The companion is handed one program and no settings: the voice is pinned
+    # by the package rather than chosen at run time or by the environment.
+    synthesiser = pkgs.runCommand "scufris-synthesiser-check" {} ''
+      helper=${lib.getExe speak}
+      grep -F ${lib.escapeShellArg voice.model} "$helper"
+      grep -F ${lib.escapeShellArg voice.config} "$helper"
+      grep -F ${lib.escapeShellArg "${voiceResources}/share/scufris/tools/voice/scufris-speak"} "$helper" \
+        || grep -F scufris-speak "$helper"
       touch "$out"
     '';
 

@@ -22,15 +22,17 @@ existing conventions.
 
 [agents.review]
 description = "Read finished work independently and report findings."
-keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium", spawn = "review_of" }
+keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium", spawn = "review_of", command = "/scufris-review" }
 guidance = """
-Read-only against the implementation job's exact workspace. Report concrete
-findings with paths and lines. Keep one review job for the work: spawn it for
-the first round, then steer that same job with scufris_job_send for each later
-round, because a fresh reviewer has no record of what it already accepted.
-Spawn a second review job only when no owned review job covers this work.
-Repeat the implement-then-review cycle only for as long as the request asked
-for.
+Run `/scufris-review` over the range the work produced. It is this project's
+own review panel: it dispatches the reviewer lanes and adjudicates what they
+report, read-only against the implementation job's exact workspace. Report
+concrete findings with paths and lines. Keep one review job for the work:
+spawn it for the first round, then steer that same job with scufris_job_send
+for each later round, because a fresh reviewer has no record of what it
+already accepted. Spawn a second review job only when no owned review job
+covers this work. Repeat the implement-then-review cycle only for as long as
+the request asked for.
 """
 
 [agents.quick-review]

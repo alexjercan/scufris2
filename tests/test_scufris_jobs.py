@@ -603,8 +603,16 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
             self.assertIn(heading, markdown)
         # A fresh reviewer re-derives fault every round, so the menu tells the
         # foreground to steer the one review job instead of spawning another.
-        self.assertIn("steer that same job with scufris_job_send", markdown)
-        self.assertIn("no record of what it already accepted", markdown)
+        #
+        # Matched against the guidance with its line breaks collapsed. The
+        # sentence is prose in a wrapped block, so where it wraps is the
+        # author's business and not something an assertion should pin.
+        flowed = " ".join(markdown.split())
+        self.assertIn("steer that same job with scufris_job_send", flowed)
+        self.assertIn("no record of what it already accepted", flowed)
+        # The review agent is run through the project's own review command.
+        self.assertIn("command: /scufris-review", markdown)
+        self.assertIn("Run `/scufris-review` over the range", flowed)
 
     def test_general_job_uses_temporary_workspace_and_generic_events(self) -> None:
         job_id = "abc123def456"

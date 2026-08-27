@@ -1,6 +1,6 @@
 # Add the scufris-review skill
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 75
 - TAGS: review, skills
 
@@ -73,3 +73,18 @@ Done, against `50c6f90..f0e56a8`. Verdict and findings in
   longer than dispatching the panel did. The skill should say so.
 
 Open until the cap and that note land in `SKILL.md`.
+
+## Closed (2026-08-27)
+
+Both open items landed in `SKILL.md`.
+
+- The cap is 10000 changed lines, with a line saying what it is for: one
+  increment of one task runs to several thousand lines, so the cap is
+  there for a range nobody meant to ask for rather than for a big
+  change. Alex set the number.
+- The adjudication section now says to budget for it, and why: three
+  lanes wrong on the facts, one blocker ranked down, and re-deriving the
+  load-bearing claims took longer than dispatching the panel did.
+
+The skill works. Alex on the first real run: "the review I did last was
+ok so it's working".

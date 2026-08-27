@@ -23,9 +23,13 @@ Never fan out over an unresolved range.
 - `--task <id>`: the commits named in `tasks/<id>/TASK.md`.
 - `--worktree`: uncommitted changes, tracked and untracked.
 
-Stop above 2000 changed lines and offer a narrower range or a
+Stop above 10000 changed lines and offer a narrower range or a
 commit-by-commit pass. `origin/master..HEAD` and the last release tag
 are both too wide to be a default.
+
+One increment of one task is the unit this is written for, and one of
+those runs to several thousand lines. The cap is there for a range
+nobody meant to ask for, not for a big change.
 
 ## Build the bundle once
 
@@ -73,6 +77,11 @@ Do this in this session, not in a lane.
   higher.
 - Re-derive a load-bearing claim yourself before it reaches the
   verdict.
+
+Budget for this. It is where the value is and it is not cheap: in the
+first real run three lanes were wrong on the facts and one blocker had
+to be ranked down, and re-deriving each load-bearing claim from the
+tree took longer than dispatching the panel did.
 
 ## Report
 

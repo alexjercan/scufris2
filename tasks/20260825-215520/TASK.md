@@ -1,6 +1,6 @@
 # Widget runtime: implementation
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 85
 - TAGS: widgets, desktop
 
@@ -249,3 +249,32 @@ Checks: `cargo test` 233 passed, `cargo clippy --all-targets` clean,
 `cargo fmt --check` clean, `npm run check` 140 tests with Prettier
 clean, `nix build .#scufris-desktop` and `.#docs` green, `nix flake
 check` all checks passed.
+
+## Closed (2026-08-27)
+
+Closed by Alex: "close this one it's done and we are not going to
+implement anything from here".
+
+The runtime is built and in use. Increments 1 and 2 landed, all thirty
+review findings are fixed, and two of increment 3's three parts landed.
+The rest of the scope is not pending; it is dead, in two different ways.
+
+- **The `tasks` widget was resolved by deletion, not by decision.** It
+  was blocked on a real question - an unfocusable window cannot receive
+  keystrokes, so a hand-typed entry has nowhere to land. Task
+  `20260827-081702` then deleted `note` and `tasks` and the `tasks`
+  backend outright. The question is still unanswered and still belongs
+  to `20260825-153746` if anything ever needs typing into a panel.
+  Shipped widgets are now `timer`, `cpu`, `claude`, and `codex`.
+- **Increment 4 is superseded twice over.** "The session HUD lands as a
+  widget on this runtime" pointed at `20260825-153801`, which is CLOSED
+  and tagged `wontdo`. The conversation window shipped in
+  `20260827-081702` instead, as its own focusable, not-always-on-top
+  window - explicitly not a widget shell, per D-HUD-6: the pill and the
+  panels are indicators to be seen over what is under them, and this is
+  a window the person works in.
+
+Live acceptance of the shelf and the pin came from Alex on the desktop:
+"I asked it even to pin the widgets and it moved them on the sides".
+The increment 1 verification line cannot be run as written - "show a
+note" names a widget that no longer exists.

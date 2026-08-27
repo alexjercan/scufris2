@@ -1,0 +1,1425 @@
+<title>Scufris as a Service</title>
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap"
+/>
+<style>
+  :root {
+    --bg: #181818;
+    --bg1: #1c1c1c;
+    --bg2: #282828;
+    --bg3: #453d41;
+    --bg4: #52494e;
+    --fg: #e4e4ef;
+    --fg1: #f4f4ff;
+    --yellow: #ffdd33;
+    --brown: #cc8c3c;
+    --quartz: #95a99f;
+    --niagara: #96a6c8;
+    --wisteria: #9e95c7;
+    --green: #73c936;
+    --red: #f43841;
+    --mono:
+      "Iosevka", "Iosevka Term", "JetBrains Mono", ui-monospace, monospace;
+  }
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 14.5px;
+    line-height: 1.65;
+  }
+  .wrap {
+    max-width: 1060px;
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    color: var(--fg1);
+  }
+  code {
+    color: var(--brown);
+    font-size: 0.92em;
+  }
+  a {
+    color: var(--niagara);
+  }
+  p {
+    max-width: 76ch;
+    margin-bottom: 12px;
+  }
+  ul,
+  ol {
+    max-width: 76ch;
+    list-style: none;
+    margin-bottom: 12px;
+  }
+  ul li {
+    padding-left: 18px;
+    position: relative;
+    margin-bottom: 6px;
+  }
+  ul li::before {
+    content: ">";
+    position: absolute;
+    left: 0;
+    color: var(--bg4);
+  }
+  ol {
+    counter-reset: step;
+  }
+  ol li {
+    padding-left: 26px;
+    position: relative;
+    margin-bottom: 8px;
+    counter-increment: step;
+  }
+  ol li::before {
+    content: counter(step, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    color: var(--bg4);
+    font-weight: 800;
+    font-size: 12px;
+  }
+  ul li b,
+  ol li b,
+  p b {
+    color: var(--fg1);
+    font-weight: 700;
+  }
+
+  .mast {
+    padding: 64px 0 36px;
+    border-bottom: 1px solid var(--bg2);
+  }
+  .mast .kicker {
+    font-size: 12px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--quartz);
+    margin-bottom: 14px;
+  }
+  .mast h1 {
+    font-size: 34px;
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+  }
+  .mast .sub {
+    margin-top: 14px;
+    color: var(--fg);
+    max-width: 80ch;
+  }
+  .mast .sub em {
+    color: var(--wisteria);
+    font-style: normal;
+  }
+
+  nav.toc {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+    padding: 20px 0 0;
+    font-size: 12px;
+  }
+  nav.toc a {
+    color: var(--bg4);
+    text-decoration: none;
+  }
+  nav.toc a:hover,
+  nav.toc a:focus-visible {
+    color: var(--niagara);
+  }
+
+  section {
+    padding: 52px 0 10px;
+  }
+  .shead {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 26px;
+    align-items: baseline;
+  }
+  .snum {
+    color: var(--bg4);
+    font-weight: 800;
+    font-size: 15px;
+  }
+  .shead h2 {
+    font-size: 21px;
+  }
+  .srule {
+    flex: 1;
+    height: 1px;
+    background: var(--bg2);
+    align-self: center;
+  }
+  .stag {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--bg4);
+    white-space: nowrap;
+  }
+
+  .panel {
+    background: var(--bg1);
+    border: 1px solid #33302e;
+    position: relative;
+    padding: 22px;
+    margin: 18px 0;
+  }
+  .panel h3 {
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    color: var(--fg1);
+  }
+  .panel.decide {
+    border-left: 2px solid var(--wisteria);
+  }
+  .panel.decide h3 {
+    color: var(--wisteria);
+  }
+  .panel.risk {
+    border-left: 2px solid var(--red);
+  }
+  .panel.risk h3 {
+    color: var(--red);
+  }
+  .panel.free {
+    border-left: 2px solid var(--green);
+  }
+  .panel.free h3 {
+    color: var(--green);
+  }
+  .rec {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--bg2);
+    font-size: 13.5px;
+  }
+  .rec b {
+    color: var(--yellow);
+  }
+
+  .cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  @media (max-width: 820px) {
+    .cols {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  pre.code {
+    background: #101010;
+    border: 1px solid var(--bg2);
+    padding: 16px 18px;
+    margin: 14px 0;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: #c9c9d6;
+    overflow-x: auto;
+  }
+  pre.code .cm {
+    color: #6b6b76;
+  }
+  pre.code .k {
+    color: var(--yellow);
+  }
+  pre.code .s {
+    color: var(--green);
+  }
+  pre.code .t {
+    color: var(--niagara);
+  }
+
+  .tblwrap {
+    overflow-x: auto;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+    margin: 14px 0;
+  }
+  th {
+    color: var(--quartz);
+    text-align: left;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  th,
+  td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--bg2);
+    vertical-align: top;
+  }
+  td:first-child {
+    white-space: nowrap;
+    color: var(--fg1);
+  }
+  td.no {
+    color: var(--bg4);
+  }
+
+  figure {
+    margin: 22px 0;
+  }
+  figure svg {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    background: #101010;
+    border: 1px solid var(--bg2);
+  }
+  figcaption {
+    font-size: 12px;
+    color: var(--quartz);
+    margin-top: 8px;
+    max-width: 82ch;
+  }
+
+  .keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 16px 0;
+  }
+  .keycard {
+    background: var(--bg1);
+    border: 1px solid #33302e;
+    padding: 14px 16px;
+    flex: 1 1 240px;
+  }
+  .keycard .kb {
+    color: var(--yellow);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+  }
+  .keycard p {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: var(--fg);
+  }
+
+  footer {
+    padding: 60px 0 80px;
+    color: var(--bg4);
+    font-size: 12px;
+    border-top: 1px solid var(--bg2);
+    margin-top: 40px;
+  }
+</style>
+
+<div class="wrap">
+  <header class="mast">
+    <div class="kicker">
+      Architecture &middot; 2026-08-27 &middot; task 20260827-081702
+    </div>
+    <h1>Scufris as a Service</h1>
+    <p class="sub">
+      The conversation stops living in a terminal window. A daemon owns
+      <code>pi</code>, the session, and the socket; the desktop app becomes the
+      microphone, the speaker, and the screen.
+      <em
+        >The server moves from the agent to the service, and everything else
+        becomes a client.</em
+      >
+    </p>
+    <nav class="toc">
+      <a href="#s01">01 The inversion</a>
+      <a href="#s02">02 Who owns what</a>
+      <a href="#s03">03 The seams</a>
+      <a href="#s04">04 Free from the stream</a>
+      <a href="#s05">05 Surfaces</a>
+      <a href="#s06">06 One turn</a>
+      <a href="#s07">07 What this deletes</a>
+      <a href="#s08">08 What this costs</a>
+      <a href="#s09">09 Open decisions</a>
+      <a href="#s10">10 Increments</a>
+    </nav>
+  </header>
+
+  <section id="s01">
+    <div class="shead">
+      <span class="snum">01</span>
+      <h2>The inversion</h2>
+      <span class="srule"></span>
+      <span class="stag">Thesis</span>
+    </div>
+
+    <p>
+      Today the Pi process in the Kitty scratchpad is the server. It binds
+      <code>$XDG_RUNTIME_DIR/scufris/daemon.sock</code>, and the desktop
+      companion connects out to it. That is why the Home Manager module asserts
+      that enabling the desktop requires enabling the popup: without the
+      terminal window there is no socket, and without the socket there is no
+      Scufris.
+    </p>
+    <p>
+      The conversation is therefore pinned to a window. Close the window and the
+      assistant is gone. That is the thing worth fixing, and everything in this
+      document follows from fixing exactly that.
+    </p>
+    <p>
+      <b>A new process, <code>scufris-service</code>, becomes the server.</b> It
+      spawns <code>pi --mode rpc</code> and owns the session. It serves one
+      socket. Both the agent and the desktop app connect to it. No user
+      interface owns the conversation any more, so no user interface can take it
+      away.
+    </p>
+
+    <figure>
+      <svg
+        viewBox="0 0 1000 400"
+        role="img"
+        aria-label="Today the Pi process serves the socket and the desktop connects to it. In the proposal a new scufris-service serves one socket, spawns Pi over stdio, and both Pi and the desktop connect to it as clients."
+      >
+        <defs>
+          <marker
+            id="ar"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
+          </marker>
+          <marker
+            id="arn"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#96a6c8" />
+          </marker>
+        </defs>
+
+        <text
+          x="30"
+          y="34"
+          fill="#95a99f"
+          font-size="11"
+          letter-spacing="2.4"
+          font-family="monospace"
+        >
+          TODAY
+        </text>
+        <text
+          x="560"
+          y="34"
+          fill="#95a99f"
+          font-size="11"
+          letter-spacing="2.4"
+          font-family="monospace"
+        >
+          PROPOSED
+        </text>
+        <line
+          x1="500"
+          y1="20"
+          x2="500"
+          y2="380"
+          stroke="currentColor"
+          stroke-opacity="0.14"
+        />
+
+        <g font-family="monospace" font-size="12.5" fill="currentColor">
+          <rect
+            x="60"
+            y="64"
+            width="300"
+            height="52"
+            fill="none"
+            stroke="#ffdd33"
+          />
+          <text x="76" y="88">pi (Kitty window, TUI)</text>
+          <text x="76" y="106" font-size="11" fill="#95a99f">
+            owns session &middot; serves daemon.sock
+          </text>
+          <text x="372" y="84" font-size="10.5" fill="#73c936">piper</text>
+          <text x="372" y="100" font-size="10.5" fill="#73c936">speaks</text>
+
+          <rect
+            x="60"
+            y="212"
+            width="300"
+            height="52"
+            fill="none"
+            stroke="currentColor"
+            stroke-opacity="0.55"
+          />
+          <text x="76" y="236">scufris-desktop</text>
+          <text x="76" y="254" font-size="11" fill="#95a99f">
+            pill, tray, widgets &middot; serves desktop.sock
+          </text>
+          <text x="372" y="232" font-size="10.5" fill="#73c936">mic +</text>
+          <text x="372" y="248" font-size="10.5" fill="#73c936">whisper</text>
+
+          <rect
+            x="60"
+            y="320"
+            width="300"
+            height="36"
+            fill="none"
+            stroke="currentColor"
+            stroke-opacity="0.3"
+          />
+          <text x="76" y="343" fill-opacity="0.75">
+            scufris-ctl (i3 binding mode)
+          </text>
+
+          <line
+            x1="210"
+            y1="212"
+            x2="210"
+            y2="120"
+            stroke="currentColor"
+            marker-end="url(#ar)"
+          />
+          <text x="222" y="170" font-size="11" fill="#ffdd33">daemon.sock</text>
+          <line
+            x1="210"
+            y1="320"
+            x2="210"
+            y2="268"
+            stroke="currentColor"
+            stroke-opacity="0.5"
+            marker-end="url(#ar)"
+          />
+          <text x="222" y="300" font-size="11" fill-opacity="0.6">
+            desktop.sock
+          </text>
+        </g>
+
+        <g font-family="monospace" font-size="12.5" fill="currentColor">
+          <rect
+            x="560"
+            y="64"
+            width="382"
+            height="52"
+            fill="none"
+            stroke="#96a6c8"
+            stroke-width="1.6"
+          />
+          <text x="576" y="88" fill="#96a6c8">scufris-service</text>
+          <text x="576" y="106" font-size="11" fill="#95a99f">
+            owns session &middot; serves service.sock
+          </text>
+
+          <rect
+            x="560"
+            y="204"
+            width="176"
+            height="52"
+            fill="none"
+            stroke="currentColor"
+            stroke-opacity="0.55"
+          />
+          <text x="574" y="228">pi --mode rpc</text>
+          <text x="574" y="246" font-size="11" fill="#95a99f">the brain</text>
+
+          <rect
+            x="766"
+            y="204"
+            width="176"
+            height="52"
+            fill="none"
+            stroke="currentColor"
+            stroke-opacity="0.55"
+          />
+          <text x="780" y="228">scufris-desktop</text>
+          <text x="780" y="246" font-size="11" fill="#95a99f">
+            mic, whisper, piper
+          </text>
+
+          <rect
+            x="560"
+            y="320"
+            width="382"
+            height="36"
+            fill="none"
+            stroke="currentColor"
+            stroke-opacity="0.3"
+          />
+          <text x="576" y="343" fill-opacity="0.75">
+            scufris-ctl (scripts, key bindings)
+          </text>
+
+          <line
+            x1="600"
+            y1="204"
+            x2="600"
+            y2="120"
+            stroke="#96a6c8"
+            stroke-dasharray="4 4"
+            marker-start="url(#arn)"
+          />
+          <text
+            x="516"
+            y="150"
+            font-size="10.5"
+            fill="#96a6c8"
+            text-anchor="end"
+          >
+            spawns
+          </text>
+          <text
+            x="516"
+            y="166"
+            font-size="10.5"
+            fill="#96a6c8"
+            text-anchor="end"
+          >
+            stdio
+          </text>
+
+          <line
+            x1="700"
+            y1="204"
+            x2="700"
+            y2="120"
+            stroke="currentColor"
+            marker-end="url(#ar)"
+          />
+          <text x="712" y="160" font-size="10.5" fill="#ffdd33">tools</text>
+
+          <line
+            x1="854"
+            y1="204"
+            x2="854"
+            y2="120"
+            stroke="currentColor"
+            marker-end="url(#ar)"
+          />
+          <text x="866" y="160" font-size="10.5" fill="#ffdd33">surfaces</text>
+
+          <line
+            x1="751"
+            y1="320"
+            x2="751"
+            y2="268"
+            stroke="currentColor"
+            stroke-opacity="0.5"
+            marker-end="url(#ar)"
+          />
+          <text x="763" y="300" font-size="11" fill-opacity="0.6">
+            service.sock
+          </text>
+        </g>
+      </svg>
+      <figcaption>
+        The whole change in one picture. The box with the accent border is the
+        one that binds the socket; every arrow points at whoever is the server.
+        Today that is the agent, in a terminal window. Tomorrow it is a daemon,
+        and the agent is a client like everything else.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section id="s02">
+    <div class="shead">
+      <span class="snum">02</span>
+      <h2>Who owns what</h2>
+      <span class="srule"></span>
+      <span class="stag">Four processes</span>
+    </div>
+
+    <p>
+      Four processes, and the boundaries are drawn so that each one can be
+      described in a sentence. What a process does <em>not</em> do matters as
+      much: a service that grew rendering or synthesis into it would be the
+      thing this design is trying not to build.
+    </p>
+
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Process</th>
+            <th>Owns</th>
+            <th>Never</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>scufris-service</td>
+            <td>
+              The session directory. Spawning and supervising the agent. The one
+              socket and who is connected to it. Assistant state. A bounded
+              transcript ring so a reconnecting screen has something to draw.
+              Routing surface commands between the agent and the frontend.
+            </td>
+            <td class="no">
+              No audio. No synthesis. No rendering. No windows. No model calls.
+              No tools.
+            </td>
+          </tr>
+          <tr>
+            <td>pi --mode rpc</td>
+            <td>
+              The thinking. Tools, sub-agents, skills, jobs, the workflow
+              engine, Calm policy, response shaping. Everything under
+              <code>extensions/scufris/</code> keeps running here, unchanged
+              except for the desktop extension.
+            </td>
+            <td class="no">
+              Binds no socket. Owns no window. Speaks nothing aloud.
+            </td>
+          </tr>
+          <tr>
+            <td>scufris-desktop</td>
+            <td>
+              Every pixel and every sample. The pill, the textbox, the HUD, the
+              tray, the widget runtime. Microphone capture and the whisper
+              client. Piper synthesis and playback. Hotkeys and focus
+              restoration.
+            </td>
+            <td class="no">
+              Holds no conversation. Persists nothing but its own unsent words.
+            </td>
+          </tr>
+          <tr>
+            <td>whisper-server</td>
+            <td>
+              Transcription over HTTP. Already a separate unit, already
+              optional, already someone else's if you point at an endpoint.
+            </td>
+            <td class="no">Knows nothing about Scufris.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      Putting whisper <em>and</em> piper behind the desktop app is the decision
+      that makes the service simple. The service handles text and only text. It
+      cannot speak, which means a headless service is silent by construction
+      rather than by configuration, and voice becomes a property of the machine
+      you are sitting at rather than a property of the assistant.
+    </p>
+    <p>
+      The half of this that already works this way is the microphone: capture
+      and the whisper client are in the companion today. The half that moves is
+      piper, which currently runs inside the Pi process. The seam is clean,
+      because the two halves of speech are already separate concerns:
+      <b>shaping</b> stays in the agent, where the <code>voice</code> extension
+      decides what is safe to say aloud, and <b>synthesis</b> moves to the
+      frontend, which is the thing with a speaker.
+    </p>
+  </section>
+
+  <section id="s03">
+    <div class="shead">
+      <span class="snum">03</span>
+      <h2>The seams</h2>
+      <span class="srule"></span>
+      <span class="stag">Three protocols</span>
+    </div>
+
+    <p>
+      Three, and two of them already exist. That is the pleasant surprise of
+      this design: almost nothing new has to be invented, because the protocol
+      work done for widgets was done against the right abstraction.
+    </p>
+
+    <div class="panel">
+      <h3>Seam 1 &mdash; service to agent: Pi RPC over stdio</h3>
+      <p>
+        Pi's own documented protocol, LF-terminated JSON lines on the child's
+        stdin and stdout. Scufris already drives it for standalone Quick Review
+        (<code>tools/quick-review-agent</code>), so this is a road we have
+        walked.
+      </p>
+      <pre class="code"><span class="cm">// service -> agent</span>
+{<span class="t">"id"</span>: <span class="s">"u-41"</span>, <span class="t">"type"</span>: <span class="k">"prompt"</span>, <span class="t">"message"</span>: <span class="s">"what is on my calendar"</span>}
+{<span class="t">"type"</span>: <span class="k">"prompt"</span>, <span class="t">"message"</span>: <span class="s">"..."</span>, <span class="t">"streamingBehavior"</span>: <span class="s">"steer"</span>}
+{<span class="t">"type"</span>: <span class="k">"abort"</span>}
+
+<span class="cm">// agent -> service</span>
+{<span class="t">"type"</span>: <span class="k">"agent_start"</span>}
+{<span class="t">"type"</span>: <span class="k">"message_end"</span>, <span class="t">"message"</span>: {<span class="cm">...</span>}}
+{<span class="t">"type"</span>: <span class="k">"tool_execution_start"</span>, <span class="cm">...</span>}
+{<span class="t">"type"</span>: <span class="k">"agent_settled"</span>}</pre>
+      <p>
+        The service is the RPC client. It writes prompts and reads events, and
+        that stream is where assistant state and the HUD transcript both come
+        from.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h3>Seam 2 &mdash; agent to service: the surface protocol, inverted</h3>
+      <p>
+        Tool calls originate inside a model turn and need an answer.
+        <code>scufris_widget_open</code> has to return a surface identifier
+        before the tool result is written, so it cannot ride the event stream.
+        It needs a request and response channel, which is exactly what
+        <code>extensions/scufris/desktop/</code> already implements.
+      </p>
+      <p>
+        So the code stays and the direction flips. <code>server.ts</code> stops
+        calling <code>createServer</code> and starts connecting out to the
+        service, the way <code>daemon.rs</code> does today. The correlation
+        identifiers, the five-second bound, the typed error codes, the
+        well-formedness checks and the shared fixtures all survive. The socket
+        lock disappears, because the service binds the socket and systemd makes
+        sure there is one of it.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h3>
+        Seam 3 &mdash; frontend to service: the same socket, a second role
+      </h3>
+      <p>
+        One socket, two kinds of client, declared in the hello. Protocol v3 is
+        v2 plus a role and the message types the frontend needs.
+      </p>
+      <pre class="code"><span class="cm">// frontend -> service</span>
+{<span class="t">"v"</span>: 3, <span class="t">"type"</span>: <span class="k">"hello"</span>, <span class="t">"role"</span>: <span class="s">"frontend"</span>, <span class="t">"voice"</span>: <span class="k">true</span>}
+{<span class="t">"v"</span>: 3, <span class="t">"type"</span>: <span class="k">"submit"</span>, <span class="t">"id"</span>: <span class="s">"u-41"</span>, <span class="t">"text"</span>: <span class="s">"..."</span>}
+{<span class="t">"v"</span>: 3, <span class="t">"type"</span>: <span class="k">"speaking"</span>, <span class="t">"active"</span>: <span class="k">true</span>}   <span class="cm">// piper started</span>
+{<span class="t">"v"</span>: 3, <span class="t">"type"</span>: <span class="k">"widget_event"</span>, <span class="cm">...</span>}
+
+<span class="cm">// service -> frontend</span>
+{<span class="t">"v"</span>: 3, <span class="t">"type"</span>: <span class="k">"state"</span>, <span class="t">"state"</span>: <span class="s">"working"</span>}
+{<span class="t">"v"</span>: 3, <span class="t">"type"</span>: <span class="k">"say"</span>, <span class="t">"text"</span>: <span class="s">"..."</span>}       <span class="cm">// shaped by the voice extension</span>
+{<span class="t">"v"</span>: 3, <span class="t">"type"</span>: <span class="k">"transcript"</span>, <span class="t">"entry"</span>: {<span class="cm">...</span>}} <span class="cm">// for the HUD</span>
+{<span class="t">"v"</span>: 3, <span class="t">"type"</span>: <span class="k">"widget_open"</span>, <span class="cm">...</span>}</pre>
+      <p>
+        The service routes rather than interprets. A surface command from the
+        agent goes out to the frontend and its answer comes back under the same
+        correlation identifier. When no frontend is connected the service
+        answers <code>companion_unavailable</code> itself, which is a code the
+        widget tools already handle.
+      </p>
+    </div>
+
+    <p>
+      <code>scufris-ctl</code> becomes a client of seam 3 with a third role,
+      <code>control</code>. That gives it real verbs for the first time:
+      <code>send</code>, <code>listen</code>, <code>cancel</code>,
+      <code>abort</code>, <code>state</code>, <code>detach</code>,
+      <code>attach</code>. It works with no graphical session at all, which is
+      how the service gets tested without a display.
+    </p>
+  </section>
+
+  <section id="s04">
+    <div class="shead">
+      <span class="snum">04</span>
+      <h2>What the stream gives us for free</h2>
+      <span class="srule"></span>
+      <span class="stag">Read before building</span>
+    </div>
+
+    <p>
+      Pi's RPC events answer several questions that Scufris currently answers
+      with code of its own. Reading the event table before writing the service
+      removes work rather than adding it.
+    </p>
+
+    <div class="panel free">
+      <h3>Assistant state stops being computed</h3>
+      <p>
+        <code>agent_start</code>, <code>tool_execution_start</code> and
+        <code>agent_settled</code> are the state machine. Idle is settled,
+        working is anything between. The desktop extension's own state
+        derivation goes away, and so does the risk of it disagreeing with what
+        Pi is actually doing.
+      </p>
+    </div>
+
+    <div class="panel free">
+      <h3>Speaking becomes reported by whoever speaks</h3>
+      <p>
+        Because piper moves to the frontend, the frontend is what knows when
+        speech starts and stops, and it says so. That is strictly better than
+        today, where the widget ageing rule stops its clocks on a speaking state
+        inferred one process away from the speaker.
+      </p>
+    </div>
+
+    <div class="panel free">
+      <h3>Talking over a running turn gets a real answer</h3>
+      <p>
+        <code>streamingBehavior: "steer"</code> delivers a message after the
+        current turn's tool calls and before the next model call;
+        <code>"followUp"</code> waits for the run to settle. So "I said
+        something while it was thinking" stops being an awkward case and becomes
+        a choice with two documented behaviours.
+      </p>
+    </div>
+
+    <div class="panel free">
+      <h3>Stop is now possible</h3>
+      <p>
+        <code>abort</code> ends the current run. There is no way to do that from
+        the pill today. It becomes a verb on the ctl and a key on the frontend.
+      </p>
+    </div>
+
+    <div class="panel free">
+      <h3>The HUD's history has a source</h3>
+      <p>
+        <code>message_end</code> carries complete messages, and
+        <code>get_entries</code> fetches session history on demand. The service
+        keeps a bounded ring for the common case &mdash; a frontend restarting
+        needs the last screenful, not the last month &mdash; and asks the agent
+        for anything deeper.
+      </p>
+    </div>
+
+    <div class="panel risk">
+      <h3>One thing that must not be skipped</h3>
+      <p>
+        In RPC mode, extension user-interface requests (<code>notify</code>,
+        <code>confirm</code>, <code>input</code>, <code>select</code>,
+        <code>editor</code>) are emitted on stdout and wait for an answer on
+        stdin. Today the TUI answers them. If the service does not, an extension
+        that opens a dialog hangs the agent.
+      </p>
+      <p>
+        Scufris extensions currently use only <code>notify</code>, which is
+        fire-and-forget, so the immediate exposure is small. The service must
+        still answer every request type &mdash; routing what it can to the
+        frontend and replying with a cancellation for the rest. And
+        <code>notify</code> stops being a line in a terminal nobody is looking
+        at and becomes a tray notification, which is an improvement worth taking
+        on day one.
+      </p>
+    </div>
+  </section>
+
+  <section id="s05">
+    <div class="shead">
+      <span class="snum">05</span>
+      <h2>Surfaces</h2>
+      <span class="srule"></span>
+      <span class="stag">Voice is a capability</span>
+    </div>
+
+    <p>
+      One correction to the sketch, and it makes the rest fall into place.
+      <b>Voice is not a mode, and the HUD is not the other mode.</b> They are a
+      capability and a surface, and they compose: reading the transcript while
+      talking is an ordinary thing to want, and a design where enabling voice
+      hides the conversation would be one to regret.
+    </p>
+    <p>
+      So the frontend has four surfaces and one flag. The flag,
+      <code>voice</code>, decides only whether the microphone and the speaker
+      exist.
+    </p>
+
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Surface</th>
+            <th>What it is</th>
+            <th>Keyboard</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Pill</td>
+            <td>
+              The orb. An indicator and nothing else: listening, working,
+              speaking, attention, disconnected. It has no keys of its own any
+              more.
+            </td>
+            <td class="no">Never focused</td>
+          </tr>
+          <tr>
+            <td>Textbox</td>
+            <td>
+              The one thing that sends. It opens empty in text mode and
+              pre-filled with the transcription in voice mode. Same window, same
+              keys, either way.
+            </td>
+            <td>Takes focus</td>
+          </tr>
+          <tr>
+            <td>HUD</td>
+            <td>
+              The Calm conversation, rendered from the transcript stream.
+              Available whether or not voice is on, toggled by its own key.
+            </td>
+            <td>Takes focus to scroll and copy</td>
+          </tr>
+          <tr>
+            <td>Widgets</td>
+            <td>
+              Unchanged. The runtime stays in the frontend; its commands arrive
+              through the service instead of directly.
+            </td>
+            <td class="no">Never focused</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      <b
+        >The textbox being the only sender is the simplification that pays for
+        itself.</b
+      >
+      Recording is no longer a way to submit; it is a way to fill the box. You
+      always see the words before they go, the review state and the recording
+      state collapse into one window, and the frontend has exactly one code path
+      from text to <code>submit</code>.
+    </p>
+    <p>
+      The cost is honest and worth naming: voice submission becomes two
+      keypresses plus Enter, where today Enter while recording sends
+      immediately. That is slower, and it is the trade you asked for &mdash;
+      never sending words you have not read.
+    </p>
+  </section>
+
+  <section id="s06">
+    <div class="shead">
+      <span class="snum">06</span>
+      <h2>One turn, keystroke by keystroke</h2>
+      <span class="srule"></span>
+      <span class="stag">Interaction</span>
+    </div>
+
+    <div class="keys">
+      <div class="keycard">
+        <div class="kb">Super+D</div>
+        <p>
+          Advance. Nothing up: pill rises, microphone opens. Listening: stop,
+          transcribe, open the textbox with the words in it. Text mode: open the
+          textbox empty.
+        </p>
+      </div>
+      <div class="keycard">
+        <div class="kb">Super+Escape</div>
+        <p>
+          Cancel the listen. Discards the recording and puts the pill back to
+          rest.
+        </p>
+      </div>
+      <div class="keycard">
+        <div class="kb">Enter / Escape</div>
+        <p>
+          In the textbox only, which holds the keyboard, so these are ordinary
+          keys in a focused window. Send, or discard.
+        </p>
+      </div>
+    </div>
+
+    <figure>
+      <svg
+        viewBox="0 0 980 560"
+        role="img"
+        aria-label="Sequence diagram of one voice turn across four lanes: the person, scufris-desktop, scufris-service and pi. Super+D opens the microphone, a second Super+D transcribes into a focused textbox, Enter submits to the service, the service prompts pi over stdio, and events flow back as state and spoken text."
+      >
+        <defs>
+          <marker
+            id="sq"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
+          </marker>
+        </defs>
+
+        <g font-family="monospace" font-size="11.5" fill="#95a99f">
+          <text x="70" y="26" text-anchor="middle">you</text>
+          <text x="330" y="26" text-anchor="middle">scufris-desktop</text>
+          <text x="620" y="26" text-anchor="middle">scufris-service</text>
+          <text x="880" y="26" text-anchor="middle">pi --mode rpc</text>
+        </g>
+
+        <g stroke="currentColor" stroke-opacity="0.18">
+          <line x1="70" y1="40" x2="70" y2="540" />
+          <line x1="330" y1="40" x2="330" y2="540" />
+          <line x1="620" y1="40" x2="620" y2="540" />
+          <line x1="880" y1="40" x2="880" y2="540" />
+        </g>
+
+        <g
+          font-family="monospace"
+          font-size="11.5"
+          fill="currentColor"
+          stroke="currentColor"
+        >
+          <line x1="70" y1="76" x2="326" y2="76" marker-end="url(#sq)" />
+          <text x="84" y="68" stroke="none" fill="#ffdd33">Super+D</text>
+          <text x="342" y="80" stroke="none" fill-opacity="0.7">
+            pill up, mic open
+          </text>
+
+          <line x1="70" y1="122" x2="326" y2="122" marker-end="url(#sq)" />
+          <text x="84" y="114" stroke="none" fill="#ffdd33">Super+D</text>
+          <text x="342" y="126" stroke="none" fill-opacity="0.7">
+            stop, post to whisper
+          </text>
+
+          <line x1="330" y1="164" x2="330" y2="164" />
+          <text x="342" y="168" stroke="none" fill="#73c936">
+            textbox opens, takes focus
+          </text>
+
+          <line x1="70" y1="204" x2="326" y2="204" marker-end="url(#sq)" />
+          <text x="84" y="196" stroke="none" fill="#ffdd33">Enter</text>
+
+          <line x1="334" y1="242" x2="616" y2="242" marker-end="url(#sq)" />
+          <text x="348" y="234" stroke="none">submit {id, text}</text>
+
+          <line x1="624" y1="280" x2="876" y2="280" marker-end="url(#sq)" />
+          <text x="638" y="272" stroke="none">prompt (stdio)</text>
+
+          <line x1="876" y1="318" x2="624" y2="318" marker-end="url(#sq)" />
+          <text x="638" y="310" stroke="none">agent_start</text>
+
+          <line x1="616" y1="352" x2="334" y2="352" marker-end="url(#sq)" />
+          <text x="348" y="344" stroke="none">state: working</text>
+          <text
+            x="180"
+            y="356"
+            stroke="none"
+            fill-opacity="0.7"
+            text-anchor="end"
+          >
+            orb spins
+          </text>
+
+          <line x1="876" y1="392" x2="624" y2="392" marker-end="url(#sq)" />
+          <text x="638" y="384" stroke="none">message_end</text>
+
+          <line x1="616" y1="426" x2="334" y2="426" marker-end="url(#sq)" />
+          <text x="348" y="418" stroke="none">say + transcript</text>
+          <text
+            x="180"
+            y="430"
+            stroke="none"
+            fill-opacity="0.7"
+            text-anchor="end"
+          >
+            piper speaks, HUD draws
+          </text>
+
+          <line x1="334" y1="464" x2="616" y2="464" marker-end="url(#sq)" />
+          <text x="348" y="456" stroke="none">speaking: true / false</text>
+
+          <line x1="876" y1="502" x2="624" y2="502" marker-end="url(#sq)" />
+          <text x="638" y="494" stroke="none">agent_settled</text>
+
+          <line x1="616" y1="534" x2="334" y2="534" marker-end="url(#sq)" />
+          <text x="348" y="526" stroke="none">state: idle</text>
+        </g>
+      </svg>
+      <figcaption>
+        Every arrow crossing a lane boundary is one of the three seams. Note
+        where the audio lives: whisper and piper are both inside the desktop
+        lane, and the service never sees a sample.
+      </figcaption>
+    </figure>
+
+    <p>
+      Two properties fall out of this that are worth stating plainly. The
+      service never needs a display, so the whole conversation path is testable
+      with <code>scufris-ctl send</code> and no graphical session. And the
+      frontend never needs the agent, so it can start, show a disconnected orb,
+      and connect when the service comes up &mdash; which is what it already
+      does today with <code>daemon.rs</code>.
+    </p>
+  </section>
+
+  <section id="s07">
+    <div class="shead">
+      <span class="snum">07</span>
+      <h2>What this deletes</h2>
+      <span class="srule"></span>
+      <span class="stag">Subtraction</span>
+    </div>
+
+    <p>
+      A design that only adds is a design to distrust. This one removes several
+      pieces of machinery that exist purely because the socket is in the wrong
+      process or because the pill has to steal the keyboard.
+    </p>
+
+    <ul>
+      <li>
+        <b>The i3 binding mode.</b> All of <code>keys.rs</code>, the
+        <code>SCUFRIS_DESKTOP_MODE_COMMAND</code> hook, the mode-enter and
+        mode-leave dance, and the documentation explaining it. Bare Enter and
+        Escape only ever needed rescuing because the pill wanted keys without
+        holding the keyboard. The textbox holds the keyboard, so they arrive
+        normally.
+      </li>
+      <li>
+        <b><code>desktop.sock</code> and <code>command.rs</code>.</b> The
+        companion stops being a server. <code>scufris-ctl accept</code> and the
+        <code>scufris://accept</code> page round trip go with it.
+      </li>
+      <li>
+        <b>The socket lock.</b> <code>tools/desktop/scufris-socket-lock</code>
+        exists because two popups could race for one socket name. A systemd
+        service does not race with itself.
+      </li>
+      <li>
+        <b
+          ><code>SCUFRIS_DAEMON</code> and the server half of the desktop
+          extension.</b
+        >
+        Roughly the accept loop and the lock dance; the protocol and the command
+        machinery stay.
+      </li>
+      <li>
+        <b>The Home Manager assertion</b> that the desktop requires the popup.
+        The dependency it encoded no longer exists.
+      </li>
+      <li>
+        <b>The review window as a separate state.</b> It becomes the textbox,
+        which is also the text-mode input.
+      </li>
+    </ul>
+  </section>
+
+  <section id="s08">
+    <div class="shead">
+      <span class="snum">08</span>
+      <h2>What this costs</h2>
+      <span class="srule"></span>
+      <span class="stag">Risks</span>
+    </div>
+
+    <div class="panel risk">
+      <h3>The Pi TUI goes away, and it is the best interface we have</h3>
+      <p>
+        This is the real cost and it should not be soft-pedalled. The Kitty
+        popup is a complete Pi terminal: model cycling, thinking levels, slash
+        commands, session forking, the config UI, scrollback, copy. RPC mode has
+        no TUI, and the HUD will not match it for a long time.
+      </p>
+      <p>
+        The mitigation is an explicit handoff rather than a second writer.
+        <code>scufris-ctl detach</code> stops the service's agent child and
+        leaves the session directory free; you then run an ordinary
+        <code>pi --continue</code> in any terminal against it and get everything
+        back. <code>scufris-ctl attach</code> restarts the child when you are
+        done. The service reports <code>detached</code> as an assistant state,
+        so the pill says so rather than looking broken. Two writers on one
+        session is never allowed, and the ctl is what enforces it.
+      </p>
+    </div>
+
+    <div class="panel risk">
+      <h3>The HUD is a large build hiding inside a small phrase</h3>
+      <p>
+        "Shows the Calm conversation" is a transcript renderer: streaming text,
+        thinking blocks, tool executions, custom messages, scrollback, and a
+        theme. It is comparable in size to the pill and the widget runtime
+        together. Until it exists, text mode means <code>scufris-ctl send</code>
+        and the detach hatch, and that has to be acceptable for a while or the
+        increments below are in the wrong order.
+      </p>
+    </div>
+
+    <div class="panel risk">
+      <h3>The service becomes the single point</h3>
+      <p>
+        Today a companion crash is harmless and a popup crash takes the socket.
+        Afterwards both frontends are disposable and the service is the thing
+        that must not die. That is the trade being bought deliberately: one
+        process to supervise, restarted by systemd, with the session on disk so
+        a restart resumes rather than forgets.
+      </p>
+    </div>
+  </section>
+
+  <section id="s09">
+    <div class="shead">
+      <span class="snum">09</span>
+      <h2>Open decisions</h2>
+      <span class="srule"></span>
+      <span class="stag">Needs a call</span>
+    </div>
+
+    <div class="panel decide">
+      <h3>D1 &mdash; Does the service spawn the frontend?</h3>
+      <p>
+        The sketch says the service starts the Tauri app as its frontend. The
+        difficulty is that a graphical client needs the display environment and
+        must die with the graphical session, which is what
+        <code>PartOf=graphical-session.target</code> already models. A service
+        on <code>default.target</code> spawning a GUI child fights that.
+      </p>
+      <div class="rec">
+        <b>Recommended:</b> the frontend stays its own unit, wanted by
+        <code>graphical-session.target</code>, and connects to the service. The
+        service still owns the relationship &mdash; it is the only server the
+        frontend has &mdash; and can start or restart it by asking systemd when
+        a session exists. Ownership by protocol, not by process parentage.
+      </div>
+    </div>
+
+    <div class="panel decide">
+      <h3>D2 &mdash; What is the service written in?</h3>
+      <p>
+        Three real options. <b>Rust</b>, in the existing cargo workspace,
+        driving <code>pi --mode rpc</code> as a child. <b>TypeScript</b>,
+        driving the same child, reusing <code>server.ts</code> nearly unchanged.
+        <b>TypeScript embedding <code>AgentSession</code></b
+        >, which Pi's own documentation suggests for Node clients and which
+        would remove the subprocess entirely &mdash; at the price of re-wiring
+        what the <code>pi</code> CLI does for us: settings, extension discovery,
+        skills, prompt templates, session resolution.
+      </p>
+      <div class="rec">
+        <b>Recommended:</b> Rust. The workspace, the protocol crate, and the
+        supervision patterns all exist &mdash; the widget backends are already
+        supervised exactly this way, process group and all. The RPC stream is a
+        documented line protocol, so we couple to Pi's protocol rather than to
+        Pi's internals, and <code>pi</code> keeps doing everything the CLI does.
+      </div>
+    </div>
+
+    <div class="panel decide">
+      <h3>D3 &mdash; Where does the repository put it?</h3>
+      <p>
+        <code>desktop/</code> is named for the runtime architecture, and a
+        service that is not a desktop thing does not belong under it.
+      </p>
+      <div class="rec">
+        <b>Recommended:</b> rename the workspace to <code>native/</code> holding
+        three crates: <code>scufris-control</code> (protocol),
+        <code>scufris-service</code>, and <code>scufris-desktop</code>. One
+        rename, done once, before there are two things to move.
+      </div>
+    </div>
+
+    <div class="panel decide">
+      <h3>D4 &mdash; Does the HUD replace the popup, or join it?</h3>
+      <p>
+        Related to D1 and to the first risk. If the popup unit survives as a
+        detach target, the migration is gentle and nothing is lost early. If it
+        is retired with the last increment, the HUD has to be finished first.
+      </p>
+      <div class="rec">
+        <b>Recommended:</b> keep the popup as a detach target from the start and
+        retire the unit only when the HUD is genuinely better. The escape hatch
+        costs nothing while it is unused.
+      </div>
+    </div>
+
+    <div class="panel decide">
+      <h3>D5 &mdash; What speaks, exactly?</h3>
+      <p>
+        The <code>voice</code> extension currently decides what is safe to say
+        aloud and calls <code>scufris-speak</code>. With synthesis in the
+        frontend it instead emits shaped text. The question is whether that
+        travels as a surface command over seam 2, or as a field on the
+        transcript entries over seam 3.
+      </p>
+      <div class="rec">
+        <b>Recommended:</b> a <code>say</code> command over seam 2, routed like
+        any other. Speaking is an act with a lifetime, not a property of a
+        message, and the frontend has to be able to refuse it &mdash; muted, no
+        speaker, voice off.
+      </div>
+    </div>
+  </section>
+
+  <section id="s10">
+    <div class="shead">
+      <span class="snum">10</span>
+      <h2>Increments</h2>
+      <span class="srule"></span>
+      <span class="stag">Order of work</span>
+    </div>
+
+    <p>
+      Each step ships and is usable before the next one starts. The order is
+      chosen so that the risky part &mdash; a service owning the conversation
+      &mdash; is proven headlessly before any window depends on it.
+    </p>
+
+    <ol>
+      <li>
+        <b>The service, headless.</b> Spawn and supervise
+        <code>pi --mode rpc</code>, own the session directory, derive state from
+        the event stream, hold the transcript ring, answer extension UI
+        requests, serve protocol v3.
+        <code>scufris-ctl send | state | abort | detach | attach</code>. No
+        graphical change at all; verified with the ctl and a test socket.
+      </li>
+      <li>
+        <b>The agent becomes a client.</b> The desktop extension stops binding
+        and starts connecting. Widget commands route through the service. The
+        socket lock and <code>SCUFRIS_DAEMON</code> go. At this point the old
+        popup still works, now talking to the service.
+      </li>
+      <li>
+        <b>The frontend becomes a client.</b> Pill, tray and widget runtime move
+        to v3. <code>desktop.sock</code>, <code>command.rs</code> and the
+        binding mode are deleted. Piper moves into the frontend behind the voice
+        flag.
+      </li>
+      <li>
+        <b>The textbox.</b> One focused window that sends, filled by voice or
+        typed into directly. The review state and Enter-while-recording are
+        removed with it.
+      </li>
+      <li>
+        <b>The HUD.</b> The Calm conversation as a frontend surface, drawn from
+        the transcript stream, with <code>get_entries</code> behind it for
+        depth.
+      </li>
+      <li>
+        <b>Retire the popup unit</b> and document detach as the way to a full
+        terminal. Only once the HUD earns it.
+      </li>
+    </ol>
+
+    <p>
+      The widget runtime is untouched by all six. It stays in the frontend, its
+      protocol survives with one more hop in front of it, and the four tools do
+      not change shape. Jobs, tmux, review and the workflow engine are equally
+      untouched: they live inside the agent and never knew where the socket was.
+    </p>
+  </section>
+
+  <footer>
+    <div class="wrap" style="padding: 0">
+      Scufris &middot; design record for task 20260827-081702 &middot;
+      supersedes the popup-as-daemon arrangement described in
+      docs/src/dev/desktop.md
+    </div>
+  </footer>
+</div>

@@ -50,6 +50,28 @@ export const ACKNOWLEDGED_ACTION_TOOLS: ReadonlySet<string> = new Set([
   QUICK_REVIEW_TOOL,
   PLANNOTATOR_REVIEW_TOOL,
 ]);
+export const literalDelegationPolicy = `Scufris delegates literally. A project context is a menu of agent types, not a workflow to run.
+
+Before planning every new project job, call scufris_project_context with an
+opaque project ID from scufris_projects. Its Agents section is the menu: start
+only the agents this request names, in the order it names them, and start no
+agent because the project declares it. "Implement X" is the work agent alone.
+"Implement X and review it" is the work agent and then the review agent. An
+agent the request names by a name you have never seen is still delegated to
+with that entry's keywords. Infer the Conventions section for tracking,
+workspace, base branch, and harness; an explicit instruction in the request
+wins over any of them. Use no project context for general work. A project
+context creates exactly one job.
+
+A later round of an agent you already own for this work is scufris_job_send,
+not a second spawn. The steered job resumes its own session and keeps what it
+already accepted; a fresh job keeps nothing and re-derives its findings.
+
+One request is one job. A done event is a finished assignment: inspect the job
+and its report, then tell the user what happened. A done event never selects
+review, steering, landing, or shutdown by itself. Never queue follow-on work of
+your own.`;
+
 export const foregroundActionPolicy = `Call each meaningful workflow action as the only tool in its tool batch. After a successful spawn, steering, stop, landing, or review-opening action, call scufris_final_response next as the only permitted follow-up. Give one short natural acknowledgment of what happened, then end. After spawn or steering, do not sleep, wait, poll, inspect, or do any other work before that final response. If an action tool fails, do not claim success; use scufris_final_response for one concise explanation and the next safe step. Do not use a canned acknowledgment.`;
 
 export type WorkerEventType = "working" | "blocked" | "done" | "failed";
@@ -218,7 +240,7 @@ export function deliverWorkerEvent(
   pi.sendMessage(
     {
       customType: "scufris-job-event",
-      content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ${line}. Inspect the pinned job context, prompt, report, and state before deciding what follows. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
+      content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ${line}. Inspect the pinned job context, prompt, report, and state, then tell the user what happened. Start another agent only if the original request named it. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
       display: true,
       details: {
         job_id: job.job_id,
@@ -499,15 +521,7 @@ function activeJobPrompt(jobs: Iterable<OwnedJob>): string {
         )
         .join("\n")
     : "- none";
-  return `Scufris resolves project workflow preferences per job.
-
-Before planning every new project job, call scufris_project_context with an
-opaque project ID from scufris_projects. Follow the returned project guidance
-unless the user's explicit request overrides it or it is impossible. Use no
-project context for general work. A project context creates exactly one job.
-Treat done events as completed assignments: inspect the job, project context,
-and report, then decide what follows. A done event never selects review,
-steering, landing, or shutdown by itself.
+  return `${literalDelegationPolicy}
 
 ${foregroundActionPolicy}
 Filesystem notifications will deliver later worker events.
@@ -733,12 +747,13 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   pi.registerTool(
     defineTool({
       name: "scufris_project_context",
-      label: "Load project workflow context",
+      label: "Load project agent menu",
       description:
-        "Load one project's advisory .scufris.toml workflow preferences before planning one new job. Returns a single-use context ID.",
-      promptSnippet: "Load project workflow preferences for one new job",
+        "Load one project's advisory .scufris.toml agent menu and conventions before planning one new job. Returns a single-use context ID.",
+      promptSnippet: "Load the project agent menu for one new job",
       promptGuidelines: [
         "Call scufris_project_context before planning every new project job, even when another job already uses that project.",
+        "The menu lists what the project can do. Start only the agents this request names.",
       ],
       parameters: Type.Object(
         {
@@ -768,7 +783,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           diagnostic: resolved.diagnostic,
           project_context: resolved.markdown,
           instruction:
-            "Compose this job now. Pass this context ID exactly once to scufris_job_spawn.",
+            "Compose this job now for the agent this request names. Pass this context ID exactly once to scufris_job_spawn.",
         });
       },
     }),
@@ -782,7 +797,9 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         "Start one independent Pi or Claude worker. Use a fresh project context ID for project work or omit it for general work.",
       promptSnippet: "Start an independent project or general worker",
       promptGuidelines: [
-        "Use scufris_job_spawn for work expected to take minutes. Select workspace sprout only when project guidance or the user asks for isolated repository work.",
+        "Use scufris_job_spawn for work expected to take minutes. Spawn one job for the agent this request names, with that menu entry's keywords.",
+        "Spawn an agent's first round only. Steer the job you already own for a later round with scufris_job_send, so it keeps what it already accepted.",
+        "Select the workspace the request asks for. Fall back to the project conventions only when the request is silent.",
         foregroundActionPolicy,
       ],
       executionMode: "sequential",
@@ -964,7 +981,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             pi.sendMessage(
               {
                 customType: "scufris-job-event",
-                content: `Plannotator review completed for Scufris job ${job.job_id}. Inspect this structured result and decide what follows from the project preferences: ${encoded}. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
+                content: `Plannotator review completed for Scufris job ${job.job_id}. Inspect this structured result and report it to the user: ${encoded}. Act on it further only where the request asked for that. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
                 display: true,
                 details: {
                   job_id: job.job_id,
@@ -1061,7 +1078,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             pi.sendMessage(
               {
                 customType: "scufris-job-event",
-                content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ${nextState}: ${milestone}. Inspect this standalone Quick Review result and decide what follows from the project preferences: ${quickReviewSummary(event)}. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
+                content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ${nextState}: ${milestone}. Inspect this standalone Quick Review result and report it to the user: ${quickReviewSummary(event)}. Act on it further only where the request asked for that. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
                 display: true,
                 details: {
                   job_id: job.job_id,
@@ -1102,7 +1119,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       name: "scufris_job_land",
       label: "Land Scufris job",
       description:
-        "Explicitly land one owned Sprout job after the selected workflow has supplied user approval. This tool never runs automatically.",
+        "Explicitly land one owned Sprout job after the user has asked for it. This tool never runs automatically.",
       executionMode: "sequential",
       parameters: Type.Object(
         {

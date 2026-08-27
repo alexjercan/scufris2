@@ -22,20 +22,24 @@ privately.
 ## Delegated jobs
 
 Ask for project work and Scufris spawns an independent worker job. For a
-configured project it first loads the project's workflow preferences from
-`.scufris.toml` and follows them: task tracking, an isolated Sprout worktree,
-the implementation harness and model, review, and the landing gate.
+configured project it first loads the agent menu from `.scufris.toml`. The menu
+is what the project can do, not what a request means: Scufris starts only the
+agents the request names, in the order it names them. "Implement X" is the work
+agent alone. "Implement X, then review it" is the work agent and then the
+review agent. The menu's conventions supply task tracking, the workspace, the
+base branch, and the harness when the request is silent; an explicit
+instruction such as "do it directly on master" wins over them.
 
 Workers report progress events. `working` is quiet by default. `blocked`,
 `done`, and runtime-generated `failed` events wake Scufris, which inspects the
-job report and decides what follows. Independent review uses the configured Pi
-or Claude harness and model against the implementation job's exact workspace.
-Both adapters expose only read built-in tools to the reviewer model. This is
-enforced at the model-tool boundary, not by an operating-system read-only
-filesystem sandbox. The harness executable remains trusted; for Claude,
-administrator-managed hook and plugin policy is trusted too. Landing never
-happens implicitly; the configured review must approve
-first, and Scufris then lands with an explicit guarded operation.
+job report and tells you what happened. It queues no follow-on work of its own.
+Review uses the configured Pi or Claude harness and model against the
+implementation job's exact workspace. Both adapters expose only read built-in
+tools to the reviewer model. This is enforced at the model-tool boundary, not
+by an operating-system read-only filesystem sandbox. The harness executable
+remains trusted; for Claude, administrator-managed hook and plugin policy is
+trusted too. Landing never happens implicitly; Scufris lands with an explicit
+guarded operation when you ask for it.
 
 Each worker runs in a named tmux session on the default server. Attach to it
 read-only to watch, but do not type into worker panes.
@@ -50,13 +54,13 @@ scripts/scufris-jobs all --archived --json
 
 ## Quick Review
 
-When project preferences select Quick Review, Scufris starts a separate Pi RPC
-agent after independent review passes. The agent loads the standalone Quick
-Review npm extension, writes an exact-revision walkthrough, opens its browser
-page, and answers page questions. Foreground Scufris remains available while
-the review is open.
+Ask for a quick review and Scufris starts a separate Pi RPC agent for the
+`quick-review` menu entry. The agent loads the standalone Quick Review npm
+extension, writes an exact-revision walkthrough, opens its browser page, and
+answers page questions. Foreground Scufris remains available while the review
+is open.
 
-Approval returns to Scufris as the final landing gate. A request for changes
+The outcome returns to Scufris, which reports it to you. A request for changes
 restarts the implementation job with the review feedback. The separate agent
 is closed when the review completes, the workflow stops, or the Scufris session
 shuts down.

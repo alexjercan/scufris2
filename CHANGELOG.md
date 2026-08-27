@@ -117,6 +117,20 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Changed
 
+- Scufris delegates literally. `.scufris.toml` is a menu of agent types, not a
+  workflow: one `conventions` table for what Scufris infers when you do not
+  say, and one `agents.<name>` table per agent, each with a `description` of
+  what it is for and `keywords` for how it is run. Ask to implement something
+  and Scufris runs the work agent and stops. Ask to implement and then review
+  and it runs both, in that order. It starts no agent because the project
+  declares one, and it queues no follow-on work of its own. An explicit
+  instruction such as "do it directly on master" wins over a convention, and an
+  agent name Scufris has never seen is delegated to like any other. A later
+  round of an agent already running steers that job rather than starting a
+  second one, so a reviewer keeps what it already accepted instead of finding
+  new fault every round. The retired `preferences` shape is refused with a
+  diagnostic rather than half-read; see the
+  [jobs chapter](docs/src/dev/jobs.md) for the file to write instead.
 - Scufris is a background service with clients now, which is the whole shape of
   this release. `scufris-service` owns the conversation, the session, and the
   socket; the Pi agent, the desktop companion, and `scufris-ctl` are all

@@ -423,82 +423,141 @@ def keyword_text(value: Any) -> str:
     raise ValueError("keyword values must be scalars or a list of scalars")
 
 
+def simple_identifier(value: Any) -> bool:
+    return isinstance(value, str) and bool(
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", value)
+    )
+
+
+def keyword_lines(scope: str, keywords: Any) -> list[str]:
+    # Keywords say how an agent is run. They render one per line so the
+    # orchestrator can reproduce each value exactly.
+    if not isinstance(keywords, dict):
+        raise ValueError(f"{scope} keywords must be a table")
+    if "harness" in keywords:
+        try:
+            selected_adapter(
+                keywords["harness"],
+                keywords.get("model"),
+                keywords.get("thinking"),
+            )
+        except JobError as error:
+            raise ValueError(f"{scope} has an unsupported adapter: {error}") from error
+    lines = []
+    for label, value in keywords.items():
+        if not simple_identifier(label):
+            raise ValueError(f"{scope} keyword names must be simple identifiers")
+        lines.append(f"{label}: {keyword_text(value)}")
+    return lines
+
+
+def guidance_text(scope: str, value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{scope} guidance must be nonempty text")
+    return value.strip()
+
+
+def render_menu(project: str, raw: bytes) -> list[str]:
+    # The file is a menu of agent types, not a workflow. Conventions are
+    # inferred; agents run only when the request names them.
+    document = tomllib.loads(raw.decode("utf-8"))
+    unexpected = set(document) - {"conventions", "agents"}
+    if "preferences" in unexpected:
+        raise ValueError(
+            "the preferences workflow shape was retired; declare conventions and agents tables"
+        )
+    if unexpected:
+        raise ValueError("expected only conventions and agents tables")
+    conventions = document.get("conventions", {})
+    agents = document.get("agents", {})
+    if not isinstance(conventions, dict):
+        raise TypeError("conventions must be a table")
+    if not isinstance(agents, dict):
+        raise TypeError("agents must be a table")
+    if not conventions and not agents:
+        raise ValueError("expected at least one convention or agent")
+    sections: list[str] = [
+        f"# Project context: {project}",
+        "",
+        f"Configuration fingerprint: {hashlib.sha256(raw).hexdigest()}",
+    ]
+    if conventions:
+        if set(conventions) - {"keywords", "guidance"}:
+            raise ValueError("conventions accepts only keywords and guidance")
+        sections.extend(
+            [
+                "",
+                "## Conventions",
+                "",
+                "Infer these when the request does not say. An explicit instruction in the request wins over any of them.",
+            ]
+        )
+        if "keywords" in conventions:
+            sections.extend(
+                ["", *keyword_lines("conventions", conventions["keywords"])]
+            )
+        if "guidance" in conventions:
+            sections.extend(["", guidance_text("conventions", conventions["guidance"])])
+    if agents:
+        sections.extend(
+            [
+                "",
+                "## Agents",
+                "",
+                "This is a menu, not a workflow. Run only the agents this request names, in the order it names them.",
+            ]
+        )
+        for name, entry in agents.items():
+            if not simple_identifier(name):
+                raise ValueError("agent names must be simple identifiers")
+            scope = f"agent {name}"
+            if not isinstance(entry, dict) or set(entry) - {
+                "description",
+                "keywords",
+                "guidance",
+            }:
+                raise ValueError(
+                    f"{scope} accepts only description, keywords and guidance"
+                )
+            description = entry.get("description")
+            if (
+                not isinstance(description, str)
+                or not description.strip()
+                or len(description) > 200
+                or not description.strip().isprintable()
+            ):
+                raise ValueError(f"{scope} needs one short printable description line")
+            sections.extend(["", f"### {name}", "", description.strip()])
+            if "keywords" in entry:
+                sections.extend(["", *keyword_lines(scope, entry["keywords"])])
+            if "guidance" in entry:
+                sections.extend(["", guidance_text(scope, entry["guidance"])])
+    sections.extend(
+        [
+            "",
+            "Delegate only to the agents this request names. Never start an agent because the project declares it.",
+            "",
+        ]
+    )
+    return sections
+
+
 def render_context(project: str, source: Path) -> dict[str, Any]:
     if not source.exists():
         return {
             "project": project,
             "configured": False,
             "fingerprint": hashlib.sha256(b"").hexdigest(),
-            "markdown": f"# Project context: {project}\n\nNo .scufris.toml was found. Infer the workflow from the request and project instructions.\n",
+            "markdown": f"# Project context: {project}\n\nNo .scufris.toml was found. Infer the conventions from the request and project instructions, and delegate only to what the request names.\n",
             "diagnostic": None,
         }
     try:
         raw = source.read_bytes()
-        document = tomllib.loads(raw.decode("utf-8"))
-        if set(document) - {"preferences"}:
-            raise ValueError("expected only a preferences table")
-        preferences = document.get("preferences", {})
-        if not isinstance(preferences, dict):
-            raise TypeError("preferences must be a table")
-        sections: list[str] = [
-            f"# Project context: {project}",
-            "",
-            f"Configuration fingerprint: {hashlib.sha256(raw).hexdigest()}",
-        ]
-        for key, entry in preferences.items():
-            if not isinstance(key, str) or not re.fullmatch(
-                r"[A-Za-z0-9][A-Za-z0-9_-]*", key
-            ):
-                raise ValueError("preference names must be simple identifiers")
-            if not isinstance(entry, dict) or set(entry) - {"keywords", "guidance"}:
-                raise ValueError(f"preference {key} accepts only keywords and guidance")
-            keywords = entry.get("keywords")
-            guidance = entry.get("guidance")
-            if keywords is not None and not isinstance(keywords, dict):
-                raise ValueError(f"preference {key} keywords must be a table")
-            if keywords is not None and "harness" in keywords:
-                try:
-                    selected_adapter(
-                        keywords["harness"],
-                        keywords.get("model"),
-                        keywords.get("thinking"),
-                    )
-                except JobError as error:
-                    raise ValueError(
-                        f"preference {key} has an unsupported adapter: {error}"
-                    ) from error
-            if guidance is not None and (
-                not isinstance(guidance, str) or not guidance.strip()
-            ):
-                raise ValueError(f"preference {key} guidance must be nonempty text")
-            if keywords is None and guidance is None:
-                raise ValueError(f"preference {key} is empty")
-            sections.extend(["", f"## {key}"])
-            if keywords:
-                rendered = []
-                for label, value in keywords.items():
-                    if not isinstance(label, str) or not re.fullmatch(
-                        r"[A-Za-z0-9][A-Za-z0-9_-]*", label
-                    ):
-                        raise ValueError(
-                            f"preference {key} keyword names must be simple identifiers"
-                        )
-                    rendered.append(f"{label}: {keyword_text(value)}")
-                sections.extend(["", *rendered])
-            if guidance is not None:
-                sections.extend(["", guidance.strip()])
-        sections.extend(
-            [
-                "",
-                "Follow these project preferences unless the user's explicit request overrides them or they are impossible to follow.",
-                "",
-            ]
-        )
         return {
             "project": project,
             "configured": True,
             "fingerprint": hashlib.sha256(raw).hexdigest(),
-            "markdown": "\n".join(sections),
+            "markdown": "\n".join(render_menu(project, raw)),
             "diagnostic": None,
         }
     except (
@@ -512,7 +571,7 @@ def render_context(project: str, source: Path) -> dict[str, Any]:
             "project": project,
             "configured": False,
             "fingerprint": hashlib.sha256(b"").hexdigest(),
-            "markdown": f"# Project context: {project}\n\nThe project configuration was unusable. Infer the workflow from the request and project instructions.\n",
+            "markdown": f"# Project context: {project}\n\nThe project configuration was unusable. Infer the conventions from the request and project instructions, and delegate only to what the request names.\n",
             "diagnostic": f"ignored .scufris.toml: {error}",
         }
 
@@ -586,7 +645,7 @@ def worker_prompt(
     harness: str,
 ) -> str:
     project_section = (
-        f"\n## Project workflow preferences\n\n{context_markdown.strip()}\n"
+        f"\n## Project context\n\n{context_markdown.strip()}\n"
         if context_markdown
         else ""
     )
@@ -645,9 +704,9 @@ orchestration generates failure when the harness can no longer work.
 `blocked` and `done` both end this execution. Report either one only when you
 have nothing further to do, and put everything the next execution needs into
 `report.md` first. Do not wait afterwards. Your conversation is preserved:
-foreground Scufris inspects the request, project preferences, prompt, report,
-and conversation, then decides whether to review, land, stop, or continue. If
-it continues, you resume in this same session with its guidance appended to
+foreground Scufris inspects the request, project context, prompt, report, and
+conversation, then reports the outcome to the user. If the user asks for more,
+you resume in this same session with that guidance appended to
 `conversation.md`, so do not repeat work you already finished.
 """
     return f"""# Scufris delegated job

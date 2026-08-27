@@ -14,9 +14,9 @@ Manager.
 
 Scufris packages five capability-owned Pi extensions:
 
-- `workflow` is the core engine. It owns the Scufris identity, project
-  workflow preferences, delegated job spawn and control, worker events,
-  review, and landing.
+- `workflow` is the core engine. It owns the Scufris identity, the project
+  agent menu, delegated job spawn and control, worker events, review, and
+  landing.
 - `voice` owns response shaping, and decides which paragraph of an answer is
   worth saying aloud. Saying it belongs to the companion.
 - `calm` reduces transcript and working-state clutter.

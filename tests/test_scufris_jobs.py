@@ -19,6 +19,7 @@ from unittest import mock
 REPOSITORY = Path(__file__).resolve().parents[1]
 HELPER = REPOSITORY / "tools" / "jobs" / "scufris-jobs"
 REPORTER = REPOSITORY / "tools" / "jobs" / "scufris-report"
+MENU_FIXTURE = "scufris-menu.toml"
 
 FAKE_PI = """#!/usr/bin/env python3
 import os
@@ -99,11 +100,16 @@ class ReplacementJobsTest(unittest.TestCase):
         )
         (self.project / "README.md").write_text("# Fixture\n")
         (self.project / ".scufris.toml").write_text(
-            """[preferences.tracking]
-keywords = { tool = "tatr" }
+            """[conventions]
+keywords = { tracking = "tatr", workspace = "sprout", base = "master" }
 guidance = "Use project tasks."
 
-[preferences.implementation]
+[agents.work]
+description = "Implement a change in the project."
+keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
+
+[agents.review]
+description = "Read the finished change and report findings."
 keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
 """
         )
@@ -487,33 +493,70 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         self.assertFalse(inspected["window_alive"])
         self.assertNotIn("worker harness exited unexpectedly", status.read_text())
 
-    def test_project_context_is_canonical_and_malformed_config_is_ignored(self) -> None:
+    def test_project_context_is_an_agent_menu_and_bad_config_is_ignored(self) -> None:
         projects = self.call("projects", {})["result"]["projects"]
         self.assertEqual(projects, ["projects/nova-protocol"])
         context = self.call("context", {"project": "projects/nova-protocol"})["result"]
         self.assertTrue(context["configured"])
-        self.assertIn("## tracking", context["markdown"])
-        self.assertIn("tool: tatr", context["markdown"])
+        markdown = context["markdown"]
+        self.assertIn("## Conventions", markdown)
+        self.assertIn("tracking: tatr", markdown)
+        self.assertIn("workspace: sprout", markdown)
+        self.assertIn("An explicit instruction in the request wins", markdown)
+        self.assertIn("## Agents", markdown)
+        self.assertIn("This is a menu, not a workflow.", markdown)
+        self.assertIn("### work", markdown)
+        self.assertIn("Implement a change in the project.", markdown)
+        self.assertIn("### review", markdown)
         # Exact tokens the orchestrator must reproduce stay on their own line.
-        self.assertIn("model: openai-codex/gpt-5.6-sol", context["markdown"])
-        self.assertIn("thinking: medium", context["markdown"])
+        self.assertIn("model: openai-codex/gpt-5.6-sol", markdown)
+        self.assertIn("thinking: medium", markdown)
+        self.assertIn("Never start an agent because the project declares it.", markdown)
+        # A menu declares no sequence and no gate of its own.
+        self.assertNotIn("Follow these project preferences", markdown)
+
+        # A project agent Scufris has never seen renders like any other entry.
+        (self.project / ".scufris.toml").write_text(
+            "[agents.fuzz]\n"
+            'description = "Run the differential fuzzer against the change."\n'
+            'keywords = { harness = "claude", model = "opus", thinking = "xhigh" }\n'
+        )
+        unfamiliar = self.call("context", {"project": "projects/nova-protocol"})[
+            "result"
+        ]
+        self.assertTrue(unfamiliar["configured"])
+        self.assertIsNone(unfamiliar["diagnostic"])
+        self.assertIn("### fuzz", unfamiliar["markdown"])
+        self.assertIn("harness: claude", unfamiliar["markdown"])
 
         (self.project / ".scufris.toml").write_text("not = [valid")
         ignored = self.call("context", {"project": "projects/nova-protocol"})["result"]
         self.assertFalse(ignored["configured"])
         self.assertIn("ignored .scufris.toml", ignored["diagnostic"])
 
-        # The retired name/options shape is refused rather than half-read.
+        # The retired workflow shape is refused rather than half-read.
         (self.project / ".scufris.toml").write_text(
-            '[preferences.implementation]\nname = "pi"\n'
+            '[preferences.implementation]\nkeywords = { harness = "pi" }\n'
         )
         retired = self.call("context", {"project": "projects/nova-protocol"})["result"]
         self.assertFalse(retired["configured"])
-        self.assertIn("keywords and guidance", retired["diagnostic"])
+        self.assertIn("preferences workflow shape was retired", retired["diagnostic"])
+
+        # Every agent says what it is for, so the menu can be read by name.
+        (self.project / ".scufris.toml").write_text(
+            '[agents.work]\nkeywords = { harness = "pi" }\n'
+        )
+        undescribed = self.call("context", {"project": "projects/nova-protocol"})[
+            "result"
+        ]
+        self.assertFalse(undescribed["configured"])
+        self.assertIn("short printable description", undescribed["diagnostic"])
 
         # Keyword values must stay flat so they render as copyable scalars.
         (self.project / ".scufris.toml").write_text(
-            "[preferences.implementation]\nkeywords = { model = { nested = 1 } }\n"
+            "[agents.work]\n"
+            'description = "Implement a change."\n'
+            "keywords = { model = { nested = 1 } }\n"
         )
         nested = self.call("context", {"project": "projects/nova-protocol"})["result"]
         self.assertFalse(nested["configured"])
@@ -521,22 +564,11 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
 
         # A list of scalars is a legitimate keyword value.
         (self.project / ".scufris.toml").write_text(
-            '[preferences.verification]\nkeywords = { checks = ["npm run check", "nix flake check"] }\n'
+            '[conventions]\nkeywords = { checks = ["npm run check", "nix flake check"] }\n'
         )
         listed = self.call("context", {"project": "projects/nova-protocol"})["result"]
         self.assertTrue(listed["configured"])
         self.assertIn("checks: npm run check, nix flake check", listed["markdown"])
-
-        (self.project / ".scufris.toml").write_text(
-            "[preferences.review]\n"
-            'keywords = { harness = "claude", model = "opus", thinking = "xhigh" }\n'
-        )
-        claude_review = self.call("context", {"project": "projects/nova-protocol"})[
-            "result"
-        ]
-        self.assertTrue(claude_review["configured"])
-        self.assertIn("harness: claude", claude_review["markdown"])
-        self.assertIsNone(claude_review["diagnostic"])
 
         for adapter in (
             '{ harness = "claude", model = "opus", thinking = "minimal" }',
@@ -544,13 +576,35 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
             '{ harness = "pi", model = "reviewer", thinking = "max" }',
         ):
             (self.project / ".scufris.toml").write_text(
-                f"[preferences.review]\nkeywords = {adapter}\n"
+                f'[agents.review]\ndescription = "Review the change."\nkeywords = {adapter}\n'
             )
             unsupported = self.call("context", {"project": "projects/nova-protocol"})[
                 "result"
             ]
             self.assertFalse(unsupported["configured"])
             self.assertIn("unsupported adapter", unsupported["diagnostic"])
+
+    def test_recommended_menu_fixture_renders_conventions_and_every_agent(
+        self,
+    ) -> None:
+        # The fixture is the shape a real .scufris.toml must take. Rendering it
+        # here keeps the documented snippet and the parser in step.
+        jobs_module = load_jobs_module()
+        rendered = jobs_module.render_context(
+            "projects/nova-protocol", REPOSITORY / "tests" / "fixtures" / MENU_FIXTURE
+        )
+        self.assertTrue(rendered["configured"])
+        self.assertIsNone(rendered["diagnostic"])
+        markdown = rendered["markdown"]
+        self.assertIn("## Conventions", markdown)
+        self.assertIn("workspace: sprout", markdown)
+        self.assertIn("This is a menu, not a workflow.", markdown)
+        for heading in ("### work", "### review", "### quick-review"):
+            self.assertIn(heading, markdown)
+        # A fresh reviewer re-derives fault every round, so the menu tells the
+        # foreground to steer the one review job instead of spawning another.
+        self.assertIn("steer that same job with scufris_job_send", markdown)
+        self.assertIn("no record of what it already accepted", markdown)
 
     def test_general_job_uses_temporary_workspace_and_generic_events(self) -> None:
         job_id = "abc123def456"

@@ -1,0 +1,43 @@
+# Scufris reads this file as a menu, not a workflow. Conventions are inferred
+# when the request is silent. Agents run only when the request names them.
+
+[conventions]
+keywords = { tracking = "tatr", scope = "one-task-per-request", workspace = "sprout", base = "master", typescript = "npm run check", packaging = "nix flake check", landing = "explicit" }
+guidance = """
+Use Tatr for substantial tracked work. Keep one task for one request and its
+follow-up work. Record decisions and verification evidence under the task.
+Keep the main checkout on master and do project work in a Sprout worktree.
+Run the cheapest relevant focused check first. Land a Sprout only when the
+request asks for it.
+"""
+
+[agents.work]
+description = "Implement a change in the project."
+keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
+guidance = """
+Keep orchestration narrow. Prefer product skills and small deterministic
+helpers over extension complexity. Follow repository AGENTS.md instructions and
+existing conventions.
+"""
+
+[agents.review]
+description = "Read finished work independently and report findings."
+keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium", spawn = "review_of" }
+guidance = """
+Read-only against the implementation job's exact workspace. Report concrete
+findings with paths and lines. Keep one review job for the work: spawn it for
+the first round, then steer that same job with scufris_job_send for each later
+round, because a fresh reviewer has no record of what it already accepted.
+Spawn a second review job only when no owned review job covers this work.
+Repeat the implement-then-review cycle only for as long as the request asked
+for.
+"""
+
+[agents.quick-review]
+description = "Open the Quick Review walkthrough page for the user to approve."
+keywords = { tool = "scufris_job_quick_review", harness = "pi", mode = "rpc", model = "openai-codex/gpt-5.6-sol", thinking = "medium", extension = "npm:@alexjercan/quick-review@0.1.1" }
+guidance = """
+Start the standalone Quick Review extension in its separate Pi RPC agent. Keep
+foreground Scufris responsive while that agent writes the walkthrough and
+answers page questions. Do not use these Pi RPC settings for the review agent.
+"""

@@ -10,6 +10,7 @@ import {
   foregroundActionPolicy,
   ForegroundAcknowledgmentGate,
   foregroundCommandWaits,
+  literalDelegationPolicy,
   parseWorkerEvent,
   PLANNOTATOR_REVIEW_TOOL,
   QUICK_REVIEW_TOOL,
@@ -78,6 +79,47 @@ test("foreground action policy requires one natural final acknowledgment", () =>
     gate.completeFinalResponse(false);
     assert.equal(gate.blockReason("read"), undefined);
   }
+});
+
+test("delegation policy runs the named agents and nothing else", () => {
+  assert.match(literalDelegationPolicy, /menu of agent types, not a workflow/);
+  assert.match(
+    literalDelegationPolicy,
+    /start no\nagent because the project declares it/,
+  );
+  assert.match(
+    literalDelegationPolicy,
+    /"Implement X" is the work agent alone\./,
+  );
+  assert.match(
+    literalDelegationPolicy,
+    /"Implement X and review it" is the work agent and then the review agent\./,
+  );
+  // An unfamiliar agent name is still delegated to by name.
+  assert.match(
+    literalDelegationPolicy,
+    /name you have never seen is still delegated to/,
+  );
+  // The request outranks the inferred conventions.
+  assert.match(
+    literalDelegationPolicy,
+    /an explicit instruction in the request\nwins over any of them/,
+  );
+  // A later round steers the owned job, so a reviewer keeps what it accepted.
+  assert.match(
+    literalDelegationPolicy,
+    /A later round of an agent you already own for this work is scufris_job_send,\nnot a second spawn\./,
+  );
+  assert.match(
+    literalDelegationPolicy,
+    /a fresh job keeps nothing and re-derives its findings/,
+  );
+  assert.match(literalDelegationPolicy, /One request is one job\./);
+  assert.match(
+    literalDelegationPolicy,
+    /Never queue follow-on work of\nyour own\./,
+  );
+  assert.doesNotMatch(literalDelegationPolicy, /Follow the returned project/);
 });
 
 test("foreground Scufris rejects shell waits", () => {

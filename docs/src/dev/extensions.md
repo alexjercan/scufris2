@@ -19,7 +19,8 @@ Orchestration tools:
 - `scufris_projects`: list opaque project IDs discovered under
   `SCUFRIS_PROJECT_ROOTS`.
 - `scufris_project_context`: render one project's advisory `.scufris.toml`
-  into Markdown guidance and return a single-use 24-hex context ID.
+  into a Markdown conventions and agent menu, and return a single-use 24-hex
+  context ID.
 - `scufris_job_spawn`: start one worker. Optional harness, model, thinking,
   workspace, feature, and `review_of` selections. A project context ID is
   consumed exactly once; `project` and `sprout` workspaces require one. Review

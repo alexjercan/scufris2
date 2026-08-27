@@ -47,35 +47,52 @@ The launch wrapper then validates its inherited current-directory inode before
 starting the harness, closing the path replacement window between checking a
 pathname and entering it.
 
-## Projects and preferences
+## Projects and the agent menu
 
 Projects are Git roots discovered under `SCUFRIS_PROJECT_ROOTS`. The `context`
-command renders a project's `.scufris.toml` into Markdown. The file holds one
-`preferences` table; each entry accepts `keywords` (short exact scalars the
-orchestrator must reproduce) and `guidance` (prose judgement):
+command renders a project's `.scufris.toml` into Markdown. The file is a menu,
+not a workflow. It holds two optional tables:
+
+- `conventions` says what Scufris infers when the request is silent: tracking,
+  workspace, base branch, harness. An explicit instruction in the request wins
+  over any of them.
+- `agents.<name>` declares one agent type. `description` is one short printable
+  line that says what the agent is for. `keywords` are short exact scalars that
+  say how it is run. `guidance` is prose judgement.
 
 ```toml
-[preferences.workspace]
-keywords = { workspace = "sprout", base = "master" }
+[conventions]
+keywords = { tracking = "tatr", workspace = "sprout", base = "master" }
 guidance = """
-Use a Sprout workspace for project implementation.
+Keep the main checkout on master.
 """
+
+[agents.work]
+description = "Implement a change in the project."
+keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
 ```
 
-Review workflows use separate `independent-review` and `quick-review` entries.
-Their keywords set `order = "first"` and `order = "second"` respectively. The
-Quick Review entry sets `harness = "pi"` and `mode = "rpc"`; those adapter
-values do not apply to the independent reviewer.
+Scufris starts only the agents a request names, in the order it names them. An
+agent name Scufris has never seen is delegated to like any other entry, with
+that entry's keywords. The menu declares no order and no gate of its own.
 
-The rendered context includes the file's SHA-256 fingerprint. Preferences are
+A menu entry can also say to reuse its job. A later round of an agent already
+owned for the work is `send`, not a second `spawn`: the steered job restores
+its own harness session and keeps what it already accepted, while a fresh job
+keeps nothing and re-derives its findings. A review entry says this in its
+`guidance`, because an implement-then-review cycle that spawns a new reviewer
+each round never converges.
+
+The rendered context includes the file's SHA-256 fingerprint. The menu is
 advisory: a missing or malformed file degrades to inference, never an error.
-When a preference declares `harness`, its optional `model` and `thinking`
-keywords are validated by the same adapter resolver used at spawn. Supported
-harnesses are `pi` and `claude`; Pi rejects `max`, and Claude rejects `off` and
-`minimal`. An unsupported tuple makes the file unusable and returns an
-`ignored .scufris.toml` diagnostic instead of promising a workflow runtime
-cannot start. Every new project job consumes a fresh single-use context; the
-exact snapshot is stored beside the job.
+When an entry declares `harness`, its optional `model` and `thinking` keywords
+are validated by the same adapter resolver used at spawn. Supported harnesses
+are `pi` and `claude`; Pi rejects `max`, and Claude rejects `off` and
+`minimal`. An unsupported tuple, a missing agent description, or the retired
+`preferences` workflow shape makes the file unusable and returns an
+`ignored .scufris.toml` diagnostic instead of a half-read menu. Every new
+project job consumes a fresh single-use context; the exact snapshot is stored
+beside the job.
 
 ## Spawn
 

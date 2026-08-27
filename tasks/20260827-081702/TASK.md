@@ -155,7 +155,68 @@ The rest is bookkeeping the verb does:
    v2, the popup unit and its options are deleted.
 3. The textbox. Review state and Enter-while-recording deleted with it.
 4. Listening is one rule: barge-in, steer, and a key for abort.
-5. The HUD, when we want it.
+5. The extension keeps only what must run inside Pi. `voice/speech.ts`
+   deleted, mute moves to the companion, `SCUFRIS_SPEECH` and
+   `SCUFRIS_VOICE_AVAILABLE` deleted. See "D5 reversed" below.
+6. The HUD, when we want it.
+
+## D5 reversed (2026-08-27)
+
+D5 said speech shaping does not move. It is half right and the half that
+is wrong has cost a working run: `SCUFRIS_SPEECH` was unset, the agent
+decided nothing was worth saying, and a companion with a synthesiser
+bound sat silent with nothing in any log to say why.
+
+What is actually true, and what D5 should have said:
+
+- **The prose rules stay.** They are not about speech. Scufris answers in
+  one plain paragraph plus optional Markdown detail because that is the
+  shape of the assistant, and it is that shape whether or not anything is
+  listening. `plainProseParagraph` and `spokenResponseInstruction` in
+  `voice/response.ts` are the whole of it, and `scufris_final_response`
+  already computes the paragraph and puts it in the response entry.
+- **The mode does not stay.** Whether to make sound is a property of the
+  speaker, and the companion owns the speaker. `voice/speech.ts` is 246
+  lines that re-derive the paragraph `response.ts:320` already has,
+  wrapped around an off/on/once switch kept in the session and seeded
+  from an environment variable on a process that makes no sound.
+
+So `SPOKEN_EVENT` carries both halves from one place, `response.ts:320`,
+and the companion decides. A companion with no synthesiser is silent
+already (`native/scufris-desktop/src/speech.rs`), so "off" needs no wire
+field: it is a tray toggle over a speaker that is already there.
+
+Deleted by this: `voice/speech.ts`, the `/speech` command, the
+`scufris-speech-state-v1` session entry, `SCUFRIS_SPEECH`,
+`SCUFRIS_VOICE_AVAILABLE` and the dynamic import it gates,
+`tests/speech.test.ts`, the `voice.enable` line in `nix/home-manager.nix`
+that sets the variable on the service, and the two assertions in
+`nix/checks/service.nix` that pin it. `voice.enable` then means one
+thing: the companion gets a synthesiser.
+
+`voice/` is a misnomer once this lands. It is the response extension.
+
+## What stays, and why (2026-08-27)
+
+Asked directly whether `service/` and `widgets/` are needed:
+
+- **`service/` stays.** It is the agent-role socket client and it is the
+  output of increment 2, not legacy. Something must run inside Pi to read
+  Pi's events, report what was said, and carry widget commands. By D2
+  that something is TypeScript. 850 lines across the client, the
+  protocol, and the wiring.
+- **`widgets/` stays and is already right.** It defines the three tools
+  and hands each command to the companion's widget runtime over the
+  wire. It manages nothing itself. The one tangle is that it imports the
+  control event and the catalog type from `service/`, which is fine but
+  reads backwards; `shared/` is where they belong.
+- **`calm.ts` is on notice.** It filters the Pi TUI, and in this
+  architecture the only TUI left is `scufris-ctl debug`. It survives on
+  that alone.
+- **`workflow/orchestration.ts` is the real legacy mass**, 1364 lines of
+  delegated job loop. It is not this task's: `20260826-183008` (p75,
+  "Scufris does what is asked, not a workflow") owns it and lands
+  independently, exactly as L4 says.
 
 ## Increment 1 done (2026-08-27)
 

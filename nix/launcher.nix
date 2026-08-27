@@ -2,7 +2,6 @@
   pkgs,
   resources,
   piPackage,
-  voice ? false,
   projectRoots ? ["~/personal" "~/work" "~/third-party"],
 }: let
   extensionArgs = [
@@ -11,7 +10,7 @@
     "--skill"
     "${resources}/share/scufris/skills/workflow"
     "--extension"
-    "${resources}/share/scufris/extensions/scufris/voice/index.ts"
+    "${resources}/share/scufris/extensions/scufris/response.ts"
     "--extension"
     "${resources}/share/scufris/extensions/scufris/calm.ts"
     "--extension"
@@ -36,9 +35,6 @@ in
         export SCUFRIS_PROJECT_ROOTS=${pkgs.lib.escapeShellArg (builtins.toJSON projectRoots)}
       fi
       export SCUFRIS_ROLE=orchestrator
-      ${pkgs.lib.optionalString voice ''
-        export SCUFRIS_VOICE_AVAILABLE=1
-      ''}
 
       pi=${pkgs.lib.escapeShellArg "${piPackage}/bin/pi"}
       if system_pi="$(type -P pi)"; then

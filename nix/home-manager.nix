@@ -30,12 +30,8 @@
   };
   launcher = import ./launcher.nix {
     inherit pkgs;
-    resources =
-      if cfg.voice.enable
-      then defaults.voiceResources
-      else defaults.resources;
+    resources = defaults.resources;
     piPackage = cfg.piPackage;
-    voice = cfg.voice.enable;
     projectRoots = cfg.projectRoots;
   };
   # The frontend owns the speaker, so the synthesiser is bound here and handed
@@ -293,15 +289,13 @@ in {
         Service = {
           Type = "simple";
           ExecStart = lib.getExe serviceCfg.package;
-          Environment =
-            [
-              "SCUFRIS_SERVICE_AGENT=${lib.getExe serviceCfg.agentPackage}"
-              "SCUFRIS_SERVICE_SESSION_DIR=${serviceCfg.sessionDirectory}"
-            ]
-            # Inherited by the agent, which decides what is worth saying aloud.
-            # Saying it is the frontend's, and a session with no frontend
-            # simply has nowhere for the paragraph to go.
-            ++ lib.optional cfg.voice.enable "SCUFRIS_SPEECH=1";
+          # Nothing about speech. The agent shapes every answer as one
+          # prose paragraph whatever is listening, and whether a sound is
+          # made is the companion's, which is where the speaker is.
+          Environment = [
+            "SCUFRIS_SERVICE_AGENT=${lib.getExe serviceCfg.agentPackage}"
+            "SCUFRIS_SERVICE_SESSION_DIR=${serviceCfg.sessionDirectory}"
+          ];
           # The service restarts its own agent, so it going down is a fault of
           # the service itself and the conversation is on disk either way.
           Restart = "on-failure";

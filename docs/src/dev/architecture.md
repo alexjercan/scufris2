@@ -48,11 +48,10 @@ One codebase serves two roles selected by `SCUFRIS_ROLE`:
   relays its terminal outcome to the orchestrator.
 
 Before the harness starts, the launch wrapper removes `SCUFRIS_ROLE`, the
-speech and Calm variables, the Piper paths, the report capability, and the
-`PI_*` session variables from the inherited environment, then sets
-`SCUFRIS_ROLE=worker`, the job ID, the generation, and a fresh report
-capability. `SCUFRIS_PROJECT_ROOTS` and `SCUFRIS_VOICE_AVAILABLE` are
-inherited unchanged.
+Calm variable, the Piper paths, the report capability, and the `PI_*` session
+variables from the inherited environment, then sets `SCUFRIS_ROLE=worker`, the
+job ID, the generation, and a fresh report capability. `SCUFRIS_PROJECT_ROOTS`
+is inherited unchanged.
 
 ## Helper protocol
 
@@ -120,11 +119,12 @@ module and voice tool so they cannot enter the closure. The launcher is a
 shell application that:
 
 1. Sets `SCUFRIS_PROJECT_ROOTS` when unset and `SCUFRIS_ROLE=orchestrator`.
-2. Sets `SCUFRIS_VOICE_AVAILABLE` for voice variants. No synthesiser and no
-   player enter the launcher closure: the agent decides what is worth saying
-   aloud, and the companion is what says it.
-3. Prefers a system `pi` from `PATH` and falls back to the pinned flake Pi.
-4. Passes `--extension` and `--skill` flags pointing into the resources.
+2. Prefers a system `pi` from `PATH` and falls back to the pinned flake Pi.
+3. Passes `--extension` and `--skill` flags pointing into the resources.
+
+There is one launcher and it has no voice variant. No synthesiser and no
+player enter its closure, and nothing it sets turns speech on: the agent
+shapes the answer, and the companion owns the speaker.
 
 `nix/speak.nix` builds `scufris-speak`, the synthesiser the companion runs. It
 binds the pinned Piper package, model, and configuration, so the voice is a

@@ -8,7 +8,7 @@
   ...
 }: let
   inherit (pkgs) lib;
-  inherit (scufris) launcher voiceLauncher desktop;
+  inherit (scufris) launcher desktop;
   inherit (homes) mkHome;
   # Stand-ins keep the checks from realising the pinned whisper model and the
   # real whisper.cpp build; only the wiring is under test here.
@@ -67,21 +67,17 @@
   configuredDesktop = configuredEndpointHome.config;
   desktopWithoutServiceEvaluation = builtins.tryEval (builtins.deepSeq desktopWithoutServiceHome.activationPackage true);
   normalClosure = pkgs.closureInfo {rootPaths = [launcher];};
-  voiceClosure = pkgs.closureInfo {rootPaths = [voiceLauncher];};
   desktopClosure = pkgs.closureInfo {rootPaths = [desktop];};
 in
   lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
     desktop-closure = pkgs.runCommand "scufris-desktop-closure-check" {} ''
       normal=${normalClosure}/store-paths
-      voice=${voiceClosure}/store-paths
       desktop=${desktopClosure}/store-paths
 
       # The companion is its own package output: consumers who never enable it
       # never build Tauri.
       ! grep -Fx ${lib.escapeShellArg (toString desktop)} "$normal"
-      ! grep -Fx ${lib.escapeShellArg (toString desktop)} "$voice"
       ! grep -Fx ${lib.escapeShellArg (toString pkgs.webkitgtk_4_1)} "$normal"
-      ! grep -Fx ${lib.escapeShellArg (toString pkgs.webkitgtk_4_1)} "$voice"
       grep -Fx ${lib.escapeShellArg (toString pkgs.webkitgtk_4_1)} "$desktop"
       ! grep -Fx ${lib.escapeShellArg (toString launcher)} "$desktop"
 

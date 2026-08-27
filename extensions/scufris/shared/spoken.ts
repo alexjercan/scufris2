@@ -6,10 +6,13 @@
  * can read the answer off the conversation. It says so here, and the service
  * extension is what carries it to the transcript and to the speaker.
  *
- * Two fields because they are two different strings and two different
- * decisions. The transcript holds the whole answer; speech holds the paragraph
- * shaped for a speaker, and only when the speech mode says there is one worth
- * saying.
+ * Two fields because they have two destinations, not because anything here
+ * decides between them. `said` goes in the transcript and `speak` goes to the
+ * speaker, and the response extension fills both from the same paragraph.
+ *
+ * Whether a sound is made is not decided here and is not on this event. The
+ * companion owns the speaker, so it owns the mute; a deployment with no
+ * synthesiser is silent without being told.
  */
 export const SPOKEN_EVENT = "scufris:spoken";
 

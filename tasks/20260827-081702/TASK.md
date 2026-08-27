@@ -418,3 +418,64 @@ contract is the half no headless test reaches. What to try on the
 machine - `Super+D`, `Super+D`, type into the box, `Enter`; then a second
 turn, because a window manager reads the focus hints when it maps a
 window and the second map is where the old review box lost the keyboard.
+
+## Increment 5 done (2026-08-27)
+
+`voice/speech.ts` is gone and the extension tree is one file flatter.
+
+What changed:
+
+- `voice/response.ts` became `extensions/scufris/response.ts` and `voice/`
+  was deleted. The directory was named for a capability the code inside it
+  does not have; what is left shapes the answer and makes no sound.
+- Both halves of `SPOKEN_EVENT` are emitted where the paragraph is decided.
+  `appendResponse` sends `said` and `speak` together, because the tool path's
+  answer is a tool argument nothing outside the extension can read. The direct
+  path sends only `speak`, because its rewritten message is already visible to
+  the service through Pi's own events. `speech.ts` used to re-derive the same
+  paragraph from the session branch at `agent_settled`; there was never a
+  second decision to make.
+- The mute moved to the companion, as `Speaker::mute` and "Mute Scufris" in
+  the tray. Muting cuts what is playing; unmuting restores nothing, because
+  the next answer is what a person wants to hear. Nothing about it crosses the
+  wire and the agent is neither asked nor told.
+- Deleted with it: the `/speech` command and its `replay`, the
+  `scufris-speech-state-v1` session entry, `SCUFRIS_SPEECH`,
+  `SCUFRIS_VOICE_AVAILABLE`, `tests/speech.test.ts`, the `SCUFRIS_SPEECH=1`
+  line on the service unit, and the two assertions pinning it.
+- The build variants went with them, which was the surprise of this increment.
+  `nix/resources.nix` had a `voice` parameter and `nix/scufris.nix` built a
+  second launcher, purely to ship `speech.ts` and set one variable. Gone:
+  `voiceResources`, `voiceLauncher`, the `voice-resources` package, the
+  `scufris-voice` package and app, `npm run dev:voice`, and
+  `scufris-dev --voice`. `nix/checks/launcher.nix` lost its second half.
+  `scufris-dev` also still listed `extensions/scufris/desktop/index.ts`, which
+  increment 2 deleted, and had no `service/index.ts`; the working-tree
+  launcher has been broken since then and now is not.
+- `voice.enable` means one thing: the companion gets a synthesiser.
+- Documentation: the extensions chapter's "voice" section is "response" and
+  says what the paragraph is for; the operation, architecture, desktop, using
+  and installation chapters lost the variables, the command, and the packages.
+
+### Verification
+
+- `npm run check` - pass. 67 tests, down from 75 with `speech.test.ts` gone.
+- `cargo test --workspace` - pass, 234 in the companion including the new
+  `a_muted_speaker_cuts_what_is_playing_and_takes_nothing_new`.
+- `cargo clippy --workspace --all-targets -- -D warnings` - clean.
+- `cargo fmt --all --check`, `shellcheck scripts/scufris-dev`, `prettier` -
+  clean.
+- `nix flake check --offline` - pass.
+
+Not verified on a display. The tray mute is wired the way the sound cue
+switch is and its behaviour is covered in `speech.rs`, but nobody has clicked
+it.
+
+### Found while landing this
+
+`widgets::backends::tests::two_widgets_asking_the_same_question_share_one_process`
+fails intermittently in the Nix sandbox and passes on the developer machine.
+It is unrelated to this increment, which touches nothing in the widget
+runtime, and it is a real gap rather than only a slow test: a panel that
+subscribes to an already-running shared backend is never handed the last
+reading. Filed as `20260827-142259` (p80).

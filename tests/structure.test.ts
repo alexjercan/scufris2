@@ -21,7 +21,7 @@ test("package loads only capability-owned Scufris extensions", async () => {
   );
   assert.deepEqual(manifest.pi.extensions, [
     "./extensions/scufris/workflow/index.ts",
-    "./extensions/scufris/voice/index.ts",
+    "./extensions/scufris/response.ts",
     "./extensions/scufris/calm.ts",
     "./extensions/scufris/service/index.ts",
     "./extensions/scufris/widgets/index.ts",

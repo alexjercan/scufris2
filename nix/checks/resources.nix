@@ -1,30 +1,29 @@
-# The resource variants carry every distributed file, and the normal variant
-# carries no speech module and no voice tool.
+# The resources carry every distributed file the agent runs, and neither the
+# synthesiser nor the development launcher is one of them.
 {
   pkgs,
   scufris,
   ...
 }: let
-  inherit (scufris) resources voiceResources;
+  inherit (scufris) resources;
 in {
   resources = pkgs.runCommand "scufris-resources-check" {} ''
     test -f ${resources}/share/scufris/extensions/scufris/workflow/index.ts
     test -f ${resources}/share/scufris/extensions/scufris/workflow/identity.ts
     test -f ${resources}/share/scufris/extensions/scufris/workflow/orchestration.ts
     test -f ${resources}/share/scufris/extensions/scufris/workflow/worker-report.ts
-    test -f ${resources}/share/scufris/extensions/scufris/voice/index.ts
-    test -f ${resources}/share/scufris/extensions/scufris/voice/response.ts
-    test ! -e ${resources}/share/scufris/extensions/scufris/voice/speech.ts
-    test ! -e ${resources}/share/scufris/tools/voice
+    test -f ${resources}/share/scufris/extensions/scufris/response.ts
     test -f ${resources}/share/scufris/extensions/scufris/calm.ts
     test -f ${resources}/share/scufris/extensions/scufris/service/index.ts
     test -f ${resources}/share/scufris/extensions/scufris/service/protocol.ts
     test -f ${resources}/share/scufris/extensions/scufris/service/client.ts
     test -f ${resources}/share/scufris/extensions/scufris/widgets/index.ts
-    test -f ${voiceResources}/share/scufris/extensions/scufris/voice/speech.ts
-    test -x ${voiceResources}/share/scufris/tools/voice/scufris-speak
+    # Nothing in this process tree makes sound. There is no speech module to
+    # ship and no variant that ships one, and the synthesiser the companion
+    # runs is not on the agent's side of the machine.
+    test ! -e ${resources}/share/scufris/extensions/scufris/voice
+    test ! -e ${resources}/share/scufris/tools/voice
     test ! -e ${resources}/share/scufris/scripts/scufris-dev
-    test ! -e ${voiceResources}/share/scufris/scripts/scufris-dev
     test ! -e ${resources}/share/scufris/prompts
     test -x ${resources}/share/scufris/tools/jobs/scufris-jobs
     test -x ${resources}/share/scufris/tools/jobs/scufris-report

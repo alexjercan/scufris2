@@ -5,7 +5,6 @@
     printf '%s\n' \
       "''${SCUFRIS_PROJECT_ROOTS-}" \
       "''${SCUFRIS_ROLE-}" \
-      "''${SCUFRIS_SPEECH-}" \
       "''${SCUFRIS_CALM-}" \
       "''${SCUFRIS_PIPER_MODEL-}" \
       "''${SCUFRIS_PIPER_CONFIG-}" \

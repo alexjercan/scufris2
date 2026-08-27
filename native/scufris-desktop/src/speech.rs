@@ -36,6 +36,13 @@ pub type Listener = Box<dyn Fn(bool) + Send + Sync>;
 /// Runs the synthesiser and owns whatever it is playing.
 pub struct Speaker {
     command: Option<PathBuf>,
+    /// Whether the person has asked for silence.
+    ///
+    /// Here rather than in the agent because it is a property of the speaker,
+    /// and the speaker is this. A muted companion still receives every
+    /// paragraph and still knows the answer; it just does not play it, so
+    /// unmuting takes effect on the next answer with nothing to restore.
+    muted: AtomicBool,
     /// The child currently making sound, if any.
     playing: Mutex<Option<Child>>,
     /// Which utterance the child belongs to. A reaper for an utterance that was
@@ -57,6 +64,7 @@ impl Speaker {
         }
         Arc::new(Self {
             command,
+            muted: AtomicBool::new(false),
             playing: Mutex::new(None),
             utterance: AtomicU64::new(0),
             speaking: AtomicBool::new(false),
@@ -73,8 +81,29 @@ impl Speaker {
         let _ = self.listener.set(Box::new(listener));
     }
 
+    /// Asks for silence, or takes the ask back. Returns whether it is muted now.
+    ///
+    /// Muting cuts what is being spoken. Waiting for the sentence to end is not
+    /// what anybody means by mute.
+    pub fn mute(&self, muted: bool) -> bool {
+        self.muted.store(muted, Ordering::Release);
+        if muted {
+            self.hush();
+        }
+        muted
+    }
+
+    /// Whether the person has asked for silence.
+    pub fn muted(&self) -> bool {
+        self.muted.load(Ordering::Acquire)
+    }
+
     /// Speaks one paragraph, cutting whatever is being spoken now.
     pub fn say(self: &Arc<Self>, text: String) {
+        if self.muted() {
+            debug!("a paragraph was dropped: the speaker is muted");
+            return;
+        }
         let Some(command) = self.command.clone() else {
             debug!("a paragraph was dropped: no synthesiser is configured");
             return;
@@ -301,6 +330,45 @@ mod tests {
             &[true, false],
             "the companion did not settle into silence: {heard:?}"
         );
+        std::fs::remove_file(&script).unwrap();
+    }
+
+    #[test]
+    fn a_muted_speaker_cuts_what_is_playing_and_takes_nothing_new() {
+        let script = std::env::temp_dir().join(format!("scufris-mute-{}", std::process::id()));
+        std::fs::write(&script, "#!/bin/sh\ncat >/dev/null\nsleep 5\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let speaker = Speaker::new(Some(script.clone()));
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&heard);
+        speaker.attach(move |speaking| {
+            recorded
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .push(speaking)
+        });
+
+        assert!(!speaker.muted());
+        speaker.say("the first thing".into());
+        // Muting is not "after this sentence". It stops the sound.
+        assert!(speaker.mute(true));
+        speaker.say("the muted thing".into());
+        let heard = heard.lock().unwrap_or_else(|error| error.into_inner());
+        assert_eq!(
+            heard.as_slice(),
+            &[true, false],
+            "muting did not cut what was playing: {heard:?}"
+        );
+        drop(heard);
+
+        // Unmuting restores nothing. The next answer is what is heard.
+        assert!(!speaker.mute(false));
+        assert!(!speaker.muted());
         std::fs::remove_file(&script).unwrap();
     }
 }

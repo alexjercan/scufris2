@@ -23,12 +23,12 @@ import { Text } from "@earendil-works/pi-tui";
 import {
   ACKNOWLEDGMENT_STATE_EVENT,
   type AcknowledgmentState,
-} from "../shared/acknowledgment.ts";
+} from "./shared/acknowledgment.ts";
 import {
   appendScufrisIdentityPrompt,
   scufrisIdentityPrompt,
-} from "../workflow/identity.ts";
-import { SPOKEN_EVENT, type SpokenSignal } from "../shared/spoken.ts";
+} from "./workflow/identity.ts";
+import { SPOKEN_EVENT, type SpokenSignal } from "./shared/spoken.ts";
 
 export const spokenResponseInstruction =
   "The spoken field must be one short natural prose paragraph in complete sentences without Markdown, paths, hashes, URLs, or code.";
@@ -316,8 +316,12 @@ function appendResponse(
   // The tool-call path is the only one nothing outside this extension can read:
   // the answer is a tool argument, not an assistant text block, so a service
   // watching the conversation sees the question and no reply. The direct path
-  // below rewrites the message itself, which is already visible.
-  pi.events.emit(SPOKEN_EVENT, { said: entry.spoken } satisfies SpokenSignal);
+  // below rewrites the message itself, which is already visible, so it sends
+  // only the paragraph to speak.
+  pi.events.emit(SPOKEN_EVENT, {
+    said: entry.spoken,
+    speak: entry.spoken,
+  } satisfies SpokenSignal);
   return entry;
 }
 
@@ -337,6 +341,20 @@ export function promptInspectionMarkdown(
   return `# Scufris effective system prompt\n\n## Ordered provenance\n\n${provenance.map((item) => `- ${item}`).join("\n")}\n\n## Pi inputs\n\n\`\`\`json\n${JSON.stringify({ systemPromptOptions: options, tools }, null, 2)}\n\`\`\`\n\n## Embedded canonical identity policy\n\n${scufrisIdentityPrompt}\n## Final-response policy\n\n${finalResponsePolicy}\n\n## Exact assembled prompt\n\n\`\`\`text\n${effectivePrompt}\n\`\`\`\n`;
 }
 
+/**
+ * The shape of every Scufris answer: one plain prose paragraph, with the rest
+ * of it in a private artifact behind `/detail`.
+ *
+ * This is not about speech, which is why there is nothing here that decides
+ * whether to make a sound. The paragraph exists because it is the shape of the
+ * assistant, and it is that shape with nothing listening. What it makes
+ * possible is that a speaker has something safe to say: the paragraph carries
+ * no Markdown, no lists and no code, so whoever owns the speaker can hand it
+ * straight to a synthesiser without reading it first.
+ *
+ * Both halves of [`SPOKEN_EVENT`] are emitted from here, because both are the
+ * same string and this is where it is decided.
+ */
 export default function response(pi: ExtensionAPI): void {
   if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
   const prepared = new Map<string, { spoken: string; detail?: string }>();
@@ -468,6 +486,11 @@ export default function response(pi: ExtensionAPI): void {
     }
     const split = splitDirectResponse(assistantText(message));
     const entry = prepareResponse(context, split.spoken, split.detail);
+    // No `said`: the rewrite below puts the paragraph in the message itself,
+    // and the service reads that from Pi's own events.
+    pi.events.emit(SPOKEN_EVENT, {
+      speak: entry.spoken,
+    } satisfies SpokenSignal);
     return {
       message: {
         ...message,

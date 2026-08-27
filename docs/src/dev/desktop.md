@@ -389,13 +389,20 @@ Listening and transcribing stay companion-local. The service never sees audio.
 
 ## Speaking
 
-Speech is two decisions in two places. The agent decides which paragraph of an
-answer is worth saying aloud and pushes it as `speak`. The companion owns the
-speaker and decides whether to say it:
+The agent shapes every answer as one prose paragraph and pushes it as `speak`.
+It is not a speech decision: the paragraph is the shape of a Scufris answer
+whether or not anything is listening, and what it makes possible is that a
+speaker has something safe to say. Every decision about sound is here.
 `native/scufris-desktop/src/speech.rs` runs the configured
 `SCUFRIS_DESKTOP_SPEAK_COMMAND` with the paragraph on its standard input. A
 companion with no synthesiser configured stays silent, which is a deployment
 without one rather than a fault.
+
+The mute is here too, as "Mute Scufris" in the tray. It belongs to the speaker
+rather than to the conversation, so nothing about it reaches the wire and the
+agent is neither asked nor told. A muted companion still receives every
+paragraph and cuts what is playing; unmuting takes effect on the next answer
+with nothing to restore.
 
 One utterance at a time. A new paragraph cuts the one being spoken, and so does
 the microphone opening: a person who has started talking is not waiting for the

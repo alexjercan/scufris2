@@ -43,10 +43,8 @@
             default = scufris.launcher;
             scufris = scufris.launcher;
             inherit (scufris) docs resources;
-            voice-resources = scufris.voiceResources;
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-            scufris-voice = scufris.voiceLauncher;
             scufris-speak = scufris.speak;
             scufris-desktop = scufris.desktop;
             scufris-service = scufris.service;
@@ -62,11 +60,6 @@
             };
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-            scufris-voice = {
-              type = "app";
-              program = "${scufris.voiceLauncher}/bin/scufris";
-              meta.description = "Run voice-capable Scufris without enabling speech by default";
-            };
             scufris-desktop = {
               type = "app";
               program = "${scufris.desktop}/bin/scufris-desktop";
@@ -95,7 +88,6 @@
         homeModules.default = import ./nix/home-manager.nix {
           defaultsFor = system: {
             resources = self.packages.${system}.resources;
-            voiceResources = self.packages.${system}.voice-resources;
             piPackage = inputs.llm-agents.packages.${system}.pi;
             desktopPackage = self.packages.${system}.scufris-desktop;
             servicePackage = self.packages.${system}.scufris-service;

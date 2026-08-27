@@ -2,11 +2,6 @@
 
 set -euo pipefail
 
-voice=false
-if [[ "${1-}" == "--voice" ]]; then
-  voice=true
-  shift
-fi
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 session_root="${XDG_STATE_HOME:-$HOME/.local/state}/scufris/dev-sessions"
 if [[ -z "${SCUFRIS_PROJECT_ROOTS+x}" ]]; then
@@ -59,33 +54,20 @@ export PATH="$system_path"
 
 extensions=(
   "$root/extensions/scufris/workflow/index.ts"
-  "$root/extensions/scufris/voice/index.ts"
+  "$root/extensions/scufris/response.ts"
   "$root/extensions/scufris/calm.ts"
-  "$root/extensions/scufris/desktop/index.ts"
+  "$root/extensions/scufris/service/index.ts"
   "$root/extensions/scufris/widgets/index.ts"
 )
 skills=(
   "$root/skills/workflow"
   "$root/skills/widgets"
 )
-if [[ "$voice" == true ]]; then
-  if [[ "${SCUFRIS_DEV_VOICE:-}" != 1 ]] \
-    || [[ -z "${SCUFRIS_PIPER_MODEL:-}" ]] \
-    || [[ -z "${SCUFRIS_PIPER_CONFIG:-}" ]] \
-    || [[ ! -f "$SCUFRIS_PIPER_MODEL" ]] \
-    || [[ ! -f "$SCUFRIS_PIPER_CONFIG" ]] \
-    || ! type -P piper >/dev/null \
-    || ! type -P pw-play >/dev/null; then
-    printf 'scufris-dev: voice requires the repository nix develop shell\n' >&2
-    exit 2
-  fi
-  export SCUFRIS_VOICE_AVAILABLE=1
-  export SCUFRIS_SPEECH=1
-  export SCUFRIS_CALM=1
-else
-  unset SCUFRIS_VOICE_AVAILABLE SCUFRIS_SPEECH SCUFRIS_CALM
-  unset SCUFRIS_PIPER_MODEL SCUFRIS_PIPER_CONFIG
-fi
+# No --voice flag and no Piper. This process makes no sound whatever it is
+# given, so there is nothing here for a voice mode to turn on. To hear a
+# working tree, run the companion with a synthesiser; see the maintenance
+# chapter.
+unset SCUFRIS_PIPER_MODEL SCUFRIS_PIPER_CONFIG
 
 args=()
 for extension in "${extensions[@]}"; do

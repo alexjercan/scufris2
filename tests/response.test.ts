@@ -22,12 +22,26 @@ import response, {
   promptInspectionMarkdown,
   responseText,
   splitDirectResponse,
-} from "../extensions/scufris/voice/response.ts";
+} from "../extensions/scufris/response.ts";
 import {
   FINAL_RESPONSE_TOOL,
   registerForegroundAcknowledgmentLifecycle,
 } from "../extensions/scufris/workflow/orchestration.ts";
-import { lastSafeAssistantParagraph } from "../extensions/scufris/voice/speech.ts";
+import { SPOKEN_EVENT } from "../extensions/scufris/shared/spoken.ts";
+
+/**
+ * The paragraph the speaker was last handed, if any.
+ *
+ * The extension emits it; nothing here decides whether a sound is made, which
+ * is the companion's, so what these tests assert is what was offered.
+ */
+function spoken(emitted: Array<{ channel: string; request: any }>) {
+  return emitted
+    .filter((item) => item.channel === SPOKEN_EVENT)
+    .map((item) => item.request?.speak)
+    .filter((paragraph): paragraph is string => typeof paragraph === "string")
+    .at(-1);
+}
 
 const usage = {
   input: 0,
@@ -318,7 +332,7 @@ test("text-only pending acknowledgment is hidden and lifecycle gate resets", asy
     message: replaced.message,
   });
   assert.deepEqual(replaced.message.content, []);
-  assert.equal(lastSafeAssistantParagraph(app.entries), undefined);
+  assert.equal(spoken(app.emitted), undefined);
   assert.equal(
     app.entries.some((entry) => entry.customType === RESPONSE_ENTRY),
     false,
@@ -392,7 +406,7 @@ test("rejected and preflight-blocked final batches create no response artifacts"
     existsSync(`${app.context.sessionManager.getSessionFile()}.scufris`),
     false,
   );
-  assert.equal(lastSafeAssistantParagraph(app.entries), undefined);
+  assert.equal(spoken(app.emitted), undefined);
 });
 
 test("spawn and send can each finish with one safe final response and no polling", async (t) => {
@@ -482,10 +496,7 @@ test("spawn and send can each finish with one safe final response and no polling
       isError: false,
     });
     assert.equal(gate.blockReason("read"), undefined);
-    assert.equal(
-      lastSafeAssistantParagraph(app.entries)?.paragraph,
-      call.arguments.spoken,
-    );
+    assert.equal(spoken(app.emitted), call.arguments.spoken);
   }
   assert.deepEqual(app.notices, []);
 });
@@ -542,7 +553,7 @@ test("structured spoken-only response remains available to settled speech", asyn
   });
 
   assert.equal(
-    lastSafeAssistantParagraph(app.entries)?.paragraph,
+    spoken(app.emitted),
     "This prose-only response is ready to speak.",
   );
 });

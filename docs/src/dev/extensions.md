@@ -46,12 +46,12 @@ protocol and exact shutdown of the separate review agent.
 the jobs helper with the worker's report capability. `blocked` and `done`
 results terminate the worker's turn.
 
-## voice
+## response
 
-`voice/index.ts` always loads `response.ts` and loads `speech.ts` only when
-`SCUFRIS_VOICE_AVAILABLE=1` (the module is absent from normal resources).
-
-`response.ts` owns response shaping for the orchestrator:
+`response.ts` owns response shaping for the orchestrator. It is not a speech
+module and there is no longer one: the paragraph exists because it is the shape
+of every Scufris answer, with nothing listening as much as with a speaker
+attached. What it makes possible is that a speaker has something safe to say.
 
 - Registers `scufris_final_response` with `spoken` and optional `detail`
   parameters. The spoken paragraph must be safe plain prose: one bounded
@@ -65,14 +65,13 @@ results terminate the worker's turn.
   strict ownership and mode checks, bounded to 256 KiB per artifact and 128
   artifacts. Registers `/detail` (Plannotator annotate with private feedback
   return) and `/scufris-prompt` (prompt inspection artifact).
-
-`speech.ts` owns playback in the orchestrator TUI:
-
-- `/speech on|off|once|replay`; the mode persists as a custom session entry.
-- After each settled agent run it extracts the last safe assistant paragraph
-  produced by that run and plays it once through the `scufris-speak` helper
-  (Piper to PipeWire). Input cancels playback; failures notify without
-  failing the turn. Playback is bounded to 1000 UTF-8 bytes and 65 seconds.
+- Emits `scufris:spoken` with both halves: `said` for the transcript and
+  `speak` for the speaker, from the same paragraph. The tool path sends both,
+  because a tool argument is invisible to anything watching the conversation;
+  the direct path sends only `speak`, because the rewritten message is already
+  visible. Nothing here decides whether a sound is made. The companion owns the
+  speaker, so it owns the mute, and a deployment with no synthesiser is silent
+  without being told.
 
 ## calm
 

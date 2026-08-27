@@ -11,14 +11,16 @@ npm ci
 
 The shell includes Node.js, Python, Ruff, ShellCheck, Alejandra, mdBook, Git,
 and tmux. On Linux it also includes the private Piper runtime, PipeWire, and
-trusted model paths, and it exports the voice development variables.
+trusted model paths, so `tools/voice/scufris-speak` runs from a checkout.
 
 Run working-tree Scufris with system Pi and dedicated resumable sessions:
 
 ```bash
 npm run dev
-npm run dev:voice   # requires the repository development shell
 ```
+
+There is no voice mode of it. This process makes no sound whatever it is
+given, so hearing a working tree means running the companion; see below.
 
 `scufris-dev` strips the repository `node_modules/.bin` from `PATH` so the
 system Pi runs, sets the orchestrator role and default project roots, and
@@ -72,24 +74,19 @@ Both processes must see the same `XDG_RUNTIME_DIR`, because that is where the
 socket is. With no service the companion reports the backend as unavailable
 and says so in the tray.
 
-Speech is two decisions, so hearing it takes both terminals. The agent decides
-which paragraph is worth saying, and it decides nothing while `SCUFRIS_SPEECH`
-is unset; the companion owns the speaker and stays silent with no synthesiser
-to run:
+To hear it, give the companion a synthesiser. That is the whole of it: the
+service and the agent are not configured for speech and have no setting for
+it, because every answer is already one prose paragraph and the speaker is the
+companion's.
 
 ```bash
-# 1. the service, which passes the variable down to the agent it starts
-SCUFRIS_SPEECH=1 cargo run --manifest-path native/scufris-service/Cargo.toml -- \
-  --agent "$(nix build --no-link --print-out-paths .#scufris)/bin/scufris"
-
-# 2. the companion
 SCUFRIS_DESKTOP_SPEAK_COMMAND="$(nix build --no-link --print-out-paths .#scufris-speak)/bin/scufris-speak" \
   cargo run --manifest-path native/scufris-desktop/Cargo.toml
 ```
 
-The mode is remembered in the session, so a session that recorded `/speech off`
-stays silent whatever the variable says. Turn it back on in the conversation
-with `/speech on`.
+A companion started without it says so once in its log and stays silent, which
+is not a fault. "Mute Scufris" in the tray silences one that has a
+synthesiser.
 
 ### Transcription in development
 
@@ -165,14 +162,13 @@ nested `nix-shell`, fails those tests with `ENOENT` on the socket. Run them
 with a short `TMPDIR` such as `/tmp`.
 
 `npm run check` runs strict TypeScript, the Node test suite, and Prettier.
-`nix flake check` builds the launchers, resources, Home Manager
+`nix flake check` builds the launcher, resources, Home Manager
 configurations, closure separation, the real Piper fixture, and this manual.
 
 Test ownership:
 
 - `tests/*.test.ts`: extension behavior in Node with the Pi APIs stubbed:
-  orchestration, response shaping, speech, Calm, identity, and repository
-  structure. `tests/service.test.ts` covers the agent side of the version 3
+  orchestration, response shaping, Calm, identity, and repository structure. `tests/service.test.ts` covers the agent side of the version 3
   protocol: the hello, what the agent reports, and what it does with a widget
   report.
 - `native/`: the Rust workspace. `scufris-control` owns the protocol encoding,

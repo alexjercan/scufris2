@@ -23,6 +23,7 @@ pub const MENU_VOICE: &str = "voice";
 pub const MENU_STATUS: &str = "status";
 pub const MENU_RESTART: &str = "restart";
 pub const MENU_CUES: &str = "cues";
+pub const MENU_SPEECH: &str = "speech";
 pub const MENU_QUIT: &str = "quit";
 
 /// What a summon item's identifier starts with, before the widget identifier.
@@ -122,6 +123,19 @@ pub fn cues_label(enabled: bool) -> &'static str {
     }
 }
 
+/// Returns the label of the speech switch for one mute.
+///
+/// Speech is the companion's to withhold because the speaker is the
+/// companion's. The agent is not asked and is not told: it shapes the same
+/// prose paragraph either way, and this decides whether it is played.
+pub fn speech_label(muted: bool) -> &'static str {
+    if muted {
+        "Unmute Scufris"
+    } else {
+        "Mute Scufris"
+    }
+}
+
 /// Builds the tray status menu.
 ///
 /// `summonable` is the widgets the person can put on the desktop themselves,
@@ -153,6 +167,7 @@ pub fn build_menu(
                 .enabled(restart_available)
                 .build(app)?,
         )
+        .text(MENU_SPEECH, speech_label(false))
         .text(MENU_CUES, cues_label(true))
         .separator()
         // Enabled only when there is something in it: an empty submenu that
@@ -170,6 +185,15 @@ pub fn set_cues_label(menu: &Menu<tauri::Wry>, enabled: bool) -> Result<(), Stri
     };
     item.set_text(cues_label(enabled))
         .map_err(|error| format!("the sound cue switch would not change: {error}"))
+}
+
+/// Applies one mute to the speech switch label in the menu.
+pub fn set_speech_label(menu: &Menu<tauri::Wry>, muted: bool) -> Result<(), String> {
+    let Some(MenuItemKind::MenuItem(item)) = menu.get(MENU_SPEECH) else {
+        return Err("the speech switch is not in the menu".into());
+    };
+    item.set_text(speech_label(muted))
+        .map_err(|error| format!("the speech switch would not change: {error}"))
 }
 
 /// Installs the tray icon and wires its click behaviour.

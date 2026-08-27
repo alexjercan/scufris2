@@ -92,11 +92,13 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   spoken, and the widgets it asks for, and it carries stable refusal codes a
   caller branches on. There is no conversion from version 2: the companion, the
   service, and the Scufris package must be updated together.
-- Speech is two decisions in two places. The agent decides which paragraph of
-  an answer is worth saying aloud; the desktop companion owns the speaker and
-  says it. Nothing in the agent's process tree makes sound, and a session with
-  no companion simply stays silent. Enabling `voice` hands the companion the
-  synthesiser and turns speech on in the service.
+- Speech is the companion's, all of it. It owns the speaker, so it owns the
+  mute: "Mute Scufris" in the tray silences Scufris without touching the
+  conversation. Nothing in the agent's process tree makes sound and nothing in
+  it decides to; every answer is one prose paragraph whatever is listening,
+  which is the shape of the assistant rather than a speech setting. A session
+  with no companion is silent, and so is a companion with no synthesiser, which
+  is the one thing enabling `voice` now does.
 - `Super+D` is the one key of the take. Press it once and the pill rises and
   the microphone opens; press it again and the take stops and what you said
   arrives in a textbox above the pill. The textbox is an ordinary focused
@@ -121,6 +123,16 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   configuration that sets `modeCommand` fails to evaluate; nothing is migrated.
 - `Enter` while the microphone is open. One take is one key: `Super+D` stops
   it, and the words are sent from the textbox.
+- The speech mode, and with it `/speech`, `SCUFRIS_SPEECH`, and
+  `SCUFRIS_VOICE_AVAILABLE`. Whether Scufris makes a sound was a switch kept in
+  the session and seeded from a variable on a process that owns no speaker. It
+  is the tray's now. A configuration that sets either variable is ignored;
+  nothing is migrated, so a session that recorded `/speech off` is audible
+  again until the tray is told otherwise.
+- The voice build variants: the `scufris-voice` package and app, the
+  `voice-resources` package, and `npm run dev:voice`. They existed to ship a
+  speech module and set a variable for it, and both are gone. There is one
+  launcher, and it is the one that was always silent.
 
 ## [0.4.0] - 2026-08-25
 

@@ -11,14 +11,13 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "dev": "./scripts/scufris-dev",
-    "dev:voice": "./scripts/scufris-dev --voice",
     "test": "node --experimental-strip-types --test --test-concurrency=1 tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "pi": {
     "extensions": [
       "./extensions/scufris/workflow/index.ts",
-      "./extensions/scufris/voice/index.ts",
+      "./extensions/scufris/response.ts",
       "./extensions/scufris/calm.ts",
       "./extensions/scufris/service/index.ts",
       "./extensions/scufris/widgets/index.ts"

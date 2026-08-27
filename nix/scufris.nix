@@ -9,18 +9,12 @@
   version = (builtins.fromJSON (builtins.readFile ../package.json)).version;
   voice = import ./voice.nix {inherit pkgs;};
   resources = import ./resources.nix {inherit pkgs;};
-  voiceResources = import ./resources.nix {
-    inherit pkgs;
-    voice = true;
-  };
   piPackage = inputs.llm-agents.packages.${system}.pi;
+  # One launcher. There used to be two, and the voice one differed only in
+  # shipping a speech module and setting a variable for it. Both are gone: the
+  # agent shapes the answer and never decides to make a sound.
   launcher = import ./launcher.nix {
     inherit pkgs resources piPackage;
-  };
-  voiceLauncher = import ./launcher.nix {
-    inherit pkgs piPackage;
-    resources = voiceResources;
-    voice = true;
   };
   # The synthesiser belongs to whoever is sitting in front of the machine, so
   # it is its own program rather than part of the agent's launcher.
@@ -48,10 +42,8 @@ in {
   inherit
     voice
     resources
-    voiceResources
     piPackage
     launcher
-    voiceLauncher
     speak
     desktop
     service

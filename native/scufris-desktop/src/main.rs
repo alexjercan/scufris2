@@ -371,6 +371,14 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                             thread::spawn(move || runtime.handle(Event::Activate));
                         }
                         tray::MENU_RESTART => runtime.restart_backend(),
+                        tray::MENU_SPEECH => {
+                            let speaker = app.state::<Arc<Speaker>>();
+                            let muted = speaker.mute(!speaker.muted());
+                            if let Err(error) = tray::set_speech_label(&cue_menu, muted) {
+                                warn!("{error}");
+                            }
+                            info!(muted, "speech");
+                        }
                         tray::MENU_CUES => {
                             let enabled =
                                 !app.state::<CueSwitch>().0.fetch_xor(true, Ordering::AcqRel);

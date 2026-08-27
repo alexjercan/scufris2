@@ -63,9 +63,6 @@ shuts down.
 
 ## Commands
 
-- `/speech on|off|once|replay`: control spoken responses in a voice-capable
-  package. `once` arms speech for one response. `replay` repeats the last safe
-  paragraph.
 - `/calm` inspects Calm mode; `/calm on|off` sets it. Calm hides thinking,
   tool execution rows, and job event noise. It is on by default.
 - `/wake` inspects the worker wake mode; `/wake minimal|all` sets it.
@@ -75,16 +72,25 @@ shuts down.
 - `/scufris-prompt` creates a private artifact with the exact assembled system
   prompt and its ordered provenance, without contacting a provider.
 
-Explicit `/speech`, `/calm`, and `/wake` values are restored with the session.
+Explicit `/calm` and `/wake` values are restored with the session.
+
+There is no `/speech`. Whether Scufris makes a sound is not a property of the
+conversation; it is a property of the speaker, and the speaker belongs to the
+desktop companion. Silence it from the tray.
 
 ## Voice
 
-The ordinary voice-capable launcher stays silent until speech is enabled. The
-background service starts with speech on when voice is enabled. Enabled speech
-sends one shaped paragraph of each safe settled response, including automatic
-wake turns, to whatever is on screen. The desktop companion is what owns the
-speaker and says it, so a session with no companion stays silent. Speech input
-is Pi configuration, not Scufris.
+Every Scufris answer is one plain paragraph, with the rest of it in a detail
+artifact. That is the shape of the assistant, not a speech setting, and it is
+the shape with nothing listening. It is also what makes the answer safe to say
+aloud, so each settled response, wake turns included, offers its paragraph to
+whoever owns the speaker.
+
+The desktop companion is the only thing that owns one. A session with no
+companion is silent, and so is a companion with no synthesiser, which is what
+`programs.scufris.voice` gives it. To stop Scufris talking without changing the
+conversation, use "Mute Scufris" in the tray. Speech input is Pi
+configuration, not Scufris.
 
 ## The voice pill
 

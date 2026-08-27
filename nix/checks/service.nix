@@ -20,17 +20,6 @@
       agentPackage = testAgent;
     };
   };
-  voiceServiceHome = mkHome {
-    settings = {
-      voice.enable = true;
-      service = {
-        enable = true;
-        package = service;
-        agentPackage = testAgent;
-      };
-    };
-  };
-  voiceServiceUnit = voiceServiceHome.config.systemd.user.services.scufris-service;
   serviceConfig = serviceHome.config.programs.scufris.service;
   serviceUnit = serviceHome.config.systemd.user.services.${serviceConfig.serviceName};
   serviceClosure = pkgs.closureInfo {rootPaths = [service];};
@@ -80,9 +69,9 @@ in
     # The client belongs to whoever enabled a half of Scufris, and it is one
     # package so enabling both halves does not collide.
     assert lib.elem ctl serviceHome.config.home.packages;
-    # Speech is the agent's decision and the frontend's job. The variable that
-    # lets the agent decide is inherited here; nothing in this unit makes sound.
+    # Speech is not the agent's decision and never reaches this unit. The
+    # answer is prose whatever is listening, and the speaker is the
+    # companion's, so no variable here turns anything on.
     assert !(lib.any (lib.hasPrefix "SCUFRIS_SPEECH=") serviceUnit.Service.Environment);
-    assert lib.elem "SCUFRIS_SPEECH=1" voiceServiceUnit.Service.Environment;
       pkgs.runCommand "scufris-service-interface-check" {} ''touch "$out"'';
   }

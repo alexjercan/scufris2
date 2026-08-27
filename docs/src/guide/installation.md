@@ -12,14 +12,9 @@ Run the normal package from the current release tag:
 nix run github:alexjercan/scufris2/v0.3.0#scufris
 ```
 
-Run the voice-capable package on Linux:
-
-```bash
-nix run github:alexjercan/scufris2/v0.3.0#scufris-voice
-```
-
-The voice-capable package starts silent. Enable speech inside the session with
-`/speech on`.
+There is one launcher and no voice variant of it. Nothing in the agent's
+process tree makes sound; hearing Scufris means running the desktop companion,
+which owns the speaker.
 
 ## Run a checkout
 
@@ -46,12 +41,13 @@ Release tags are immutable inputs. Update the tag deliberately.
 
 Packages:
 
-- `default` and `scufris`: the normal launcher.
-- `scufris-voice`: the Linux-only voice-capable launcher.
+- `default` and `scufris`: the launcher.
 - `scufris-desktop`: the Linux-only voice pill and tray companion. It is a
   separate output, so nothing else pulls Tauri into its closure.
-- `resources`: extensions, skills, and deterministic tools without speech.
-- `voice-resources`: resources that also contain speech playback and its tool.
+- `scufris-speak`: the Linux-only synthesiser the companion runs, with the
+  voice pinned by the package.
+- `resources`: extensions, skills, and deterministic tools. No synthesiser is
+  among them, because the agent runs none.
 - `docs`: this manual, including the generated option reference.
 
 Resource packages are composition inputs. Most users need only a launcher or
@@ -115,16 +111,16 @@ programs.scufris = {
 };
 ```
 
-Voice requires Linux. It selects the voice resources, a private patched Piper
-1.4.2 package, the pinned `en_US-lessac-medium` model, and PipeWire playback.
-Overrides must keep Piper version 1.4.2 and an immutable store model with its
-configuration adjacent as `model.onnx.json`.
+Voice requires Linux. It selects a private patched Piper 1.4.2 package, the
+pinned `en_US-lessac-medium` model, and PipeWire playback. Overrides must keep
+Piper version 1.4.2 and an immutable store model with its configuration
+adjacent as `model.onnx.json`.
 
-Voice is two decisions in two places. The agent decides which paragraph of an
-answer is worth saying aloud, so enabling voice sets `SCUFRIS_SPEECH=1` on the
-service unit. Saying it belongs to the companion, so enabling voice also hands
-the companion the pinned `scufris-speak` synthesiser. A deployment with voice
-and no companion has nowhere for the paragraph to go, which is not a fault.
+Voice means one thing: the companion gets a synthesiser. Nothing about it
+reaches the service or the agent, which shape the same prose answer whatever is
+listening. A deployment with voice and no companion has nowhere for the
+paragraph to go, which is not a fault, and silencing Scufris is the tray's
+"Mute Scufris" rather than anything in the conversation.
 
 ## The desktop companion
 

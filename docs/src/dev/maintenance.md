@@ -62,22 +62,34 @@ the first one it finds. It must be a program the service can start in RPC mode
 on a session directory of its choosing, so `scripts/scufris-dev`, which picks
 its own session directory, is not one.
 
-Then press `Super+D`, speak, and press `Enter`. The words reach the agent the
-service supervises as an ordinary user message. `Escape` discards the
-recording, and the accelerator again opens the transcript for editing instead
-of sending it. Watch the same conversation from a third terminal with
+Then press `Super+D`, speak, and press it again. The take stops and the words
+arrive in a textbox above the pill, where `Enter` sends them to the agent the
+service supervises as an ordinary user message and `Escape` throws them away.
+Watch the same conversation from a third terminal with
 `cargo run --manifest-path native/scufris-service/Cargo.toml --bin scufris-ctl -- watch`.
 
 Both processes must see the same `XDG_RUNTIME_DIR`, because that is where the
 socket is. With no service the companion reports the backend as unavailable
 and says so in the tray.
 
-To hear it speak, point the companion at a synthesiser:
+Speech is two decisions, so hearing it takes both terminals. The agent decides
+which paragraph is worth saying, and it decides nothing while `SCUFRIS_SPEECH`
+is unset; the companion owns the speaker and stays silent with no synthesiser
+to run:
 
 ```bash
+# 1. the service, which passes the variable down to the agent it starts
+SCUFRIS_SPEECH=1 cargo run --manifest-path native/scufris-service/Cargo.toml -- \
+  --agent "$(nix build --no-link --print-out-paths .#scufris)/bin/scufris"
+
+# 2. the companion
 SCUFRIS_DESKTOP_SPEAK_COMMAND="$(nix build --no-link --print-out-paths .#scufris-speak)/bin/scufris-speak" \
   cargo run --manifest-path native/scufris-desktop/Cargo.toml
 ```
+
+The mode is remembered in the session, so a session that recorded `/speech off`
+stays silent whatever the variable says. Turn it back on in the conversation
+with `/speech on`.
 
 ### Transcription in development
 

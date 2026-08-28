@@ -127,8 +127,31 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   deployment would have, and says on start when it could find no synthesiser
   rather than leaving a missing voice to look like a broken one. See the
   [staging](docs/src/dev/staging.md) chapter.
+- Your journal on the desktop, as three panels over the `today` command:
+  `agenda` is a month to pick a day from and then that day's habits, tasks and
+  what follows it; `macros` is the day's calories and food with a month of
+  weight behind them; `notes` is the day's notes. They write as well as read.
+  Tick a habit or a task to mark it done, click a weight to log one, click a
+  note to rewrite it, and use the `+` ticks to add a task, a food or a note.
+  Logging a food offers your database as you type the name. Everything lands on
+  the day the panel is showing, and goes through `today`, so a habit ticked
+  here and one ticked in your editor are the same habit. They need
+  `programs.scufris.desktop.todayCommand`, and a food needs
+  `programs.scufris.desktop.macrosDatabase` unless your database is where
+  `today` looks by default.
+- A panel that needs words asks for them in a small box of its own, over the
+  panel that asked. `Enter` saves, `Escape` closes it with nothing written, and
+  the keyboard goes back where it was. A panel still never takes the keyboard
+  itself.
 
 ### Changed
+
+- Two panels on one screen side no longer stand on each other. The second place
+  on a side used to be measured halfway down the screen, whatever was already
+  there, so any panel taller than a quarter of the screen overlapped the one
+  above it. The two places now hang from opposite ends of the side. The shelf
+  above the pill holds a lane per panel for the same reason, wide enough for
+  the widest one that ships.
 
 - Scufris delegates literally. `.scufris.toml` is a menu of agent types, not a
   workflow: one `conventions` table for what Scufris infers when you do not

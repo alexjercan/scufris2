@@ -21,9 +21,9 @@ where it lives and how long.
 - **Exhibit.** Scufris showing something. Exhibits sit on a shelf above the
   pill, newest nearest the center, three at a time. A fourth retires the one
   that has been up longest. Nothing has to close an exhibit.
-- **Instrument.** A panel the user asked to keep, in one of four screen-edge
-  slots. An open with no free edge slot fails rather than stacking two panels
-  in one place.
+- **Instrument.** A panel the user asked to keep, in one of the four screen
+  corners. An open with no free corner fails rather than stacking two panels in
+  one place.
 
 The pin tick on a panel's chrome promotes an exhibit into an instrument: it
 leaves the shelf for a free edge slot, stops aging, and `scufris_widget_clear`
@@ -32,6 +32,31 @@ shelf, because a column it kept is the column the reflow behind it moves a live
 exhibit into. A pin with no free edge slot is refused and says so on the badge,
 rather than doing nothing. The tick reads both ways, and an exhibit handed back
 is the current one.
+
+## Where a panel lands
+
+`runtime::place` is the whole of it: pure arithmetic over the slot, the
+window's own size, and the monitor, unit-tested without a desktop session.
+Position is set after the window is shown, because i3 places a floating window
+when it maps it.
+
+Every place is measured from the window's own size and an edge of the monitor,
+never from a fixed point in the middle of it. That is what keeps two windows
+apart without either being told about the other. On the shelf each rank holds a
+lane of its own, `SHELF_LANE` wide, and the window is centred in its lane. On an
+edge the two places hang from opposite ends, top and bottom, so the room between
+them is what the pair leave rather than a distance neither was measured against.
+
+The middle is what the edges used to be measured from - one place at the top
+corner, one halfway down - and a panel taller than a quarter of the screen stood
+on the one above it. Every journal panel is taller than that.
+
+Two panels that together are taller than the edge still meet in the middle.
+Nothing can place them apart, and a window shoved off the screen would be worse
+than one that overlaps, so they overlap.
+`every_shipped_widget_fits_the_places_it_can_be_put_in` is what holds the
+manifests to sizes where that cannot happen: no widget wider than a lane, and
+none so tall that two of it will not fit one edge of a 1080-tall screen.
 
 ## Workspaces
 
@@ -192,9 +217,7 @@ person was using, and a window it cannot type into is not one to give it back
 to.
 
 Placement is arithmetic over the monitor the window reports, in the same style
-as the pill's `bottom_center`, and it is unit-tested without a desktop session.
-Position is set after the window is shown, because i3 places a floating window
-when it maps it.
+as the pill's `bottom_center`. See [Where a panel lands](#where-a-panel-lands).
 
 ## The form window
 

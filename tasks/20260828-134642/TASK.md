@@ -114,6 +114,20 @@ fields filled in and sends `edit`, which runs `today note edit`. An empty
 heading keeps the one the note has - `today`'s own rule, and the right one here:
 the box opened on the note as it stands.
 
+**A place is measured from an edge, never from the middle.** The second slot on
+a screen side sat halfway down it, whatever stood above. Any panel taller than a
+quarter of the screen therefore overlapped its neighbour, which is every journal
+panel: on 1920x1080 the agenda ended at 544 and the notes panel began at 330.
+The two places now hang from opposite ends of the side, so the room between them
+is what the pair leave rather than a point neither was measured against, and
+neither has to be told the other's size. The shelf's pitch had the same defect -
+268 between columns for windows 340 wide - and is now a lane per rank, wide
+enough for the widest widget that ships. Two panels that together exceed the
+side still meet in the middle; nothing can place them apart, and
+`every_shipped_widget_fits_the_places_it_can_be_put_in` holds the manifests to
+sizes where that cannot happen. The agenda went from 520 to 500 tall to keep
+it.
+
 **Trouble does not drop the day.** Clearing the cached frame in the `Trouble`
 branch of `act` looked right and was not: the rebuild then fails under `refuse`
 and the panel blanks, which contradicts trouble arriving _beside_ the day. The
@@ -220,6 +234,18 @@ The typeahead, third increment:
   nothing of the first behind. The debounce is driven from the test rather than
   by the clock.
 - `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `nix flake check`: all checks passed.
+
+Placement, fourth increment:
+
+- `cargo test --workspace`: 387 pass (313 companion, 48 service, 26 control).
+  Two new: that the two places on one side stand clear of each other for the
+  pair that overlapped on screen, and that every shipped manifest declares a
+  size the places can hold. The second is the one that matters - the layout is
+  arithmetic over sizes the manifests declare, and the old assertion was against
+  a card written for the test rather than against the widgets that ship.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `npm run check`: 91 pass, Prettier clean.
 - `nix flake check`: all checks passed.
 
 ## Left

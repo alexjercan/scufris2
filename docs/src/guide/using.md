@@ -232,8 +232,10 @@ There are two kinds, and which one you get depends on who asked for it.
   longest. You never have to close one: a panel the conversation has moved on
   from dims and goes on its own after a minute.
 - **Ones you keep.** Ask for something to stay and it takes one of the four
-  screen edges. It stops fading, and it survives a request to clear the screen.
-  There are four edges, so a fifth is refused rather than stacked.
+  screen corners. It stops fading, and it survives a request to clear the
+  screen. There are four corners, so a fifth is refused rather than stacked.
+  Two panels sharing a side hang from opposite ends of it, so a tall one never
+  lands on the one already there.
 
 Every panel wears the same three ticks in its corners.
 

@@ -31,11 +31,13 @@ pub const SHELF_SLOTS: usize = 3;
 ///
 /// The top corners first: the shelf lives above the pill at the bottom center,
 /// so an instrument that lands high is an instrument the exhibits never reach.
+/// Then the sides alternate, so the first two instruments never share an edge
+/// and the taller ones are the last to have to.
 pub const EDGE_SLOTS: [EdgeSlot; 4] = [
     EdgeSlot::TopRight,
     EdgeSlot::TopLeft,
-    EdgeSlot::MidRight,
-    EdgeSlot::MidLeft,
+    EdgeSlot::BottomRight,
+    EdgeSlot::BottomLeft,
 ];
 
 /// Gap between the top of the pill window and the bottom of the shelf, in
@@ -50,15 +52,22 @@ pub const EDGE_SLOTS: [EdgeSlot; 4] = [
 /// the person had their eye on would jump every time they spoke.
 const SHELF_GAP: f64 = textbox::GAP + textbox::HEIGHT + textbox::GAP;
 
-/// Distance between the centers of two shelf columns, in logical pixels.
+/// How wide one place on the shelf is, in logical pixels.
 ///
-/// Fixed rather than measured, because the columns must not move when a widget
-/// of a different width lands in one: the shelf is a row of places, and a place
-/// that shifts with its occupant is not a place.
-const SHELF_PITCH: f64 = 268.0;
+/// Also the distance between two columns' centers, because a window is centred
+/// in its own lane. Fixed rather than measured, because the columns must not
+/// move when a widget of a different width lands in one: the shelf is a row of
+/// places, and a place that shifts with its occupant is not a place.
+///
+/// Wide enough for the widest widget that ships, which is what keeps two
+/// neighbours off each other - a lane narrower than its occupant is an occupant
+/// standing on the one beside it. `every_shipped_widget_fits_the_places_it_can
+/// _be_put_in` is what holds this to that.
+const SHELF_LANE: f64 = 352.0;
 
 /// Distance from a screen edge to an instrument parked against it, in logical
-/// pixels.
+/// pixels. Also the gap between the two instruments on one edge, when both of
+/// them fit.
 const EDGE_MARGIN: f64 = 24.0;
 
 /// How long a dim exhibit stays up before it retires.
@@ -73,16 +82,23 @@ pub const GRACE: Duration = Duration::from_secs(60);
 pub type SurfaceId = String;
 
 /// One of the four instrument slots.
+///
+/// Two per side, one hanging from each end of the edge rather than one at the
+/// top and one at the middle. The middle was measured from the monitor and not
+/// from what was already standing above it, so a panel taller than a quarter of
+/// the screen stood on the one over it - which is every one of the journal
+/// panels. Hanging each from its own end is what makes the pair depend on both
+/// their heights without either one having to know the other's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EdgeSlot {
     /// The top left corner.
     TopLeft,
     /// The top right corner.
     TopRight,
-    /// Halfway down the left edge.
-    MidLeft,
-    /// Halfway down the right edge.
-    MidRight,
+    /// The bottom left corner.
+    BottomLeft,
+    /// The bottom right corner.
+    BottomRight,
 }
 
 /// Where one surface sits.
@@ -1108,6 +1124,14 @@ pub struct Monitor {
 /// Pure, in the [`pill::bottom_center`] style, and clamped: a monitor smaller
 /// than the widget puts the widget at the monitor's own corner rather than off
 /// the screen the person is looking at.
+///
+/// Every place is measured from the window's own size and an edge of the
+/// monitor, never from a fixed point in the middle of it. That is what keeps
+/// two windows apart without either one being told about the other: on the
+/// shelf each holds a lane of its own, and on an edge the pair hang from
+/// opposite ends. Two that together are taller than the edge still meet in the
+/// middle - nothing can place them apart, and a window shoved off the screen
+/// would be worse than one that overlaps.
 pub fn place(slot: Slot, size: Size, monitor: &Monitor) -> PhysicalPosition<i32> {
     let width = (size.width * monitor.scale).round() as i32;
     let height = (size.height * monitor.scale).round() as i32;
@@ -1121,21 +1145,21 @@ pub fn place(slot: Slot, size: Size, monitor: &Monitor) -> PhysicalPosition<i32>
                 monitor.height,
                 monitor.scale,
             );
-            let pitch = (SHELF_PITCH * monitor.scale).round() as i32;
+            let lane = (SHELF_LANE * monitor.scale).round() as i32;
             let gap = (SHELF_GAP * monitor.scale).round() as i32;
-            let center = monitor.x + monitor.width as i32 / 2 + shelf_column(rank) * pitch;
+            let center = monitor.x + monitor.width as i32 / 2 + shelf_column(rank) * lane;
             (center - width / 2, pill.y - gap - height)
         }
         Slot::Edge(edge) => {
             let left = monitor.x + margin;
             let right = monitor.x + monitor.width as i32 - width - margin;
             let top = monitor.y + margin;
-            let middle = monitor.y + (monitor.height as i32 - height) / 2;
+            let bottom = monitor.y + monitor.height as i32 - height - margin;
             match edge {
                 EdgeSlot::TopLeft => (left, top),
                 EdgeSlot::TopRight => (right, top),
-                EdgeSlot::MidLeft => (left, middle),
-                EdgeSlot::MidRight => (right, middle),
+                EdgeSlot::BottomLeft => (left, bottom),
+                EdgeSlot::BottomRight => (right, bottom),
             }
         }
     };
@@ -2353,10 +2377,10 @@ cadence = 500
             .map(|rank| place(Slot::Shelf(rank), CARD, &MONITOR).x)
             .collect();
         assert_eq!(columns[0], 1920 / 2 - CARD.width as i32 / 2);
-        assert_eq!(columns[1] - columns[0], SHELF_PITCH as i32);
-        assert_eq!(columns[0] - columns[2], SHELF_PITCH as i32);
-        // The pitch is wider than the widest card, so neighbours never overlap.
-        const { assert!(SHELF_PITCH > CARD.width) };
+        assert_eq!(columns[1] - columns[0], SHELF_LANE as i32);
+        assert_eq!(columns[0] - columns[2], SHELF_LANE as i32);
+        // The lane is wider than the widest card, so neighbours never overlap.
+        const { assert!(SHELF_LANE > CARD.width) };
     }
 
     #[test]
@@ -2380,9 +2404,69 @@ cadence = 500
             PhysicalPosition::new(1920 + 2560 - width - margin, -120 + margin)
         );
         assert_eq!(
-            place(Slot::Edge(EdgeSlot::MidRight), CARD, &monitor),
-            PhysicalPosition::new(1920 + 2560 - width - margin, -120 + (1440 - height) / 2)
+            place(Slot::Edge(EdgeSlot::BottomRight), CARD, &monitor),
+            PhysicalPosition::new(1920 + 2560 - width - margin, -120 + 1440 - height - margin)
         );
+    }
+
+    /// The two places on one edge hang from opposite ends of it, so the room
+    /// between them is what the two windows leave rather than a fixed point
+    /// neither of them was measured against.
+    #[test]
+    fn two_instruments_on_one_edge_stand_clear_of_each_other() {
+        let tall = Size {
+            width: 340.0,
+            height: 520.0,
+        };
+        let shorter = Size {
+            width: 340.0,
+            height: 420.0,
+        };
+        let top = place(Slot::Edge(EdgeSlot::TopRight), tall, &MONITOR);
+        let under = place(Slot::Edge(EdgeSlot::BottomRight), shorter, &MONITOR);
+        assert_eq!(top.x, under.x, "one edge, two columns");
+        assert!(
+            top.y + tall.height as i32 <= under.y,
+            "a {}-tall panel ending at {} stands on the one starting at {}",
+            tall.height,
+            top.y + tall.height as i32,
+            under.y
+        );
+        // What the middle used to give, which is where the journal panels met.
+        let middle = MONITOR.y + (MONITOR.height as i32 - shorter.height as i32) / 2;
+        assert!(middle < top.y + tall.height as i32);
+    }
+
+    /// The layout is arithmetic over sizes the manifests declare, so what it
+    /// holds is only worth as much as those sizes. This is the assertion over
+    /// the ones that ship rather than over a card written for a test.
+    #[test]
+    fn every_shipped_widget_fits_the_places_it_can_be_put_in() {
+        let widgets = Catalog::build(
+            crate::widgets::INSTALLED,
+            &crate::widgets::backends::names(),
+        )
+        .expect("the shipped widgets install");
+        let edge = f64::from(MONITOR.height) - EDGE_MARGIN * 3.0;
+        for source in crate::widgets::INSTALLED {
+            let installed = widgets.get(source.directory).expect("a shipped widget");
+            let (wide, tall) = (f64::from(installed.width), f64::from(installed.height));
+            assert!(
+                wide <= SHELF_LANE,
+                "{} is {wide} wide and a shelf lane is {SHELF_LANE}",
+                installed.id
+            );
+            // Two of the same widget, which is the tallest pair one edge can be
+            // asked to hold. A pair that does not fit is a pair that meets in
+            // the middle - see `place`. Measured against the desktop this is
+            // built for; a shorter screen holds fewer panels than four.
+            assert!(
+                tall * 2.0 <= edge,
+                "two {} panels are {} tall and an edge holds {edge}",
+                installed.id,
+                tall * 2.0
+            );
+        }
     }
 
     #[test]
@@ -2398,6 +2482,7 @@ cadence = 500
             Slot::Shelf(0),
             Slot::Shelf(2),
             Slot::Edge(EdgeSlot::TopRight),
+            Slot::Edge(EdgeSlot::BottomLeft),
         ] {
             let position = place(slot, CARD, &monitor);
             assert_eq!(

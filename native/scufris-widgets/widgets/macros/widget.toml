@@ -1,0 +1,8 @@
+id = "macros"
+name = "Macros"
+description = "Show what today was eaten and weighed, out of the-den journal: calories with the protein, carbohydrate and fat behind them, the day's food rows, and the weight with a trend over the last month. Read only. The spawn payload is { days: number }, how far back the weight trend reaches, and 30 is the usual answer."
+width = 340
+height = 360
+backend = "today"
+cadence = 6000
+spawn = { view = "macros" }

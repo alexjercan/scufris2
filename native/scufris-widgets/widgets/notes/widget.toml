@@ -1,0 +1,8 @@
+id = "notes"
+name = "Notes"
+description = "Show today's structured notes out of the-den journal, heading and body, in the order they were written. Read only: notes are long-form and are written with the today command rather than from a panel. The spawn payload is empty."
+width = 340
+height = 420
+backend = "today"
+cadence = 6000
+spawn = { view = "notes" }

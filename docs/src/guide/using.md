@@ -266,3 +266,29 @@ You can also put one up yourself. The tray menu carries a submenu of the panels
 that can fill themselves, and one you summon is yours: it takes an edge slot,
 fades never, and is not part of the conversation. Ask Scufris to clear the
 screen and it takes down what it opened and leaves yours standing.
+
+### The journal panels
+
+Three of them read the-den journal through the `today` command, which is the
+only program that understands that format. They are the panels you summon and
+keep, rather than ones an answer puts up.
+
+- **Agenda** is a month, then one day of it. Pick a day and it shows that day's
+  habits and tasks, then the next few incomplete tasks dated after it, each
+  with its date. Days carrying an incomplete task are marked in the month.
+  Today is only the day it starts on: a future day shows an empty habit list,
+  which is the truth about a day that has not happened.
+- **Macros** is the day's calories with the protein, carbohydrate and fat
+  behind them, the food logged against it, and the weight with a line over the
+  last month.
+- **Notes** is the day's structured notes, heading and body, in order.
+
+The agenda panel writes as well as reads. Click a habit or a task to tick it;
+the tick goes through `today`, which is what makes a habit ticked here and one
+ticked in your editor the same habit. Everything else is read-only, because
+logging food and writing a note both need a keyboard, and a panel never takes
+one.
+
+These need `programs.scufris.desktop.todayCommand`. Without it the panels still
+open and say what is missing, rather than sitting empty. See
+[Installation](installation.md).

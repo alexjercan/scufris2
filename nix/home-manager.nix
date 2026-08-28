@@ -194,6 +194,29 @@ in {
         '';
       };
 
+      todayCommand = lib.mkOption {
+        type = lib.types.nullOr lib.types.package;
+        default = null;
+        description = ''
+          Executable that reads and writes the-den journal, for the agenda,
+          macros, and notes panels. Supplied by the deployment rather than
+          taken as a flake input: the journal is personal data, and Scufris
+          does not depend on the repository that holds it. Panels that need it
+          say so on the panel when it is absent.
+        '';
+      };
+
+      denPath = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "/home/you/personal/the-den";
+        description = ''
+          The journal directory, when it is not where the today command looks
+          by default. A systemd user service does not inherit the login
+          shell's `DEN_PATH`, so a shell that sets one must say so here too.
+        '';
+      };
+
       stt = {
         endpoint = lib.mkOption {
           type = lib.types.nullOr (lib.types.strMatching "https?://.*");
@@ -368,6 +391,10 @@ in {
             "SCUFRIS_DESKTOP_STOP_KEY=${desktopCfg.stopKey}"
             ++ lib.optional (desktopCfg.chatCommand != null)
             "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe desktopCfg.chatCommand}"
+            ++ lib.optional (desktopCfg.todayCommand != null)
+            "SCUFRIS_TODAY_COMMAND=${lib.getExe desktopCfg.todayCommand}"
+            ++ lib.optional (desktopCfg.denPath != null)
+            "DEN_PATH=${desktopCfg.denPath}"
             ++ lib.optional cfg.voice.enable
             "SCUFRIS_DESKTOP_SPEAK_COMMAND=${lib.getExe speak}";
           # The companion must survive its own faults; a backend crash is

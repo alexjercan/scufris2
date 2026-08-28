@@ -19,6 +19,9 @@
   testChat = pkgs.writeShellScriptBin "scufris-chat" ''
     printf 'open the chat\n'
   '';
+  testToday = pkgs.writeShellScriptBin "today" ''
+    printf 'today %s\n' "$@"
+  '';
   testAgent = pkgs.writeShellScriptBin "scufris" ''
     printf 'scufris %s\n' "$@"
   '';
@@ -37,6 +40,8 @@
         enable = true;
         package = desktop;
         chatCommand = testChat;
+        todayCommand = testToday;
+        denPath = "/home/tester/the-den";
         stt.whisper = {
           package = testWhisper;
           model = testWhisperModel;
@@ -197,6 +202,13 @@ in
     assert lib.elem "SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10302/inference" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_HOTKEY=Super+D" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe testChat}" desktopUnit.Service.Environment;
+    # The journal is personal data, so the deployment names the command that
+    # reads it and where it lives. A unit does not inherit a login shell, so a
+    # den somewhere other than the default has to be written here.
+    assert lib.elem "SCUFRIS_TODAY_COMMAND=${lib.getExe testToday}" desktopUnit.Service.Environment;
+    assert lib.elem "DEN_PATH=/home/tester/the-den" desktopUnit.Service.Environment;
+    assert !(lib.any (lib.hasPrefix "SCUFRIS_TODAY_COMMAND=") configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment);
+    assert !(lib.any (lib.hasPrefix "DEN_PATH=") configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment);
     # The two keys beside the hotkey are the deployment's to name. A module
     # that named neither writes neither, because absent means derived and the
     # companion is the one that derives them.

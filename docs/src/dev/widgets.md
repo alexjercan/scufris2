@@ -299,6 +299,21 @@ The first line a backend is handed on standard input is the payload the open
 carried. `native/scufris-widgets/backends/system/backend.py` reads one key from it, `every`,
 and reports processor load, per-core load, memory in use, and uptime.
 
+A manifest can put keys under whatever the open carried:
+
+```toml
+backend = "today"
+spawn = { view = "agenda" }
+```
+
+Summoning a widget from the tray opens it with an empty payload, so without
+this a summoned widget could not tell its backend which of several questions it
+is. The manifest's keys lie underneath: a caller naming the same key wins, and
+the merge happens at the one point both roads into an open pass through, so a
+summon and an answer resolve it the same way. This is also what lets several
+widgets share one backend - the payload is part of what a backend is keyed by,
+so each view is a process of its own.
+
 A panel can also write back. `ctx.send(action)` puts one JSON line on the
 backend's standard input, the mirror of the lines the backend writes, and the
 backend answers with the refreshed reading the ordinary way. So a timer paused
@@ -356,6 +371,42 @@ the panel says so rather than showing a stale number. What comes back names the
 account it belongs to, an email address among it; the backend reads past all of
 it, and the only fields that ever leave the process are the window's label, its
 percentage, and the seconds until it starts over.
+
+### The journal backend
+
+`today` feeds three panels - `agenda`, `macros`, and `notes` - and each is a
+process of its own, because each opens with a different `view` in its manifest's
+`spawn` table.
+
+It never parses the-den. The `today` command is the only program that
+understands that format, so it is asked rather than imitated: a change to the
+journal's shape is a change in one place, and a half-written entry is `today`'s
+to fail on rather than this backend's to misread. The command comes from
+`SCUFRIS_TODAY_COMMAND` or `today` on the path, and the journal from `DEN_PATH`
+or wherever the command looks by default. Neither present is a sentence on the
+panel rather than an empty frame, and the Home Manager module writes both from
+`programs.scufris.desktop.todayCommand` and `.denPath` - a user service does not
+inherit a login shell.
+
+An idle panel costs one `stat`. The selected day's entry is asked for with
+`today path` and watched by its timestamp, and the command only runs again when
+that moved - or once a minute, which is what keeps the tasks dated after the
+day fresh without watching a file per day. `path` rather than `show` on purpose:
+`show` creates the entry it reads, so a panel browsing a month with it would
+leave a month of empty files behind.
+
+The agenda panel writes. A habit or a task is ticked by clicking it, the
+backend runs `today habit toggle` or `today task done` for the selected date and
+reads the journal back, so a habit ticked from the panel and one ticked in an
+editor arrive identically. A tick that is refused carries its sentence beside
+the day rather than instead of it: a habit that would not toggle is no reason to
+blank a panel that was reading fine a moment ago.
+
+Nothing there needs the keyboard, and that is the boundary. A click has never
+needed focus, and a widget shell is built unfocusable for a specific reason
+(see [Windows](#windows)) and pooled, so one that ever became focusable would
+stay that way for whatever exhibit reused it. Logging food and writing a note
+are typing, so both stay with the command.
 
 A reading is not a citation. Scufris naming a panel is what says the
 conversation is still about it; a sampler writing its line every second says

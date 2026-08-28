@@ -13,7 +13,7 @@ import unittest.mock
 from pathlib import Path
 from types import ModuleType
 
-BACKENDS = Path(__file__).parents[1] / "native" / "backends"
+BACKENDS = Path(__file__).parents[1] / "native" / "scufris-widgets" / "backends"
 
 #: What a window may say and nothing else. The answers these backends read
 #: carry the account behind them, including an email address, and a key that

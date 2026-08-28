@@ -1,0 +1,1418 @@
+<title>The Second Surface</title>
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap"
+/>
+<style>
+  :root {
+    --bg: #181818;
+    --bg1: #1c1c1c;
+    --bg2: #282828;
+    --bg3: #453d41;
+    --bg4: #52494e;
+    --fg: #e4e4ef;
+    --fg1: #f4f4ff;
+    --yellow: #ffdd33;
+    --brown: #cc8c3c;
+    --quartz: #95a99f;
+    --niagara: #96a6c8;
+    --wisteria: #9e95c7;
+    --green: #73c936;
+    --red: #f43841;
+    --mono:
+      "Iosevka", "Iosevka Term", "JetBrains Mono", ui-monospace, monospace;
+  }
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 14.5px;
+    line-height: 1.65;
+  }
+  .wrap {
+    max-width: 1060px;
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    color: var(--fg1);
+  }
+  code {
+    color: var(--brown);
+    font-size: 0.92em;
+  }
+  a {
+    color: var(--niagara);
+  }
+  p {
+    max-width: 76ch;
+    margin-bottom: 12px;
+  }
+  ul,
+  ol {
+    max-width: 76ch;
+    list-style: none;
+    margin-bottom: 12px;
+  }
+  ul li {
+    padding-left: 18px;
+    position: relative;
+    margin-bottom: 6px;
+  }
+  ul li::before {
+    content: ">";
+    position: absolute;
+    left: 0;
+    color: var(--bg4);
+  }
+  ol {
+    counter-reset: step;
+  }
+  ol li {
+    padding-left: 26px;
+    position: relative;
+    margin-bottom: 8px;
+    counter-increment: step;
+  }
+  ol li::before {
+    content: counter(step, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    color: var(--bg4);
+    font-weight: 800;
+    font-size: 12px;
+  }
+  ul li b,
+  ol li b,
+  p b {
+    color: var(--fg1);
+    font-weight: 700;
+  }
+
+  .mast {
+    padding: 64px 0 36px;
+    border-bottom: 1px solid var(--bg2);
+  }
+  .mast .kicker {
+    font-size: 12px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--quartz);
+    margin-bottom: 14px;
+  }
+  .mast h1 {
+    font-size: 34px;
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+  }
+  .mast .sub {
+    margin-top: 14px;
+    color: var(--fg);
+    max-width: 80ch;
+  }
+  .mast .sub em {
+    color: var(--wisteria);
+    font-style: normal;
+  }
+
+  nav.toc {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+    padding: 20px 0 0;
+    font-size: 12px;
+  }
+  nav.toc a {
+    color: var(--bg4);
+    text-decoration: none;
+  }
+  nav.toc a:hover,
+  nav.toc a:focus-visible {
+    color: var(--niagara);
+  }
+
+  section {
+    padding: 52px 0 10px;
+  }
+  .shead {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 26px;
+    align-items: baseline;
+  }
+  .snum {
+    color: var(--bg4);
+    font-weight: 800;
+    font-size: 15px;
+  }
+  .shead h2 {
+    font-size: 21px;
+  }
+  .srule {
+    flex: 1;
+    height: 1px;
+    background: var(--bg2);
+    align-self: center;
+  }
+  .stag {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--bg4);
+    white-space: nowrap;
+  }
+
+  .panel {
+    background: var(--bg1);
+    border: 1px solid #33302e;
+    position: relative;
+    padding: 22px;
+    margin: 18px 0;
+  }
+  .panel h3 {
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    color: var(--fg1);
+  }
+  .panel.decide {
+    border-left: 2px solid var(--wisteria);
+  }
+  .panel.decide h3 {
+    color: var(--wisteria);
+  }
+  .panel.risk {
+    border-left: 2px solid var(--red);
+  }
+  .panel.risk h3 {
+    color: var(--red);
+  }
+  .panel.free {
+    border-left: 2px solid var(--green);
+  }
+  .panel.free h3 {
+    color: var(--green);
+  }
+  .panel.law {
+    border-left: 2px solid var(--yellow);
+  }
+  .panel.law h3 {
+    color: var(--yellow);
+  }
+  .rec {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--bg2);
+    font-size: 13.5px;
+  }
+  .rec b {
+    color: var(--green);
+  }
+  .said {
+    color: var(--quartz);
+    font-size: 13px;
+    border-left: 1px solid var(--bg3);
+    padding-left: 12px;
+    margin: 0 0 12px;
+  }
+
+  pre.code {
+    background: #101010;
+    border: 1px solid var(--bg2);
+    padding: 16px 18px;
+    margin: 14px 0;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: #c9c9d6;
+    overflow-x: auto;
+  }
+  pre.code .cm {
+    color: #6b6b76;
+  }
+  pre.code .k {
+    color: var(--yellow);
+  }
+  pre.code .s {
+    color: var(--green);
+  }
+  pre.code .t {
+    color: var(--niagara);
+  }
+
+  .tblwrap {
+    overflow-x: auto;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+    margin: 14px 0;
+  }
+  th {
+    color: var(--quartz);
+    text-align: left;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  th,
+  td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--bg2);
+    vertical-align: top;
+  }
+  td:first-child {
+    white-space: nowrap;
+    color: var(--fg1);
+  }
+  td.no {
+    color: var(--bg4);
+  }
+  td.yes {
+    color: var(--green);
+  }
+  td.warn {
+    color: var(--red);
+  }
+
+  figure {
+    margin: 22px 0;
+  }
+  figure svg {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    background: #101010;
+    border: 1px solid var(--bg2);
+  }
+  figcaption {
+    font-size: 12px;
+    color: var(--quartz);
+    margin-top: 8px;
+    max-width: 82ch;
+  }
+
+  .keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 16px 0;
+  }
+  .keycard {
+    background: var(--bg1);
+    border: 1px solid #33302e;
+    padding: 14px 16px;
+    flex: 1 1 240px;
+  }
+  .keycard .kb {
+    color: var(--yellow);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+  }
+  .keycard p {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: var(--fg);
+  }
+
+  footer {
+    padding: 60px 0 80px;
+    color: var(--bg4);
+    font-size: 12px;
+    border-top: 1px solid var(--bg2);
+    margin-top: 40px;
+  }
+</style>
+
+<div class="wrap">
+  <header class="mast">
+    <div class="kicker">
+      Design &middot; task 20260828-170154 &middot; 2026-08-28 &middot; revision
+      1
+    </div>
+    <h1>The Second Surface</h1>
+    <p class="sub">
+      Scufris answers on one screen, on one machine. This asks what it costs to
+      answer on a laptop across the house and a phone in your pocket. The
+      finding: <em>the one-user law is not what stands in the way</em>. Three
+      other clauses bundled into L1 are, and they cost wildly different amounts.
+      Nothing here is built until v0.5.0 ships.
+    </p>
+    <nav class="toc">
+      <a href="#laws">00 Laws</a>
+      <a href="#thesis">01 The thesis</a>
+      <a href="#audit">02 What the code already does</a>
+      <a href="#transport">03 Transport</a>
+      <a href="#presence">04 Presence</a>
+      <a href="#catalog">05 The catalog</a>
+      <a href="#phone">06 What a phone is</a>
+      <a href="#versions">07 Versions</a>
+      <a href="#ladder">08 The ladder</a>
+      <a href="#decisions">09 To settle</a>
+      <a href="#not">10 Not doing</a>
+    </nav>
+  </header>
+
+  <section id="laws">
+    <div class="shead">
+      <span class="snum">00</span>
+      <h2>Laws</h2>
+      <span class="srule"></span>
+      <span class="stag">Bounds everything below</span>
+    </div>
+
+    <p>
+      L1 of the inversion design says:
+      <em>one of everything, on one machine</em> &mdash; one
+      <code>pi --mode rpc</code>, one <code>scufris-desktop</code>, one person,
+      one host, no tenancy, no account, no authentication, no network listener,
+      no second device. It has been the most useful sentence in the project,
+      because it answers questions instead of code.
+    </p>
+    <p>
+      It is also five laws in a trench coat. This design keeps three of them,
+      narrows one, and replaces one.
+    </p>
+
+    <div class="panel law">
+      <h3>L1 &mdash; One person, one conversation (narrowed)</h3>
+      <p>
+        One <code>pi --mode rpc</code>. One session directory. One transcript.
+        One person. No tenancy, no accounts, no per-user isolation, no second
+        conversation running beside the first.
+      </p>
+      <p>
+        This is the clause that was doing the work, and it is untouched. Every
+        "what if two people..." question is still answered here rather than in
+        code. What leaves L1 is <em>one host</em> and <em>one surface</em>: they
+        were never the same claim as <em>one person</em>, they were only
+        convenient to state together.
+      </p>
+    </div>
+
+    <div class="panel law">
+      <h3>L5 &mdash; One trust domain, and never a listener</h3>
+      <p>
+        Every surface belongs to the same person, and the transport
+        authenticates before the protocol sees a byte. The service keeps binding
+        a mode 0600 Unix socket in the runtime directory and keeps
+        authenticating nothing. Anything that reaches that socket is already a
+        process running as you on the host.
+      </p>
+      <p>
+        <b>Scufris never opens a TCP listener.</b> Not behind a password, not on
+        localhost, not "just for testing". Whatever crosses a network is
+        WireGuard's problem, or Tailscale's, or ssh's &mdash; all three of which
+        do it better than we would, and none of which we have to test.
+      </p>
+      <p>
+        This is the law that keeps
+        <code>native/scufris-service/src/server.rs:5</code> literally true after
+        the change:
+        <em
+          >there is nothing to authenticate, and anything that can open the
+          socket can already act as them</em
+        >. That sentence is the security model. A design that falsifies it owes
+        a replacement, and this one does not falsify it.
+      </p>
+    </div>
+
+    <div class="panel law">
+      <h3>L6 &mdash; Any number watch, exactly one attends</h3>
+      <p>
+        State and transcript go to every connected surface. Speech, widget
+        commands and window raises go to exactly one: the surface you are
+        looking at. That surface holds <b>presence</b>.
+      </p>
+      <p>
+        Presence is not a mode and not a setting. It is inferred from what you
+        just did, the way the debug lease is inferred from a connection being
+        open. There is no verb to get stuck between.
+      </p>
+    </div>
+
+    <div class="panel law">
+      <h3>L2 &mdash; Nothing is migrated (under strain)</h3>
+      <p>
+        L2 says no backwards compatibility in any direction: v3 replaced v2
+        rather than coexisting. That is affordable because one
+        <code>nixos-rebuild</code> moves every part of Scufris at once.
+      </p>
+      <p>
+        <b
+          >A phone app is the first Scufris component that cannot be rebuilt in
+          lockstep with its host.</b
+        >
+        A laptop can be; a phone in a drawer, an app awaiting review, or a build
+        you sideloaded in March cannot. L2 does not break here, but it stops
+        being free. See <a href="#versions">07</a>.
+      </p>
+    </div>
+  </section>
+
+  <section id="thesis">
+    <div class="shead">
+      <span class="snum">01</span>
+      <h2>One user is not what breaks</h2>
+      <span class="srule"></span>
+      <span class="stag">Thesis</span>
+    </div>
+
+    <p class="said">
+      "what if we add an integration for a Phone app? would that break our only
+      one user rule? like I am thinking it could be just a new surface,
+      basically just the pill as a phone app" &mdash; Alex, 2026-08-28
+    </p>
+
+    <p>
+      No. A phone, a laptop and the desktop, all operated by you, is still one
+      person, one conversation, one session, one agent. Nothing about tenancy,
+      accounts or isolation comes into it. The multi-user question is not on the
+      table and this design does not put it there.
+    </p>
+    <p>
+      Take L1 apart clause by clause and the real cost becomes visible. Three of
+      the five are untouched. One is cheap. One is the whole job.
+    </p>
+
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Clause of L1</th>
+            <th>Under a second surface</th>
+            <th>Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>One person</td>
+            <td class="yes">Untouched. Still one of you.</td>
+            <td class="no">None</td>
+          </tr>
+          <tr>
+            <td>One agent</td>
+            <td class="yes">
+              Untouched. Surfaces are clients; the agent is one child.
+            </td>
+            <td class="no">None</td>
+          </tr>
+          <tr>
+            <td>One conversation</td>
+            <td class="yes">
+              Untouched, and reinforced &mdash; that is the point of connecting
+              a second surface at all.
+            </td>
+            <td class="no">None</td>
+          </tr>
+          <tr>
+            <td>No authentication</td>
+            <td>
+              Survives only if the transport does the authenticating. See L5.
+            </td>
+            <td>Zero code, one deployment decision</td>
+          </tr>
+          <tr>
+            <td>One surface</td>
+            <td class="warn">
+              Breaks. And it does not break gracefully &mdash; see
+              <a href="#audit">02</a>.
+            </td>
+            <td class="warn">The whole job</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      So the design question is not "how do we support more than one user". It
+      is:
+      <b
+        >the service pushes to "every frontend" as though that were a synonym
+        for "the screen". With more than one, it needs a word for the one you
+        are looking at.</b
+      >
+    </p>
+  </section>
+
+  <section id="audit">
+    <div class="shead">
+      <span class="snum">02</span>
+      <h2>What the code already does</h2>
+      <span class="srule"></span>
+      <span class="stag">Audit, not speculation</span>
+    </div>
+
+    <p>
+      Half of this is already built. The service is not a single-client server
+      that would need rewriting; it is a fan-out server with one deliberate
+      eviction in it.
+    </p>
+
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Mechanism</th>
+            <th>Today</th>
+            <th>Right with N surfaces?</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>State pushes</td>
+            <td>
+              <code>push_frontends</code> loops every frontend
+              (<code>service.rs:131</code>)
+            </td>
+            <td class="yes">Yes, as written</td>
+          </tr>
+          <tr>
+            <td>Transcript</td>
+            <td>Same loop; 200-entry ring replayed on connect</td>
+            <td class="yes">Yes. The ring is already the sync mechanism</td>
+          </tr>
+          <tr>
+            <td>Your own words</td>
+            <td>
+              Come off Pi's event stream at
+              <code>MessageEnd</code> (<code>service.rs:426</code>), not off the
+              submit path
+            </td>
+            <td class="yes">
+              Yes &mdash; typing on the phone already shows on the laptop, free
+            </td>
+          </tr>
+          <tr>
+            <td>Slow or dead client</td>
+            <td>
+              Bounded outbox of 256, then dropped (<code>drop_client</code>)
+            </td>
+            <td class="yes">Yes. A phone on a bad train is already handled</td>
+          </tr>
+          <tr>
+            <td>Concurrent submit</td>
+            <td>
+              Second one is delivered as a steer, not refused
+              (<code>service.rs:717</code>)
+            </td>
+            <td class="yes">Yes, and it is the behaviour you want</td>
+          </tr>
+          <tr>
+            <td>Control clients</td>
+            <td>
+              Already unlimited &mdash; "that is just a person in a terminal"
+            </td>
+            <td class="yes">Yes</td>
+          </tr>
+          <tr>
+            <td>Second frontend</td>
+            <td class="warn">
+              Evicted by <code>register</code> (<code>service.rs:518</code>)
+            </td>
+            <td class="warn">No. And worse than no &mdash; see below</td>
+          </tr>
+          <tr>
+            <td>Speech</td>
+            <td>Broadcast (<code>service.rs:601</code>)</td>
+            <td class="warn">No. Two devices, one paragraph, out of phase</td>
+          </tr>
+          <tr>
+            <td>Widget commands</td>
+            <td>Broadcast (<code>service.rs:609</code>)</td>
+            <td class="warn">No. Two answers for one command id</td>
+          </tr>
+          <tr>
+            <td>Widget catalog</td>
+            <td>
+              Last announcement wins, stored and replayed
+              (<code>service.rs:673</code>)
+            </td>
+            <td class="warn">No. Tools would flap by surface</td>
+          </tr>
+          <tr>
+            <td>Raise the window</td>
+            <td>Broadcast (<code>service.rs:656</code>)</td>
+            <td class="warn">No. Right on the laptop, noise in your pocket</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel risk">
+      <h3>The eviction does not fail closed &mdash; it livelocks</h3>
+      <p>
+        <code>register</code> removes the previous client in the same role. That
+        drops its outbox, which ends its writer thread, which shuts the socket
+        down. And <code>link.rs</code> reconnects with bounded backoff, because
+        surviving a service restart is its job.
+      </p>
+      <p>
+        So two companions do not produce an error. A connects. B connects and
+        evicts A. A reconnects and evicts B. B reconnects and evicts A. Forever,
+        at roughly the 5-second ceiling of <code>MAX_BACKOFF</code>, with both
+        conversation windows clearing on every cycle.
+      </p>
+      <p>
+        This is worth knowing before anyone tries the "just point the laptop at
+        it" experiment and concludes the socket forward is broken. It is not.
+        The eviction is.
+      </p>
+    </div>
+
+    <figure>
+      <svg
+        viewBox="0 0 1000 340"
+        role="img"
+        aria-label="Today the service evicts a second frontend, so two companions reconnect in a loop. Proposed, state and transcript reach every surface while speech, widgets and window raises reach only the surface holding presence."
+      >
+        <defs>
+          <marker
+            id="a1"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
+          </marker>
+          <marker
+            id="a2"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#f43841" />
+          </marker>
+          <marker
+            id="a3"
+            viewBox="0 0 10 10"
+            refX="9"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#ffdd33" />
+          </marker>
+        </defs>
+
+        <text
+          x="30"
+          y="32"
+          fill="#95a99f"
+          font-size="11"
+          letter-spacing="2.4"
+          font-family="monospace"
+        >
+          TODAY
+        </text>
+        <text
+          x="540"
+          y="32"
+          fill="#95a99f"
+          font-size="11"
+          letter-spacing="2.4"
+          font-family="monospace"
+        >
+          PROPOSED
+        </text>
+        <line
+          x1="500"
+          y1="16"
+          x2="500"
+          y2="324"
+          stroke="currentColor"
+          stroke-opacity="0.14"
+        />
+
+        <g font-family="monospace" font-size="12" fill="currentColor">
+          <rect
+            x="52"
+            y="130"
+            width="150"
+            height="46"
+            fill="none"
+            stroke="#ffdd33"
+          />
+          <text x="68" y="158">service</text>
+
+          <rect
+            x="300"
+            y="70"
+            width="150"
+            height="42"
+            fill="none"
+            stroke="currentColor"
+            stroke-opacity="0.5"
+          />
+          <text x="316" y="96">desktop</text>
+          <rect
+            x="300"
+            y="196"
+            width="150"
+            height="42"
+            fill="none"
+            stroke="currentColor"
+            stroke-opacity="0.5"
+          />
+          <text x="316" y="222">laptop</text>
+
+          <line
+            x1="204"
+            y1="145"
+            x2="298"
+            y2="98"
+            stroke="currentColor"
+            stroke-opacity="0.45"
+            marker-end="url(#a1)"
+          />
+          <line
+            x1="204"
+            y1="163"
+            x2="298"
+            y2="212"
+            stroke="currentColor"
+            stroke-opacity="0.45"
+            marker-end="url(#a1)"
+          />
+          <path
+            d="M 372 116 C 400 152 400 158 372 194"
+            fill="none"
+            stroke="#f43841"
+            marker-end="url(#a2)"
+          />
+          <path
+            d="M 340 194 C 312 158 312 152 340 116"
+            fill="none"
+            stroke="#f43841"
+            marker-end="url(#a2)"
+          />
+          <text x="392" y="160" font-size="10.5" fill="#f43841">evicts</text>
+          <text x="150" y="268" font-size="10.5" fill="#f43841">
+            each reconnect kicks the other off, forever
+          </text>
+        </g>
+
+        <g font-family="monospace" font-size="12" fill="currentColor">
+          <rect
+            x="546"
+            y="130"
+            width="150"
+            height="46"
+            fill="none"
+            stroke="#ffdd33"
+          />
+          <text x="562" y="158">service</text>
+
+          <rect
+            x="790"
+            y="56"
+            width="164"
+            height="42"
+            fill="none"
+            stroke="#ffdd33"
+          />
+          <text x="806" y="82">desktop</text>
+          <text x="906" y="82" font-size="10" fill="#ffdd33">attends</text>
+
+          <rect
+            x="790"
+            y="132"
+            width="164"
+            height="42"
+            fill="none"
+            stroke="currentColor"
+            stroke-opacity="0.5"
+          />
+          <text x="806" y="158">laptop</text>
+
+          <rect
+            x="790"
+            y="208"
+            width="164"
+            height="42"
+            fill="none"
+            stroke="currentColor"
+            stroke-opacity="0.5"
+          />
+          <text x="806" y="234">phone</text>
+
+          <line
+            x1="698"
+            y1="146"
+            x2="788"
+            y2="84"
+            stroke="currentColor"
+            stroke-opacity="0.45"
+            marker-end="url(#a1)"
+          />
+          <line
+            x1="698"
+            y1="153"
+            x2="788"
+            y2="153"
+            stroke="currentColor"
+            stroke-opacity="0.45"
+            marker-end="url(#a1)"
+          />
+          <line
+            x1="698"
+            y1="160"
+            x2="788"
+            y2="228"
+            stroke="currentColor"
+            stroke-opacity="0.45"
+            marker-end="url(#a1)"
+          />
+          <path
+            d="M 640 128 C 660 96 700 66 788 70"
+            fill="none"
+            stroke="#ffdd33"
+            marker-end="url(#a3)"
+          />
+          <text x="600" y="112" font-size="10.5" fill="#ffdd33">
+            speech, widgets, raise
+          </text>
+          <text x="576" y="268" font-size="10.5" fill="#95a99f">
+            state and transcript to all three
+          </text>
+        </g>
+      </svg>
+      <figcaption>
+        The only structural change is which arrow is which. Today every arrow
+        out of the service is a broadcast and a second surface is thrown off.
+        Proposed, the thin arrows stay broadcasts and one thick arrow follows
+        presence.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section id="transport">
+    <div class="shead">
+      <span class="snum">03</span>
+      <h2>The tunnel, not the listener</h2>
+      <span class="srule"></span>
+      <span class="stag">Zero code</span>
+    </div>
+
+    <p>
+      Behind the service socket is an agent that runs commands, spawns tmux
+      workers and writes your filesystem. An unauthenticated
+      <code>submit</code> from the network is remote code execution with a
+      friendly tone. This is the part of the design where being conservative is
+      not timidity, it is arithmetic.
+    </p>
+    <p>
+      So the service does not learn about networks. The socket goes over a
+      tunnel the operating system already authenticates, and OpenSSH forwards
+      Unix sockets directly:
+    </p>
+
+    <pre
+      class="code"
+    ><span class="cm"># on the laptop, over WireGuard or Tailscale to the host</span>
+ssh -N -L <span class="s">"$HOME/.scufris-remote/service.sock"</span>:/run/user/1000/scufris/service.sock den
+
+<span class="cm"># then the companion, unchanged, pointed at the forwarded socket</span>
+SCUFRIS_RUNTIME_DIR=<span class="s">"$HOME/.scufris-remote"</span> scufris-desktop</pre>
+
+    <div class="panel free">
+      <h3>Staging already built this</h3>
+      <p>
+        <code>SCUFRIS_RUNTIME_DIR</code> names the directory outright, and the
+        service, the companion, <code>scufris-ctl</code> and the agent extension
+        all resolve it the same way, so <em>one export moves a whole stack</em>.
+        It exists so a staging Scufris cannot end up in the real one's
+        conversation.
+      </p>
+      <p>
+        The same export moves a stack onto a forwarded socket. The mechanism
+        built for isolation is exactly the mechanism for a remote surface, and
+        nothing has to be added to get it.
+      </p>
+    </div>
+
+    <p>
+      The companion's own <code>desktop.sock</code> does not come along.
+      <code>scufris-ctl open</code> and <code>hud</code> are window manager
+      bindings for the machine the windows are on. They stay host-local, and a
+      remote surface simply does not have them.
+    </p>
+  </section>
+
+  <section id="presence">
+    <div class="shead">
+      <span class="snum">04</span>
+      <h2>Presence</h2>
+      <span class="srule"></span>
+      <span class="stag">One primitive, three fixes</span>
+    </div>
+
+    <p>
+      The argument for presence being the right primitive is that it is one
+      concept and it closes four of the five broken rows in
+      <a href="#audit">02</a> at once. Speech stops doubling because only one
+      surface is told to speak. Widget reports stop duplicating because only one
+      surface was given the command. Window raises stop being noise because only
+      the surface in front of you is asked to raise. That is not three fixes, it
+      is one fix seen three times, which is the sign it is at the right level.
+    </p>
+
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Message</th>
+            <th>Goes to</th>
+            <th>Why</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>state</code></td>
+            <td>every surface</td>
+            <td>Knowing what Scufris is doing is not exclusive</td>
+          </tr>
+          <tr>
+            <td><code>transcript</code></td>
+            <td>every surface</td>
+            <td>One conversation, seen from wherever you are</td>
+          </tr>
+          <tr>
+            <td><code>speak</code></td>
+            <td>presence</td>
+            <td>Two speakers saying one paragraph is the worst outcome here</td>
+          </tr>
+          <tr>
+            <td><code>widget</code></td>
+            <td>presence</td>
+            <td>One command must produce one report</td>
+          </tr>
+          <tr>
+            <td><code>conversation</code></td>
+            <td>presence</td>
+            <td>A window raises where you are looking</td>
+          </tr>
+          <tr>
+            <td><code>submit</code>, <code>abort</code></td>
+            <td>from anywhere</td>
+            <td>Already correct. Steering is defined behaviour</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      <b>How presence moves.</b> The cheapest rule that is also right most of
+      the time: <em>the last surface to submit holds it</em>. You asked from the
+      phone, so the phone answers. You typed on the laptop, so the laptop speaks
+      and shows the panel. It needs no new client message at all, because
+      <code>submit</code> already identifies its sender.
+    </p>
+    <p>
+      The rule is wrong in exactly one case, and it is a case the vision cares
+      about: <em>the machine may initiate substantive contact</em>. Unprompted
+      speech goes to whatever you touched last, which may be the phone in a
+      drawer. Two things already cover it. D5 of the inversion design says the
+      frontend synthesises what it is handed <em>and may refuse it</em>, so a
+      phone can be built to never speak unasked. And an explicit claim message
+      can be added later by a surface that knows its own foreground state, which
+      a phone app does and an X11 window mostly does not.
+    </p>
+    <p>
+      So presence is staged: infer it now, let a surface assert it when there is
+      a surface that can.
+    </p>
+  </section>
+
+  <section id="catalog">
+    <div class="shead">
+      <span class="snum">05</span>
+      <h2>The catalog</h2>
+      <span class="srule"></span>
+      <span class="stag">The one presence does not fix</span>
+    </div>
+
+    <p>
+      A frontend announces what widgets it has installed, the service remembers
+      it, and it types the agent's widget tools &mdash; including for an agent
+      that connects later, which is what makes the tools survive a debug lease.
+      One store, last writer wins.
+    </p>
+    <p>
+      A phone announces nothing. It has no shelf, no window manager, no monitor
+      corners, no Python backends and no <code>today</code> on its PATH. If it
+      overwrites the store, your widget tools vanish for as long as the phone
+      was the most recent to connect, and come back when the desktop reconnects.
+      The agent's tool surface would flap by surface, not by capability.
+    </p>
+    <p>
+      <b>Proposal: union at registration, refuse at relay.</b> Keep a catalog
+      per surface and hand the agent the union, so the tool surface is stable
+      for the life of the session. Route each widget command by presence, as L6
+      says, and when the presence holder does not have that widget, answer the
+      agent with the existing failure shape. Scufris tries to open a panel,
+      hears it cannot, and says so. That is honest and it uses a road that
+      already exists (<code>WidgetReport::Failed</code> with a refusal code).
+    </p>
+
+    <div class="panel risk">
+      <h3>Unverified: can the agent's tools change mid-session?</h3>
+      <p>
+        The union is chosen partly because it is <em>stable</em>, which matters
+        only if re-typing tools on a live Pi session is difficult or impossible.
+        That has not been checked. Before building, read the installed Pi RPC
+        documentation for whether a tool set can be re-registered on a running
+        session.
+      </p>
+      <p>
+        If it can, a third option opens: the catalog is exactly the presence
+        holder's, and the tools honestly disappear while you are on the phone.
+        That is a nicer model and it is cheaper to reason about. It is only
+        unavailable if Pi says so.
+      </p>
+    </div>
+  </section>
+
+  <section id="phone">
+    <div class="shead">
+      <span class="snum">06</span>
+      <h2>What a phone actually is</h2>
+      <span class="srule"></span>
+      <span class="stag">Not the pill</span>
+    </div>
+
+    <p class="said">
+      "it could be just a new surface, basically just the pill as a phone app"
+    </p>
+
+    <p>
+      The pill does not port, and it is worth being precise about why, because
+      the reason is the entire substance of the pill. It is an always-on-top X11
+      window, cut down to the ellipse inscribed in its own rectangle so the
+      desktop shows around it, positioned bottom-center of a monitor, raised by
+      a global activation hotkey, living under focus rules that exist because
+      tao hands <code>accept-focus</code> back from a draw handler. A phone has
+      no always-on-top overlay, no global hotkey and no window manager. Every
+      one of those sentences is about a desktop.
+    </p>
+    <p>
+      What ports is not the pill but <em>what the pill is a client of</em>: four
+      message types. So the phone surface is
+      <b>the conversation window plus a microphone button</b>, which is the HUD
+      we already built and understand, in a different frame.
+    </p>
+
+    <div class="tblwrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Companion part</th>
+            <th>On a phone</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Transcript view</td>
+            <td class="yes">Ports. It is the whole app</td>
+          </tr>
+          <tr>
+            <td>Text submit</td>
+            <td class="yes">Ports</td>
+          </tr>
+          <tr>
+            <td>State indicator</td>
+            <td class="yes">Ports as a status line, not an orb</td>
+          </tr>
+          <tr>
+            <td>Microphone</td>
+            <td class="yes">
+              Ports. On-device dictation, or POST to the host whisper-server
+              over the same tunnel
+            </td>
+          </tr>
+          <tr>
+            <td>Speech playback</td>
+            <td>Ports, and should default to off</td>
+          </tr>
+          <tr>
+            <td>The pill window</td>
+            <td class="no">Does not port. It is an X11 overlay</td>
+          </tr>
+          <tr>
+            <td>Activation hotkey</td>
+            <td class="no">Does not port. No global keys on a phone</td>
+          </tr>
+          <tr>
+            <td>Widget shelf</td>
+            <td class="no">
+              Does not port. Per-window webviews on monitor corners, fed by host
+              processes
+            </td>
+          </tr>
+          <tr>
+            <td>Tray</td>
+            <td class="no">Does not port</td>
+          </tr>
+          <tr>
+            <td><code>desktop.sock</code></td>
+            <td class="no">Does not port. Window manager bindings are local</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel free">
+      <h3>Speech was already designed for this</h3>
+      <p>
+        Speaking and listening are frontend-local and never cross the service
+        socket. There is no <code>speaking</code> field on the wire and the
+        service never hears about audio. <code>stt.rs</code> is already a
+        configurable HTTP endpoint.
+      </p>
+      <p>
+        That decision was made for a different reason - the pill, the tray and
+        the widget clocks all live in the process that owns the speaker - and it
+        pays for the phone entirely. Voice on a second surface costs nothing in
+        the service.
+      </p>
+    </div>
+
+    <p>
+      <b>The laptop is the cheaper case and should come first.</b> It runs the
+      real <code>scufris-desktop</code> unchanged, over a forwarded socket, with
+      pill and widgets and all. It needs no new user interface &mdash; only the
+      multi-frontend work in <a href="#presence">04</a>. The phone needs that
+      work <em>and</em> a new surface <em>and</em> the version discipline in
+      <a href="#versions">07</a>. Doing them in that order means the protocol
+      work is proven by something you can rebuild before it is depended on by
+      something you cannot.
+    </p>
+  </section>
+
+  <section id="versions">
+    <div class="shead">
+      <span class="snum">07</span>
+      <h2>Versions</h2>
+      <span class="srule"></span>
+      <span class="stag">The genuinely new constraint</span>
+    </div>
+
+    <p>
+      The socket is not the hard part. This is. Every Scufris component today
+      moves together, because one <code>nixos-rebuild</code> moves them, which
+      is why L2 could forbid migration outright and cost nothing. Presence means
+      a v4 protocol. Under L2, v4 means every surface changes at once.
+    </p>
+    <p>
+      A phone cannot promise that. Three options, and the choice is deployment
+      taste rather than engineering:
+    </p>
+
+    <div class="keys">
+      <div class="keycard">
+        <div class="kb">A. Keep L2 whole</div>
+        <p>
+          The service speaks one version. A stale app is told which version it
+          spoke and shows one screen: your host is newer, update. Costs one
+          panel. No compatibility matrix, ever.
+        </p>
+      </div>
+      <div class="keycard">
+        <div class="kb">B. One version of overlap</div>
+        <p>
+          The service accepts v4 and v3 for one release. Buys an update window,
+          costs a test matrix and a second code path in the one place that must
+          never be wrong.
+        </p>
+      </div>
+      <div class="keycard">
+        <div class="kb">C. Additive-only for frontends</div>
+        <p>
+          Unknown fields and unknown message types are ignored rather than
+          refused. Cheapest to live with, hardest to hold to, and it quietly
+          repeals L2 in the direction that matters.
+        </p>
+      </div>
+    </div>
+
+    <p>
+      <b>Recommendation: A.</b> It is a personal app you sideload onto your own
+      phone. The failure is one screen telling you to rebuild, on a device you
+      are holding. B and C both buy a convenience you do not need with a
+      permanent complication in the protocol, and L2 has been earning its keep.
+    </p>
+  </section>
+
+  <section id="ladder">
+    <div class="shead">
+      <span class="snum">08</span>
+      <h2>The ladder</h2>
+      <span class="srule"></span>
+      <span class="stag">Four rungs, stop anywhere</span>
+    </div>
+
+    <ol>
+      <li>
+        <b>Today, no code.</b> <code>ssh den scufris-ctl watch</code> and
+        <code>scufris-ctl send</code>. Control clients are already unlimited. No
+        pill, no voice, no widgets, but the conversation is reachable from the
+        laptop right now, and it costs nothing to try this evening.
+      </li>
+      <li>
+        <b>Tunnel and forward, still no service code.</b> A real companion on
+        the laptop. This is where the livelock in <a href="#audit">02</a> bites,
+        so this rung is a diagnosis rather than a destination. Worth doing once,
+        to watch it happen.
+      </li>
+      <li>
+        <b>Multi-frontend.</b> Drop the eviction, add presence, decide the
+        catalog. Protocol v4. One file plus a field in <code>hello</code>. This
+        is the actual work and it is contained.
+      </li>
+      <li>
+        <b>The phone.</b> A new surface: transcript, submit, state, microphone.
+        Plus the version decision in <a href="#versions">07</a>, which becomes
+        real the moment the first build leaves your machine.
+      </li>
+    </ol>
+
+    <div class="panel">
+      <h3>Gate</h3>
+      <p>
+        None of this starts before v0.5.0 is tagged and deployed. The tree is
+        forty-four commits ahead of the last tag with the service, the
+        conversation window, the widget layer and the journal panels all
+        unreleased. Adding a protocol version on top of an unshipped protocol
+        version is how a release stops being possible.
+      </p>
+    </div>
+  </section>
+
+  <section id="decisions">
+    <div class="shead">
+      <span class="snum">09</span>
+      <h2>To settle</h2>
+      <span class="srule"></span>
+      <span class="stag">Yours</span>
+    </div>
+
+    <div class="panel decide">
+      <h3>D1 &mdash; Does L1 get narrowed, or does this design get refused?</h3>
+      <p>
+        Narrowing L1 to "one person, one conversation" and adding L5 and L6 is
+        the load-bearing decision. Everything else is consequence. Refusing it
+        is a legitimate answer: one screen is a real constraint that has kept
+        this codebase small.
+      </p>
+      <p class="rec">
+        <b>Recommended:</b> narrow it, and add L5 in the same breath so the
+        security clause is never quietly lost.
+      </p>
+    </div>
+
+    <div class="panel decide">
+      <h3>D2 &mdash; Version policy for a surface you cannot rebuild</h3>
+      <p>A, B or C from <a href="#versions">07</a>.</p>
+      <p class="rec"><b>Recommended:</b> A. Keep L2 whole.</p>
+    </div>
+
+    <div class="panel decide">
+      <h3>D3 &mdash; How presence moves</h3>
+      <p>
+        Inferred from the last submit, an explicit claim, or both in stages.
+      </p>
+      <p class="rec">
+        <b>Recommended:</b> infer now, add the claim when a phone exists to send
+        it.
+      </p>
+    </div>
+
+    <div class="panel decide">
+      <h3>D4 &mdash; The catalog</h3>
+      <p>
+        Union at registration, or exactly the presence holder's. Blocked on the
+        Pi question in <a href="#catalog">05</a>.
+      </p>
+      <p class="rec">
+        <b>Recommended:</b> read the RPC documentation first, then prefer the
+        presence holder's if Pi allows it.
+      </p>
+    </div>
+
+    <div class="panel decide">
+      <h3>D5 &mdash; Is the laptop enough?</h3>
+      <p>
+        Rung 3 gives you Scufris on the laptop with everything working. The
+        phone is rung 4 and is most of the remaining cost. It is reasonable to
+        stop at three and never write an app.
+      </p>
+      <p class="rec">
+        <b>Recommended:</b> decide this after living on rung 3 for a while, not
+        now.
+      </p>
+    </div>
+  </section>
+
+  <section id="not">
+    <div class="shead">
+      <span class="snum">10</span>
+      <h2>Not doing</h2>
+      <span class="srule"></span>
+      <span class="stag">Named so it stays out</span>
+    </div>
+
+    <ul>
+      <li>
+        <b>Any TCP listener</b>, under any conditions. This is L5 and it is not
+        a trade-off to revisit.
+      </li>
+      <li>
+        <b>Accounts, tenancy, or a second conversation.</b> L1's surviving half.
+      </li>
+      <li>
+        <b>Widgets on the phone.</b> They are host processes drawing on host
+        monitors.
+      </li>
+      <li>
+        <b>Reachability from outside the tunnel.</b> No public endpoint, no
+        relay service, no push notification road. A phone with no tunnel is a
+        phone with no Scufris, and that is the correct behaviour.
+      </li>
+      <li>
+        <b>Session sharing in Pi.</b> Already answered in the inversion design:
+        RPC mode is bound to one client for its lifetime. Surfaces multiply in
+        front of the service, never behind it.
+      </li>
+    </ul>
+  </section>
+
+  <footer>
+    <div>
+      Task 20260828-170154 &middot; revision 1 &middot; 2026-08-28. Follows
+      <code>tasks/20260827-081702</code>, "Scufris as a service: the
+      architecture inversion". Gated behind the v0.5.0 release; nothing here is
+      implemented.
+    </div>
+  </footer>
+</div>

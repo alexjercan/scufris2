@@ -348,9 +348,10 @@
     <p class="sub">
       Scufris answers on one screen, on one machine. This asks what it costs to
       answer on a laptop across the house and a phone in your pocket. The
-      finding: <em>the one-user law is not what stands in the way</em>. Three
-      other clauses bundled into L1 are, and they cost wildly different amounts.
-      Nothing here is built until v0.5.0 ships.
+      finding: <em>the one-user law is not what stands in the way</em>, and
+      neither is one host &mdash; the rig keeps the agent. Two other clauses
+      bundled into L1 are, and they cost wildly different amounts. Nothing here
+      is built until v0.5.0 ships.
     </p>
     <nav class="toc">
       <a href="#laws">00 Laws</a>
@@ -384,23 +385,31 @@
       because it answers questions instead of code.
     </p>
     <p>
-      It is also five laws in a trench coat. This design keeps three of them,
-      narrows one, and replaces one.
+      It is also five claims in a trench coat. This design keeps four of them
+      &mdash; one of those on a new footing &mdash; and replaces exactly one.
     </p>
 
     <div class="panel law">
-      <h3>L1 &mdash; One person, one conversation (narrowed)</h3>
+      <h3>L1 &mdash; One person, one conversation, one host (narrowed)</h3>
       <p>
         One <code>pi --mode rpc</code>. One session directory. One transcript.
-        One person. No tenancy, no accounts, no per-user isolation, no second
-        conversation running beside the first.
+        One person.
+        <b>One host: the rig runs the agent, and only the rig ever does.</b> No
+        tenancy, no accounts, no per-user isolation, no second conversation
+        running beside the first.
       </p>
       <p>
-        This is the clause that was doing the work, and it is untouched. Every
+        This is the part that was doing the work and it is untouched. Every
         "what if two people..." question is still answered here rather than in
-        code. What leaves L1 is <em>one host</em> and <em>one surface</em>: they
-        were never the same claim as <em>one person</em>, they were only
-        convenient to state together.
+        code, and so is every "what if two agents".
+      </p>
+      <p>
+        <b>Exactly one clause leaves: <em>one surface</em>.</b> "One host" was
+        two claims wearing one name &mdash; the machine that runs Scufris, and
+        the only device involved at all. The first stays a law, and it is the
+        one that matters: everything authoritative stays on the rig. The second
+        was never the same claim; it was only convenient to state alongside it.
+        A surface is a client, and a client was never the host.
       </p>
     </div>
 
@@ -488,6 +497,15 @@
       Take L1 apart clause by clause and the real cost becomes visible. Three of
       the five are untouched. One is cheap. One is the whole job.
     </p>
+    <p>
+      <b
+        >"One host" is on the untouched side, and that is worth being exact
+        about.</b
+      >
+      The rig runs the agent, the session and the service, and it stays the only
+      thing that ever does. What a second surface adds is a client, not a second
+      Scufris. Nothing authoritative leaves the machine it is on today.
+    </p>
 
     <div class="tblwrap">
       <table>
@@ -516,6 +534,14 @@
             <td class="yes">
               Untouched, and reinforced &mdash; that is the point of connecting
               a second surface at all.
+            </td>
+            <td class="no">None</td>
+          </tr>
+          <tr>
+            <td>One host</td>
+            <td class="yes">
+              Untouched. The rig runs the agent, the session and the service,
+              and stays the only thing that does. A surface is a client.
             </td>
             <td class="no">None</td>
           </tr>

@@ -30,10 +30,17 @@ harder for no gain.
 ## Finding
 
 The one-user rule is not what breaks. L1 bundles five separate claims -
-one person, one agent, one conversation, no authentication, one surface.
+one person, one conversation, one host, no authentication, one surface.
 The first three are untouched by a second surface. The fourth survives if
 the transport authenticates. Only **one surface** breaks, and it does not
 break gracefully.
+
+"One host" is on the untouched side, corrected on the page after Alex's
+comment on 2026-08-28: it was two claims wearing one name. The machine
+that runs Scufris stays singular - the rig keeps the agent, the session
+and the service, and stays the only thing that runs `pi --mode rpc`. What
+leaves is only "the one device involved at all", which was never the same
+claim. A surface is a client, and a client was never the host.
 
 Half the work is already built. `push_frontends` is a loop over every
 frontend, the 200-entry transcript ring is replayed to each connecting
@@ -62,10 +69,10 @@ What does not work, all in `native/scufris-service/src/service.rs`:
 
 ## Proposed laws
 
-- **L1 narrowed** to "one person, one conversation". One agent, one
-  session, one transcript, no tenancy. This is the half that was doing
-  the work and it is untouched. What leaves is "one host" and "one
-  surface".
+- **L1 narrowed** to "one person, one conversation, one host". One agent,
+  one session, one transcript, no tenancy, and the rig is the only thing
+  that ever runs the agent. This is the part that was doing the work and
+  it is untouched. Exactly one clause leaves: "one surface".
 - **L5 One trust domain, and never a listener.** The service keeps
   binding a 0600 Unix socket and keeps authenticating nothing. Whatever
   crosses a network is WireGuard's, Tailscale's or ssh's problem.

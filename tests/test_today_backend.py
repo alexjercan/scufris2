@@ -340,10 +340,15 @@ class Trouble(unittest.TestCase):
         journal = self.journal(
             SCUFRIS_TODAY_COMMAND=str(self.den.root / "no-such-today")
         )
-        frame = journal.read("agenda")
-        self.assertIn("is not on the path", frame["trouble"])
-        self.assertEqual(frame["view"], "agenda")
-        self.assertEqual(frame["date"], DAY)
+        # Every view, not only the ones that ask a second question. Notes asks
+        # for the day and nothing else, so it is the one that would otherwise
+        # report an empty day and look like a day with no notes in it.
+        for view in ("agenda", "macros", "notes"):
+            journal.forget()
+            frame = journal.read(view)
+            self.assertIn("is not on the path", frame["trouble"], view)
+            self.assertEqual(frame["view"], view)
+            self.assertEqual(frame["date"], DAY)
 
     def test_a_refused_command_carries_its_own_complaint(self) -> None:
         (self.den.home / "plan.json").write_text(

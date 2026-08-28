@@ -244,9 +244,15 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
           : {};
       const kcal = number(totals.calories);
       calories.textContent = kcal === undefined ? "--" : kcal.toFixed(0);
-      protein.textContent = `p ${grams(number(totals.protein) ?? 0)} g`;
-      carbs.textContent = `c ${grams(number(totals.carbs) ?? 0)} g`;
-      fat.textContent = `f ${grams(number(totals.fat) ?? 0)} g`;
+      // A dash rather than a zero where there is no reading at all: a day
+      // nobody logged and a day of nothing are not the same day.
+      const gram = (value: unknown): string => {
+        const held = number(value);
+        return held === undefined ? "--" : `${grams(held)} g`;
+      };
+      protein.textContent = `p ${gram(totals.protein)}`;
+      carbs.textContent = `c ${gram(totals.carbs)}`;
+      fat.textContent = `f ${gram(totals.fat)}`;
 
       const today = number(fields.weight);
       const change = number(fields.change);

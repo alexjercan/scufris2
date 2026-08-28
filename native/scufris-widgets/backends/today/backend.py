@@ -250,10 +250,11 @@ class Journal:
     def build(self, view: str, selected: str) -> dict[str, object]:
         """Asks `today` for one day and shapes it for one panel."""
         frame = self.bare(view, selected, None)
-        try:
-            here = os.path.isfile(self.file(selected))
-        except Trouble:
-            here = False
+        # Not caught here. A day with no entry is `exists: false` and a full
+        # frame, but a command that would not run is trouble, and the panel
+        # that would say the least about it - notes, which asks nothing else -
+        # is the one that must not report an empty day instead.
+        here = os.path.isfile(self.file(selected))
         frame["exists"] = here
         day = self.on(selected, ["show", "--json"]) if here else {}
         if not isinstance(day, dict):

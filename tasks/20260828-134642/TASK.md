@@ -81,6 +81,10 @@ hash written here is one the commit cannot carry.
 - `nix build .#checks.x86_64-linux.desktop-interface`: the unit carries
   `SCUFRIS_TODAY_COMMAND` and `DEN_PATH` when named and neither when not.
 - In `~/personal/today`: 95 pytest cases pass, `ruff check` clean, `mypy` clean.
+- `nix flake check`: all checks passed.
+- Live on the isolated `Super+Y` rig against a copy of the-den. See
+  [live-run.md](live-run.md). It caught one real bug: a journal the notes panel
+  could not reach read as a day with no notes in it.
 
 ## Left
 

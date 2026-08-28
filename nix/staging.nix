@@ -12,6 +12,7 @@
   self,
   service,
   desktop,
+  speak,
 }:
 pkgs.writeShellApplication {
   name = "scufris-staging";
@@ -22,6 +23,11 @@ pkgs.writeShellApplication {
   text = ''
     export SCUFRIS_STAGING_SERVICE=${pkgs.lib.getExe' service "scufris-service"}
     export SCUFRIS_STAGING_DESKTOP=${pkgs.lib.getExe' desktop "scufris-desktop"}
+    # The synthesiser is the packaged one, which binds Piper, the model, and
+    # the configuration itself. Staging hears the deployed voice rather than
+    # one assembled here, and the script still lets an environment override
+    # name another.
+    export SCUFRIS_STAGING_SPEAK=${pkgs.lib.getExe' speak "scufris-speak"}
     exec ${self}/scripts/scufris-staging "$@"
   '';
   meta = {

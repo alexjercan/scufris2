@@ -27,6 +27,7 @@ Environment:
   SCUFRIS_STAGING_ROOT     staging root (default: /tmp/scufris-staging)
   SCUFRIS_STAGING_SERVICE  scufris-service binary to run
   SCUFRIS_STAGING_DESKTOP  scufris-desktop binary to run
+  SCUFRIS_STAGING_SPEAK    synthesiser to give the companion
   SCUFRIS_DESKTOP_HOTKEY   activation key (default: Super+G)
 EOF
 }
@@ -120,6 +121,34 @@ for binary in "$service" "$desktop"; do
   fi
 done
 
+# The synthesiser, which is the companion's and nothing else's. Three sources,
+# in the order of who knows most about the machine:
+#
+#   1. a command already in the environment, which is the person saying so;
+#   2. the packaged `scufris-speak`, which `nix run .#staging` names and which
+#      binds Piper, the model, and the configuration itself;
+#   3. the working tree's helper, which reads those paths from the environment
+#      and so only works where a dev shell has bound them.
+#
+# With none of the three the companion says so once and stays silent, which is
+# not a fault. Staging is not the place to make a voice appear that a deployment
+# would not have.
+speak="${SCUFRIS_DESKTOP_SPEAK_COMMAND:-${SCUFRIS_STAGING_SPEAK:-}}"
+if [[ -z "$speak" && -n "${SCUFRIS_PIPER_MODEL:-}" && -n "${SCUFRIS_PIPER_CONFIG:-}" ]]; then
+  if [[ -x "$root/tools/voice/scufris-speak" ]]; then
+    speak="$root/tools/voice/scufris-speak"
+  fi
+fi
+if [[ -n "$speak" ]]; then
+  if [[ ! -x "$speak" ]]; then
+    printf 'scufris-staging: %s is not executable\n' "$speak" >&2
+    exit 2
+  fi
+  export SCUFRIS_DESKTOP_SPEAK_COMMAND="$speak"
+else
+  printf 'scufris-staging: no synthesiser, so staging stays silent\n'
+fi
+
 # Isolation is this script's to decide. The three below it are taste, so a
 # value already in the environment wins.
 export XDG_STATE_HOME="$staging/state"
@@ -144,6 +173,7 @@ scufris-staging: the staging environment
   SCUFRIS_SERVICE_AGENT=$SCUFRIS_SERVICE_AGENT
   SCUFRIS_DESKTOP_HOTKEY=$SCUFRIS_DESKTOP_HOTKEY
   SCUFRIS_STT_ENDPOINT=$SCUFRIS_STT_ENDPOINT
+  SCUFRIS_DESKTOP_SPEAK_COMMAND=${SCUFRIS_DESKTOP_SPEAK_COMMAND:-none}
   service=$service
   desktop=$desktop
 

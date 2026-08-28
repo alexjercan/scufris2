@@ -176,3 +176,28 @@ transcript.
 
 Out of scope as recorded above: the nix.dotfiles phases, the `Mod4+Shift+s`
 staging keybind, and `scufris-staging run -- <cmd>`.
+
+## Follow-up, 2026-08-28: staging speaks
+
+Staging set no `SCUFRIS_DESKTOP_SPEAK_COMMAND`, so the companion stayed
+silent. Asked for and added.
+
+`nix/staging.nix` exports `SCUFRIS_STAGING_SPEAK` from the packaged
+`scufris-speak`, so `nix run .#staging -- up` gives staging the voice a
+deployment would have rather than one assembled here. The script resolves the
+synthesiser from three sources in the order of who knows most about the
+machine: a command already in the environment, then that wrapper variable, then
+`tools/voice/scufris-speak` where `SCUFRIS_PIPER_MODEL` and
+`SCUFRIS_PIPER_CONFIG` are bound, which is what a dev shell does.
+
+Two refusals rather than one silence. With nothing found, `up` says staging
+stays silent. With a command named that cannot be run, `up` exits 2. Both exist
+because the companion logs an unusable speak command once and gives up, which
+on a desktop is indistinguishable from having no synthesiser at all.
+
+Verified live: `--print-config` resolved
+`speak_command=/nix/store/...-scufris-speak/bin/scufris-speak`, and an answer
+came back through the staging service with no speech error in the log. Two new
+tests in `tests/test_scufris_staging.py` cover the ranking and the refusal.
+Green: `npm run check` (81), `unittest` (52), `ruff`, `shellcheck`,
+`nix fmt --check`, `nix flake check`.

@@ -39,6 +39,9 @@ A second `up` while one runs exits 3 without starting anything.
 | `SCUFRIS_DESKTOP_HOTKEY` | `Super+G`                            |
 | `SCUFRIS_STT_ENDPOINT`   | `http://127.0.0.1:10301/inference`   |
 
+`SCUFRIS_DESKTOP_SPEAK_COMMAND` is in the block too; see
+[speech](#speech) below for where its value comes from.
+
 The root is disposable and a reboot wipes it. `SCUFRIS_STAGING_ROOT`,
 `SCUFRIS_DESKTOP_HOTKEY`, and `SCUFRIS_STT_ENDPOINT` are taste, so a value
 already in the environment wins; the rest is isolation and the script owns it.
@@ -68,14 +71,33 @@ pointed at a different model without editing the deployed file.
 - The Pi login, through the `auth.json` symlink.
 - `~/.claude` and `~/.codex`, which the usage widgets read.
 
-Speech is not shared and not configured. Staging sets no
-`SCUFRIS_DESKTOP_SPEAK_COMMAND`, so the staging companion stays silent. Give
-it one to hear it:
+## Speech
 
-```bash
-SCUFRIS_DESKTOP_SPEAK_COMMAND="$(nix build --no-link --print-out-paths .#scufris-speak)/bin/scufris-speak" \
-  nix run .#staging -- up
-```
+Staging speaks. `nix run .#staging -- up` gives the companion the packaged
+`scufris-speak`, the same synthesiser a deployment runs, which binds Piper, the
+model, and the configuration itself. The voice you hear from staging is the
+voice the deployment would have.
+
+The script looks in three places, in the order of who knows most about the
+machine:
+
+1. `SCUFRIS_DESKTOP_SPEAK_COMMAND`, which is a person saying so.
+2. `SCUFRIS_STAGING_SPEAK`, which the flake wrapper sets to the packaged
+   `scufris-speak`.
+3. `tools/voice/scufris-speak` from this checkout, used only where
+   `SCUFRIS_PIPER_MODEL` and `SCUFRIS_PIPER_CONFIG` are bound. That is what a
+   dev shell does, so `scripts/scufris-staging up` inside `nix develop` speaks
+   with the working tree's helper.
+
+With none of the three the companion stays silent, and `up` says so on start
+rather than leaving a missing voice to look like a broken one. A command that
+is named but cannot be run is refused with exit 2, for the same reason: a
+synthesiser the companion logs once and gives up on is indistinguishable from
+no synthesiser at all.
+
+Both stacks run their own synthesiser process. Nothing is shared here but the
+pinned voice, and two Scufrises talking at once is the ordinary cost of running
+two. "Mute Scufris" in the staging companion's tray silences one of them.
 
 ## Reaching the staging stack
 

@@ -87,8 +87,11 @@ class StagingTests(unittest.TestCase):
             stub = self.bin / role
             stub.write_text(STUB)
             stub.chmod(0o755)
+        self.speaker = self.bin / "speak"
+        self.speaker.write_text("#!/bin/sh\nexit 0\n")
+        self.speaker.chmod(0o755)
 
-    def environment(self) -> dict[str, str]:
+    def environment(self, **named: str) -> dict[str, str]:
         env = os.environ.copy()
         env.update(
             {
@@ -100,15 +103,27 @@ class StagingTests(unittest.TestCase):
                 "SCUFRIS_STAGING_REPORT": str(self.report),
             }
         )
-        for name in ("XDG_STATE_HOME", "XDG_DATA_HOME", "PI_CODING_AGENT_DIR"):
+        for name in (
+            "XDG_STATE_HOME",
+            "XDG_DATA_HOME",
+            "PI_CODING_AGENT_DIR",
+            # A dev shell exports these, and the script reads them as leave to
+            # use the working tree's synthesiser. Dropped so a test says what
+            # it means rather than what the shell around it happens to hold.
+            "SCUFRIS_PIPER_MODEL",
+            "SCUFRIS_PIPER_CONFIG",
+            "SCUFRIS_DESKTOP_SPEAK_COMMAND",
+            "SCUFRIS_STAGING_SPEAK",
+        ):
             env.pop(name, None)
+        env.update(named)
         return env
 
-    def up(self) -> subprocess.Popen[str]:
+    def up(self, **named: str) -> subprocess.Popen[str]:
         """Starts one stack and stops it when the test ends."""
         started = subprocess.Popen(
             [str(SCRIPT), "up"],
-            env=self.environment(),
+            env=self.environment(**named),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -173,6 +188,9 @@ class StagingTests(unittest.TestCase):
             )
             # Not Super+D. The deployed companion keeps its own activation key.
             self.assertEqual(env["SCUFRIS_DESKTOP_HOTKEY"], "Super+G")
+            # With no synthesiser anywhere staging is silent, and says so
+            # rather than assembling a voice a deployment would not have.
+            self.assertNotIn("SCUFRIS_DESKTOP_SPEAK_COMMAND", env)
 
         # The one directory the deployed Scufris looks in was never made.
         self.assertFalse((self.runtime / "scufris").exists())
@@ -183,6 +201,72 @@ class StagingTests(unittest.TestCase):
             (self.deployed_pi_agent / "settings.json").read_text(),
             '{"model": "deployed"}\n',
         )
+
+    def test_the_companion_is_given_a_synthesiser_when_one_can_be_found(self) -> None:
+        """Speech is the companion's, so this is the one process that gets it.
+
+        Three sources in one order: a command already named, then the packaged
+        one the flake wrapper points at, then the working tree's helper where a
+        dev shell has bound the Piper paths it reads.
+        """
+        packaged = self.bin / "packaged-speak"
+        packaged.write_text("#!/bin/sh\nexit 0\n")
+        packaged.chmod(0o755)
+
+        started = self.up(SCUFRIS_STAGING_SPEAK=str(self.speaker))
+        self.started_or_fail(started, "service", "desktop")
+        for role in ("service", "desktop"):
+            self.assertEqual(
+                self.reported(role)["env"]["SCUFRIS_DESKTOP_SPEAK_COMMAND"],
+                str(self.speaker),
+            )
+
+        # A command already in the environment is the person saying so, and it
+        # outranks what the wrapper names.
+        self.stop(started)
+        shutil.rmtree(self.report)
+        started = self.up(
+            SCUFRIS_STAGING_SPEAK=str(packaged),
+            SCUFRIS_DESKTOP_SPEAK_COMMAND=str(self.speaker),
+        )
+        self.started_or_fail(started, "desktop")
+        self.assertEqual(
+            self.reported("desktop")["env"]["SCUFRIS_DESKTOP_SPEAK_COMMAND"],
+            str(self.speaker),
+        )
+
+        # And with only the Piper paths bound, the working tree's own helper.
+        self.stop(started)
+        shutil.rmtree(self.report)
+        started = self.up(
+            SCUFRIS_PIPER_MODEL="/pinned/model.onnx",
+            SCUFRIS_PIPER_CONFIG="/pinned/model.onnx.json",
+        )
+        self.started_or_fail(started, "desktop")
+        self.assertEqual(
+            self.reported("desktop")["env"]["SCUFRIS_DESKTOP_SPEAK_COMMAND"],
+            str(REPOSITORY / "tools" / "voice" / "scufris-speak"),
+        )
+
+    def test_a_synthesiser_that_cannot_be_run_is_refused_rather_than_ignored(
+        self,
+    ) -> None:
+        """A voice that never arrives is the hardest fault to see.
+
+        The companion logs a speak command it cannot run once and stays silent,
+        which looks exactly like the silent default. Refusing here names it.
+        """
+        missing = self.bin / "not-a-speaker"
+        refused = subprocess.run(
+            [str(SCRIPT), "up"],
+            env=self.environment(SCUFRIS_STAGING_SPEAK=str(missing)),
+            capture_output=True,
+            text=True,
+            # The refusal is what is under test.
+            check=False,
+        )
+        self.assertEqual(refused.returncode, 2, refused.stderr)
+        self.assertIn("not executable", refused.stderr)
 
     def test_a_fresh_root_is_seeded_with_a_project_and_a_pi_directory(self) -> None:
         started = self.up()

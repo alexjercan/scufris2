@@ -37,7 +37,7 @@
   service = native.service;
   ctl = native.ctl;
   staging = import ./staging.nix {
-    inherit pkgs self service desktop;
+    inherit pkgs self service desktop speak;
   };
   devShell = import ./dev-shell.nix {inherit pkgs voice;};
   docs = import ./docs.nix {inherit inputs self pkgs;};

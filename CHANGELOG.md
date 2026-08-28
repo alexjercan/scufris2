@@ -123,7 +123,10 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - `nix run .#staging -- up` runs this source tree's Scufris beside the deployed
   one: its own sockets, state, sessions, and `Super+G`, against a disposable
   root under `/tmp`. It stays in the foreground and Ctrl+C stops both halves.
-  See the [staging](docs/src/dev/staging.md) chapter.
+  It speaks with the packaged `scufris-speak`, so staging has the voice the
+  deployment would have, and says on start when it could find no synthesiser
+  rather than leaving a missing voice to look like a broken one. See the
+  [staging](docs/src/dev/staging.md) chapter.
 
 ### Changed
 

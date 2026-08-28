@@ -1,4 +1,4 @@
-# Look at this: Kitty scrollback and cwd into the session
+# Look at this: ask the program what it is showing
 
 - STATUS: OPEN
 - PRIORITY: 60
@@ -6,79 +6,95 @@
 
 ## Goal
 
-When the window you are pointing at is a terminal, "look at this" puts
-its scrollback and its working directory into the session as **text**,
-not as a picture.
+Rung 2 of the capture ladder. When the pointed window belongs to a
+program that can be asked directly, ask it, and hand the agent the real
+artifact rather than a description of it.
 
-Split from `20260825-153756` on 2026-08-28. Same trigger, same window
-detection, entirely different delivery. The original research rated this
-half cheaper _and better_ than what the vendor desktop apps do by
-scraping the accessibility tree.
+Two probes are worth building, and they are the same shape: the window
+resolves to a process, the process is listening, and one call gets the
+truth. Rung 0 and rung 1 are `20260825-153756`; the picture is
+`20260828-224226`.
 
-## Why this is the half that pays
+## Why this rung is the one that pays
 
-The copy-paste loop this feature exists to kill is a terminal loop. What
-gets copied out of a window and pasted into an assistant is command
-output, a stack trace, a failing test. Text is what that is, and text is
-what the agent reads best - it can be quoted, diffed, and grepped, none
-of which a screenshot allows.
+For a file-backed program the best capture is not content at all - it is
+**the identity of the thing**. Given a path, Scufris reads the whole file
+rather than the visible part, greps it, and can change it. A screenshot
+of an editor is worse in every dimension than the path it is editing.
 
-It is also the cheaper half by a wide margin: no image road, no size
-regime, no base64.
+## Neovim
 
-## What it needs from the desktop
+Every running nvim already listens on a socket named
+`$XDG_RUNTIME_DIR/nvim.<pid>.0`. No configuration change. Read-only, one
+call, proven against the three instances running while this was written:
 
-`kitty @ get-text` and `kitty @ ls` give the scrollback and the working
-directory. `allow_remote_control = true` is already set in
-`nix.dotfiles/home/modules/kitty/default.nix:17`.
+```
+nvim --server "$sock" --remote-expr 'expand("%:p") . " @ " . line(".") . " cwd=" . getcwd()'
 
-**One prerequisite, one line, in a repo you own:** `allow_remote_control`
-alone permits control from a process running _inside_ kitty, over its
-tty. The companion is outside it, so it needs `listen_on` set in the same
-module and `kitty @ --to` on the call. Add that before building this.
+nvim.2021417.0 -> /home/alex/personal/scufris2/tasks/20260828-220328/TASK.md @ 1 cwd=/home/alex/personal/scufris2
+nvim.2046889.0 -> /home/alex/personal/nova-protocol/crates/.../standard.rs @ 333 cwd=/home/alex/personal/nova-protocol
+```
 
-Window detection is shared with `20260825-153756`: `focus.rs` already
-records the top-level window that had focus before the pill opened, and
-i3's default `focus_follows_mouse` makes that the window under the
-pointer. The window class tells the two halves apart - a Kitty window
-takes this road, anything else takes the picture.
+Absolute path, cursor line, working directory. Take the visual selection
+too when there is one - `getpos("'<")` and `getpos("'>")` - because a
+selected range is a better "this" than a cursor.
 
-## Delivery
+The window is a terminal, so the socket is found from the terminal's
+child process rather than from `_NET_WM_PID`. Walk the process tree, or
+take it from `kitty @ ls`, which reports the foreground process of each
+window.
 
-Text, so the choice is only how much of it. Scrollback runs past the
-8 KiB `MAX_SUBMISSION_TEXT_BYTES` and past the 64 KiB message cap for a
-long session.
+Guard it: a bounded timeout, and a failed probe falls to the next rung
+rather than failing the capture. An editor in a modal state must not hang
+the verb.
 
-Decide between:
+## Kitty
 
-- **Bounded to the last screenful or few**, sent inside the submission.
-  Nothing new on the wire. Most of the value, since what you are pointing
-  at is what is on screen.
-- **The path road**, shared with `20260825-153756`: the companion writes
-  the text to a file and the service reads it. Carries the whole
-  scrollback, and reuses whatever that task builds.
+`kitty @ get-text` for the scrollback and `kitty @ ls` for the working
+directory and the foreground process.
 
-Recommended: the bounded road first. "Look at this" means the screen, and
-a screenful is what the demonstrative refers to. The path road is there
-if it turns out not to be enough.
+**One prerequisite, one line, in a repo you own.**
+`allow_remote_control = true` is already set at
+`nix.dotfiles/home/modules/kitty/default.nix:17`, but that permits
+control only from a process running _inside_ kitty, over its tty. The
+companion is outside it, so the same module needs `listen_on` and the
+call needs `kitty @ --to`. Add that before building this.
+
+Scrollback is the terminal case that matters: what you copy-paste out of
+a terminal is command output, a stack trace, a failing test. Text can be
+quoted, diffed and grepped; a picture of text cannot.
+
+Bound it to the last screenful or few rather than the whole history.
+"Look at this" means the screen, and a screenful is what the
+demonstrative refers to.
+
+## Order inside the rung
+
+The two are independent. Neovim first: it needs no configuration change,
+the payoff is the highest of anything on this desktop, and it proves the
+probe registry with the cheapest possible case.
+
+## Shape
+
+A small registry of probes, each one a matcher on the window or its
+process and a bounded command that returns a block of facts. A probe that
+does not match, times out, or fails contributes nothing and the ladder
+continues. Adding an application later must be adding one probe, not
+touching the capture path.
 
 ## Scope
 
-- Detect that the pointed window is Kitty.
-- Read its scrollback and cwd through `kitty @ --to`.
-- Bound the text and send it with the submission, marked as captured
-  context rather than as something the person said.
-- The capture is explicit and single-shot. **No continuous recording,
-  ever.**
+- The probe registry and the fall-through rule.
+- The neovim probe: path, cursor, visual selection, cwd.
+- The kitty probe: bounded scrollback, cwd, foreground process.
+- The `skills/look/SKILL.md` paragraph for each: prefer the path.
 
 ## Verification
 
-- "Look at this" over a Kitty window with a failing command answers from
-  the output, quoting it.
-- The capture carries text, not a screenshot.
-- The working directory reaches the session.
+- "Look at this" over nvim hands over `path:line` and Scufris answers
+  from the file, not from a description of it.
+- A visual selection narrows what Scufris reads.
+- "Look at this" over a Kitty window running a failed command answers
+  from the output and quotes it.
+- A probe that times out does not fail the capture.
 - No capture happens without the explicit verb.
-
-## Origin
-
-Backlog item 3 in `tasks/20260822-132001/RESEARCH.md` section 5.

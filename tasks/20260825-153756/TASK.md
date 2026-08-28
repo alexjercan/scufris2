@@ -1,4 +1,4 @@
-# Look at this: the window under the pointer into the session
+# Look at this: the verb, the window's identity, and the selection
 
 - STATUS: OPEN
 - PRIORITY: 60
@@ -6,96 +6,131 @@
 
 ## Goal
 
-"Look at this" puts a picture of the window you are pointing at into the
-session, beside what you said. This kills the copy-paste loop for
-anything that is not text.
+"Look at this" tells Scufris what you are pointing at, and Scufris
+decides what to do about it.
 
-Split from the original task on 2026-08-28. The Kitty scrollback half is
-`20260828-220328` and shares this trigger; it is text and needs none of
-the image road below.
+This is rung 0 and rung 1 of the capture ladder: the verb itself, the
+window's own identity, and the selection. Both are universal and need no
+per-application code, and together they answer a large share of real
+"look at this" moments without a screenshot ever being taken.
 
-## What the pointer actually answers
+Rung 2 is `20260828-220328`, the per-application deep roads. Rung 3 is
+`20260828-224226`, the picture. Each is useful on its own and they
+compose; this one comes first because the other two are rungs on a ladder
+that has to exist.
 
-**"Hovering" and "focused" are the same window on this desktop.** i3
+## The division of labour
+
+**The capture describes the situation. The model decides what to do about
+it.** That is the same split the rest of Scufris uses: deterministic
+helpers gather, the agent chooses. Nothing here tries to guess intent
+from a window class.
+
+**The companion captures, never the agent.** The agent has no display, is
+built with no graphical dependency, and does not get one. This is the
+boundary the widgets already keep.
+
+## Rung 0 - the window's identity
+
+Free, universal, and always sent.
+
+`WM_CLASS`, `_NET_WM_NAME`, and `_NET_WM_PID`; then the PID gives
+`/proc/<pid>/cmdline` and `/proc/<pid>/cwd`. Against a running GUI with no
+file and no text, that already yields:
+
+```
+WM_CLASS      "wfc_arena"
+_NET_WM_NAME  "NovaProtocol - 0.11.0"
+argv          target/debug/examples/wfc_arena
+cwd           /home/alex/personal/nova-protocol
+```
+
+which is enough for the agent to go and read the source of the thing you
+are looking at.
+
+`argv` generalises further than it looks: a large class of applications
+names the document in its own arguments - image viewers, PDF readers,
+`soffice <path>`. Where it does, the real file is in hand and any later
+picture is a supplement rather than the subject.
+
+**Which window.** `focus.rs` already records the top-level window that
+had focus before the pill opened, because it has to give focus back. i3
 defaults `focus_follows_mouse` to `yes` and nothing in `nix.dotfiles`
-overrides it, so the pointer entering a window focuses it. `focus.rs`
-already records the top-level window that had focus before the pill
-opened, because it has to give focus back afterwards. That record is the
-answer to "what am I pointing at", and it already ships.
+overrides it, so the window under the pointer is the focused window.
+Hovering and focusing are the same act on this desktop, and the record
+already ships.
 
-So the capture does not need `query_pointer` to choose a window. It
-should still read the pointer for a second reason - see below.
+**Also read the pointer**, converted to window coordinates, and say where
+it was. A dense window plus "the pointer was at 812,455" resolves the
+demonstrative that a window alone cannot.
 
-**X11 answers "which window", never "which data".** The pointer resolves
-to a top-level window, not to a table row, a cell, or a paragraph inside
-it. Nothing on X11 can see inside another application's window, and this
-task will not try.
+## Rung 1 - the selection
 
-That is not a limit in practice, because the model reads the picture. The
-demonstrative in "look at this" is resolved by the model from the words
-and the image together, not by the capture. What the capture owes it is a
-hint: **the pointer position, in window coordinates**, said in the text
-beside the image. A dense window plus "the pointer was at 812,455"
-resolves "this" precisely, and it costs one `query_pointer` call on a
-connection `focus.rs` already holds.
+The X11 PRIMARY selection is the cheapest "this" that exists: select text
+in a browser, a document, a PDF viewer, anything, and the companion reads
+it with no per-application code at all.
 
-## The agent never touches X11
+`GetSelectionOwner(PRIMARY)` names the window that owns the selection.
+Use the selection only when that owner is the window being captured;
+otherwise it is something selected somewhere else, an hour ago.
 
-The companion captures. The agent has no display, is built with no
-graphical dependency, and does not get one. This is the same boundary the
-widgets keep: the agent asks, the companion draws.
+**PRIMARY, never CLIPBOARD.** The selection is what you just pointed at.
+The clipboard is a private buffer you did not offer.
 
 ## Delivery
 
-Pi's RPC `prompt` and `steer` both take an optional `images` array of
-base64 PNG (`docs/rpc.md:51,90`). That is the destination.
+All text, and small once bounded. It rides the submission the companion
+was already sending, in a delimited block the skill teaches the model to
+read. Pi's RPC has no separate context field, so a fenced block in the
+message is the road.
 
-The bytes must not cross the service socket. `MAX_MESSAGE_BYTES` is
-64 KiB and a base64 window capture is hundreds of kilobytes; raising the
-cap would loosen every message to buy one.
+Bound the selection. A whole selected document must not become the
+prompt.
 
-**The path crosses the socket; the bytes do not.** The companion writes
-the capture under the runtime directory, sends the path, and the service
-reads the file and inlines it into `images` on the prompt it was already
-sending. The Pi stdin stream accepts megabytes, so no bound is strained.
+## The skill
 
-This is host-local by construction, which is correct today and is the one
-thing that would change under `20260828-170154`: a remote surface would
-send the bytes on a capture message instead. The service-side code that
-inlines them into `images` is the same either way, so that upgrade does
-not invalidate this one.
+`skills/look/SKILL.md`, created here and extended by each later rung. It
+says how to read the block: prefer a file path over anything else, prefer
+the selection over a description, and use the title and `argv` to name
+the thing when there is nothing better. This is where "figure out what to
+do" lives, and it is model-facing prose rather than code.
 
-Housekeeping: captures are written to a private directory under the
-runtime directory and removed once delivered. A capture that is never
-delivered does not survive the companion.
+## Consent
+
+- The capture is explicit and single-shot. **No continuous recording,
+  ever.**
+- The conversation window says what was captured, by name - "captured:
+  firefox / Ada Lovelace - Wikipedia". You should be able to see what
+  left.
+
+## Open
+
+The transcript ring takes what Pi echoes as the user message, so a
+capture block glued into the submission would be drawn in full by the
+conversation window. Decide whether the window renders its own one-line
+summary at submission time instead. The consent line above wants a
+summary either way, so this may answer itself.
 
 ## Scope
 
-- Capture the recorded focus window as a PNG, from the `x11rb`
-  connection `focus.rs` already owns, or by `maim` if the direct road
-  proves worse.
-- Read the pointer and convert it to window coordinates. Say it in the
-  submission text.
-- One capture message on protocol v3 carrying the path, sent by the
-  companion beside the submission it belongs to.
-- The service reads the file, base64s it, and sends it as `images` on the
-  prompt. It deletes the file afterwards.
-- Triggered by a verb in the textbox or a `scufris-ctl` verb. Not by a
-  pill take.
-- The capture is explicit and single-shot. **No continuous recording,
-  ever.**
+- A capture verb in the textbox and a `scufris-ctl` verb. Not a pill
+  take.
+- Window identity from the `x11rb` connection `focus.rs` already owns,
+  plus the PID's `cmdline` and `cwd`.
+- The pointer in window coordinates.
+- The PRIMARY selection, owner-checked and bounded.
+- A delimited block in the submission, and `skills/look/SKILL.md`.
 
 ## Verification
 
-- "Look at this" plus a question about the visible window answers from
-  the capture.
-- The pointer position reaches the agent and resolves a demonstrative in
-  a window with more than one thing in it.
+- "Look at this" over a GUI with no file names the process and its
+  directory, and the agent finds the source.
+- A selection in a browser reaches the agent as text.
+- A selection made in another window is not sent.
 - No capture happens without the explicit verb.
-- A capture file does not outlive its delivery.
 
 ## Origin
 
 Backlog item 3 in `tasks/20260822-132001/RESEARCH.md` section 5, and
-feature 3 of that task's `research/product-features.md`: "screenshot into
-chat is the quietly high-frequency winner of both vendor apps".
+feature 3 of that task's `research/product-features.md`. Restructured
+into rungs on 2026-08-28, replacing the earlier picture/text split.

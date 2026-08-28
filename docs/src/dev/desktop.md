@@ -188,6 +188,30 @@ is logged and the companion starts anyway. X reports a key another client has
 grabbed as `BadAccess`, which the display layer surfaces as "already
 registered", so that is what the log line says.
 
+### Nothing a key means happens on the thread that read it
+
+`global-hotkey` runs one X11 thread. It hands every accelerator to one handler,
+and it is the same thread that carries out a grab, so a `register` waits for the
+handler to return. The plugin runs that `register` on the event loop. So a
+handler that waits on the event loop, and an event loop that is registering a
+key, wait for each other - and the pill asks for a grab every time it comes on
+screen or goes away, which is often and is caused by keys.
+
+That is a whole-companion freeze, not a lost keypress: the event loop is what
+every window and the tray are served by. The command socket has its own thread
+and keeps answering, which is what it looks like from outside.
+
+So `keys::Hold` decides what a key meant and posts it, and one thread of the
+companion's own carries the queue out. The handler reads the key, starts the
+hold timer on a thread, and returns.
+
+Posted under the lock that decided it, because the order is the meaning: the
+activation that opens the microphone and the activation that closes it are the
+two ends of one press, and a stop that overtook its own start would leave the
+microphone open with nothing on screen saying so. Cutting the speaker is the one
+thing still done where the key is read - it is the companion's own process and
+waits for nothing, and stop means stop.
+
 ## Pill design
 
 The pill is the orb. The window is a small square around the dotted thought

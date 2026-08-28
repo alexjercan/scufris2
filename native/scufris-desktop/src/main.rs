@@ -35,6 +35,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
+        mpsc::Receiver,
     },
     thread,
 };
@@ -286,20 +287,25 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
+                    // This is the display's thread, and everything this handler
+                    // decides is queued rather than done: see `carry`.
+                    let Some(hold) = app.try_state::<Arc<keys::Hold>>() else {
+                        return;
+                    };
                     let state = event.state();
                     // The hotkey that opens the pill, or one of the two keys
                     // grabbed beside it while it is up. Every accelerator
                     // arrives here, so which one it is decides what it means.
                     let pill = app.try_state::<Arc<keys::PillKeys>>();
                     let beside = match pill {
-                        Some(keys) if keys.cancels(shortcut) => Some(Event::Escape),
+                        Some(keys) if keys.cancels(shortcut) => Some(keys::Gesture::Cancel),
                         Some(keys) if keys.stops(shortcut) => {
                             // Stop means stop. The speaker is the companion's
                             // own and never crossed the socket, so it is cut
-                            // right here; the run belongs to the service, so
-                            // the runtime is what asks for that.
+                            // right here rather than queued; the run belongs to
+                            // the service, so the runtime is what asks for that.
                             app.state::<Arc<Speaker>>().hush();
-                            Some(Event::Stop)
+                            Some(keys::Gesture::Stop)
                         }
                         _ => None,
                     };
@@ -307,13 +313,13 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                     // they answer the press and ignore the release. Only the
                     // hotkey has two, and only it needs to know how long it was
                     // down to tell them apart.
-                    if let Some(event) = beside {
+                    if let Some(gesture) = beside {
                         if state == ShortcutState::Pressed {
-                            app.state::<Arc<App>>().inner().clone().handle(event);
+                            hold.asks(gesture);
                         }
                         return;
                     }
-                    hotkey(app, state);
+                    hotkey(hold.inner(), state);
                 })
                 .build(),
         )
@@ -446,10 +452,13 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                 },
             ));
             tauri.manage(Arc::clone(&pill_keys));
-            // The hotkey's own memory of whether it is being tapped or held.
-            // Managed for the same reason the keys beside it are: the handler
-            // has nothing but the app.
-            tauri.manage(Arc::new(keys::Hold::default()));
+            // The hotkey's own memory of whether it is being tapped or held,
+            // and the queue every key it reads is carried out from. Managed for
+            // the same reason the keys beside it are: the handler has nothing
+            // but the app.
+            let (hold, queued) = keys::Hold::new();
+            carry(handle.clone(), queued);
+            tauri.manage(Arc::new(hold));
 
             // Before the runtime, because the runtime holds the surface that
             // cuts speech on barge-in; the runtime is given back to it below.
@@ -694,32 +703,56 @@ struct CommandSocket(std::path::PathBuf);
 /// activation that starts a take and the activation that stops it, sent at the
 /// two ends of the same press, which is why the tray and `scufris-ctl open`
 /// keep working the way they did.
-fn hotkey(app: &AppHandle, state: ShortcutState) {
-    let Some(hold) = app.try_state::<Arc<keys::Hold>>() else {
-        return;
-    };
-    let runtime = app.state::<Arc<App>>().inner().clone();
+///
+/// Neither is carried out here. This is the display's thread and it reads what
+/// the key did; [`carry`] is what acts on it.
+fn hotkey(hold: &Arc<keys::Hold>, state: ShortcutState) {
     match state {
         ShortcutState::Pressed => {
             let turn = hold.pressed();
-            let waiting = Arc::clone(&hold);
+            let waiting = Arc::clone(hold);
             // On a thread because this one is the display's: it hands over
             // every accelerator, and a quarter of a second spent asleep here is
             // a quarter of a second in which no other key arrives.
             thread::spawn(move || {
                 thread::sleep(keys::HOLD);
-                if waiting.talks(turn) {
-                    runtime.handle(Event::Activate);
-                }
+                waiting.matured(turn);
             });
         }
-        ShortcutState::Released => match hold.released() {
-            // The take ends where the key does.
-            keys::Gesture::Talk => runtime.handle(Event::Activate),
-            keys::Gesture::Tap => runtime.workspace(),
-            keys::Gesture::Nothing => {}
-        },
+        ShortcutState::Released => hold.released(),
     }
+}
+
+/// Starts the thread that carries out what the person's keys meant.
+///
+/// The keys are read on the display's own thread, which is the thread the
+/// display also takes grabs on: a grab asked for while that thread is inside
+/// the handler waits for the handler to return. The event loop is what asks for
+/// those grabs, and the runtime is full of work that waits for the event loop -
+/// so a key acted on where it is read is the hotkey thread waiting for the
+/// event loop while the event loop waits for the hotkey thread. Both stop, and
+/// with the event loop stopped so does every window and the tray with them.
+///
+/// One thread rather than one per key, because the order is the meaning: the
+/// activation that opens the microphone and the one that closes it are the two
+/// ends of a single press.
+fn carry(handle: AppHandle, queued: Receiver<keys::Gesture>) {
+    thread::spawn(move || {
+        for gesture in queued {
+            let Some(runtime) = handle.try_state::<Arc<App>>() else {
+                return;
+            };
+            let runtime = runtime.inner().clone();
+            match gesture {
+                // The two ends of one press. Both are the activation the tray
+                // and `scufris-ctl open` have always sent.
+                keys::Gesture::Open | keys::Gesture::Talk => runtime.handle(Event::Activate),
+                keys::Gesture::Tap => runtime.workspace(),
+                keys::Gesture::Cancel => runtime.handle(Event::Escape),
+                keys::Gesture::Stop => runtime.handle(Event::Stop),
+            }
+        }
+    });
 }
 
 /// Answers whether one widget command is Scufris showing the person something

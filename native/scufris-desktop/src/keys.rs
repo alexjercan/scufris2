@@ -28,11 +28,18 @@
 //! Neither is required. A companion whose hotkey has no modifier is one the
 //! person puts away with the tray and stops with `scufris-ctl abort`, and every
 //! other key belongs to the textbox.
+//!
+//! Nothing any of these keys means is carried out where it is decided. The
+//! display hands every accelerator to one handler, on the same thread it takes
+//! grabs on, so that thread waiting for the event loop and the event loop
+//! waiting for a grab is a deadlock with the person's own hotkey at the top of
+//! it. What a key meant is queued here and carried out by a thread of the
+//! companion's own.
 
 use std::{
     sync::{
         Mutex,
-        mpsc::{self, Sender},
+        mpsc::{self, Receiver, Sender},
     },
     thread,
     time::Duration,
@@ -72,26 +79,39 @@ const STOP: &str = "Delete";
 /// the scrap away, which costs nothing to hear and a great deal to trust.
 pub const HOLD: Duration = Duration::from_millis(250);
 
-/// What a release of the hotkey turned out to be.
+/// What one of the person's keys turned out to mean.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Gesture {
-    /// Down and up inside [`HOLD`]. The person asked for the workspace.
+    /// The hotkey has been down [`HOLD`] long. The microphone opens.
+    Open,
+    /// The hotkey went down and came up inside [`HOLD`]. The person asked for
+    /// the workspace.
     Tap,
-    /// Down long enough to have opened the microphone. The take ends here.
+    /// The hotkey came up on a microphone it opened. The take ends here.
     Talk,
-    /// Nothing was down. A release with no press of ours behind it, which is
-    /// what a grab taken while the key was already held looks like.
-    Nothing,
+    /// The cancel key.
+    Cancel,
+    /// The stop key.
+    Stop,
 }
 
-/// The hotkey between its press and its release.
+/// Where the person's keys are read, and the queue that carries them out.
 ///
-/// One key with two gestures on it needs somewhere to remember which one is
-/// happening, because the answer is only known at the release. Tapping is what
-/// a press is until it has been down long enough to be talking.
-#[derive(Debug, Default)]
+/// Two jobs that are one job. One key has two gestures on it, so a press has to
+/// be remembered until the release says which it was; and none of that may be
+/// acted on where it is decided, because the deciding happens on the display's
+/// own thread.
+///
+/// So a decided gesture is posted rather than performed, and it is posted under
+/// the lock that decided it. The microphone opening and the microphone closing
+/// are two gestures of one press, and the order between them is the whole
+/// meaning: a stop that overtook its own start would leave the microphone open
+/// with nothing on screen saying so.
+#[derive(Debug)]
 pub struct Hold {
     grip: Mutex<Grip>,
+    /// Where a decided gesture goes to be carried out.
+    posts: Sender<Gesture>,
 }
 
 #[derive(Debug, Default)]
@@ -111,6 +131,18 @@ struct Grip {
 }
 
 impl Hold {
+    /// Builds the reader, and the queue whatever carries gestures out reads.
+    pub fn new() -> (Self, Receiver<Gesture>) {
+        let (posts, queued) = mpsc::channel();
+        (
+            Self {
+                grip: Mutex::default(),
+                posts,
+            },
+            queued,
+        )
+    }
+
     /// Records the hotkey going down, and answers which press this is.
     ///
     /// The number goes to whatever times this press and comes back with it.
@@ -122,31 +154,56 @@ impl Hold {
         grip.turn
     }
 
-    /// Answers whether the press this times is still down and still silent.
+    /// Opens the microphone, if the press this times is still down and silent.
     ///
-    /// True once and only once per press: the caller opens the microphone on
-    /// it, and the release closes it.
-    pub fn talks(&self, turn: u64) -> bool {
+    /// Once and only once per press: this asks for the microphone and the
+    /// release is what closes it.
+    pub fn matured(&self, turn: u64) {
         let mut grip = self.grip();
         if grip.turn != turn || !grip.down || grip.talking {
-            return false;
+            return;
         }
         grip.talking = true;
-        true
+        self.post(&grip, Gesture::Open);
     }
 
-    /// Records the hotkey coming up, and answers what it was.
-    pub fn released(&self) -> Gesture {
+    /// Records the hotkey coming up, and asks for what it turned out to mean.
+    ///
+    /// A release with no press of ours behind it means nothing and asks for
+    /// nothing, which is what a grab taken while the key was already held looks
+    /// like.
+    pub fn released(&self) {
         let mut grip = self.grip();
         if !grip.down {
-            return Gesture::Nothing;
+            return;
         }
         grip.down = false;
-        if grip.talking {
+        let gesture = if grip.talking {
             grip.talking = false;
             Gesture::Talk
         } else {
             Gesture::Tap
+        };
+        self.post(&grip, gesture);
+    }
+
+    /// Asks for one gesture that took no press to work out.
+    ///
+    /// The keys beside the hotkey have one meaning each and answer the press.
+    /// They queue with the rest so that the person's keys are carried out in
+    /// the order they were pressed.
+    pub fn asks(&self, gesture: Gesture) {
+        let grip = self.grip();
+        self.post(&grip, gesture);
+    }
+
+    /// Queues one gesture. The grip is asked for to prove it is held: what
+    /// orders these is the lock they were decided under.
+    fn post(&self, _grip: &Grip, gesture: Gesture) {
+        // The thread outlives every caller. A send that fails is a process on
+        // its way out, and a key that reaches nothing is what that looks like.
+        if let Err(error) = self.posts.send(gesture) {
+            debug!("the key reached nothing: {error}");
         }
     }
 
@@ -492,33 +549,41 @@ mod tests {
         assert_eq!(arrange("Super+D", off), (None, None));
     }
 
+    /// Everything the keys asked for, in the order they asked for it.
+    fn asked(queued: &Receiver<Gesture>) -> Vec<Gesture> {
+        queued.try_iter().collect()
+    }
+
     /// The press that came up before its timer woke is the workspace gesture,
     /// and nothing asks the microphone for anything.
     #[test]
     fn a_press_released_before_the_threshold_is_a_tap() {
-        let hold = Hold::default();
+        let (hold, queued) = Hold::new();
         hold.pressed();
-        assert_eq!(hold.released(), Gesture::Tap);
+        hold.released();
+        assert_eq!(asked(&queued), vec![Gesture::Tap]);
     }
 
     /// The timer woke on a key still down, so the microphone opened, and the
     /// release is what closes it.
     #[test]
     fn a_press_that_outlives_the_threshold_is_a_take() {
-        let hold = Hold::default();
+        let (hold, queued) = Hold::new();
         let turn = hold.pressed();
-        assert!(hold.talks(turn));
-        assert_eq!(hold.released(), Gesture::Talk);
+        hold.matured(turn);
+        hold.released();
+        assert_eq!(asked(&queued), vec![Gesture::Open, Gesture::Talk]);
     }
 
     /// Once per press. A second timer on the same press would open a microphone
     /// that is already open, and the release would close only one of them.
     #[test]
     fn one_press_opens_the_microphone_once() {
-        let hold = Hold::default();
+        let (hold, queued) = Hold::new();
         let turn = hold.pressed();
-        assert!(hold.talks(turn));
-        assert!(!hold.talks(turn));
+        hold.matured(turn);
+        hold.matured(turn);
+        assert_eq!(asked(&queued), vec![Gesture::Open]);
     }
 
     /// The hazard the count is there for: a tap, then a second press inside the
@@ -526,28 +591,57 @@ mod tests {
     /// must not read it as its own.
     #[test]
     fn a_timer_that_woke_late_does_not_open_the_microphone_for_the_next_press() {
-        let hold = Hold::default();
+        let (hold, queued) = Hold::new();
         let stale = hold.pressed();
-        assert_eq!(hold.released(), Gesture::Tap);
+        hold.released();
         let fresh = hold.pressed();
-        assert!(!hold.talks(stale), "the press it timed is over");
+        hold.matured(stale);
+        hold.released();
+        hold.matured(fresh);
         assert_eq!(
-            hold.released(),
-            Gesture::Tap,
-            "the second press is still a tap of its own"
+            asked(&queued),
+            vec![Gesture::Tap, Gesture::Tap],
+            "two taps, and the microphone was never asked for"
         );
-        assert!(!hold.talks(fresh), "and it is over too");
     }
 
     /// A release with no press behind it. The display can hand one over for a
     /// key that was already down when the grab was taken, and there is nothing
     /// to end.
     #[test]
-    fn a_release_of_a_key_we_never_saw_go_down_is_nothing() {
-        let hold = Hold::default();
-        assert_eq!(hold.released(), Gesture::Nothing);
+    fn a_release_of_a_key_we_never_saw_go_down_asks_for_nothing() {
+        let (hold, queued) = Hold::new();
+        hold.released();
         hold.pressed();
-        assert_eq!(hold.released(), Gesture::Tap);
-        assert_eq!(hold.released(), Gesture::Nothing);
+        hold.released();
+        hold.released();
+        assert_eq!(asked(&queued), vec![Gesture::Tap]);
+    }
+
+    /// The order is the meaning. Whatever carries these out reads one queue, so
+    /// the take cannot be stopped before it has started however fast the person
+    /// lets go.
+    #[test]
+    fn the_keys_are_carried_out_in_the_order_they_were_pressed() {
+        let (hold, queued) = Hold::new();
+        let turn = hold.pressed();
+        hold.matured(turn);
+        hold.released();
+        hold.asks(Gesture::Cancel);
+        let second = hold.pressed();
+        hold.matured(second);
+        hold.asks(Gesture::Stop);
+        hold.released();
+        assert_eq!(
+            asked(&queued),
+            vec![
+                Gesture::Open,
+                Gesture::Talk,
+                Gesture::Cancel,
+                Gesture::Open,
+                Gesture::Stop,
+                Gesture::Talk,
+            ]
+        );
     }
 }

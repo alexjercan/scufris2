@@ -109,7 +109,13 @@ fn patient() -> bool {
     RUNNING.load(Ordering::SeqCst) && !on_the_event_loop()
 }
 
-fn on_the_event_loop() -> bool {
+/// Answers whether this is the thread the event loop runs on.
+///
+/// Public because waiting is not the only thing this thread must not do. It is
+/// the thread every window request is carried out on, so a wait taken here for
+/// anything a window request could be behind is a wait for itself. Whoever
+/// holds such a thing has to be able to ask.
+pub fn on_the_event_loop() -> bool {
     EVENT_LOOP
         .get()
         .is_some_and(|thread| *thread == thread::current().id())

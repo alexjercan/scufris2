@@ -13,6 +13,7 @@ pub mod backends;
 pub mod catalog;
 pub mod pool;
 pub mod runtime;
+pub mod turn;
 pub mod windows;
 
 use std::{
@@ -38,6 +39,7 @@ use crate::{
         catalog::{Catalog, CatalogError, Source},
         pool::{Pool, ShellMsg},
         runtime::{Act, Cmd, Runtime, Still},
+        turn::Turn,
     },
 };
 
@@ -78,10 +80,11 @@ pub struct Widgets {
     /// windows in one column. This is the queue that stops it.
     ///
     /// It is held across the window work, which is where the waiting is: a first
-    /// placement asks the display whether the window came up. That wait is the
-    /// same one the companion always paid; what is new is that nothing else
-    /// decides while it runs.
-    turn: Mutex<()>,
+    /// placement asks the display whether the window came up, and asks the
+    /// toolkit which monitor the window landed on. The event loop is what
+    /// answers both, so it is the one thread that never waits here - it hands
+    /// what it cannot decide now to a thread that can. See [`turn`].
+    turn: Turn<Asked>,
     backends: Backends,
     link: OnceLock<Arc<ServiceLink>>,
     /// Whether the service welcomed this companion before there was a link to
@@ -91,6 +94,23 @@ pub struct Widgets {
     /// off the change rather than off a message of its own.
     assistant: Mutex<Assistant>,
     app: AppHandle,
+}
+
+/// One thing the widget runtime was asked for, as it was asked for.
+///
+/// A [`Cmd`] is what the runtime is given. An open only becomes one after a
+/// shell has been reserved to carry it, and reserving one is itself a wait. So
+/// the two travel together: either can be handed to the thread that is allowed
+/// to wait, and an open handed over waits for its shell there rather than on
+/// the event loop.
+enum Asked {
+    Command(Cmd),
+    Open {
+        id: Option<String>,
+        widget: String,
+        posture: Posture,
+        data: Value,
+    },
 }
 
 impl Widgets {
@@ -112,7 +132,7 @@ impl Widgets {
             catalog,
             pool: Pool::new(app.clone()),
             runtime: Mutex::new(Runtime::new()),
-            turn: Mutex::new(()),
+            turn: Turn::new(),
             backends: Backends::new(),
             link: OnceLock::new(),
             owed_catalog: AtomicBool::new(false),
@@ -120,9 +140,54 @@ impl Widgets {
             app,
         });
         widgets.pool.warm();
+        widgets.staff();
         widgets.age();
         widgets.beat();
         Ok(widgets)
+    }
+
+    /// Gives the turn's queue a thread of its own.
+    ///
+    /// Before the clock and the beat, because both of them decide from the
+    /// event loop and the event loop is what the queue exists for. It holds a
+    /// weak handle like they do, so it ends with the runtime rather than
+    /// keeping it alive.
+    fn staff(self: &Arc<Self>) {
+        let waking = Arc::downgrade(self);
+        self.turn.staff(move |asked| {
+            let Some(widgets) = Weak::upgrade(&waking) else {
+                return;
+            };
+            widgets.now(asked);
+        });
+    }
+
+    /// Carries out one thing that was asked for, waiting for the turn.
+    ///
+    /// Whoever gets here is allowed to wait: either a thread that arrived with
+    /// its own decision, or the queue's, which exists so that the event loop
+    /// never has to.
+    fn now(&self, asked: Asked) {
+        match asked {
+            Asked::Command(cmd) => {
+                let _turn = self.turn.wait();
+                let acts = self.runtime().apply(&self.catalog, cmd);
+                self.settle(acts);
+            }
+            Asked::Open {
+                id,
+                widget,
+                posture,
+                data,
+            } => self.opening(id, widget, posture, data),
+        }
+    }
+
+    /// Hands one thing over to the thread that can wait for its turn.
+    fn hand(&self, asked: Asked) {
+        if !self.turn.later(asked) {
+            debug!("a widget decision had nowhere to wait for its turn");
+        }
     }
 
     /// Stops every backend. The companion is going away.
@@ -392,6 +457,27 @@ impl Widgets {
         self.open(None, widget, Posture::Instrument, json!({}));
     }
 
+    /// Opens one widget, here or on the thread that is allowed to wait.
+    ///
+    /// An open is the one decision that waits twice: once for a shell to be
+    /// free, which is up to three seconds, and again for the window it reserves
+    /// to reach the screen, which the event loop is what carries out. Neither
+    /// wait can be taken on that loop, so an open asked for there - the tray's
+    /// summon is the one that is - always goes to the queue. It is never worth
+    /// trying the turn first: a free turn would not shorten either wait.
+    fn open(&self, id: Option<String>, widget: String, posture: Posture, data: Value) {
+        if display::on_the_event_loop() {
+            self.hand(Asked::Open {
+                id,
+                widget,
+                posture,
+                data,
+            });
+            return;
+        }
+        self.opening(id, widget, posture, data);
+    }
+
     /// Reserves a shell, then asks the runtime what to do with it.
     ///
     /// The shell is reserved first because its label is the surface identifier:
@@ -399,7 +485,7 @@ impl Widgets {
     /// service has been told about can never be confused with a later one. A
     /// runtime that then refuses the open leaves the shell unused, and it is
     /// discarded rather than kept, for the same reason.
-    fn open(&self, id: Option<String>, widget: String, posture: Posture, data: Value) {
+    fn opening(&self, id: Option<String>, widget: String, posture: Posture, data: Value) {
         if self.catalog.get(&widget).is_none() {
             self.refuse(id, "widget_not_found", format!("no widget named {widget}"));
             return;
@@ -412,7 +498,7 @@ impl Widgets {
             );
             return;
         };
-        let _turn = self.turn();
+        let _turn = self.turn.wait();
         let acts = self.runtime().apply(
             &self.catalog,
             Cmd::Open {
@@ -447,10 +533,24 @@ impl Widgets {
         }
     }
 
+    /// Asks the runtime for one thing, here or on the thread that can wait.
+    ///
+    /// The event loop takes the turn only if the turn is free. It cannot wait
+    /// for one: whoever holds it is very likely waiting for this loop to place
+    /// a window, and a loop waiting for that thread would be waiting for
+    /// itself. The decision is not dropped - it goes to the queue, and the
+    /// thread working that queue does the waiting instead.
     fn decide(&self, cmd: Cmd) {
-        let _turn = self.turn();
-        let acts = self.runtime().apply(&self.catalog, cmd);
-        self.settle(acts);
+        if display::on_the_event_loop() {
+            let Some(_turn) = self.turn.free() else {
+                self.hand(Asked::Command(cmd));
+                return;
+            };
+            let acts = self.runtime().apply(&self.catalog, cmd);
+            self.settle(acts);
+            return;
+        }
+        self.now(Asked::Command(cmd));
     }
 
     /// Carries out one batch, and then whatever that batch's own failures
@@ -697,10 +797,6 @@ impl Widgets {
         self.runtime
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-    }
-
-    fn turn(&self) -> MutexGuard<'_, ()> {
-        self.turn.lock().unwrap_or_else(|error| error.into_inner())
     }
 }
 

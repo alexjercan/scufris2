@@ -2,7 +2,8 @@
 //!
 //! A widget is a directory: `widget.toml` says what it is called and how big
 //! its window is, and `widget.ts` renders into it. In-repo widgets live under
-//! `native/widgets/` and are compiled into the binary by `build.rs`, so
+//! `native/scufris-widgets/widgets/` and are compiled into the binary by
+//! `build.rs`, so
 //! discovery is a startup check over what was built rather than a walk of the
 //! filesystem. `SCUFRIS_WIDGET_PATH` names extra roots on the person's own
 //! machine, walked at startup and read from their compiled `widget.js`.
@@ -24,6 +25,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 use scufris_control::{is_identifier, service::CatalogEntry};
 use serde::Deserialize;
+use serde_json::Value;
 use tracing::{debug, warn};
 
 /// How often a widget with a backend expects a reading, when it does not say.
@@ -60,10 +62,15 @@ struct Manifest {
     /// False when two panels asking the same question must still each get a
     /// process of their own.
     shared: Option<bool>,
+    /// What the widget's backend needs to be told before anything else.
+    spawn: Option<toml::Table>,
 }
 
 /// One installed widget.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Not `Eq`: the spawn table holds whatever the manifest wrote, and JSON
+/// carries floats.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Widget {
     /// The identifier the agent opens it by.
     pub id: String,
@@ -86,6 +93,13 @@ pub struct Widget {
     /// of its own says otherwise: two timers of the same length are two
     /// timers, not one counted twice.
     pub shared: bool,
+    /// What this widget's backend is told before whatever the open carried.
+    ///
+    /// A widget's own identity rather than a default the caller may forget. Two
+    /// widgets can share one backend and ask it different questions, and
+    /// neither the tray's summon - which carries nothing at all - nor the model
+    /// is the right place to know which question a widget is. The manifest is.
+    pub spawn: Option<Value>,
     /// The compiled module the shell window imports.
     pub script: String,
 }
@@ -132,7 +146,7 @@ pub enum CatalogError {
 }
 
 /// Every installed widget, by identifier.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Catalog {
     widgets: BTreeMap<String, Widget>,
 }
@@ -348,8 +362,19 @@ fn install(source: Source<'_>, backends: &[&str]) -> Result<Widget, CatalogError
             .cadence
             .map_or(DEFAULT_CADENCE, Duration::from_millis),
         shared: manifest.shared.unwrap_or(true),
+        spawn: manifest.spawn.map(spawn),
         script: source.script.to_string(),
     })
+}
+
+/// One manifest's spawn table as the backend will read it.
+///
+/// TOML and JSON agree on everything a spawn table may hold - strings, numbers,
+/// booleans, and tables and arrays of those - so nothing here can fail. A
+/// datetime is the one value that would not survive, and a widget declaring one
+/// is a widget asking its backend for the wrong thing.
+fn spawn(table: toml::Table) -> Value {
+    serde_json::to_value(table).unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
 }
 
 #[cfg(test)]
@@ -383,6 +408,27 @@ height = 110
         assert_eq!(widget.name, "Note");
         assert_eq!((widget.width, widget.height), (250, 110));
         assert_eq!(catalog.get("weather"), None);
+    }
+
+    /// Two widgets can sit over one backend and ask it different questions.
+    /// Neither the tray, which carries nothing, nor the model is where that
+    /// belongs: the widget is the thing that knows which question it is.
+    #[test]
+    fn a_manifest_says_what_its_backend_is_told_before_anything_else() {
+        let declared =
+            format!("{NOTE}backend = \"system\"\nspawn = {{ view = \"day\", days = 30 }}\n");
+        let catalog = Catalog::build(&[source("note", &declared)], BACKENDS)
+            .expect("the manifest is well formed");
+        let widget = catalog.get("note").expect("note is installed");
+        assert_eq!(
+            widget.spawn,
+            Some(serde_json::json!({"view": "day", "days": 30}))
+        );
+        // And a manifest that declares nothing leaves its backend on its own
+        // defaults, which is every widget that shipped before this.
+        let plain =
+            Catalog::build(&[source("note", NOTE)], BACKENDS).expect("the manifest is well formed");
+        assert_eq!(plain.get("note").expect("note is installed").spawn, None);
     }
 
     #[test]

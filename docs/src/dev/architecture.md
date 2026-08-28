@@ -13,9 +13,10 @@ Repository ownership follows the runtime architecture:
   `scufris-desktop`, the Tauri voice pill, widget runtime, and tray companion,
   and `scufris-service`, the headless background service and its `scufris-ctl`
   client. Each ships as its own flake package, and the service package builds
-  with no graphical dependency at all. Beside the workspace, `native/widgets/`
-  holds the widgets themselves and `native/backends/` the samplers that feed
-  them; both are compiled into the companion by its `build.rs`. See
+  with no graphical dependency at all. Beside the workspace,
+  `native/scufris-widgets/` holds the widgets themselves under `widgets/` and
+  the backends that feed them under `backends/`; both are compiled into the
+  companion by its `build.rs`. It is not a crate and holds no Rust. See
   [Background service](service.md), [Desktop companion](desktop.md), and
   [Widgets](widgets.md).
 - `tools/` contains deterministic executables called by extensions:

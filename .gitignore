@@ -10,4 +10,4 @@ docs/book/
 native/target/
 native/scufris-desktop/gen/
 native/scufris-desktop/ui/dist/
-native/widgets/dist/
+native/scufris-widgets/widgets/dist/

@@ -460,8 +460,10 @@ impl Widgets {
     /// asks. The desktop is the person's, and a panel they put up themselves
     /// is not a turn in the conversation.
     ///
-    /// It carries no payload, which is why only a widget with a backend behind
-    /// it can be summoned: that backend has to stand up on its own defaults.
+    /// It carries no payload of the person's, so what its backend is told is
+    /// whatever the widget's own manifest declares - and a widget that declares
+    /// nothing has a backend that stands up on its own defaults or is not worth
+    /// summoning.
     pub fn summon(&self, widget: String) {
         info!(widget, "summoned from the tray");
         self.open(None, widget, Posture::Instrument, json!({}));
@@ -496,10 +498,13 @@ impl Widgets {
     /// runtime that then refuses the open leaves the shell unused, and it is
     /// discarded rather than kept, for the same reason.
     fn opening(&self, id: Option<String>, widget: String, posture: Posture, data: Value) {
-        if self.catalog.get(&widget).is_none() {
+        let Some(spawn) = self.catalog.get(&widget).map(|found| found.spawn.clone()) else {
             self.refuse(id, "widget_not_found", format!("no widget named {widget}"));
             return;
-        }
+        };
+        // Both roads into an open pass here, which is why the manifest's own
+        // keys are laid under the caller's here rather than at either end.
+        let data = beneath(spawn.as_ref(), data);
         let Some(surface) = self.pool.take() else {
             self.refuse(
                 id,
@@ -815,6 +820,27 @@ pub fn is_shell(label: &str) -> bool {
     label.starts_with(windows::LABEL_PREFIX)
 }
 
+/// Lays a widget's declared spawn keys under the ones the open carried.
+///
+/// The caller's word wins key by key, because the manifest says what the widget
+/// is and the open says what is being asked of it: a panel opened on a chosen
+/// day is that widget looking at that day, not a different widget.
+///
+/// A payload that is not an object is passed through as it stands. A widget
+/// whose backend reads a bare value has nothing to merge into, and quietly
+/// replacing what the caller sent would be worse than handing it over.
+fn beneath(declared: Option<&Value>, asked: Value) -> Value {
+    let Some(Value::Object(declared)) = declared else {
+        return asked;
+    };
+    let Value::Object(asked) = asked else {
+        return asked;
+    };
+    let mut merged = declared.clone();
+    merged.extend(asked);
+    Value::Object(merged)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -827,6 +853,39 @@ mod tests {
         assert!(is_shell("widget-1"));
         assert!(!is_shell(crate::pill::LABEL));
         assert!(!is_shell(crate::textbox::LABEL));
+    }
+
+    /// The manifest says what the widget is; the open says what is being asked
+    /// of it. So a panel opened on a chosen day is that widget looking at that
+    /// day, and a summon that carries nothing still gets the widget it asked
+    /// for rather than whatever its backend defaults to.
+    #[test]
+    fn a_widgets_own_keys_lie_under_the_ones_the_open_carried() {
+        let declared = json!({"view": "agenda", "days": 30});
+        assert_eq!(
+            beneath(Some(&declared), json!({"date": "2026-08-30"})),
+            json!({"view": "agenda", "days": 30, "date": "2026-08-30"})
+        );
+        assert_eq!(
+            beneath(Some(&declared), json!({})),
+            json!({"view": "agenda", "days": 30}),
+            "a summon carries nothing and still knows which widget it is"
+        );
+        assert_eq!(
+            beneath(Some(&declared), json!({"days": 7})),
+            json!({"view": "agenda", "days": 7}),
+            "the caller's word wins key by key"
+        );
+        assert_eq!(
+            beneath(None, json!({"seconds": 300})),
+            json!({"seconds": 300}),
+            "a widget that declares nothing changes nothing"
+        );
+        assert_eq!(
+            beneath(Some(&declared), json!(5)),
+            json!(5),
+            "a payload with nothing to merge into is handed over as it stands"
+        );
     }
 
     #[test]

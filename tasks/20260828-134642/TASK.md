@@ -88,10 +88,25 @@ hash written here is one the commit cannot carry.
 
 ## Left
 
-- Writing a task from the panel. It needs the pill's textbox to know it is
-  collecting a task rather than a sentence: a field on the editing phase in
-  `state.rs`, honoured where `Event::Enter` is handled, and a way for the
-  widget layer to ask for it. The backend already takes the action
-  (`{"action": "add", "text": ...}`) and it is tested; nothing on screen sends
-  it yet.
-- A live run against a copy of the-den.
+Writing a task from the panel, which the user asked for and this does not do.
+The backend already takes it - `{"action": "add", "text": ...}` runs
+`today task add` for the selected day, and it is tested - but nothing on screen
+sends it. Two things stand between here and there, and both are decisions
+rather than work:
+
+**A widget cannot ask the companion for anything.** `ctx.send` becomes
+`Act::Send { surface, action }` and goes to the backend's standard input
+(`widgets/runtime.rs:666`, `widgets/mod.rs:698`). A "+" tick needs a class of
+action the widget layer keeps rather than forwards, which is a new rule in the
+widget contract and needs its own answer to which widget may ask for what.
+
+**The textbox has one meaning and it is a careful one.** It is raised and
+hidden from `Phase`, and `Phase` is the machine that guarantees a transcript is
+never lost and never sent twice - `Sent`, `Retained`, `Delivery`, `warned`.
+Giving `Editing` a second meaning puts an unrelated concern inside it. Keeping
+the flag off `Phase` instead means a textbox that is up for a reason `settle`
+does not know about, and `settle` is what takes it down.
+
+Neither is hard. Both change something load-bearing, so they are the next
+increment rather than the tail of this one - which is what the plan said when
+it called this step separable.

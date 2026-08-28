@@ -1,6 +1,6 @@
 # Scufris on more than one surface: a phone and a laptop as clients
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 65
 - TAGS: architecture, service, protocol
 
@@ -103,23 +103,37 @@ What does not work, all in `native/scufris-service/src/service.rs`:
   is what L2 is for. Get that backwards and the notice is the first
   casualty of the change it exists to announce.
 
-## To settle
+## Decisions
 
-- **D1** Narrow L1 and add L5 and L6, or refuse the design. Everything
-  else is consequence. Recommended: narrow it, and add L5 in the same
-  breath so the security clause is not quietly lost.
+- **D1 SETTLED: narrowed.** L1 keeps one person, one conversation and
+  one host; exactly one clause leaves it. L5 and L6 land with it, so the
+  security clause is restated rather than dropped.
 - **D2 SETTLED (revision 2): A, L2 stays whole.** One version on the
   host; a client that is behind is told so plainly. The two obligations
   it created are in the laws above.
-- **D3** How presence moves: inferred from the last submit, an explicit
-  claim, or both in stages. Recommended: infer now, add the claim when a
-  phone exists to send it.
-- **D4** The catalog: union at registration, or exactly the presence
-  holder's. Blocked on reading whether Pi can re-register tools on a live
-  RPC session. Recommended: check first, then prefer the presence
-  holder's if Pi allows it.
-- **D5** Whether the phone is wanted at all once the laptop works.
-  Recommended: decide after living on rung 3.
+- **D3 SETTLED: infer now, claim later.** Presence follows the last
+  surface to submit, which needs no new client message. An explicit claim
+  is added when a surface exists that knows its own foreground state - a
+  phone app does, an X11 window mostly does not.
+- **D4 SETTLED: register the union, activate the presence holder's.**
+  The blocking check is done. `docs/extensions.md:1342`:
+  `pi.registerTool()` "works both during extension load and after
+  startup ... callable by the LLM without `/reload`", and beside it "use
+  `pi.setActiveTools()` to enable or disable tools ... at runtime".
+  Registration and activation are separate levers, which is the shape
+  this wanted: the registered set never churns, and the active set is
+  what the surface you are looking at can actually draw. Neither option
+  offered in revision 1 was right - the union alone offers panels that
+  cannot be placed, and the presence holder's catalog alone re-registers
+  tools every time you pick up your phone. One constraint on the seam: a
+  `setActiveTools` call made during a tool's own execution must be
+  additive, so presence that moves mid-turn defers its activation change
+  to the turn boundary. Keep the `relay_widget` refusal anyway, for the
+  race between the model choosing a widget and the command landing.
+- **D5 SETTLED: deferred on purpose.** Rung 3 gives Scufris on the
+  laptop with everything working, and rung 4 is most of the remaining
+  cost. Decided after living on rung 3 - a decision not to decide yet,
+  rather than an open question.
 
 ## The ladder
 
@@ -152,8 +166,29 @@ depends on it.
   mode is bound to one client for its lifetime. Surfaces multiply in
   front of the service, never behind it.
 
+## Outcome (2026-08-28)
+
+All five decisions settled across revisions 2 and 3, and the design page
+records each one where it applies rather than only in the decision list.
+
+Two of them were changed by Alex rather than merely approved, and both
+changes made the design smaller or sharper:
+
+- L1 keeps "one host". It was two claims wearing one name - the machine
+  that runs Scufris, and the only device involved at all - and only the
+  second leaves. The rig stays the only thing that runs `pi --mode rpc`.
+- L5 is Alex's sentence rather than mine: "Scufris should not even
+  realize we call it from a different machine." That replaced a security
+  argument with an invariant, and gave the design a tripwire it did not
+  have.
+
+One decision was settled by reading rather than by choosing: D4's
+blocking question about Pi is answered, and the answer was better than
+either option on offer.
+
+Implementation is a separate task, after v0.5.0. Nothing here is built.
+
 ## Completion criteria
 
-Design only for now. This task is complete when D1 to D5 are settled on
-the page and the outcome is recorded here. Implementation, if D1 is
-accepted, becomes its own task after v0.5.0.
+Met. D1 to D5 are settled on the page and the outcome is recorded
+above.

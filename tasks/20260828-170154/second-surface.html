@@ -342,7 +342,7 @@
   <header class="mast">
     <div class="kicker">
       Design &middot; task 20260828-170154 &middot; 2026-08-28 &middot; revision
-      2
+      3
     </div>
     <h1>The Second Surface</h1>
     <p class="sub">
@@ -350,8 +350,8 @@
       answer on a laptop across the house and a phone in your pocket. The
       finding: <em>the one-user law is not what stands in the way</em>, and
       neither is one host &mdash; the rig keeps the agent. Two other clauses
-      bundled into L1 are, and they cost wildly different amounts. Nothing here
-      is built until v0.5.0 ships.
+      bundled into L1 are, and they cost wildly different amounts. All five
+      decisions are settled; nothing here is built until v0.5.0 ships.
     </p>
     <nav class="toc">
       <a href="#laws">00 Laws</a>
@@ -363,7 +363,7 @@
       <a href="#phone">06 What a phone is</a>
       <a href="#versions">07 Versions</a>
       <a href="#ladder">08 The ladder</a>
-      <a href="#decisions">09 To settle</a>
+      <a href="#decisions">09 Settled</a>
       <a href="#not">10 Not doing</a>
     </nav>
   </header>
@@ -1136,31 +1136,61 @@ SCUFRIS_RUNTIME_DIR=<span class="s">"$HOME/.scufris-remote"</span> scufris-deskt
       The agent's tool surface would flap by surface, not by capability.
     </p>
     <p>
-      <b>Proposal: union at registration, refuse at relay.</b> Keep a catalog
-      per surface and hand the agent the union, so the tool surface is stable
-      for the life of the session. Route each widget command by presence, as L6
-      says, and when the presence holder does not have that widget, answer the
-      agent with the existing failure shape. Scufris tries to open a panel,
-      hears it cannot, and says so. That is honest and it uses a road that
-      already exists (<code>WidgetReport::Failed</code> with a refusal code).
+      Revision 1 offered two answers and could not choose between them, because
+      the choice turned on a fact about Pi that had not been checked. It has
+      been checked now, and the answer is better than either option.
     </p>
 
-    <div class="panel risk">
-      <h3>Unverified: can the agent's tools change mid-session?</h3>
+    <div class="panel free">
+      <h3>Checked: tools can change on a live session</h3>
       <p>
-        The union is chosen partly because it is <em>stable</em>, which matters
-        only if re-typing tools on a live Pi session is difficult or impossible.
-        That has not been checked. Before building, read the installed Pi RPC
-        documentation for whether a tool set can be re-registered on a running
-        session.
+        From the installed documentation (<code>docs/extensions.md:1342</code>):
+      </p>
+      <p class="said">
+        "<code>pi.registerTool()</code> works both during extension load and
+        after startup ... New tools are refreshed immediately in the same
+        session, so they appear in <code>pi.getAllTools()</code> and are
+        callable by the LLM without <code>/reload</code>."
       </p>
       <p>
-        If it can, a third option opens: the catalog is exactly the presence
-        holder's, and the tools honestly disappear while you are on the phone.
-        That is a nicer model and it is cheaper to reason about. It is only
-        unavailable if Pi says so.
+        And beside it: "Use <code>pi.setActiveTools()</code> to enable or
+        disable tools (including dynamically added tools) at runtime."
+      </p>
+      <p>
+        So registration and activation are separate levers, and that separation
+        is exactly the shape this problem wanted.
       </p>
     </div>
+
+    <p>
+      <b>Settled: register the union, activate the presence holder's.</b> Every
+      widget any surface has is registered once, so the registered set never
+      churns. The <em>active</em> set is whatever the surface you are looking at
+      can actually draw. Move to the phone and the widget tools go quiet; come
+      back to the desktop and they return.
+    </p>
+    <p>
+      That is honest in a way neither revision-1 option was. The union alone
+      would let Scufris offer you a panel it cannot put anywhere. The presence
+      holder's catalog alone would mean re-registering tools every time you
+      picked up your phone.
+    </p>
+    <p>
+      One constraint on the seam, from the same page: a
+      <code>setActiveTools</code> call made
+      <em>during a tool's own execution</em>
+      must be additive - Pi records the added names on that tool result. So
+      presence that moves mid-turn defers its activation change to the turn
+      boundary. Nothing is lost by waiting, because the model has already
+      decided what to call.
+    </p>
+    <p>
+      Keep the refusal anyway. Presence can move between the model choosing a
+      widget and the command landing, and
+      <code>relay_widget</code> already answers the agent with
+      <code>WidgetReport::Failed</code> when there is no screen for it. Two
+      guards for a race that will be rare and confusing when it happens.
+    </p>
   </section>
 
   <section id="phone">
@@ -1383,9 +1413,10 @@ SCUFRIS_RUNTIME_DIR=<span class="s">"$HOME/.scufris-remote"</span> scufris-deskt
         to watch it happen.
       </li>
       <li>
-        <b>Multi-frontend.</b> Drop the eviction, add presence, decide the
-        catalog. Protocol v4. One file plus a field in <code>hello</code>. This
-        is the actual work and it is contained.
+        <b>Multi-frontend.</b> Drop the eviction, add presence, and split
+        registration from activation for the catalog. Protocol v4. One file plus
+        a field in <code>hello</code>. This is the actual work and it is
+        contained.
       </li>
       <li>
         <b>The phone.</b> A new surface: transcript, submit, state, microphone.
@@ -1409,30 +1440,29 @@ SCUFRIS_RUNTIME_DIR=<span class="s">"$HOME/.scufris-remote"</span> scufris-deskt
   <section id="decisions">
     <div class="shead">
       <span class="snum">09</span>
-      <h2>To settle</h2>
+      <h2>Settled</h2>
       <span class="srule"></span>
-      <span class="stag">Yours</span>
+      <span class="stag">All five</span>
     </div>
 
     <div class="panel decide">
       <h3>D1 &mdash; Does L1 get narrowed, or does this design get refused?</h3>
       <p>
-        Narrowing L1 to "one person, one conversation" and adding L5 and L6 is
-        the load-bearing decision. Everything else is consequence. Refusing it
-        is a legitimate answer: one screen is a real constraint that has kept
-        this codebase small.
+        <b>Settled: narrowed.</b> L1 keeps one person, one conversation and one
+        host; exactly one clause leaves it. L5 and L6 land in the same breath,
+        so the security clause is restated rather than quietly dropped.
       </p>
-      <p class="rec">
-        <b>Recommended:</b> narrow it, and add L5 in the same breath so the
-        security clause is never quietly lost.
+      <p>
+        L5 was rewritten on your framing rather than mine, which made it an
+        invariant instead of an argument. See <a href="#laws">00</a>.
       </p>
     </div>
 
     <div class="panel decide">
       <h3>D2 &mdash; Version policy for a surface you cannot rebuild</h3>
       <p>
-        <b>Settled on revision 1: A.</b> L2 stays whole. The host speaks one
-        version, and a client that is behind is told so plainly.
+        <b>Settled: A.</b> L2 stays whole. The host speaks one version, and a
+        client that is behind is told so plainly.
       </p>
       <p>
         Two obligations came with it: Scufris announces the mismatch unprompted
@@ -1444,36 +1474,32 @@ SCUFRIS_RUNTIME_DIR=<span class="s">"$HOME/.scufris-remote"</span> scufris-deskt
     <div class="panel decide">
       <h3>D3 &mdash; How presence moves</h3>
       <p>
-        Inferred from the last submit, an explicit claim, or both in stages.
-      </p>
-      <p class="rec">
-        <b>Recommended:</b> infer now, add the claim when a phone exists to send
-        it.
+        <b>Settled: infer now, claim later.</b> Presence follows the last
+        surface to submit, which needs no new client message at all. An explicit
+        claim is added when there is a surface that knows its own foreground
+        state to send one - which a phone app does and an X11 window mostly does
+        not.
       </p>
     </div>
 
     <div class="panel decide">
       <h3>D4 &mdash; The catalog</h3>
       <p>
-        Union at registration, or exactly the presence holder's. Blocked on the
-        Pi question in <a href="#catalog">05</a>.
-      </p>
-      <p class="rec">
-        <b>Recommended:</b> read the RPC documentation first, then prefer the
-        presence holder's if Pi allows it.
+        <b>Settled, and the check is done.</b> Pi registers tools after startup
+        and enables or disables them at runtime, so the answer is neither of the
+        two options revision 1 offered:
+        <b>register the union, activate the presence holder's</b>. See
+        <a href="#catalog">05</a>.
       </p>
     </div>
 
     <div class="panel decide">
       <h3>D5 &mdash; Is the laptop enough?</h3>
       <p>
-        Rung 3 gives you Scufris on the laptop with everything working. The
-        phone is rung 4 and is most of the remaining cost. It is reasonable to
-        stop at three and never write an app.
-      </p>
-      <p class="rec">
-        <b>Recommended:</b> decide this after living on rung 3 for a while, not
-        now.
+        <b>Settled: deferred on purpose.</b> Rung 3 gives you Scufris on the
+        laptop with everything working, and rung 4 is most of the remaining
+        cost. This one gets decided after living on rung 3 for a while, which is
+        a decision to not decide yet rather than an open question.
       </p>
     </div>
   </section>
@@ -1513,7 +1539,7 @@ SCUFRIS_RUNTIME_DIR=<span class="s">"$HOME/.scufris-remote"</span> scufris-deskt
 
   <footer>
     <div>
-      Task 20260828-170154 &middot; revision 2 &middot; 2026-08-28. Follows
+      Task 20260828-170154 &middot; revision 3 &middot; 2026-08-28. Follows
       <code>tasks/20260827-081702</code>, "Scufris as a service: the
       architecture inversion". Gated behind the v0.5.0 release; nothing here is
       implemented.

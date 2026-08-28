@@ -155,6 +155,14 @@ pub trait Surface: Send + Sync {
     fn show_pill(&self) -> Result<Shown, String>;
     /// Hides the pill, and says what that achieved.
     fn hide_pill(&self) -> Result<Hidden, String>;
+    /// Answers whether the layer is holding anything worth staying on screen
+    /// for.
+    ///
+    /// What separates cancelling a take from putting the companion away. With
+    /// panels on the layer the two are different intentions and Escape means
+    /// only the first; with an empty layer they are the same intention, and
+    /// asking for it twice is a step the person did not need.
+    fn holding(&self) -> bool;
     /// Records the active window, then puts the textbox over the pill with the
     /// keyboard, and says what that achieved.
     fn show_textbox(&self) -> Result<Shown, String>;
@@ -733,6 +741,7 @@ impl App {
     /// becomes the next event rather than a nested call, so the window follows
     /// the phase each event leaves rather than the one it started in.
     pub fn handle(self: &Arc<Self>, event: Event) {
+        let event = self.escapes_to(event);
         let (actions, decision) = self.decide(|companion| companion.apply(event));
         if !decision.surfaced.posture.waits() {
             // A phase that is leaving, or one that is only reporting, stays on
@@ -756,6 +765,48 @@ impl App {
                 Err(reason) => runtime.abandon(reason),
             }),
         );
+    }
+
+    /// Decides which Escape this is: the one that ends the take, or the one
+    /// that ends the take and the companion with it.
+    ///
+    /// Only in the phases that are holding something to cancel. In the passive
+    /// ones Escape is already the dismissal and has nothing else it could mean,
+    /// and answering those with a cancel would make the ladder circular - the
+    /// take would go, the pill would stay, and the next press would find itself
+    /// in the same place.
+    ///
+    /// The phases cannot decide this themselves. Whether there is a workspace
+    /// to go back to is a fact about the widget layer, and the layer is the
+    /// host's.
+    fn escapes_to(&self, event: Event) -> Event {
+        if event != Event::Escape {
+            return event;
+        }
+        if !matches!(self.posture(), Posture::Watched | Posture::Editing) {
+            return event;
+        }
+        if self.ports.surface.holding() {
+            Event::Cancel
+        } else {
+            event
+        }
+    }
+
+    /// Brings the workspace up, or puts it away.
+    ///
+    /// One gesture, because the person has one thing in mind: the pill and its
+    /// panels, on screen or not. Which of the two this is follows from where
+    /// the windows are, and a phase that is holding words answers neither -
+    /// [`Event::Dismiss`] refuses those, and they are already on screen so
+    /// there is nothing for [`Event::Reveal`] to do.
+    pub fn workspace(self: &Arc<Self>) {
+        let event = if self.posture() == Posture::Off {
+            Event::Reveal
+        } else {
+            Event::Dismiss
+        };
+        self.handle(event);
     }
 
     /// Runs what one phase asked for, and puts it on the surfaces afterwards
@@ -1258,7 +1309,7 @@ impl App {
     }
 
     /// Where the newest phase needs the companion's windows to be.
-    fn posture(&self) -> Posture {
+    pub fn posture(&self) -> Posture {
         self.companion
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -1733,6 +1784,9 @@ mod tests {
         /// Runs once as a presentation reaches the pill, so a test can move the
         /// companion on while an older presentation is still on the surface.
         at_present: Mutex<Option<Watcher>>,
+        /// Whether the layer is holding a panel, which is what decides between
+        /// the two Escapes.
+        holding: AtomicBool,
     }
 
     impl Default for RecordedSurface {
@@ -1762,6 +1816,7 @@ mod tests {
                 refuse_present: Refusals::new("the pill would not render"),
                 refuse_tray: Refusals::new("the tray icon would not change"),
                 at_present: Mutex::default(),
+                holding: AtomicBool::new(false),
             }
         }
     }
@@ -1781,6 +1836,11 @@ mod tests {
             self.on_screen.load(Ordering::SeqCst)
         }
 
+        /// Puts a panel on the layer, or takes the last one off.
+        fn hold(&self, holding: bool) {
+            self.holding.store(holding, Ordering::SeqCst);
+        }
+
         /// True while the textbox holds the keyboard.
         fn focused(&self) -> bool {
             self.focused.load(Ordering::SeqCst)
@@ -1798,6 +1858,10 @@ mod tests {
     }
 
     impl Surface for RecordedSurface {
+        fn holding(&self) -> bool {
+            self.holding.load(Ordering::SeqCst)
+        }
+
         fn show_pill(&self) -> Result<Shown, String> {
             if self.panic_on_show.swap(false, Ordering::SeqCst) {
                 panic!("the window connection is gone");
@@ -3582,5 +3646,84 @@ mod tests {
         let harness = harness(FakeRecorder::default(), Ok("unused".into()));
         harness.app.restart_backend();
         assert!(harness.app.restarts.lock().unwrap().allow(0));
+    }
+
+    /// The gesture the person has in mind is one thing: the workspace, on
+    /// screen or not. Which event that is follows from where the windows are.
+    #[test]
+    fn the_workspace_gesture_brings_the_pill_up_and_puts_it_back_down() {
+        let harness = harness(FakeRecorder::default(), Ok("unused".into()));
+        assert!(!harness.surface.on_screen());
+
+        harness.app.workspace();
+        harness.executor.drain();
+        assert!(harness.surface.on_screen());
+        assert_eq!(
+            harness.recorder.captures(),
+            0,
+            "the workspace gesture opened the microphone"
+        );
+        assert!(!harness.surface.last().recording);
+
+        harness.app.workspace();
+        harness.executor.drain();
+        assert!(!harness.surface.on_screen());
+    }
+
+    /// A gesture that threw away words on screen would be one nobody dares
+    /// make, so a phase holding any answers neither half of it.
+    #[test]
+    fn the_workspace_gesture_leaves_a_take_and_a_draft_alone() {
+        let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
+        harness.app.handle(Event::Activate);
+        harness.executor.drain();
+        harness.app.workspace();
+        harness.executor.drain();
+        assert!(harness.surface.last().recording, "the take was thrown away");
+        assert!(harness.surface.on_screen());
+
+        take(&harness);
+        assert!(harness.surface.focused());
+        harness.app.workspace();
+        harness.executor.drain();
+        assert!(harness.surface.focused(), "the draft was thrown away");
+    }
+
+    /// Escape out of a take is a cancel while there is a workspace behind it to
+    /// go back to, and the whole dismissal once there is not. The layer is the
+    /// host's, so this is the host's decision and not the phase's.
+    #[test]
+    fn escape_keeps_the_pill_only_while_the_layer_is_holding_something() {
+        let harness = harness(FakeRecorder::default(), Ok("unused".into()));
+        harness.surface.hold(true);
+        harness.app.handle(Event::Activate);
+        harness.executor.drain();
+        harness.app.handle(Event::Escape);
+        harness.executor.drain();
+        assert!(harness.recorder.was_discarded(0), "the take was kept");
+        assert!(
+            harness.surface.on_screen(),
+            "the panels the take was cancelled over went with it"
+        );
+
+        // The ladder's second rung. Nothing is left to cancel, so this Escape
+        // is the dismissal whatever the layer is holding.
+        harness.app.handle(Event::Escape);
+        harness.executor.drain();
+        assert!(!harness.surface.on_screen());
+    }
+
+    #[test]
+    fn escape_takes_an_empty_workspace_down_with_the_take() {
+        let harness = harness(FakeRecorder::default(), Ok("unused".into()));
+        harness.app.handle(Event::Activate);
+        harness.executor.drain();
+        harness.app.handle(Event::Escape);
+        harness.executor.drain();
+        assert!(harness.recorder.was_discarded(0), "the take was kept");
+        assert!(
+            !harness.surface.on_screen(),
+            "a pill over a bare desktop was left standing"
+        );
     }
 }

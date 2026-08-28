@@ -83,6 +83,20 @@ pub enum Verb {
     /// binding: a person who pressed it to read the last answer presses it again
     /// to go back to what they were doing.
     Hud,
+    /// Bring the workspace up: the pill, and the panels standing beside it.
+    ///
+    /// The microphone is not touched. This is the companion's other door, and
+    /// it is a verb rather than a second accelerator because a grab held all
+    /// session is a chord taken from every other program on the desktop. One
+    /// key is what the companion is worth; whether this one is worth another is
+    /// the desktop's to decide, and it decides by binding this.
+    Show,
+    /// Put the workspace away, leaving whatever is on it mounted.
+    ///
+    /// A show and a hide rather than one toggle, unlike [`Verb::Hud`]. What
+    /// sends these is not always a key: a script that means to leave the screen
+    /// clear has to be able to say so without first asking what is on it.
+    Hide,
 }
 
 impl Verb {
@@ -91,6 +105,8 @@ impl Verb {
         match word {
             "open" => Some(Self::Open),
             "hud" => Some(Self::Hud),
+            "show" => Some(Self::Show),
+            "hide" => Some(Self::Hide),
             _ => None,
         }
     }
@@ -100,6 +116,8 @@ impl Verb {
         match self {
             Self::Open => "open",
             Self::Hud => "hud",
+            Self::Show => "show",
+            Self::Hide => "hide",
         }
     }
 }

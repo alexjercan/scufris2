@@ -161,6 +161,27 @@ pub enum Event {
     /// Escape was pressed: in the textbox, or on the accelerator that answers
     /// a pill with no textbox under it.
     Escape,
+    /// Escape, where there is a workspace on screen to go back to.
+    ///
+    /// The same verb as [`Event::Escape`] and the same thing thrown away. What
+    /// differs is where it leaves the person: cancelling a take you did not
+    /// mean to start should not also take down the panels you were reading. The
+    /// host decides which of the two this is, because whether there is anything
+    /// in the layer is not something the phases know.
+    Cancel,
+    /// The person asked for the workspace, without asking to be heard.
+    ///
+    /// The pill comes home and the layer comes up with it. The phase is not
+    /// touched and the microphone is not opened: this is the door the companion
+    /// did not have, and every other way onto the screen went through the
+    /// microphone.
+    Reveal,
+    /// The person asked for the workspace to go away.
+    ///
+    /// Only from the phases that are holding nothing. A gesture that could put
+    /// the pill away while there are words on screen is a gesture that can lose
+    /// them, and this one is on the key that is pressed most.
+    Dismiss,
     /// The stop key was pressed, or the tray was asked to stop Scufris.
     ///
     /// The one gesture here that reaches the conversation without saying
@@ -552,9 +573,9 @@ impl Companion {
     pub fn apply(&mut self, event: Event) -> Vec<Action> {
         // The runtime stopped trying the window when it could not open one.
         // The person asking for the pill again is what tries it again: nothing
-        // else here knows whether the display has come back. An activation is
-        // also the one thing that brings a dismissed pill home to the screen.
-        if matches!(event, Event::Activate) {
+        // else here knows whether the display has come back. Both of the
+        // gestures that ask for the pill bring a dismissed one home.
+        if matches!(event, Event::Activate | Event::Reveal) {
             self.blind = None;
             self.dismissed = false;
         }
@@ -562,6 +583,12 @@ impl Companion {
     }
 
     fn transition(&mut self, event: Event) -> Vec<Action> {
+        // `Cancel` is `Escape` that leaves the workspace standing. The phases
+        // answer one verb and throw the same thing away; all that differs is
+        // whether the pill goes down with it, so it travels as an argument to
+        // `close` rather than as a second row for every phase.
+        let keep = matches!(event, Event::Cancel);
+        let event = if keep { Event::Escape } else { event };
         match (&self.phase, event) {
             (Phase::Resting, Event::Activate) => {
                 self.phase = Phase::Listening;
@@ -579,8 +606,10 @@ impl Companion {
                 self.phase = Phase::Transcribing;
                 vec![Action::StopRecording]
             }
-            (Phase::Listening, Event::Escape) => self.close(vec![Action::DiscardRecording]),
-            (Phase::Transcribing, Event::Escape) => self.close(vec![Action::CancelTranscription]),
+            (Phase::Listening, Event::Escape) => self.close(keep, vec![Action::DiscardRecording]),
+            (Phase::Transcribing, Event::Escape) => {
+                self.close(keep, vec![Action::CancelTranscription])
+            }
             // The microphone can fail before capture starts and while it runs.
             // Either way the pill must stop claiming to record.
             (Phase::Listening, Event::RecordingFailed(reason)) => {
@@ -679,11 +708,11 @@ impl Companion {
             }],
             (Phase::Editing { id, .. } | Phase::Retained { id, .. }, Event::Escape) => {
                 let id = id.clone();
-                self.close(vec![Action::DiscardPending { id }])
+                self.close(keep, vec![Action::DiscardPending { id }])
             }
             // Nothing to answer and nothing to correct, so Escape is the only
             // key a failure has: it puts the pill away.
-            (Phase::Failed { .. }, Event::Escape) => self.close(Vec::new()),
+            (Phase::Failed { .. }, Event::Escape) => self.close(keep, Vec::new()),
             // The two phases the pill is on screen without the keyboard in.
             // Escape there is the person putting the pill away, and it had no
             // road down until the verb could arrive without focus: the pill
@@ -693,7 +722,26 @@ impl Companion {
             // The phase is left alone. A send in flight is a turn the pill is
             // watching, and losing it to put the window away would lose the
             // acknowledgment the words are waiting on.
+            //
+            // A cancel is not a dismissal here. There is nothing to cancel in
+            // either phase, and answering it with a dismissal would make the
+            // Escape ladder circular: the take goes and the pill stays, and the
+            // next press has to be the one that ends it.
             (Phase::Resting | Phase::Sent { .. }, Event::Escape) => {
+                if !keep {
+                    self.dismissed = true;
+                }
+                Vec::new()
+            }
+            // Asked for on its own. The pill is already home by the time this
+            // runs - `apply` brings it - so there is nothing left to do but
+            // leave the phase exactly as it was found.
+            (_, Event::Reveal) => Vec::new(),
+            // Only the phases holding nothing. Everything else is words on
+            // screen or a microphone that is open, and this arrives from the
+            // key that is pressed most: a tap that could lose a take is a tap
+            // that eventually will.
+            (Phase::Resting | Phase::Sent { .. }, Event::Dismiss) => {
                 self.dismissed = true;
                 Vec::new()
             }
@@ -846,12 +894,19 @@ impl Companion {
         }]
     }
 
-    /// Puts the pill away on the person's say-so. This is the only road off
-    /// the screen: everything the machine finishes on its own settles into
-    /// resting instead.
-    fn close(&mut self, actions: Vec<Action>) -> Vec<Action> {
+    /// Ends an interaction on the person's say-so, and says whether the pill
+    /// stays.
+    ///
+    /// `keep` is a workspace to go back to. Without one the pill goes away,
+    /// which is the road off the screen every other transition lacks:
+    /// everything the machine finishes on its own settles into resting instead.
+    /// With one it stays, because the panels the person was reading are not
+    /// what they cancelled.
+    fn close(&mut self, keep: bool, actions: Vec<Action>) -> Vec<Action> {
         self.phase = Phase::Resting;
-        self.dismissed = true;
+        if !keep {
+            self.dismissed = true;
+        }
         actions
     }
 
@@ -1866,5 +1921,70 @@ mod tests {
             vec![Action::CancelTranscription]
         );
         assert!(!companion.on_screen());
+    }
+
+    #[test]
+    fn reveal_brings_a_dismissed_pill_back_without_opening_the_microphone() {
+        let mut companion = handed_off();
+        companion.apply(Event::Escape);
+        assert_eq!(companion.posture(), Posture::Off);
+        assert_eq!(companion.apply(Event::Reveal), Vec::new());
+        assert_eq!(companion.posture(), Posture::Passive);
+        assert_eq!(companion.phase(), &Phase::Resting);
+    }
+
+    #[test]
+    fn dismiss_puts_a_resting_pill_away_and_leaves_a_working_one_alone() {
+        let mut companion = handed_off();
+        assert_eq!(companion.posture(), Posture::Passive);
+        assert_eq!(companion.apply(Event::Dismiss), Vec::new());
+        assert_eq!(companion.posture(), Posture::Off);
+
+        // A phase holding the person's words answers neither gesture. A tap
+        // that threw away a draft would be a tap nobody dares make.
+        let mut companion = drafted("open the tasks widget");
+        assert_eq!(companion.apply(Event::Dismiss), Vec::new());
+        assert_eq!(companion.posture(), Posture::Editing);
+        assert_eq!(companion.apply(Event::Reveal), Vec::new());
+        assert_eq!(companion.posture(), Posture::Editing);
+    }
+
+    #[test]
+    fn cancel_ends_the_take_and_leaves_the_pill_standing() {
+        let mut companion = opened();
+        assert_eq!(
+            companion.apply(Event::Cancel),
+            vec![Action::DiscardRecording]
+        );
+        assert_eq!(companion.phase(), &Phase::Resting);
+        assert_eq!(
+            companion.posture(),
+            Posture::Passive,
+            "the take is gone and the workspace it was cancelled over is not"
+        );
+
+        // And the same throw-away out of the textbox.
+        let mut companion = drafted("open the tasks widget");
+        assert_eq!(
+            companion.apply(Event::Cancel),
+            vec![Action::DiscardPending {
+                id: "pill-1".into()
+            }]
+        );
+        assert_eq!(companion.posture(), Posture::Passive);
+    }
+
+    #[test]
+    fn the_escape_ladder_ends_at_a_dismissal() {
+        let mut companion = opened();
+        // The host answers a real Escape with a cancel while there is a
+        // workspace to go back to, and with an Escape once there is not.
+        assert_eq!(
+            companion.apply(Event::Cancel),
+            vec![Action::DiscardRecording]
+        );
+        assert_eq!(companion.posture(), Posture::Passive);
+        assert_eq!(companion.apply(Event::Escape), Vec::new());
+        assert_eq!(companion.posture(), Posture::Off);
     }
 }

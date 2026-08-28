@@ -76,7 +76,7 @@ its own session directory, is not one. Name the build explicitly while a stale
 speaks nothing, and the service says so ten seconds in. See
 [Background service](service.md).
 
-Then press `Super+D`, speak, and press it again. The take stops and the words
+Then hold `Super+D`, speak, and let go. The take stops and the words
 arrive in a textbox above the pill, where `Enter` sends them to the agent the
 service supervises as an ordinary user message and `Escape` throws them away.
 Watch the same conversation from a third terminal with

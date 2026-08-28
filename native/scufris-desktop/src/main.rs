@@ -50,9 +50,15 @@ use focus::FocusTracker;
 use hud::Hud;
 use link::{LinkEvent, ServiceLink};
 use pending::{FilePendingStore, PendingStore};
-use scufris_control::command::{Outcome, Verb};
+use scufris_control::{
+    command::{Outcome, Verb},
+    // The widget layer's own word for where a surface lives, named apart from
+    // the pill's posture: one says whether the person owns a panel, the other
+    // says where the companion's windows are.
+    service::{Posture as Standing, WidgetCommand},
+};
 use speech::Speaker;
-use state::Event;
+use state::{Assistant, Event, Posture};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent, http, ipc::Channel, menu::Menu};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tracing::{debug, error, info, warn};
@@ -157,6 +163,12 @@ impl Surface for DesktopSurface {
         // stopped - this is the layer going away, not the panels going away.
         self.layer(true);
         pill::hide(&self.handle)
+    }
+
+    fn holding(&self) -> bool {
+        self.handle
+            .try_state::<Arc<widgets::Widgets>>()
+            .is_some_and(|widgets| widgets.holding())
     }
 
     fn show_textbox(&self) -> Result<Shown, String> {
@@ -274,26 +286,34 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
-                    if event.state() != ShortcutState::Pressed {
-                        return;
-                    }
+                    let state = event.state();
                     // The hotkey that opens the pill, or one of the two keys
                     // grabbed beside it while it is up. Every accelerator
                     // arrives here, so which one it is decides what it means.
                     let pill = app.try_state::<Arc<keys::PillKeys>>();
-                    let event = match pill {
-                        Some(keys) if keys.cancels(shortcut) => Event::Escape,
+                    let beside = match pill {
+                        Some(keys) if keys.cancels(shortcut) => Some(Event::Escape),
                         Some(keys) if keys.stops(shortcut) => {
                             // Stop means stop. The speaker is the companion's
                             // own and never crossed the socket, so it is cut
                             // right here; the run belongs to the service, so
                             // the runtime is what asks for that.
                             app.state::<Arc<Speaker>>().hush();
-                            Event::Stop
+                            Some(Event::Stop)
                         }
-                        _ => Event::Activate,
+                        _ => None,
                     };
-                    app.state::<Arc<App>>().inner().clone().handle(event);
+                    // The two keys beside the hotkey have one meaning each, so
+                    // they answer the press and ignore the release. Only the
+                    // hotkey has two, and only it needs to know how long it was
+                    // down to tell them apart.
+                    if let Some(event) = beside {
+                        if state == ShortcutState::Pressed {
+                            app.state::<Arc<App>>().inner().clone().handle(event);
+                        }
+                        return;
+                    }
+                    hotkey(app, state);
                 })
                 .build(),
         )
@@ -350,6 +370,12 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             // Before the menu, because the menu offers what is installed: the
             // catalog is what the summon submenu is built from.
             let widgets = widgets::Widgets::start(handle.clone())?;
+            // The layer starts where the pill starts, which is away. Said here
+            // rather than made the runtime's default: the runtime is a layer of
+            // panels and has no opinion about a pill, and a companion that
+            // started with its windows up would be one that greets a person who
+            // did not ask for it.
+            widgets.conceal(true);
             tauri.manage(Arc::clone(&widgets));
 
             let menu = tray::build_menu(
@@ -420,6 +446,10 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                 },
             ));
             tauri.manage(Arc::clone(&pill_keys));
+            // The hotkey's own memory of whether it is being tapped or held.
+            // Managed for the same reason the keys beside it are: the handler
+            // has nothing but the app.
+            tauri.manage(Arc::new(keys::Hold::default()));
 
             // Before the runtime, because the runtime holds the surface that
             // cuts speech on barge-in; the runtime is given back to it below.
@@ -468,7 +498,23 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                     // Routed away from the pill before it can reach the state
                     // machine. The runtime is the pill's sibling, and a widget
                     // command has nothing to say about a conversation.
-                    LinkEvent::Widget(command) => surfaces.command(command),
+                    //
+                    // The one thing it says is that a panel is coming, and a
+                    // panel answering a question the person asked is worth
+                    // seeing. Off this thread for the reason the conversation
+                    // window is, and unordered against the open for the same
+                    // reason it can be: the layer is one flag over every
+                    // surface, so a panel that opens first is raised with the
+                    // rest of them.
+                    LinkEvent::Widget(command) => {
+                        if answers(&command, observer.shown_assistant())
+                            && observer.posture() == Posture::Off
+                        {
+                            let workspace = Arc::clone(&observer);
+                            thread::spawn(move || workspace.handle(Event::Reveal));
+                        }
+                        surfaces.command(command);
+                    }
                     // The agent decided this is worth saying aloud. What
                     // becomes of it is the companion's: it owns the speaker,
                     // and a deployment with no synthesiser configured drops it.
@@ -636,6 +682,64 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
 /// Where the command socket is, so the exit can take it away again.
 struct CommandSocket(std::path::PathBuf);
 
+/// Carries the hotkey going down and coming up.
+///
+/// One key, two gestures. Tapped it asks for the workspace, which is the door
+/// the companion did not have: everything else that put the pill on screen
+/// opened the microphone on the way. Held it is push to talk, and the release
+/// is what ends the take - so the microphone is open exactly while the key is,
+/// which is the one arrangement nobody has to read a pill to be sure of.
+///
+/// Both gestures come out as events the runtime already had. A hold is the
+/// activation that starts a take and the activation that stops it, sent at the
+/// two ends of the same press, which is why the tray and `scufris-ctl open`
+/// keep working the way they did.
+fn hotkey(app: &AppHandle, state: ShortcutState) {
+    let Some(hold) = app.try_state::<Arc<keys::Hold>>() else {
+        return;
+    };
+    let runtime = app.state::<Arc<App>>().inner().clone();
+    match state {
+        ShortcutState::Pressed => {
+            let turn = hold.pressed();
+            let waiting = Arc::clone(&hold);
+            // On a thread because this one is the display's: it hands over
+            // every accelerator, and a quarter of a second spent asleep here is
+            // a quarter of a second in which no other key arrives.
+            thread::spawn(move || {
+                thread::sleep(keys::HOLD);
+                if waiting.talks(turn) {
+                    runtime.handle(Event::Activate);
+                }
+            });
+        }
+        ShortcutState::Released => match hold.released() {
+            // The take ends where the key does.
+            keys::Gesture::Talk => runtime.handle(Event::Activate),
+            keys::Gesture::Tap => runtime.workspace(),
+            keys::Gesture::Nothing => {}
+        },
+    }
+}
+
+/// Answers whether one widget command is Scufris showing the person something
+/// they asked for.
+///
+/// An exhibit is opened by a turn, so one that arrives while a turn is running
+/// is an answer, and an answer behind a workspace the person put away is an
+/// answer nobody reads. Neither of the other two is: an instrument is the
+/// person's own and waits to be looked for, and an exhibit with nothing running
+/// behind it is answering nothing the person is waiting on.
+fn answers(command: &WidgetCommand, assistant: Assistant) -> bool {
+    matches!(
+        command,
+        WidgetCommand::Open {
+            posture: Standing::Exhibit,
+            ..
+        }
+    ) && matches!(assistant, Assistant::Working | Assistant::Speaking)
+}
+
 /// Puts the conversation window up, or away if it is already up.
 ///
 /// The tray calls this from the event loop, so it does its own reporting: there
@@ -668,6 +772,25 @@ fn perform(handle: &AppHandle, verb: Verb) -> Outcome {
             Ok(()) => Outcome::Taken,
             Err(detail) => Outcome::Refused { detail },
         },
+        // Taken rather than reported, as an activation is. The workspace is a
+        // layer and not a window: asking for one that is already up is not a
+        // refusal, it is a request that was already true.
+        Verb::Show => {
+            handle
+                .state::<Arc<App>>()
+                .inner()
+                .clone()
+                .handle(Event::Reveal);
+            Outcome::Taken
+        }
+        Verb::Hide => {
+            handle
+                .state::<Arc<App>>()
+                .inner()
+                .clone()
+                .handle(Event::Dismiss);
+            Outcome::Taken
+        }
     }
 }
 
@@ -841,4 +964,49 @@ fn refused() -> http::Response<Vec<u8>> {
         .status(http::StatusCode::NOT_FOUND)
         .body(Vec::new())
         .expect("a bodyless response is well formed")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn open(posture: Standing) -> WidgetCommand {
+        WidgetCommand::Open {
+            id: "w-1".into(),
+            widget: "note".into(),
+            posture,
+            data: serde_json::Value::Null,
+        }
+    }
+
+    /// The workspace comes back for an answer and for nothing else. A panel
+    /// that raises the companion's windows over whatever the person is doing,
+    /// for a reason they did not ask for, is the obnoxious thing this whole
+    /// gesture exists to avoid.
+    #[test]
+    fn only_an_exhibit_a_running_turn_opened_raises_the_workspace() {
+        assert!(answers(&open(Standing::Exhibit), Assistant::Working));
+        assert!(answers(&open(Standing::Exhibit), Assistant::Speaking));
+        assert!(
+            !answers(&open(Standing::Exhibit), Assistant::Idle),
+            "nothing was asked, so nothing is being answered"
+        );
+        assert!(
+            !answers(&open(Standing::Instrument), Assistant::Working),
+            "an instrument is the person's own and waits to be looked for"
+        );
+        // The other three say nothing about a panel arriving.
+        assert!(!answers(
+            &WidgetCommand::Update {
+                id: "w-1".into(),
+                surface: "widget-1".into(),
+                data: serde_json::Value::Null,
+            },
+            Assistant::Working
+        ));
+        assert!(!answers(
+            &WidgetCommand::Clear { id: "w-1".into() },
+            Assistant::Working
+        ));
+    }
 }

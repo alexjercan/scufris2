@@ -30,8 +30,12 @@
 //! other key belongs to the textbox.
 
 use std::{
-    sync::mpsc::{self, Sender},
+    sync::{
+        Mutex,
+        mpsc::{self, Sender},
+    },
     thread,
+    time::Duration,
 };
 
 use tauri::AppHandle;
@@ -55,6 +59,101 @@ const CANCEL: &str = "Escape";
 /// out in full because the accelerator parser knows `Delete` and does not know
 /// `Del`.
 const STOP: &str = "Delete";
+
+/// How long the hotkey stays down before it is talking rather than tapping.
+///
+/// A quarter of a second. Long enough that no tap reaches it - a deliberate tap
+/// is well under two hundred milliseconds - and short enough that a person who
+/// pressed to speak has not started speaking yet: the hand leaves the key before
+/// the voice arrives, which is the whole reason push to talk works.
+///
+/// It is the microphone's latency, and it is the price of the key meaning two
+/// things. The alternative is opening the microphone on every tap and throwing
+/// the scrap away, which costs nothing to hear and a great deal to trust.
+pub const HOLD: Duration = Duration::from_millis(250);
+
+/// What a release of the hotkey turned out to be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gesture {
+    /// Down and up inside [`HOLD`]. The person asked for the workspace.
+    Tap,
+    /// Down long enough to have opened the microphone. The take ends here.
+    Talk,
+    /// Nothing was down. A release with no press of ours behind it, which is
+    /// what a grab taken while the key was already held looks like.
+    Nothing,
+}
+
+/// The hotkey between its press and its release.
+///
+/// One key with two gestures on it needs somewhere to remember which one is
+/// happening, because the answer is only known at the release. Tapping is what
+/// a press is until it has been down long enough to be talking.
+#[derive(Debug, Default)]
+pub struct Hold {
+    grip: Mutex<Grip>,
+}
+
+#[derive(Debug, Default)]
+struct Grip {
+    /// Which press this is.
+    ///
+    /// A press is timed by a thread that wakes up later and asks whether the
+    /// key is still down. Between the two the person can release and press
+    /// again, and the waking thread would find a key that is down and open the
+    /// microphone for a press that had nothing to do with it. Counting the
+    /// presses is what tells those two apart.
+    turn: u64,
+    /// Whether a press is down at all.
+    down: bool,
+    /// Whether this press has already opened the microphone.
+    talking: bool,
+}
+
+impl Hold {
+    /// Records the hotkey going down, and answers which press this is.
+    ///
+    /// The number goes to whatever times this press and comes back with it.
+    pub fn pressed(&self) -> u64 {
+        let mut grip = self.grip();
+        grip.turn = grip.turn.wrapping_add(1);
+        grip.down = true;
+        grip.talking = false;
+        grip.turn
+    }
+
+    /// Answers whether the press this times is still down and still silent.
+    ///
+    /// True once and only once per press: the caller opens the microphone on
+    /// it, and the release closes it.
+    pub fn talks(&self, turn: u64) -> bool {
+        let mut grip = self.grip();
+        if grip.turn != turn || !grip.down || grip.talking {
+            return false;
+        }
+        grip.talking = true;
+        true
+    }
+
+    /// Records the hotkey coming up, and answers what it was.
+    pub fn released(&self) -> Gesture {
+        let mut grip = self.grip();
+        if !grip.down {
+            return Gesture::Nothing;
+        }
+        grip.down = false;
+        if grip.talking {
+            grip.talking = false;
+            Gesture::Talk
+        } else {
+            Gesture::Tap
+        }
+    }
+
+    fn grip(&self) -> std::sync::MutexGuard<'_, Grip> {
+        self.grip.lock().unwrap_or_else(|error| error.into_inner())
+    }
+}
 
 /// What a deployment writes to take one key off the companion.
 ///
@@ -391,5 +490,64 @@ mod tests {
             stop: Some(NONE),
         };
         assert_eq!(arrange("Super+D", off), (None, None));
+    }
+
+    /// The press that came up before its timer woke is the workspace gesture,
+    /// and nothing asks the microphone for anything.
+    #[test]
+    fn a_press_released_before_the_threshold_is_a_tap() {
+        let hold = Hold::default();
+        hold.pressed();
+        assert_eq!(hold.released(), Gesture::Tap);
+    }
+
+    /// The timer woke on a key still down, so the microphone opened, and the
+    /// release is what closes it.
+    #[test]
+    fn a_press_that_outlives_the_threshold_is_a_take() {
+        let hold = Hold::default();
+        let turn = hold.pressed();
+        assert!(hold.talks(turn));
+        assert_eq!(hold.released(), Gesture::Talk);
+    }
+
+    /// Once per press. A second timer on the same press would open a microphone
+    /// that is already open, and the release would close only one of them.
+    #[test]
+    fn one_press_opens_the_microphone_once() {
+        let hold = Hold::default();
+        let turn = hold.pressed();
+        assert!(hold.talks(turn));
+        assert!(!hold.talks(turn));
+    }
+
+    /// The hazard the count is there for: a tap, then a second press inside the
+    /// first press's threshold. The first timer wakes on a key that is down and
+    /// must not read it as its own.
+    #[test]
+    fn a_timer_that_woke_late_does_not_open_the_microphone_for_the_next_press() {
+        let hold = Hold::default();
+        let stale = hold.pressed();
+        assert_eq!(hold.released(), Gesture::Tap);
+        let fresh = hold.pressed();
+        assert!(!hold.talks(stale), "the press it timed is over");
+        assert_eq!(
+            hold.released(),
+            Gesture::Tap,
+            "the second press is still a tap of its own"
+        );
+        assert!(!hold.talks(fresh), "and it is over too");
+    }
+
+    /// A release with no press behind it. The display can hand one over for a
+    /// key that was already down when the grab was taken, and there is nothing
+    /// to end.
+    #[test]
+    fn a_release_of_a_key_we_never_saw_go_down_is_nothing() {
+        let hold = Hold::default();
+        assert_eq!(hold.released(), Gesture::Nothing);
+        hold.pressed();
+        assert_eq!(hold.released(), Gesture::Tap);
+        assert_eq!(hold.released(), Gesture::Nothing);
     }
 }

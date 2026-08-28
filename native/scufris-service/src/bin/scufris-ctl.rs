@@ -5,10 +5,11 @@
 //! works with no graphical session at all, which is how the service gets
 //! tested without a display and how the conversation stays reachable over ssh.
 //!
-//! Two verbs go to the companion's own socket instead. They are its windows,
-//! not the conversation: a window manager binding that opens the pill, and one
-//! that shows the conversation window. They need a graphical session, and they
-//! are refused rather than answered when there is no companion running.
+//! Four verbs go to the companion's own socket instead. They are its windows,
+//! not the conversation: window manager bindings that open the pill, show the
+//! conversation window, and put the workspace up or away. They need a graphical
+//! session, and they are refused rather than answered when there is no
+//! companion running.
 //!
 //! `debug` is the one verb that does more than send a line. It takes the agent
 //! away from the service, starts `pi` on the same session in this terminal,
@@ -88,6 +89,10 @@ enum Spoken {
     Open,
     /// Show the conversation window, or put it away.
     Hud,
+    /// Bring the workspace up: the pill, and the panels beside it.
+    Show,
+    /// Put the workspace away.
+    Hide,
 }
 
 fn main() -> ExitCode {
@@ -102,6 +107,8 @@ fn main() -> ExitCode {
         Spoken::Debug => debug(),
         Spoken::Open => report(pill(Verb::Open)),
         Spoken::Hud => report(pill(Verb::Hud)),
+        Spoken::Show => report(pill(Verb::Show)),
+        Spoken::Hide => report(pill(Verb::Hide)),
     }
 }
 

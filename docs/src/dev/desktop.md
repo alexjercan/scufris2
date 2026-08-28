@@ -32,20 +32,30 @@ does not stop the conversation.
 
 ## Interaction
 
-- The activation accelerator, `Super+D` by default, opens the bottom-center
-  pill and starts recording immediately. The pill never takes the keyboard.
+- The activation accelerator, `Super+D` by default, carries two gestures. A tap
+  brings the workspace up - the bottom-center pill and the panels beside it -
+  and the next tap puts it away. Neither touches the microphone. The pill never
+  takes the keyboard.
+- Holding the accelerator is push to talk. The microphone opens at
+  `keys::HOLD`, a quarter of a second, which no deliberate tap reaches and no
+  voice beats; releasing ends the take. `keys::Hold` is where a press waits to
+  find out which gesture it was, and it counts presses so a timer that woke
+  late cannot open the microphone for the press after the one it timed.
 - The pill rises into place from the bottom of the screen and shows a
   level-driven orb in the recording accent, with the recording duration on one
   dim line under it. The tray keeps the red privacy ring.
-- The accelerator again stops the take, transcribes, and raises the textbox
-  over the pill with the words in it. The textbox is the one window here that
-  takes the keyboard.
+- Ending the take transcribes and raises the textbox over the pill with the
+  words in it. The textbox is the one window here that takes the keyboard.
 - `Enter` in the textbox sends what is in it. `Escape` discards it, and
   `Ctrl+C` copies it. They are ordinary keys in a focused window, so every
   other editing key is the field's own.
 - `Super+Escape` cancels the take. It is grabbed from the display, so it
   reaches the companion wherever the keyboard is. `cancelKey` names another
-  accelerator, and `"none"` leaves the key to the desktop.
+  accelerator, and `"none"` leaves the key to the desktop. With panels on the
+  layer it is a cancel that leaves the workspace standing, and the press after
+  it is the dismissal; with nothing on the layer it is the dismissal outright.
+  `App::escapes_to` makes that call, because whether there is a workspace to go
+  back to is a fact about the widget layer and the layer is the host's.
 - `Super+Delete` stops Scufris: it cuts the speech and ends the run. Grabbed
   the same way and on the same terms, and named by `stopKey`. Nothing else is touched - a transcript
   being edited stays where it is - and the pill goes on reporting `working`
@@ -60,13 +70,18 @@ does not stop the conversation.
   and `Escape` closes it - ordinary keys in a focused window, the way the
   textbox's are. It has no accelerator of its own; see the command socket
   below for why.
-- The pill is resident. The first activation brings it up and it then
-  stays on screen, resting between interactions and showing what the
-  assistant is doing - idle, working, speaking, attention, disconnected.
-  `Super+Escape` is the only thing that puts it away, and the next activation
-  is what brings it back. Nothing the assistant does ever raises a dismissed
-  pill or takes a resting one down.
-- The activation key always listens, so barge-in needs no key of its own.
+- The pill is resident. The first tap or hold brings it up and it then stays on
+  screen, resting between interactions and showing what the assistant is doing -
+  idle, working, speaking, attention, disconnected. A tap, `Super+Escape`, and
+  `scufris-ctl hide` put it away, and a tap, a hold, or `scufris-ctl show`
+  bring it back. Nothing the assistant does raises a dismissed pill or takes a
+  resting one down, with one exception: a panel Scufris opens to answer a
+  running turn raises the layer, because an answer nobody can see is not an
+  answer. `answers` in `main.rs` is that rule, and it is narrow - an exhibit,
+  and the assistant working or speaking. A summoned instrument does not, and
+  neither does an exhibit that arrives with nothing running.
+- Holding the activation key always listens, so barge-in needs no key of its
+  own.
   `DesktopSurface::present` cuts the speaker on every presentation that says
   the microphone is open, which makes it one rule rather than one transition:
   pressing the key while Scufris talks stops the sentence, and nothing is
@@ -109,20 +124,29 @@ each way, one verb per connection, and the connection closes:
 {"v":1,"verb":"hud"}   ->  {"v":1,"answer":"refused","detail":"..."}
 ```
 
-`scufris-ctl open` and `scufris-ctl hud` are the clients. They are their own
-flake package, installed by
+`scufris-ctl open`, `hud`, `show`, and `hide` are the clients. They are their
+own flake package, installed by
 whichever half of Scufris is enabled, because a window manager binding runs it
 by name and a terminal reaches the background service with it. Its exit status
 is what a binding can branch on: 0 the verb reached the pill, 1 it did not, 2
 the run was wrong. See [Background service](service.md) for its other verbs.
 
-`open` goes straight to the state machine as `Activate`, which is the whole of
-the activation key: it starts a take, and it stops one that is running. `hud`
-puts the conversation window up if it is down and down if it is up, and it is
-reported rather than assumed: the caller can see whether a window came up, so a
-window that refused is worth saying out loud in their terminal.
+`open` goes straight to the state machine as `Activate`: it starts a take, and
+it stops one that is running. That is the two-press gesture, not the hold - a
+binding is one press, and a desktop that takes the hotkey for itself trades tap
+and hold for this. `hud` puts the conversation window up if it is down and down
+if it is up, and it is reported rather than assumed: the caller can see whether
+a window came up, so a window that refused is worth saying out loud in their
+terminal.
 
-Both are windows and neither carries words. Everything that carries words goes
+`show` and `hide` are `Reveal` and `Dismiss`, the workspace with no microphone
+behind it. Two verbs rather than one toggle, unlike `hud`: what sends these is
+not always a key, and a script that means to leave the screen clear has to be
+able to say so without first asking what is on it. They are taken rather than
+reported, as `open` is - the workspace is a layer, and asking for one that is
+already up is not a refusal but a request that was already true.
+
+All four are windows and none carries words. Everything that carries words goes
 to the service socket, where `send` and `abort` already live.
 
 This socket is also why the conversation window has no accelerator. The
@@ -243,8 +267,9 @@ keyboard: the handoff, the turn after it, and every rest between
 interactions, where the pill reports the assistant while the keys go to the
 person's own window. **Off** is down, and only the person puts it there. The
 passive posture is why the keyboard comes back at the handoff instead of at
-the answer. Visibility itself is the person's: Escape dismisses the pill,
-activation brings it home, and nothing the assistant does changes either.
+the answer. Visibility itself is the person's: a tap or Escape dismisses the
+pill, a tap or a hold brings it home, and the one thing the assistant does that
+changes either is opening a panel to answer a turn the person started.
 
 Where the pill belongs and what it renders are one decision, not two. What the
 pill renders is only an indicator while the pill is up, so two orders would let

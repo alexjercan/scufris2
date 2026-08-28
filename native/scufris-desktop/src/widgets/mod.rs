@@ -396,6 +396,16 @@ impl Widgets {
         self.pool.shown()
     }
 
+    /// Answers whether the layer is holding any panel at all.
+    ///
+    /// Read rather than waited for: this answers a keypress, and the runtime
+    /// lock is only ever held for a decision, never across the window work. A
+    /// panel that is mounted but concealed still counts - it is on the layer,
+    /// and raising the layer is what would show it.
+    pub fn holding(&self) -> bool {
+        self.runtime().holding()
+    }
+
     /// Records that one shell page has loaded and is listening.
     pub fn ready(&self, label: String, channel: Channel<ShellMsg>) {
         self.pool.ready(label, channel);

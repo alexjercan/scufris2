@@ -98,16 +98,24 @@ configuration, not Scufris.
 
 ## The voice pill
 
-With the desktop companion installed, `Super+D` opens a small pill at the
-bottom of the screen and starts recording immediately. The desktop stays
-usable and visible around it.
+With the desktop companion installed, `Super+D` is the only key you need. It has
+two gestures on it, and neither of them is a second accelerator to remember.
 
-- `Super+D` again stops the take. What you said is transcribed and arrives in a
-  textbox above the pill, and the textbox takes the keyboard.
+**Tap it** and a small pill comes up at the bottom of the screen, with whatever
+panels are on the workspace beside it. Tap it again and they go away. Nothing is
+recorded either way. The desktop stays usable and visible around it.
+
+**Hold it** to talk. The microphone opens a quarter of a second in - long enough
+that no tap reaches it, and short enough that your hand is off the key before
+your voice arrives. Let go and the take ends: what you said is transcribed and
+arrives in a textbox above the pill, and the textbox takes the keyboard.
+
 - `Enter` in the textbox sends the words. `Escape` discards them, and `Ctrl+C`
   copies them.
-- `Super+Escape` cancels a take without opening the microphone on the way, and
-  it puts a resting pill away.
+- `Super+Escape` cancels a take without opening the microphone on the way. With
+  panels on the workspace it leaves them standing, so cancelling a take you did
+  not mean to start does not take away what you were reading; press it again to
+  put the workspace down.
 - `Super+Delete` stops Scufris. It cuts what is being spoken and ends the run,
   and it changes nothing else: words you are still editing stay where they are,
   and the conversation keeps everything said so far. With nothing running it
@@ -121,9 +129,9 @@ set either to `"none"` to leave the key alone; see
 [Installation](installation.md). The textbox is an ordinary focused window, so
 the caret, the selection, and every editing key are its own.
 
-`Super+D` always listens, so interrupting needs no second gesture. Press it
-while Scufris is talking and the sentence stops and the microphone opens;
-nothing is spoken for as long as the microphone is open. Press it while Scufris
+Holding `Super+D` always listens, so interrupting needs no second gesture. Hold
+it while Scufris is talking and the sentence stops and the microphone opens;
+nothing is spoken for as long as the microphone is open. Hold it while Scufris
 is working and what you send is delivered into the run it is already doing
 rather than queued behind it.
 
@@ -147,8 +155,8 @@ owns. There is no second session, so the same words are there in a terminal.
 
 `scufris-ctl open` puts the pill up from outside its window, so a window
 manager binding can be the thing that opens it. It ships with the companion and
-takes that one verb, which does exactly what the activation hotkey does: it
-starts a take, and it stops one that is running.
+takes that one verb, which is the two-press gesture the tray offers: it starts a
+take, and it stops one that is running.
 
 ```
 bindsym $mod+d exec --no-startup-id "scufris-ctl open"
@@ -156,7 +164,18 @@ bindsym $mod+d exec --no-startup-id "scufris-ctl open"
 
 Once i3 owns `$mod+d`, the companion cannot also take it, and it says so in the
 log at startup. That is expected here - your binding opens the pill, and it
-opens the same pill. Sway runs the same configuration.
+opens the same pill. Sway runs the same configuration. Note that a binding is
+one press: the tap and hold gestures are the companion's own grab, so a desktop
+that takes the hotkey for itself trades them for the two-press take.
+
+`scufris-ctl show` and `scufris-ctl hide` are the workspace on its own, with no
+microphone and no toggling. They are two verbs rather than one because a script
+that means to leave the screen clear has to be able to say so without first
+asking what is on it.
+
+```
+bindsym $mod+w exec --no-startup-id "scufris-ctl show"
+```
 
 ## Reading and typing
 
@@ -233,9 +252,15 @@ pointer is over it, while Scufris is speaking, while the microphone is open, and
 while the pill is put away. Time you are not looking at the screen does not
 count against a panel.
 
-`Super+D` puts the pill away and takes the shelf down with it. Nothing is lost:
-the panels come back exactly as they were, with the time they had left. Panels
-you kept are not on that layer and stay where they are.
+A tap of `Super+D` puts the pill away and takes the shelf down with it, and the
+next tap brings both back. Nothing is lost: the panels come back exactly as they
+were, with the time they had left. Panels you kept are not on that layer and
+stay where they are.
+
+A panel Scufris opens to answer something you asked brings the workspace back up
+by itself, because an answer behind a workspace you put away is an answer nobody
+reads. A panel you summoned does not, and neither does one that arrives with
+nothing running.
 
 You can also put one up yourself. The tray menu carries a submenu of the panels
 that can fill themselves, and one you summon is yours: it takes an edge slot,

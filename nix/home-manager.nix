@@ -155,7 +155,7 @@ in {
       hotkey = lib.mkOption {
         type = lib.types.strMatching "[A-Za-z0-9+]+";
         default = "Super+D";
-        description = "Accelerator that opens the pill and starts recording.";
+        description = "Accelerator the pill answers: tap for the workspace, hold to talk.";
       };
 
       cancelKey = lib.mkOption {

@@ -460,6 +460,14 @@ impl Runtime {
         self.surfaces.get(id)
     }
 
+    /// Answers whether the layer is holding any panel at all.
+    ///
+    /// Concealed panels count. The layer being down is what conceals them, and
+    /// what the caller is deciding is whether to leave the layer up.
+    pub fn holding(&self) -> bool {
+        !self.surfaces.is_empty()
+    }
+
     /// Carries out one command and answers with what the host must do.
     pub fn apply(&mut self, catalog: &Catalog, cmd: Cmd) -> Vec<Act> {
         match cmd {
@@ -1851,6 +1859,22 @@ cadence = 500
             surface: instrument,
             sticky: false
         }));
+    }
+
+    /// What the host asks before it decides whether an Escape takes the layer
+    /// down with the take. A concealed panel is still a panel to go back to:
+    /// the layer being down is exactly the state the person is escaping into.
+    #[test]
+    fn the_layer_holds_a_concealed_panel_and_nothing_once_it_is_closed() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        assert!(!runtime.holding());
+        let surface = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
+        assert!(runtime.holding());
+        runtime.apply(&catalog, Cmd::Conceal { hidden: true });
+        assert!(runtime.holding(), "a panel behind a down layer is a panel");
+        runtime.apply(&catalog, Cmd::Dismissed { surface });
+        assert!(!runtime.holding());
     }
 
     #[test]

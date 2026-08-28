@@ -1,6 +1,6 @@
 # Integrate today into Scufris as native tools
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 70
 - TAGS: extension, today
 
@@ -48,3 +48,17 @@ the CLI API; build against the current contract and track changes.
 - The tool surface stays at two tools; no per-subcommand tool sprawl.
 - `npm run check` and `nix flake check` pass; released and pinned
   through the normal gate.
+
+## Closed
+
+Closed on 2026-08-28 without being built. Nothing here shipped: no helper, no
+tools, no skill, no gating, no Home Manager option.
+
+The panels landed instead, under `20260828-134642`. They read and write the-den
+from the workspace, which covers the glance and the tick. What stays missing is
+the spoken half - asking for the day and writing to it by voice - because that
+is what these two tools were for.
+
+Reopen with `tatr edit 20260824-130127 --status OPEN` when the voice road is
+next. The scope above still holds; only the today CLI surface may have moved
+under it.

@@ -14,6 +14,7 @@ mod config;
 mod conversation;
 mod display;
 mod focus;
+mod form;
 mod hud;
 mod keys;
 mod link;
@@ -28,6 +29,7 @@ mod tray;
 mod widgets;
 
 use std::{
+    collections::BTreeMap,
     env,
     error::Error,
     os::unix::process::CommandExt,
@@ -356,6 +358,10 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             widget_tick,
             widget_hover,
             widget_send,
+            widget_ask,
+            form_ready,
+            form_submit,
+            form_cancel,
             hud_ready,
             hud_submit,
             hud_close,
@@ -365,6 +371,10 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             let handle = tauri.handle().clone();
             pill::ensure(&handle)?;
             textbox::ensure(&handle)?;
+            // Made now rather than on the first question, for the reason the
+            // textbox is: the page has to be loaded and listening before the
+            // question that fills it arrives.
+            form::ensure(&handle)?;
 
             // One prefix for the whole process, shared by both senders. It is
             // what makes an identifier this companion's rather than another's;
@@ -972,6 +982,47 @@ fn widget_send(
     action: serde_json::Value,
 ) {
     widgets.sent(window.label().to_string(), action);
+}
+
+/// One question a widget asked before it sends anything.
+///
+/// The window says which surface this is, for the reason `widget_send` does. A
+/// page that named its own surface could put a question on the box in another
+/// panel's name, and the answer would be written into that panel's journal.
+#[tauri::command]
+fn widget_ask(
+    widgets: tauri::State<'_, Arc<widgets::Widgets>>,
+    window: tauri::Window,
+    request: serde_json::Value,
+) {
+    widgets.asked(window.label().to_string(), request);
+}
+
+/// The form page saying hello, and asking what it has missed.
+///
+/// The question is pushed just before the box comes up, so a page that is still
+/// loading misses it. This is how that page catches up.
+#[tauri::command]
+fn form_ready(widgets: tauri::State<'_, Arc<widgets::Widgets>>) -> Option<form::Ask> {
+    widgets.asking()
+}
+
+/// Enter in the form box, carrying whatever is in the fields.
+///
+/// Only the fields that were asked for are carried on. What the answers mean
+/// was decided by the widget that asked, and this process is holding that.
+#[tauri::command]
+fn form_submit(
+    widgets: tauri::State<'_, Arc<widgets::Widgets>>,
+    answers: BTreeMap<String, String>,
+) {
+    widgets.answered(&answers);
+}
+
+/// Escape in the form box.
+#[tauri::command]
+fn form_cancel(widgets: tauri::State<'_, Arc<widgets::Widgets>>) {
+    widgets.dropped();
 }
 
 /// The pointer arriving over one widget window, or leaving it.

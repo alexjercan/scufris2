@@ -17,10 +17,13 @@ use x11rb::{
     rust_connection::RustConnection,
 };
 
-use crate::{hud, pill, textbox, widgets};
+use crate::{form, hud, pill, textbox, widgets};
 
 /// Source indication used by `_NET_ACTIVE_WINDOW` for pager-like clients.
 const SOURCE_PAGER: u32 = 2;
+
+/// How far up the window tree the keyboard is followed to its top level.
+const DEPTH: usize = 32;
 
 /// Remembers and restores the window that had focus before the pill opened.
 pub struct FocusTracker {
@@ -52,16 +55,26 @@ impl FocusTracker {
     /// while a review is on screen would record the box and hand the person's
     /// keys to a window that refuses them.
     ///
+    /// When the active window is the companion's, the keyboard is asked
+    /// instead. A click on a panel makes i3 name that panel the active window
+    /// while the keyboard stays exactly where it was, because the panel is
+    /// built refusing it. A capture taken then - which is every capture the
+    /// panels' form window takes, since a tick is what raises it - would find
+    /// only our own panel and record nothing, and the box would take the
+    /// person's keys out of their editor with nowhere to put them back.
+    ///
     /// What cannot be bettered is left alone. A display with no active window
-    /// to name, and a window that turns out to be the companion's, both leave
-    /// the last window worth returning to exactly where it was: the pill
-    /// promised to give the desktop back, and forgetting where it came from is
-    /// not a way to keep that promise.
+    /// and no keyboard to name, and both of them turning out to be the
+    /// companion's, leave the last window worth returning to exactly where it
+    /// was: the pill promised to give the desktop back, and forgetting where it
+    /// came from is not a way to keep that promise.
     pub fn capture(&self, mine: &[Window]) {
         let Some(session) = &self.connection else {
             return;
         };
-        let Some(active) = worth_returning_to(session.active_window(), mine) else {
+        let Some(active) =
+            somewhere_to_return(session.active_window(), || session.keyboard_window(), mine)
+        else {
             return;
         };
         *self
@@ -98,11 +111,12 @@ impl FocusTracker {
 /// The one list. There is a tracker on the pill's side and a tracker on the
 /// conversation window's, and the first time they kept a list each, the second
 /// one was short: it named only its own window, on the reasoning that nothing
-/// else of the companion's could be active while it was up. `capture` does not
-/// ask which window holds the keyboard, it reads `_NET_ACTIVE_WINDOW`, and i3
-/// marks the pill active when the pill maps even though the pill is built
-/// refusing the keyboard. So the pill was recorded, `restore` activated it, and
-/// the person's keys went to the one window here that cannot take them.
+/// else of the companion's could be active while it was up. `capture` asks
+/// `_NET_ACTIVE_WINDOW` first, and i3 marks the pill active when the pill maps
+/// even though the pill is built refusing the keyboard. So the pill was
+/// recorded, `restore` activated it, and the person's keys went to the one
+/// window here that cannot take them. The keyboard is the second answer, and it
+/// is filtered through this same list for the same reason.
 ///
 /// A window of the companion's own is never somewhere to give the desktop back
 /// to. Deriving the list from the app rather than passing one keeps that true
@@ -112,6 +126,7 @@ pub fn own_windows(app: &AppHandle) -> Vec<Window> {
         pill::known_window(),
         textbox::known_window(),
         hud::known_window(),
+        form::known_window(),
     ]
     .into_iter()
     .flatten()
@@ -128,6 +143,23 @@ pub fn own_windows(app: &AppHandle) -> Vec<Window> {
 /// companion's own windows - can be checked without a display.
 fn worth_returning_to(active: Option<Window>, mine: &[Window]) -> Option<Window> {
     active.filter(|window| !mine.contains(window))
+}
+
+/// Answers where the desktop goes back to, from the two things the display can
+/// say about it.
+///
+/// The active window first: it is what a window manager means by "where the
+/// person is", and it is right every time the pill or the conversation window
+/// is raised from a key. The keyboard only when that answer is our own, which
+/// is the panel case - i3 names a clicked panel active, and the keys never left
+/// the window the person was typing in. Asked lazily, because reading it costs
+/// a round trip and a walk up the window tree that the common case never needs.
+fn somewhere_to_return(
+    active: Option<Window>,
+    keyboard: impl FnOnce() -> Option<Window>,
+    mine: &[Window],
+) -> Option<Window> {
+    worth_returning_to(active, mine).or_else(|| worth_returning_to(keyboard(), mine))
 }
 
 impl Default for FocusTracker {
@@ -164,6 +196,30 @@ impl Session {
             .value32()
             .and_then(|mut values| values.next())
             .filter(|window| *window != 0)
+    }
+
+    /// The top-level window the keyboard is really in.
+    ///
+    /// The X server answers the focus of `None` or `PointerRoot` when nobody
+    /// holds the keyboard, and neither is a window to go back to. What it does
+    /// name is often an inner window of the client's, so it is walked up to the
+    /// top level the window manager and `mine` both speak in terms of.
+    fn keyboard_window(&self) -> Option<Window> {
+        let reply = self.connection.get_input_focus().ok()?.reply().ok()?;
+        let mut window = reply.focus;
+        if window == 0 || window == 1 || window == self.root {
+            return None;
+        }
+        // Bounded rather than `loop`: a display that answered a cycle would
+        // otherwise hang the raise this is being asked for.
+        for _ in 0..DEPTH {
+            let tree = self.connection.query_tree(window).ok()?.reply().ok()?;
+            if tree.parent == 0 || tree.parent == tree.root {
+                return Some(window);
+            }
+            window = tree.parent;
+        }
+        None
     }
 
     fn activate(&self, window: Window) -> Result<(), String> {
@@ -234,5 +290,40 @@ mod tests {
         // it with: a capture only ever records a window.
         assert_eq!(worth_returning_to(None, &[]), None);
         assert_eq!(worth_returning_to(None, &[0x400010]), None);
+    }
+
+    #[test]
+    fn a_panel_named_active_is_answered_by_the_keyboard_instead() {
+        // Clicking a panel makes i3 name that panel the active window while the
+        // keyboard stays in the editor, because the panel refuses it. That is
+        // every capture the form window takes, so the active window alone would
+        // record nothing and the box would have nowhere to give the keys back
+        // to.
+        let panel = 0x400030;
+        let editor = 0x500030;
+        let mine = [panel];
+        assert_eq!(
+            somewhere_to_return(Some(panel), || Some(editor), &mine),
+            Some(editor)
+        );
+    }
+
+    #[test]
+    fn the_active_window_is_asked_first_and_the_keyboard_only_after_it() {
+        // A key raises the pill while the person's window is both active and
+        // holding the keyboard, which is the common case and must not pay for
+        // the panel one. Nothing else is read when the first answer stands.
+        let editor = 0x500030;
+        assert_eq!(
+            somewhere_to_return(Some(editor), || panic!("the keyboard was read"), &[]),
+            Some(editor)
+        );
+        // And a display holding the keyboard nowhere leaves the last window
+        // alone, the same as one naming nothing active.
+        assert_eq!(somewhere_to_return(None, || None, &[]), None);
+        assert_eq!(
+            somewhere_to_return(Some(0x400030), || Some(0x400010), &[0x400030, 0x400010]),
+            None
+        );
     }
 }

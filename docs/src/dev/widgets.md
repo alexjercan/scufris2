@@ -196,6 +196,44 @@ as the pill's `bottom_center`, and it is unit-tested without a desktop session.
 Position is set after the window is shown, because i3 places a floating window
 when it maps it.
 
+## The form window
+
+A panel cannot hold a keyboard, and that is not a gap to close - it is the
+reason the shell is built the way it is. So a panel that needs words does not
+get them; it asks for them, and a fourth window answers.
+
+`src/form.rs` is that window, built to the HUD's recipe rather than the panel's:
+focusable, always on top, with a `FocusTracker` of its own. `set_focusable(true)`
+runs before every raise, because i3 unmanages a hidden window and reads its hints
+again when it maps. On the way down the window is made unfocusable first, and the
+keyboard goes back only if this window actually held it.
+
+It refuses to come up while the pill's textbox is up. That is the rule the HUD
+already keeps, for the reason it keeps it: i3 ignores `_NET_WM_STATE_ABOVE`
+between floating windows, so last mapped wins, and a box that took the keys off
+a half-typed message would be taking them off the person.
+
+One box serves every panel, so the question describes itself. `Ask::parse` is
+where a request from a widget becomes one: at most four fields, at most twelve
+lines each, a title and labels clipped, and nothing else honoured. Those bounds
+live in Rust because `SCUFRIS_WIDGET_PATH` can install a widget that was never
+in this build - a page must not be able to size or name the companion's own
+window. The window is then fitted to the question before it maps, by
+`Ask::height`, which is the same arithmetic `ui/form.css` lays out with and the
+one piece of that file with a test on it.
+
+Two more things happen host-side rather than in the page. The answers are
+folded into the action by `Ask::fill`, which copies only the fields the ask
+declared, so a page cannot name an argument the backend reads. And a one-line
+field's answer is flattened: a task with a newline in it is not a task, while a
+note's line breaks are the note, which is what the line count is for.
+
+Nothing past `Act::Ask` knows a panel wrote by asking. The finished action goes
+in through `Cmd::Sent`, the road a tick already takes, so a refused write is
+refused the same way and lands on the same badge. A retired surface forgets its
+pending question with the rest of itself: an answer that outlived the panel that
+asked would have nowhere to go.
+
 ## Warm shells
 
 Building a webview window and waiting for its page to load takes long enough to
@@ -247,6 +285,22 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView;
 line back to the backend. The returned view is driven with `update(data)` and
 released with `destroy()`. A widget renders into the element it is handed and
 nothing else: it draws no chrome, asks who sent nothing, and runs on no clock.
+
+`ctx.ask(request)` is `ctx.send` for an action that needs words. The widget
+gives a title, one to four named fields, and the action the answers belong to:
+
+```ts
+ctx.ask({
+  title: "Task for Tuesday",
+  fields: [{ name: "text", label: "Task", hint: "what has to be done" }],
+  action: { action: "add" },
+});
+```
+
+The companion asks the person in a window of its own and, if they answer, sends
+the action with each field's name carrying what was typed under it. Nothing
+comes back to the widget: the answer arrives as the next reading, down the road
+every other change already takes. See [The form window](#the-form-window).
 
 The widget draws its first frame from `ctx.spawn`, inside `mount`. The shell
 never hands that payload to `update`, because the two are not the same shape:
@@ -395,18 +449,33 @@ day fresh without watching a file per day. `path` rather than `show` on purpose:
 `show` creates the entry it reads, so a panel browsing a month with it would
 leave a month of empty files behind.
 
-The agenda panel writes. A habit or a task is ticked by clicking it, the
-backend runs `today habit toggle` or `today task done` for the selected date and
-reads the journal back, so a habit ticked from the panel and one ticked in an
-editor arrive identically. A tick that is refused carries its sentence beside
-the day rather than instead of it: a habit that would not toggle is no reason to
-blank a panel that was reading fine a moment ago.
+The panels write. A habit or a task is ticked by clicking it, the backend runs
+`today habit toggle` or `today task done` for the selected date and reads the
+journal back, so a habit ticked from the panel and one ticked in an editor
+arrive identically. A tick that is refused carries its sentence beside the day
+rather than instead of it: a habit that would not toggle is no reason to blank a
+panel that was reading fine a moment ago.
 
-Nothing there needs the keyboard, and that is the boundary. A click has never
-needed focus, and a widget shell is built unfocusable for a specific reason
-(see [Windows](#windows)) and pooled, so one that ever became focusable would
-stay that way for whatever exhibit reused it. Logging food and writing a note
-are typing, so both stay with the command.
+The writes that need words - a task, a weight, a food, a note - are asked for
+through `ctx.ask` and land as ordinary actions. Every one of them uses the day
+the panel is showing, not today, because the day on screen is the day the person
+means.
+
+Logging a food is two questions in one box and, sometimes, a third on the panel.
+`today macros query` is asked for the name; one match is calculated and added
+straight away, and several are handed to the panel as `choices` with the amount
+held. The panel offers them as clicks - it has the room, and the person already
+answered the amount once. A day change or a second attempt drops the held
+question rather than logging against a name nobody is looking at any more.
+`today macros calculate` resolves its database from `MACROS_DATABASE`, which the
+Home Manager module writes from `programs.scufris.desktop.macrosDatabase`.
+
+The keyboard is still never the panel's. A click has never needed focus, and a
+widget shell is built unfocusable for a specific reason (see
+[Windows](#windows)) and pooled, so one that ever became focusable would stay
+that way for whatever exhibit reused it. The words are typed into a window that
+may hold a keyboard, and given back when it closes (see
+[The form window](#the-form-window)).
 
 A reading is not a citation. Scufris naming a panel is what says the
 conversation is still about it; a sampler writing its line every second says

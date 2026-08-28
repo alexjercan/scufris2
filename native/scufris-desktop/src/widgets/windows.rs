@@ -187,6 +187,7 @@ mod tests {
             crate::pill::LABEL,
             crate::textbox::LABEL,
             crate::hud::LABEL,
+            crate::form::LABEL,
             &format!("{LABEL_PREFIX}*"),
         ] {
             assert!(

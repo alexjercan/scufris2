@@ -20,9 +20,9 @@ from types import ModuleType
 
 BACKENDS = Path(__file__).parents[1] / "native" / "scufris-widgets" / "backends"
 
-#: A stub standing in for `today`. It answers the four subcommands the backend
-#: asks for out of a plan file, records every call, and refuses what the plan
-#: tells it to refuse - so a test can drive a failure without a broken journal.
+#: A stub standing in for `today`. It answers the subcommands the backend asks
+#: for out of a plan file, records every call, and refuses what the plan tells
+#: it to refuse - so a test can drive a failure without a broken journal.
 STUB = '''#!/usr/bin/env python3
 import json, os, pathlib, sys
 
@@ -53,8 +53,25 @@ elif rest[0] == "show":
     print(json.dumps(day or {}))
 elif rest[0] == "upcoming":
     print(json.dumps(plan["upcoming"].get(date, [])))
+elif rest[0] == "weight" and len(rest) > 1 and rest[1] != "--days":
+    plan["days"].setdefault(date, {})["weight"] = float(rest[1])
+    (home / "plan.json").write_text(json.dumps(plan))
 elif rest[0] == "weight":
     print(json.dumps(plan["weight"]))
+elif rest[0] == "note" and rest[1] == "add":
+    notes = plan["days"].setdefault(date, {}).setdefault("notes", [])
+    title = rest[rest.index("--title") + 1] if "--title" in rest else ""
+    notes.append({"index": len(notes) + 1, "heading": title, "body": rest[2]})
+    (home / "plan.json").write_text(json.dumps(plan))
+elif rest[0] == "macros" and rest[1] == "query":
+    print(json.dumps({"results": plan.get("foods", {}).get(rest[2], [])}))
+elif rest[0] == "macros" and rest[1] == "calculate":
+    food = rest[rest.index("--food") + 1]
+    amount = rest[rest.index("--amount") + 1]
+    print(food + " " + amount + "g,1,2,3")
+elif rest[0] == "macros" and rest[1] == "add":
+    plan["added"] = plan.get("added", []) + [rest[2]]
+    (home / "plan.json").write_text(json.dumps(plan))
 elif rest[0] == "habit" and rest[1] == "toggle":
     for habit in day["habits"]:
         if habit["name"] == rest[2]:
@@ -132,6 +149,15 @@ def plan() -> dict[str, object]:
             "recent": [
                 {"date": "2026-07-30", "weight": 82.0},
                 {"date": DAY, "weight": 81.4},
+            ],
+        },
+        # What the food database answers, keyed by the words asked for. One
+        # word that names a food, and one that names several.
+        "foods": {
+            "oats": [{"id": "oats:g", "name": "Oats", "unit": "g"}],
+            "chicken": [
+                {"id": "chicken breast:g", "name": "Chicken breast", "unit": "g"},
+                {"id": "chicken thigh:g", "name": "Chicken thigh", "unit": "g"},
             ],
         },
     }
@@ -317,6 +343,113 @@ class Ticking(unittest.TestCase):
             ["--den", str(self.den.den), "--date", DAY, "task", "add", "Buy oats"],
             self.den.calls(),
         )
+
+    def test_a_weight_reaches_the_selected_day(self) -> None:
+        self.assertIsNone(self.journal.act({"action": "weight", "value": " 81.9 "}))
+        self.assertIn(
+            ["--den", str(self.den.den), "--date", DAY, "weight", "81.9"],
+            self.den.calls(),
+        )
+        self.assertEqual(self.journal.read("macros")["weight"], 81.9)
+
+    def test_a_weight_that_is_not_one_is_said_rather_than_written(self) -> None:
+        self.assertEqual(
+            self.journal.act({"action": "weight", "value": "heavy"}),
+            "a weight is a number of kilograms",
+        )
+        self.assertEqual(self.den.calls(), [])
+
+    def test_a_field_left_empty_writes_nothing_and_says_nothing(self) -> None:
+        # The person opened the box and changed their mind. That is not an
+        # error, and a panel wearing one would be a panel to dismiss.
+        for action in (
+            {"action": "weight", "value": "  "},
+            {"action": "add", "text": ""},
+            {"action": "note", "body": " "},
+            {"action": "food", "name": "", "amount": "100"},
+        ):
+            self.assertIsNone(self.journal.act(action), action)
+        self.assertEqual(self.den.calls(), [])
+
+    def test_a_note_carries_a_heading_only_when_it_was_given_one(self) -> None:
+        self.journal.act(
+            {"action": "note", "heading": " Standup ", "body": " Shipped it. "}
+        )
+        self.journal.act({"action": "note", "body": "No heading."})
+        den = str(self.den.den)
+        self.assertIn(
+            [
+                *["--den", den, "--date", DAY],
+                *["note", "add", "Shipped it.", "--title", "Standup"],
+            ],
+            self.den.calls(),
+        )
+        self.assertIn(
+            ["--den", den, "--date", DAY, "note", "add", "No heading."],
+            self.den.calls(),
+        )
+
+    def test_a_food_the_database_names_once_is_logged_straight_away(self) -> None:
+        self.assertIsNone(
+            self.journal.act({"action": "food", "name": " oats ", "amount": "80"})
+        )
+        # Queried, scaled, then written. The row is the database's to compose:
+        # `macros add` takes a `what 100g,protein,carbs,fat` line, which is a
+        # thing to calculate rather than to type.
+        self.assertEqual(self.den.plan()["added"], ["oats:g 80.0g,1,2,3"])
+        self.assertEqual(self.journal.read("macros")["choices"], [])
+
+    def test_a_food_that_matches_more_than_one_asks_which(self) -> None:
+        self.assertIsNone(
+            self.journal.act({"action": "food", "name": "chicken", "amount": "150"})
+        )
+        self.assertNotIn("added", self.den.plan())
+        frame = self.journal.read("macros")
+        self.assertEqual(
+            [choice["id"] for choice in frame["choices"]],
+            ["chicken breast:g", "chicken thigh:g"],
+        )
+        # The amount was answered once and is not asked for again.
+        self.assertIsNone(
+            self.journal.act({"action": "pick", "id": "chicken thigh:g"})
+        )
+        self.assertEqual(self.den.plan()["added"], ["chicken thigh:g 150.0g,1,2,3"])
+        self.assertEqual(self.journal.read("macros")["choices"], [])
+
+    def test_none_of_these_drops_the_question_without_writing(self) -> None:
+        self.journal.act({"action": "food", "name": "chicken", "amount": "150"})
+        self.assertIsNone(self.journal.act({"action": "pick"}))
+        self.assertNotIn("added", self.den.plan())
+        self.assertEqual(self.journal.read("macros")["choices"], [])
+
+    def test_a_food_with_no_amount_or_no_match_says_which(self) -> None:
+        self.assertEqual(
+            self.journal.act({"action": "food", "name": "oats", "amount": "lots"}),
+            "an amount is a number of grams or pieces",
+        )
+        self.assertEqual(
+            self.journal.act({"action": "food", "name": "quinoa", "amount": "80"}),
+            "no food matching quinoa",
+        )
+        self.assertNotIn("added", self.den.plan())
+
+    def test_moving_the_day_drops_a_food_waiting_to_be_named(self) -> None:
+        # It was going to be logged on the day that was showing. Answering it
+        # somewhere else is worse than asking again.
+        self.journal.act({"action": "food", "name": "chicken", "amount": "150"})
+        self.journal.act({"action": "select", "date": NEXT})
+        self.assertEqual(self.journal.read("macros")["choices"], [])
+        self.assertEqual(
+            self.journal.act({"action": "pick", "id": "chicken thigh:g"}),
+            "that search is over",
+        )
+        self.assertNotIn("added", self.den.plan())
+
+    def test_only_the_macros_view_carries_a_food_question(self) -> None:
+        self.journal.act({"action": "food", "name": "chicken", "amount": "150"})
+        self.assertNotIn("choices", self.journal.read("agenda"))
+        self.journal.forget()
+        self.assertNotIn("choices", self.journal.read("notes"))
 
 
 class Trouble(unittest.TestCase):

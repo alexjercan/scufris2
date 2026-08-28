@@ -22,6 +22,22 @@ Every line after it is an action:
     {"action": "refresh"}
     {"action": "habit", "name": "Gym"}
     {"action": "task", "index": 2}
+    {"action": "add", "text": "Call the dentist"}
+    {"action": "weight", "value": "81.4"}
+    {"action": "note", "heading": "Standup", "body": "..."}
+    {"action": "food", "name": "chicken", "amount": "150"}
+    {"action": "pick", "id": "chicken breast:g"}
+
+The five that write are the panel's ticks and the words the person typed into
+the form box the companion raises for them; a panel has no keyboard of its own.
+Nothing is written here either way. `today` is asked to make the change and
+then asked what the day now says, so a task added from a panel and one added in
+the editor arrive by the same road.
+
+Adding a food is two questions because the database answers with more than one
+row for most words. The name and the amount come in together; if the name is
+not enough to name a food, the candidates go out in `choices` for the panel to
+offer and the amount waits here for the `pick` that follows.
 
 Each line written is an object carrying `view`, the `date` it is about, the
 real `today`, whether the entry `exists`, and `trouble` - a sentence when
@@ -31,6 +47,7 @@ reason to blank the panel that was reading fine a moment ago.
 """
 
 import json
+import math
 import os
 import queue
 import subprocess
@@ -58,6 +75,9 @@ AHEAD = 5
 
 #: How far back the weight trend reaches.
 DAYS = 30
+
+#: How many foods a search offers before the panel is too small to offer them.
+CHOICES = 8
 
 #: What a panel may ask to be. Anything else is an agenda, because a panel
 #: that opened wrong is better than a panel that stayed empty.
@@ -87,6 +107,27 @@ def whole(value: object, fallback: int, low: int, high: int) -> int:
     return min(max(int(value), low), high)
 
 
+def quantity(value: object) -> float | None:
+    """Reads a positive amount out of an action, typed or clicked.
+
+    The form box answers with strings, because a field holds words. A number
+    that arrives as a number is taken as one, so an action a widget composed
+    itself does not have to be quoted.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        found = float(value)
+    elif isinstance(value, str):
+        try:
+            found = float(value.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    return found if math.isfinite(found) and found > 0 else None
+
+
 def sentence(text: str) -> str:
     """Takes the first line of a program's complaint, without its prefix."""
     line = text.strip().splitlines()[0] if text.strip() else ""
@@ -107,6 +148,10 @@ class Journal:
         self.stamp: float | None = None
         self.built = 0.0
         self.frame: dict[str, object] | None = None
+        #: The foods a search matched, waiting for the panel to name one.
+        self.choices: list[dict[str, object]] = []
+        #: How much of it was asked for, held while that question stands.
+        self.amount: float | None = None
 
     def now(self) -> str:
         """The real date, read again each time so a panel left up rolls over."""
@@ -174,6 +219,11 @@ class Journal:
             except ValueError:
                 return
             self.picked = asked
+        # A food waiting to be named was going to be logged on the day that was
+        # showing, so moving the day drops the question rather than answering
+        # it somewhere else.
+        self.choices = []
+        self.amount = None
         self.forget()
 
     def forget(self) -> None:
@@ -211,12 +261,102 @@ class Journal:
                 if not isinstance(text, str) or not text.strip():
                     return None
                 self.on(selected, ["task", "add", text.strip()])
+            elif name == "weight":
+                self.weigh(selected, action)
+            elif name == "note":
+                self.note(selected, action)
+            elif name == "food":
+                self.food(selected, action)
+            elif name == "pick":
+                self.take(selected, action)
             else:
                 return None
         except Trouble as trouble:
+            # The reading is kept. A habit that would not toggle is no reason to
+            # blank a panel that was reading fine a moment ago, and the sentence
+            # goes out beside the day rather than instead of it.
             return str(trouble)
         self.forget()
         return None
+
+    def weigh(self, selected: str, action: dict[str, object]) -> None:
+        """Logs the day's weight.
+
+        An empty field is the person changing their mind after the box was
+        already up, so it writes nothing. Words that are not a number are a
+        mistake worth saying out loud.
+        """
+        value = action.get("value")
+        said = value.strip() if isinstance(value, str) else value
+        if said is None or said == "":
+            return
+        if quantity(said) is None:
+            raise Trouble("a weight is a number of kilograms")
+        self.on(selected, ["weight", str(said)])
+
+    def note(self, selected: str, action: dict[str, object]) -> None:
+        """Keeps one structured note, with a heading when there is one."""
+        body = action.get("body")
+        if not isinstance(body, str) or not body.strip():
+            return
+        arguments = ["note", "add", body.strip()]
+        heading = action.get("heading")
+        if isinstance(heading, str) and heading.strip():
+            arguments += ["--title", heading.strip()]
+        self.on(selected, arguments)
+
+    def food(self, selected: str, action: dict[str, object]) -> None:
+        """Looks one food up, and logs it when the answer is not ambiguous.
+
+        The name is a query rather than a row: `today macros add` takes a
+        `what 100g,protein,carbs,fat` line, which is a thing to compose rather
+        than to type. The database is what knows the numbers, so it is asked.
+        """
+        # Cleared, and said so now rather than on the way out: what follows may
+        # not get there, and a panel left showing the last search's candidates
+        # would be offering an answer to a question nobody is holding.
+        self.choices = []
+        self.amount = None
+        self.forget()
+        name = action.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return
+        amount = quantity(action.get("amount"))
+        if amount is None:
+            raise Trouble("an amount is a number of grams or pieces")
+        found = self.run(["macros", "query", name.strip(), "--json"])
+        results = found.get("results") if isinstance(found, dict) else None
+        results = results if isinstance(results, list) else []
+        if not results:
+            raise Trouble(f"no food matching {name.strip()}")
+        if len(results) == 1:
+            self.log(selected, str(results[0].get("id")), amount)
+            return
+        # More than one, so the person names it. The amount waits here rather
+        # than being asked for again: they already answered that question.
+        self.choices = results[:CHOICES]
+        self.amount = amount
+
+    def take(self, selected: str, action: dict[str, object]) -> None:
+        """Logs the food the panel named, or drops the question."""
+        identifier = action.get("id")
+        amount = self.amount
+        self.choices = []
+        self.amount = None
+        self.forget()
+        if not isinstance(identifier, str) or not identifier:
+            # The panel's way of saying none of these.
+            return
+        if amount is None:
+            raise Trouble("that search is over")
+        self.log(selected, identifier, amount)
+
+    def log(self, selected: str, identifier: str, amount: float) -> None:
+        """Scales one database food to an amount and writes the row."""
+        row = self.run(
+            ["macros", "calculate", "--food", identifier, "--amount", str(amount)]
+        )
+        self.on(selected, ["macros", "add", str(row)])
 
     def read(self, view: str) -> dict[str, object]:
         """The reading for this beat, built again only when it has to be."""
@@ -298,6 +438,9 @@ class Journal:
             "weight": day.get("weight"),
             "change": trend.get("change"),
             "recent": trend.get("recent") or [],
+            # A question standing rather than an answer: the words matched more
+            # than one food and the panel is where the person names which.
+            "choices": self.choices,
         }
 
 

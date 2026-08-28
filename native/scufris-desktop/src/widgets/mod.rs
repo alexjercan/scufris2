@@ -17,6 +17,7 @@ pub mod turn;
 pub mod windows;
 
 use std::{
+    collections::BTreeMap,
     sync::{
         Arc, Mutex, MutexGuard, OnceLock, Weak,
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -32,6 +33,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     display,
+    form::{self, Form},
     link::ServiceLink,
     state::Assistant,
     widgets::{
@@ -86,6 +88,10 @@ pub struct Widgets {
     /// what it cannot decide now to a thread that can. See [`turn`].
     turn: Turn<Asked>,
     backends: Backends,
+    /// The one window a panel may borrow to take words in. Held here because
+    /// the answer is an action for a surface's backend, and this is what knows
+    /// which surfaces there are.
+    form: Form,
     link: OnceLock<Arc<ServiceLink>>,
     /// Whether the service welcomed this companion before there was a link to
     /// answer on.
@@ -134,6 +140,7 @@ impl Widgets {
             runtime: Mutex::new(Runtime::new()),
             turn: Turn::new(),
             backends: Backends::new(),
+            form: Form::new(app.clone()),
             link: OnceLock::new(),
             owed_catalog: AtomicBool::new(false),
             assistant: Mutex::new(Assistant::Idle),
@@ -290,6 +297,34 @@ impl Widgets {
     /// Carries one widget's action toward whatever feeds it.
     pub fn sent(&self, surface: String, action: Value) {
         self.decide(Cmd::Sent { surface, action });
+    }
+
+    /// Puts one widget's question on the form box.
+    pub fn asked(&self, surface: String, ask: Value) {
+        self.decide(Cmd::Ask { surface, ask });
+    }
+
+    /// Sends the answered form on, as the action the panel asked for.
+    ///
+    /// The two halves are kept apart on purpose: the box knows the words and
+    /// nothing about surfaces, and this knows the surfaces and nothing about
+    /// the words. What joins them is the ask the box was opened with.
+    pub fn answered(&self, answers: &BTreeMap<String, String>) {
+        let Some((surface, action)) = self.form.submit(answers) else {
+            debug!("a form was answered with no question on it");
+            return;
+        };
+        self.sent(surface, action);
+    }
+
+    /// The question the box is holding, for a form page that has just loaded.
+    pub fn asking(&self) -> Option<form::Ask> {
+        self.form.asked()
+    }
+
+    /// Puts the form box away with nothing written.
+    pub fn dropped(&self) {
+        self.form.cancel();
     }
 
     /// Records the assistant state the service reported.
@@ -696,11 +731,23 @@ impl Widgets {
                 }
                 Act::Unsubscribe { surface } => self.backends.unsubscribe(&surface),
                 Act::Send { surface, action } => self.backends.send(&surface, &action),
+                Act::Ask { surface, ask } => {
+                    // A question that cannot be put up is a tick that did
+                    // nothing, and a tick that does nothing reads as broken.
+                    if let Err(detail) = self.ask(&surface, ask) {
+                        self.pool.send(&surface, ShellMsg::Refused { detail });
+                    }
+                }
                 Act::Stick { surface, sticky } => self.stick(&surface, sticky),
                 Act::Refuse { surface, detail } => {
                     self.pool.send(&surface, ShellMsg::Refused { detail });
                 }
-                Act::Retire { surface } => self.pool.discard(&surface),
+                Act::Retire { surface } => {
+                    // A box still asking about a panel that has gone is a box
+                    // whose answer has nowhere to land.
+                    self.form.forget(&surface);
+                    self.pool.discard(&surface);
+                }
                 Act::Report(WidgetReport::Opened { id, surface })
                     if lost.iter().any(|(gone, _)| gone == &surface) =>
                 {
@@ -723,6 +770,21 @@ impl Widgets {
             }
         }
         lost.into_iter().map(|(surface, _)| surface).collect()
+    }
+
+    /// Puts one question on the form box, over the panel that asked it.
+    ///
+    /// What a question may say is decided here rather than on the box's page: a
+    /// widget can come from outside this build - `SCUFRIS_WIDGET_PATH` installs
+    /// a directory - and the page would otherwise be a window sized and titled
+    /// by whoever wrote the widget.
+    fn ask(&self, surface: &str, ask: Value) -> Result<(), String> {
+        let ask = form::Ask::parse(ask)?;
+        let panel = self
+            .app
+            .get_webview_window(surface)
+            .and_then(|window| form::frame(&window));
+        self.form.open(surface.to_string(), ask, panel)
     }
 
     /// Gives one widget window the size its widget lays out, and nothing else.

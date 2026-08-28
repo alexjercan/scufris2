@@ -11,6 +11,30 @@
 // a hidden page, so anything that ticks in here stops when the window is put
 // away and lies about the time when it comes back.
 
+/** One field on a form a widget asked for. */
+interface WidgetField {
+  /** The key the answer arrives under, beside the action's own keys. */
+  name: string;
+  /** What is printed over the field. */
+  label: string;
+  /** What the field starts with. */
+  value?: string;
+  /** How many lines the field is. One is a line; more is a block. */
+  lines?: number;
+  /** Grey words in an empty field. */
+  hint?: string;
+}
+
+/** A question a widget cannot ask on its own page. */
+interface WidgetAsk {
+  /** What the box is titled. */
+  title: string;
+  /** The fields, in the order they are asked. At least one, at most four. */
+  fields: WidgetField[];
+  /** The action the answers are laid into, and sent as. Must be an object. */
+  action: Record<string, unknown>;
+}
+
 /** What the shell hands a widget when it mounts it. */
 interface WidgetContext {
   /**
@@ -23,6 +47,21 @@ interface WidgetContext {
   spawn: unknown;
   /** Sends one action back toward whatever is feeding this widget. */
   send(action: unknown): void;
+  /**
+   * Asks the person for words, and sends the answer as one action.
+   *
+   * A widget window never holds the keyboard - it is built unfocusable so a
+   * panel arriving mid-sentence cannot take the keys of whoever was typing -
+   * so a field on this page would be one nobody could type in. The words are
+   * taken in a small window of the companion's own instead, and what comes
+   * back is `action` with one key per field laid into it. So a widget writes
+   * by asking, and reads its own writing back through its backend the way it
+   * reads everything else.
+   *
+   * Nothing arrives if the person cancels. The answer is not a return value:
+   * it lands as an ordinary action on the backend, one line like any other.
+   */
+  ask(request: WidgetAsk): void;
 }
 
 /** What a widget hands back, so the shell can drive and unmount it. */

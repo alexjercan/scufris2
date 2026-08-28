@@ -313,6 +313,13 @@ pub enum Cmd {
         /// What the widget sent.
         action: Value,
     },
+    /// One widget asked the person for words before it sends anything.
+    Ask {
+        /// Surface the widget is mounted in.
+        surface: SurfaceId,
+        /// The question, as the widget wrote it.
+        ask: Value,
+    },
 }
 
 /// One thing the host has to carry out.
@@ -408,6 +415,18 @@ pub enum Act {
         /// What the widget sent.
         action: Value,
     },
+    /// Put one question on the form box, for one surface.
+    ///
+    /// The answer comes back as an ordinary [`Cmd::Sent`], so nothing beyond
+    /// this act knows a panel wrote by asking rather than by clicking.
+    Ask {
+        /// The surface the answer belongs to.
+        surface: SurfaceId,
+        /// The question, still as the widget wrote it. What a form may say is
+        /// [`crate::form::Ask::parse`]'s to decide, and it is the host that
+        /// asks it.
+        ask: Value,
+    },
     /// Change what a surface's chrome says about its backend.
     Health {
         /// The surface whose chrome changes.
@@ -500,6 +519,7 @@ impl Runtime {
             Cmd::Health { surface, health } => self.health(surface, health),
             Cmd::Restart { surface } => self.restart(surface),
             Cmd::Sent { surface, action } => self.sent(surface, action),
+            Cmd::Ask { surface, ask } => self.asked(surface, ask),
         }
     }
 
@@ -664,6 +684,24 @@ impl Runtime {
             }];
         }
         vec![Act::Send { surface, action }]
+    }
+
+    /// Puts one widget's question on the form box.
+    ///
+    /// Refused on the same ground an action is: the answer is an action, and a
+    /// panel with nothing behind it has nowhere to put one. Better to say so on
+    /// the badge than to take the person's words and drop them.
+    fn asked(&mut self, surface: SurfaceId, ask: Value) -> Vec<Act> {
+        let Some(open) = self.surfaces.get(&surface) else {
+            return Vec::new();
+        };
+        if open.backend.is_none() {
+            return vec![Act::Refuse {
+                surface,
+                detail: "nothing to send to".into(),
+            }];
+        }
+        vec![Act::Ask { surface, ask }]
     }
 
     /// Records what a surface's backend is doing.
@@ -1296,6 +1334,44 @@ cadence = 500
                     Cmd::Sent {
                         surface: note.clone(),
                         action: json!({ "add": "milk" }),
+                    }
+                )
+                .as_slice(),
+            [Act::Refuse { surface, .. }] if surface == &note
+        ));
+    }
+
+    /// A question is an action with the person's words in the middle of it, so
+    /// it is refused on the same ground: a panel with nothing behind it has
+    /// nowhere to put an answer, and taking the words first and dropping them
+    /// afterwards is the one outcome worth refusing to reach.
+    #[test]
+    fn a_question_from_a_widget_with_nothing_behind_it_is_never_asked() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let gauge = opened(&open(&mut runtime, &catalog, "gauge", Posture::Instrument));
+        let note = opened(&open(&mut runtime, &catalog, "note", Posture::Instrument));
+        let ask = json!({"title": "New task", "fields": [], "action": {}});
+        assert_eq!(
+            runtime.apply(
+                &catalog,
+                Cmd::Ask {
+                    surface: gauge.clone(),
+                    ask: ask.clone(),
+                }
+            ),
+            vec![Act::Ask {
+                surface: gauge,
+                ask: ask.clone(),
+            }]
+        );
+        assert!(matches!(
+            runtime
+                .apply(
+                    &catalog,
+                    Cmd::Ask {
+                        surface: note.clone(),
+                        ask,
                     }
                 )
                 .as_slice(),

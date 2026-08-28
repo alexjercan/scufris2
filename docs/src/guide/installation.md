@@ -194,19 +194,22 @@ already means something by it. The tray puts the pill away without the cancel
 key, and `scufris-ctl abort` stops a run without the stop key.
 
 The agenda, macros, and notes panels read the-den journal, and Scufris does not
-depend on the repository that holds it. Name the command that reads it, and the
-journal directory when it is not where that command looks by default:
+depend on the repository that holds it. Name the command that reads it, the
+journal directory when it is not where that command looks by default, and the
+food database if you log food from the macros panel:
 
 ```nix
 programs.scufris.desktop = {
   todayCommand = inputs.today.packages.${pkgs.system}.default;
   denPath = "/home/you/personal/the-den";
+  macrosDatabase = "/home/you/.local/share/nvim/macros.csv";
 };
 ```
 
 A user service does not inherit your login shell, so a `DEN_PATH` you export
-there is not one the companion has. Neither option is required: without them
-those three panels open and say what is missing.
+there is not one the companion has. None of the three is required: without the
+command those three panels open and say what is missing, and without the
+database a food is logged only if `today` finds one where it looks by default.
 
 See the [option reference](../reference/options.md) for evaluated types,
 defaults, and descriptions.

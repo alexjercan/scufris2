@@ -9,7 +9,7 @@ flake package, so consumers who never enable it never build Tauri.
 scufris-desktop owns:
 
 - Activation, the pill window, the textbox window, the conversation window,
-  and the tray.
+  the panels' form window, and the tray.
 - Microphone recording and cancellation.
 - Local transcription against the configured endpoint.
 - Transcript editing, in the textbox.
@@ -112,6 +112,9 @@ took it away from whatever the person was typing in. So the pill refuses focus
 on every show, and the two keys that reach it do not go through its window at
 all. The textbox is the other half of the same rule: it takes the keyboard,
 because a window with a caret in it is one the person meant to be typing in.
+The panels' form window is the same half - it comes up because a tick was
+clicked, and it hands the keyboard back when it goes (see
+[Widgets](widgets.md#the-form-window)).
 
 `native/scufris-desktop/src/command.rs` listens on a Unix socket at
 `$XDG_RUNTIME_DIR/scufris/desktop.sock`, beside the service socket and not it.

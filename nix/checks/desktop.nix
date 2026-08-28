@@ -42,6 +42,7 @@
         chatCommand = testChat;
         todayCommand = testToday;
         denPath = "/home/tester/the-den";
+        macrosDatabase = "/home/tester/macros.csv";
         stt.whisper = {
           package = testWhisper;
           model = testWhisperModel;
@@ -207,8 +208,12 @@ in
     # den somewhere other than the default has to be written here.
     assert lib.elem "SCUFRIS_TODAY_COMMAND=${lib.getExe testToday}" desktopUnit.Service.Environment;
     assert lib.elem "DEN_PATH=/home/tester/the-den" desktopUnit.Service.Environment;
+    # Logging a food turns a name and an amount into a row, and the database is
+    # what does that. It follows the den for the same reason.
+    assert lib.elem "MACROS_DATABASE=/home/tester/macros.csv" desktopUnit.Service.Environment;
     assert !(lib.any (lib.hasPrefix "SCUFRIS_TODAY_COMMAND=") configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment);
     assert !(lib.any (lib.hasPrefix "DEN_PATH=") configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment);
+    assert !(lib.any (lib.hasPrefix "MACROS_DATABASE=") configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment);
     # The two keys beside the hotkey are the deployment's to name. A module
     # that named neither writes neither, because absent means derived and the
     # companion is the one that derives them.

@@ -245,7 +245,9 @@ Every panel wears the same three ticks in its corners.
   is the one moment starting it again is worth offering.
 
 Panels never take the keyboard. One that arrives mid-sentence cannot take your
-keys, and the ticks are clicks for the same reason.
+keys, and the ticks are clicks for the same reason. A panel that needs words
+asks for them in a small box of its own, which you opened and which gives the
+keyboard back when it closes.
 
 A panel you are reading does not go away under you. The clock stops while your
 pointer is over it, while Scufris is speaking, while the microphone is open, and
@@ -283,12 +285,29 @@ keep, rather than ones an answer puts up.
   last month.
 - **Notes** is the day's structured notes, heading and body, in order.
 
-The agenda panel writes as well as reads. Click a habit or a task to tick it;
-the tick goes through `today`, which is what makes a habit ticked here and one
-ticked in your editor the same habit. Everything else is read-only, because
-logging food and writing a note both need a keyboard, and a panel never takes
-one.
+The panels write as well as read. Every change goes through `today`, which is
+what makes a habit ticked here and one ticked in your editor the same habit.
 
-These need `programs.scufris.desktop.todayCommand`. Without it the panels still
-open and say what is missing, rather than sitting empty. See
-[Installation](installation.md).
+- **Tick** a habit or a task on the agenda to mark it done.
+- **Add** a task with the `+` beside the day's tasks.
+- **Log** a weight by clicking the number on the macros panel.
+- **Log** a food with the `+` beside the day's food. You give a name and an
+  amount in grams. One matching food is logged; several are offered on the
+  panel as a short list to click, because there is more room there than in the
+  box.
+- **Write** a note with the `+` on the notes panel. The heading is optional and
+  the body keeps the line breaks you type into it.
+
+A panel still never takes the keyboard. The ones that need words open a small
+box that does, in the middle of the panel that asked. Enter sends it, Escape
+puts it away, and the keyboard goes back where it was either way. The box does
+not come up while you are typing to Scufris, so a panel can never take a
+half-finished message off you.
+
+Everything written this way lands on the day the panel is showing, not on
+today, so a day you picked in the month is the day the task belongs to.
+
+These need `programs.scufris.desktop.todayCommand`. Logging a food also needs
+`programs.scufris.desktop.macrosDatabase`, unless your food database is where
+`today` looks by default. Without them the panels still open and say what is
+missing, rather than sitting empty. See [Installation](installation.md).

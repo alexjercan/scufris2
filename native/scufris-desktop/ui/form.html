@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Scufris</title>
+    <link rel="stylesheet" href="form.css" />
+  </head>
+  <body>
+    <!-- The window is undecorated, so the box is the whole of it: what is
+         being asked at the top, the fields the host described, and one line
+         saying what the keys do. Every field is built when a question
+         arrives; there is no markup for one here, because how many there are
+         and how tall each is belongs to the panel that asked. -->
+    <main class="box">
+      <span id="title" class="crown"></span>
+      <div id="fields" class="fields"></div>
+      <span class="keys">enter saves - esc closes</span>
+    </main>
+    <script src="form.js"></script>
+  </body>
+</html>

@@ -10,6 +10,9 @@ fn main() {
     println!("cargo:rerun-if-changed=ui/hud.ts");
     println!("cargo:rerun-if-changed=ui/hud.css");
     println!("cargo:rerun-if-changed=ui/hud.html");
+    println!("cargo:rerun-if-changed=ui/form.ts");
+    println!("cargo:rerun-if-changed=ui/form.css");
+    println!("cargo:rerun-if-changed=ui/form.html");
     println!("cargo:rerun-if-changed=ui/orb-engine.js");
     println!("cargo:rerun-if-changed=ui/orb-engine.d.ts");
     println!("cargo:rerun-if-changed=ui/tauri.d.ts");
@@ -38,6 +41,8 @@ fn build_frontend() {
         "textbox.css",
         "hud.html",
         "hud.css",
+        "form.html",
+        "form.css",
         "orb-engine.js",
     ] {
         fs::copy(ui.join(file), ui.join("dist").join(file))

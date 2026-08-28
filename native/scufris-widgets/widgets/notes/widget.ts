@@ -1,10 +1,13 @@
-// Today's notes, as they were written.
+// The day's notes, as they were written.
 //
-// The read half of the journal's own notes view. There is no add form here and
-// that is deliberate: a note is long-form, the window is built unfocusable so a
-// panel landing mid-sentence cannot take the keyboard, and a one-line field is
-// the wrong shape for a paragraph anyway. `today note add` is where a note is
-// written; this is where it is read back.
+// The journal's own notes view: a heading and a body, in the order they were
+// kept. This page holds no keyboard - a widget window is built unfocusable so
+// that a panel landing mid-sentence cannot take the keys of whoever was
+// typing - so the tick asks for the words instead, and the companion takes
+// them in a window of its own and sends the finished action to the backend.
+//
+// A note keeps its own line breaks. The block field is what makes that possible
+// from here rather than only from `today note add`.
 
 const MONTHS = [
   "January",
@@ -73,8 +76,25 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
   frame.style.height = "100%";
   frame.style.gap = "10px";
 
+  // The date on the left and the one tick on the right: what the panel is
+  // showing, and the way to add to it.
+  const head = document.createElement("div");
+  head.style.display = "flex";
+  head.style.alignItems = "center";
+  head.style.justifyContent = "space-between";
+  head.style.gap = "6px";
+  head.style.flex = "0 0 auto";
+
   const when = label();
   when.textContent = "--";
+
+  const write = document.createElement("button");
+  write.type = "button";
+  write.className = "tick";
+  write.textContent = "+";
+  write.title = "Write a note for this day";
+
+  head.append(when, write);
 
   // The panel scrolls, not the page: the shell's root is `overflow: hidden` so
   // that a widget drawing past its window clips instead of moving the chrome.
@@ -86,8 +106,22 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
   list.style.flexDirection = "column";
   list.style.gap = "12px";
 
-  frame.append(when, list);
+  frame.append(head, list);
   root.append(frame);
+
+  /** The day on screen, which is the day a note written here belongs to. */
+  let showing = "";
+
+  write.addEventListener("click", () => {
+    ctx.ask({
+      title: showing === "" ? "New note" : `Note for ${stamp(showing)}`,
+      fields: [
+        { name: "heading", label: "Heading", hint: "what it is about" },
+        { name: "body", label: "Note", lines: 6 },
+      ],
+      action: { action: "note" },
+    });
+  });
 
   const say = (text: string, colour: string): void => {
     list.replaceChildren();
@@ -133,8 +167,10 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
       if (key === seen) return;
       seen = key;
       const fields = data as { date?: unknown; trouble?: unknown };
-      if (typeof fields.date === "string")
+      if (typeof fields.date === "string") {
+        showing = fields.date;
         when.textContent = stamp(fields.date);
+      }
       if (typeof fields.trouble === "string" && fields.trouble !== "") {
         say(fields.trouble, "var(--sw-attention)");
         return;
@@ -175,6 +211,5 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
 
   // The spawn payload only says which view this is; the backend reports the
   // day. Nothing is drawn until its first line, one beat away.
-  void ctx;
   return view;
 }

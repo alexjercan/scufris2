@@ -13,6 +13,7 @@
     "tauri.d.ts",
     "pill.ts",
     "textbox.ts",
-    "hud.ts"
+    "hud.ts",
+    "form.ts"
   ]
 }

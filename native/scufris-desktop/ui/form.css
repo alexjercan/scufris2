@@ -1,0 +1,139 @@
+/* The box a panel borrows when it needs words, in the transcript box's own
+ * register: near-black, one quartz rule around it, uppercase micro-labels, and
+ * fields stripped of everything that would make them look like fields.
+ *
+ * Every measurement here is also in src/form.rs, which sizes the window to the
+ * question before it maps. The window cannot be resized once it is up - equal
+ * minimum and maximum hints are what make a tiling window manager float it - so
+ * a rule changed here without changing that one is a box with a gap under the
+ * last field or a field cut off by the frame. `Ask::height` is the arithmetic
+ * and there is a test on it. */
+
+:root {
+  --bg4: #52494e;
+  --fg1: #f4f4ff;
+  --quartz: #95a99f;
+  --yellow: #ffdd33;
+  --mono:
+    Iosevka, "Iosevka Nerd Font", "Iosevka Term", "JetBrains Mono",
+    ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* The window is exactly the box, and the same near-black behind it: bare X11
+ * without a compositor discards per-pixel alpha, so a margin around the box
+ * would render black anyway. */
+html,
+body {
+  height: 100%;
+  background: #101010;
+  overflow: hidden;
+  font-family: var(--mono);
+  color: var(--fg1);
+  user-select: none;
+}
+
+.box {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  /* PAD, in src/form.rs. */
+  padding: 14px 16px;
+  background: #101010;
+  border: 1px solid var(--quartz);
+}
+
+/* CROWN, and CROWN_GAP under it. */
+.crown {
+  flex: 0 0 auto;
+  height: 15px;
+  line-height: 15px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--quartz);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* FIELD_GAP between them. It scrolls rather than growing: a question taller
+ * than CEILING is capped there, and a field the frame cut off would be one
+ * nobody could reach. */
+.fields {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.field {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* NAME, and NAME_GAP under it. */
+.field > label {
+  height: 14px;
+  line-height: 14px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bg4);
+  margin-bottom: 4px;
+}
+
+/* One line is LINE tall and the box around them all is BOX: 6 and 6 of
+ * padding, 1 and 1 of rule. The height is set on the element by form.ts from
+ * the line count the host bounded, because rows and line-height are the two
+ * halves of the same number and only one of them can be a CSS rule. */
+.field > textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--bg4);
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  caret-color: var(--yellow);
+  outline: none;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.field > textarea:focus {
+  border-color: var(--quartz);
+}
+
+.field > textarea::placeholder {
+  color: var(--bg4);
+}
+
+.field > textarea::selection {
+  background: rgba(149, 169, 159, 0.26);
+}
+
+/* KEYS, with KEYS_GAP over it. */
+.keys {
+  flex: 0 0 auto;
+  margin-top: 10px;
+  height: 14px;
+  line-height: 14px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bg4);
+}

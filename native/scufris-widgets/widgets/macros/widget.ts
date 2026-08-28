@@ -5,8 +5,16 @@
 // weight trend is a line rather than a figure because a single weight says
 // almost nothing and a month of them says the whole thing.
 //
-// Read only. Food is logged with a quantity and a name and the panel has no
-// keyboard, so `today macros add` stays where a row is written.
+// Two things are written from here. The weight is one field, so clicking the
+// number opens it with the number already in it. A food is a name and an
+// amount, and the name is a query rather than a row: the database usually
+// answers with more than one, and the panel is where the person says which -
+// clicking is free, and this window has more room for a list than the box that
+// took the words does.
+//
+// The words themselves are taken elsewhere. A widget window is built
+// unfocusable so a panel arriving mid-sentence cannot take the keys of whoever
+// was typing, so `ctx.ask` is how a page with no keyboard gets any.
 
 /** The trend's own coordinates. CSS scales it to whatever the panel is. */
 const WIDE = 300;
@@ -26,6 +34,13 @@ interface Food {
   protein: number;
   carbs: number;
   fat: number;
+}
+
+/** One food the database offered for words that matched more than one. */
+interface Choice {
+  id: string;
+  name: string;
+  unit: string;
 }
 
 /** One small uppercase figure, the shell's own quiet register. */
@@ -70,11 +85,23 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
   calories.style.color = "var(--sw-fg)";
   calories.textContent = "--";
 
-  const weight = document.createElement("span");
+  // A button rather than a figure, because the way to log a weight is to
+  // correct the one on screen. The dashes under it are the only chrome it
+  // needs: a bordered tick here would read as a control beside the number
+  // rather than as the number itself.
+  const weight = document.createElement("button");
+  weight.type = "button";
+  weight.title = "Log the weight for this day";
+  weight.style.font = "inherit";
   weight.style.fontSize = "var(--sw-size-body)";
   weight.style.letterSpacing = "var(--sw-track)";
   weight.style.fontVariantNumeric = "tabular-nums";
   weight.style.color = "var(--sw-muted)";
+  weight.style.background = "transparent";
+  weight.style.border = "none";
+  weight.style.borderBottom = "1px dashed var(--sw-line)";
+  weight.style.padding = "0 0 1px";
+  weight.style.cursor = "default";
   weight.textContent = "--";
 
   head.append(calories, weight);
@@ -118,9 +145,24 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
 
   trend.append(line, last);
 
+  const bar = document.createElement("div");
+  bar.style.display = "flex";
+  bar.style.alignItems = "center";
+  bar.style.justifyContent = "space-between";
+  bar.style.gap = "6px";
+  bar.style.flex = "0 0 auto";
+
   const heading = figure();
   heading.textContent = "food";
   heading.style.color = "var(--sw-line)";
+
+  const eat = document.createElement("button");
+  eat.type = "button";
+  eat.className = "tick";
+  eat.textContent = "+";
+  eat.title = "Log a food for this day";
+
+  bar.append(heading, eat);
 
   const list = document.createElement("div");
   list.style.flex = "1";
@@ -130,8 +172,39 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
   list.style.flexDirection = "column";
   list.style.gap = "2px";
 
-  frame.append(head, split, trend, heading, list);
+  frame.append(head, split, trend, bar, list);
   root.append(frame);
+
+  /** The day on screen, and the weight it carries. Both go into the box the
+   * ticks open: the day so the title says which one, the weight so correcting
+   * it starts from what is already logged. */
+  let showing = "";
+  let logged: number | undefined;
+
+  weight.addEventListener("click", () => {
+    ctx.ask({
+      title: showing === "" ? "Weight" : `Weight for ${showing}`,
+      fields: [
+        {
+          name: "value",
+          label: "Kilograms",
+          value: logged === undefined ? "" : logged.toFixed(1),
+        },
+      ],
+      action: { action: "weight" },
+    });
+  });
+
+  eat.addEventListener("click", () => {
+    ctx.ask({
+      title: showing === "" ? "Food" : `Food for ${showing}`,
+      fields: [
+        { name: "name", label: "Food", hint: "a name from the database" },
+        { name: "amount", label: "Amount", hint: "grams, or pieces" },
+      ],
+      action: { action: "food" },
+    });
+  });
 
   const say = (text: string, colour: string): void => {
     list.replaceChildren();
@@ -191,6 +264,74 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     });
   };
 
+  const picks = (data: unknown): Choice[] => {
+    const held = (data as { choices?: unknown }).choices;
+    if (!Array.isArray(held)) return [];
+    return held.flatMap((item): Choice[] => {
+      if (typeof item !== "object" || item === null) return [];
+      const choice = item as { id?: unknown; name?: unknown; unit?: unknown };
+      if (typeof choice.id !== "string" || typeof choice.name !== "string") {
+        return [];
+      }
+      return [
+        {
+          id: choice.id,
+          name: choice.name,
+          unit: typeof choice.unit === "string" ? choice.unit : "",
+        },
+      ];
+    });
+  };
+
+  /** One line of the list that can be clicked. */
+  const row = (text: string, act: () => void, quiet = false): HTMLElement => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.style.font = "inherit";
+    button.style.display = "block";
+    button.style.width = "100%";
+    button.style.textAlign = "left";
+    button.style.background = "transparent";
+    button.style.border = "none";
+    button.style.padding = "0";
+    button.style.cursor = "default";
+    button.style.overflow = "hidden";
+    button.style.textOverflow = "ellipsis";
+    button.style.whiteSpace = "nowrap";
+    button.style.color = quiet ? "var(--sw-muted)" : "var(--sw-fg)";
+    button.textContent = text;
+    return button;
+  };
+
+  /** The list, standing in for itself while a food is being named. */
+  const offer = (choices: Choice[]): void => {
+    list.replaceChildren();
+    const asked = figure();
+    asked.style.color = "var(--sw-attention)";
+    asked.textContent = "which one?";
+    list.append(asked);
+    for (const choice of choices) {
+      const named =
+        choice.unit === "" ? choice.name : `${choice.name} (${choice.unit})`;
+      list.append(
+        row(named, () => {
+          ctx.send({ action: "pick", id: choice.id });
+        }),
+      );
+    }
+    // A question with no way out is one the person has to answer to get their
+    // panel back. The amount they typed goes with it.
+    list.append(
+      row(
+        "none of these",
+        () => {
+          ctx.send({ action: "pick" });
+        },
+        true,
+      ),
+    );
+  };
+
   const foods = (data: unknown): Food[] => {
     const held = (data as { foods?: unknown }).foods;
     if (!Array.isArray(held)) return [];
@@ -228,11 +369,13 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
       if (key === seen) return;
       seen = key;
       const fields = data as {
+        date?: unknown;
         macros?: unknown;
         weight?: unknown;
         change?: unknown;
         trouble?: unknown;
       };
+      if (typeof fields.date === "string") showing = fields.date;
 
       if (typeof fields.trouble === "string" && fields.trouble !== "") {
         say(fields.trouble, "var(--sw-attention)");
@@ -255,6 +398,7 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
       fat.textContent = `f ${gram(totals.fat)}`;
 
       const today = number(fields.weight);
+      logged = today;
       const change = number(fields.change);
       // The change is signed on purpose. Which direction is wanted is the
       // person's business, so it is reported rather than coloured.
@@ -267,8 +411,15 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
 
       draw(weighings(data));
 
-      const rows = foods(data);
       if (typeof fields.trouble === "string" && fields.trouble !== "") return;
+      // A food waiting to be named takes the list, because it is the only
+      // thing on this panel the person has to answer.
+      const choices = picks(data);
+      if (choices.length > 0) {
+        offer(choices);
+        return;
+      }
+      const rows = foods(data);
       if (rows.length === 0) {
         say("Nothing logged.", "var(--sw-muted)");
         return;
@@ -303,6 +454,5 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
 
   // The spawn payload only says which view this is and how far the trend
   // reaches; the backend reports the day.
-  void ctx;
   return view;
 }

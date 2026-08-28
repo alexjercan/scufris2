@@ -14,6 +14,11 @@
 // focus. A tick sends one action, the backend writes it through `today` and
 // reads the journal back, so a habit ticked here and one ticked in the editor
 // arrive the same way.
+//
+// The one thing that needs words is adding a task, and `ctx.ask` is how a page
+// with no keyboard gets them: the companion takes them in a window of its own
+// and sends the finished action here. The task lands on the day that is
+// showing, which is the day whose tasks are on screen above the tick.
 
 const MONTHS = [
   "January",
@@ -263,16 +268,38 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     ctx.send({ action: "select", date: null });
   });
 
-  /** A heading over one group, so an empty group takes no room at all. */
-  const group = (name: string): HTMLElement => {
+  /** A heading over one group, so an empty group takes no room at all.
+   *
+   * The heading is a row rather than a word, because one group carries a tick:
+   * the thing that adds to a list belongs on the list it adds to. */
+  const group = (name: string, add?: () => void): HTMLElement => {
     const block = document.createElement("div");
     block.style.display = "flex";
     block.style.flexDirection = "column";
     block.style.gap = "3px";
+
+    const bar = document.createElement("div");
+    bar.style.display = "flex";
+    bar.style.alignItems = "center";
+    bar.style.justifyContent = "space-between";
+    bar.style.gap = "6px";
+
     const heading = label();
     heading.style.color = "var(--sw-line)";
     heading.textContent = name;
-    block.append(heading);
+    bar.append(heading);
+
+    if (add !== undefined) {
+      const tick = document.createElement("button");
+      tick.type = "button";
+      tick.className = "tick";
+      tick.textContent = "+";
+      tick.title = "Write a task for this day";
+      tick.addEventListener("click", add);
+      bar.append(tick);
+    }
+
+    block.append(bar);
     list.append(block);
     return block;
   };
@@ -354,7 +381,16 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
         ? [{ index: item.index, text: item.text, done: item.done === true }]
         : [],
     );
-    const block = group("tasks");
+    const block = group("tasks", () => {
+      // On the day that is showing, which is the day whose tasks this tick
+      // stands under. The backend writes to the same day it is reporting, so
+      // the two cannot disagree.
+      ctx.ask({
+        title: `Task for ${shortly(selected)}`,
+        fields: [{ name: "text", label: "Task", hint: "what has to be done" }],
+        action: { action: "add" },
+      });
+    });
     if (tasks.length === 0) {
       const empty = label();
       empty.style.textTransform = "none";

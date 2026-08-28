@@ -217,6 +217,17 @@ in {
         '';
       };
 
+      macrosDatabase = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "/home/you/.local/share/nvim/macros.csv";
+        description = ''
+          The food database the macros panel names a food out of, when it is
+          not where the today command looks by default. Logging a food is a
+          name and an amount, and the database is what turns those into a row.
+        '';
+      };
+
       stt = {
         endpoint = lib.mkOption {
           type = lib.types.nullOr (lib.types.strMatching "https?://.*");
@@ -395,6 +406,8 @@ in {
             "SCUFRIS_TODAY_COMMAND=${lib.getExe desktopCfg.todayCommand}"
             ++ lib.optional (desktopCfg.denPath != null)
             "DEN_PATH=${desktopCfg.denPath}"
+            ++ lib.optional (desktopCfg.macrosDatabase != null)
+            "MACROS_DATABASE=${desktopCfg.macrosDatabase}"
             ++ lib.optional cfg.voice.enable
             "SCUFRIS_DESKTOP_SPEAK_COMMAND=${lib.getExe speak}";
           # The companion must survive its own faults; a backend crash is

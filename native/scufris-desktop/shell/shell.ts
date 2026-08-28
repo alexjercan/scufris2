@@ -106,6 +106,13 @@
             // it is refused on the badge rather than left believing it landed.
             invoke("widget_send", { action }).catch(() => {});
           },
+          ask: (request: WidgetAsk): void => {
+            // The same road as `send`, with the person's words picked up on
+            // the way. This window cannot hold the keyboard - see below - so
+            // the host takes them in one of its own and sends the action on
+            // when it has them. Nothing comes back here either way.
+            invoke("widget_ask", { request }).catch(() => {});
+          },
         };
         view = mount(root, ctx);
         // The spawn payload already reached the widget, as `ctx.spawn`. What

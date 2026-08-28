@@ -45,7 +45,54 @@ out of the same answer.
 **Ticking, but no typing.** A click needs no focus. A widget shell is built
 unfocusable on purpose (`widgets/windows.rs:9-16`) and pooled, so one that ever
 became focusable would stay that way for whatever exhibit reused it. Habits and
-tasks tick; food rows and notes stay with the command.
+tasks tick with a click, and the words go somewhere else - see the next four.
+
+**A fourth window, not a fifth meaning for the textbox.** The textbox is raised
+and hidden from `Phase`, and `Phase` is what guarantees a transcript is never
+lost and never sent twice. A second meaning inside it puts an unrelated concern
+in the one machine that must not grow one. `src/form.rs` is a window of its own,
+built to the HUD's recipe - focusable, on top, its own `FocusTracker`,
+`set_focusable(true)` before every raise because i3 rereads hints at map time -
+and it knows nothing about `Phase`. It refuses to come up while the textbox is
+up, which is the rule the HUD already keeps and for the same reason.
+
+**`ctx.ask`, not a widget that raises a window.** A widget asks for a question
+to be put; the companion decides whether to put it. `Ask::parse` is the whole
+gate - at most four fields, twelve lines each, title and labels clipped - and it
+is in Rust because `SCUFRIS_WIDGET_PATH` can install a widget that was never in
+this build. `Ask::fill` then copies only the fields the ask declared, so a page
+cannot name an argument the backend reads. The answer re-enters through
+`Cmd::Sent`, the road a tick already takes: nothing past `Act::Ask` knows a
+panel wrote by asking, and a refused write is refused on the same badge.
+
+**One box, four questions.** A single field would have needed a second box for
+the note, and the food needs two answers at once. So the box is 1-4 fields and
+is resized per question before it maps (`Ask::height`, the same arithmetic
+`ui/form.css` lays out with, with a test on it). A one-line field's answer is
+flattened host-side: a task with a newline in it is not a task, while a note's
+line breaks are the note.
+
+**Food is answered, then offered.** The old widget had a typeahead. A box that
+cannot see the panel cannot have one, so the backend queries `today macros
+query` after both answers are in. One match is logged; several are handed back
+as `choices` and the panel offers them as clicks - it has the room, and the
+person already answered the amount once. `macros calculate` reads
+`MACROS_DATABASE`, so the module writes it from
+`programs.scufris.desktop.macrosDatabase` beside `denPath`.
+
+**Trouble does not drop the day.** Clearing the cached frame in the `Trouble`
+branch of `act` looked right and was not: the rebuild then fails under `refuse`
+and the panel blanks, which contradicts trouble arriving _beside_ the day. The
+candidate list is dropped explicitly where it is set instead, so a stale pick
+cannot survive a later failure.
+
+**The keyboard is the second answer, not the first.** i3 names a clicked panel
+the active window while the keys stay where they were, because the panel
+refuses them. That is every capture the form takes, so `FocusTracker::capture`
+now asks the keyboard when the active window is one of ours - filtered through
+the same `own_windows` list, and only then, so the pill and the conversation
+window pay nothing for it. Found on the screen; see
+[live-run-writing.md](live-run-writing.md).
 
 **No flake input on the journal.** `nix/desktop.nix` is untouched. The
 deployment names the command through
@@ -66,11 +113,14 @@ renders without it - an older `today` is a shorter panel, not an error.
 | ---------------------------------- | --------------------------------------------------- |
 | `Give the widgets ... one roof`    | The move, and the manifest `spawn` default          |
 | `Put the journal on the workspace` | The `today` backend, three widgets, wiring and docs |
+| `Let the panels write`             | `ctx.ask`, the form window, and the four writes     |
 
 Named by subject rather than hash: the row sits in the commit it names, so a
 hash written here is one the commit cannot carry.
 
 ## Verification
+
+Reading, first increment:
 
 - `cargo test --workspace`: 366 pass (292 companion, 48 service, 26 control).
 - `python3 -m unittest discover -s tests -p 'test_*.py'`: 72 pass, including
@@ -86,27 +136,30 @@ hash written here is one the commit cannot carry.
   [live-run.md](live-run.md). It caught one real bug: a journal the notes panel
   could not reach read as a day with no notes in it.
 
+Writing, second increment:
+
+- `cargo test --workspace`: 381 pass (307 companion, 48 service, 26 control).
+  Fifteen new: nine on the form window - parse bounds, the height arithmetic,
+  field filtering, one-line flattening, blank answers, three placements - one
+  that a question from a widget with nothing behind it is refused rather than
+  asked, two more placements for what the live run caught, and two on the
+  focus tracker's second answer.
+- `python3 -m unittest discover -s tests -p 'test_*.py'`: 82 pass. Ten new ones
+  cover the four writes, the two-answer food flow with one match and with
+  several, "none of these", a day change dropping a held pick, and `choices`
+  reaching the macros view alone. Same stub, same temporary den.
+- `npm run check`: 81 pass, Prettier clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `nix flake check`: all checks passed, including the desktop interface check
+  asserting `MACROS_DATABASE` is written when named and not when not.
+- Live on the isolated `Super+Y` rig against a copy of the-den. See
+  [live-run-writing.md](live-run-writing.md). It caught two: the box was placed
+  from a window that had never been mapped, and the keyboard was not given back.
+
 ## Left
 
-Writing a task from the panel, which the user asked for and this does not do.
-The backend already takes it - `{"action": "add", "text": ...}` runs
-`today task add` for the selected day, and it is tested - but nothing on screen
-sends it. Two things stand between here and there, and both are decisions
-rather than work:
-
-**A widget cannot ask the companion for anything.** `ctx.send` becomes
-`Act::Send { surface, action }` and goes to the backend's standard input
-(`widgets/runtime.rs:666`, `widgets/mod.rs:698`). A "+" tick needs a class of
-action the widget layer keeps rather than forwards, which is a new rule in the
-widget contract and needs its own answer to which widget may ask for what.
-
-**The textbox has one meaning and it is a careful one.** It is raised and
-hidden from `Phase`, and `Phase` is the machine that guarantees a transcript is
-never lost and never sent twice - `Sent`, `Retained`, `Delivery`, `warned`.
-Giving `Editing` a second meaning puts an unrelated concern inside it. Keeping
-the flag off `Phase` instead means a textbox that is up for a reason `settle`
-does not know about, and `settle` is what takes it down.
-
-Neither is hard. Both change something load-bearing, so they are the next
-increment rather than the tail of this one - which is what the plan said when
-it called this step separable.
+Three of the four writes were not driven on the screen - the weight, the food
+and the note - and neither was the refusal over a take in the textbox. The
+screen work stopped at the user's word once the two defects above were found
+and fixed. Each is covered by tests: ten in `tests/test_today_backend.py` for
+what the backend does with the action, and the form's own for what reaches it.

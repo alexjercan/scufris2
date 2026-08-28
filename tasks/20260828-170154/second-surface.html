@@ -342,7 +342,7 @@
   <header class="mast">
     <div class="kicker">
       Design &middot; task 20260828-170154 &middot; 2026-08-28 &middot; revision
-      1
+      2
     </div>
     <h1>The Second Surface</h1>
     <p class="sub">
@@ -414,13 +414,35 @@
     </div>
 
     <div class="panel law">
-      <h3>L5 &mdash; One trust domain, and never a listener</h3>
+      <h3>L5 &mdash; Scufris does not know where you are</h3>
+      <p class="said">
+        "Scufris should not even realize we call it from a different machine. It
+        should just be: I am Scufris, I am running on NixOS, I respond to
+        whatever input I get." &mdash; Alex, on revision 1
+      </p>
       <p>
-        Every surface belongs to the same person, and the transport
-        authenticates before the protocol sees a byte. The service keeps binding
-        a mode 0600 Unix socket in the runtime directory and keeps
-        authenticating nothing. Anything that reaches that socket is already a
-        process running as you on the host.
+        <b>That is the law, and it is stronger than a security argument.</b>
+        Nothing in the service distinguishes a local client from a remote one,
+        because nothing in the service <em>can</em>, and nothing ever gets to
+        ask. No <code>remote</code> flag on a client. No local-or-remote branch.
+        No capability keyed to where a connection sits. A surface is a surface.
+      </p>
+      <p>
+        This is also the tripwire:
+        <b
+          >if a future design needs to know whether a client is remote, L5 is
+          being broken</b
+        >, and the thing to fix is the design rather than the law. Presence (L6)
+        is the first test of it and passes &mdash; it follows what you last
+        touched, which is blind to where you touched it from.
+      </p>
+      <p>
+        The security clause falls out rather than being argued for. The service
+        keeps binding a mode 0600 Unix socket in the runtime directory and keeps
+        authenticating nothing, because anything that reaches that socket is
+        already a process running as you on the host. Every surface belongs to
+        the same person, and the transport authenticates before the protocol
+        sees a byte.
       </p>
       <p>
         <b>Scufris never opens a TCP listener.</b> Not behind a password, not on
@@ -455,20 +477,41 @@
     </div>
 
     <div class="panel law">
-      <h3>L2 &mdash; Nothing is migrated (under strain)</h3>
+      <h3>L2 &mdash; Nothing is migrated (kept, and made explicit)</h3>
       <p>
         L2 says no backwards compatibility in any direction: v3 replaced v2
         rather than coexisting. That is affordable because one
-        <code>nixos-rebuild</code> moves every part of Scufris at once.
+        <code>nixos-rebuild</code> moves every part of Scufris at once, and a
+        phone app is the first component that cannot ride along.
+      </p>
+      <p class="said">
+        "It is what it is - keep this Law. If I update the host I better be
+        updating the app. I imagine Scufris pinging me: hey, update the phone
+        app when you can so we can keep talking." &mdash; Alex, on revision 1
       </p>
       <p>
+        <b>Settled: L2 stays whole.</b> The coupling stops being a hidden
+        assumption and becomes a stated contract, and the cost is paid by
+        <em>Scufris telling you</em> rather than by an app that silently half
+        works. That fits what Scufris is already meant to do - the machine may
+        initiate substantive contact, and "your host moved ahead of your phone"
+        is exactly the kind of thing worth being told unasked.
+      </p>
+      <p>
+        One rule falls out of it, and it is sharp:
         <b
-          >A phone app is the first Scufris component that cannot be rebuilt in
-          lockstep with its host.</b
+          >the version handshake is the one part of the protocol that is frozen
+          forever.</b
         >
-        A laptop can be; a phone in a drawer, an app awaiting review, or a build
-        you sideloaded in March cannot. L2 does not break here, but it stops
-        being free. See <a href="#versions">07</a>.
+        <code>hello</code>, <code>welcome</code>, and the version refusal must
+        keep working across every mismatch there will ever be, because they are
+        the only thing that still runs when nothing else does. Freeze their
+        shape now. Everything above them stays free to change, which is the
+        whole point of L2.
+      </p>
+      <p>
+        Get that backwards and the notice you are counting on is the first thing
+        that breaks. See <a href="#versions">07</a>.
       </p>
     </div>
   </section>
@@ -1283,11 +1326,39 @@ SCUFRIS_RUNTIME_DIR=<span class="s">"$HOME/.scufris-remote"</span> scufris-deskt
     </div>
 
     <p>
-      <b>Recommendation: A.</b> It is a personal app you sideload onto your own
-      phone. The failure is one screen telling you to rebuild, on a device you
-      are holding. B and C both buy a convenience you do not need with a
-      permanent complication in the protocol, and L2 has been earning its keep.
+      <b>Settled: A.</b> It is a personal app you sideload onto your own phone.
+      B and C both buy a convenience you do not need with a permanent
+      complication in the protocol, and L2 has been earning its keep.
     </p>
+
+    <div class="panel free">
+      <h3>What A owes you in return</h3>
+      <p>
+        A is only fair if the mismatch is announced rather than discovered. Two
+        things make it so, and they are the design work this decision creates:
+      </p>
+      <ul>
+        <li>
+          <b>The host tells you.</b> On release, Scufris says "update the phone
+          app when you can" - unprompted, in words, through the road it already
+          has for saying things. Not an error screen you find later when you
+          reach for it.
+        </li>
+        <li>
+          <b>The handshake is frozen forever.</b> A client one version behind
+          must still be able to say <em>that</em>. So the <code>hello</code> /
+          <code>welcome</code> exchange and the version refusal are permanently
+          fixed in shape: they are the only messages that must survive every
+          future mismatch. Everything else in the protocol stays free to change,
+          which is what L2 is for.
+        </li>
+      </ul>
+      <p>
+        The second is the one that is easy to get wrong. If the version check
+        rides on anything that can change, the notice is the first casualty of
+        the change it exists to announce.
+      </p>
+    </div>
   </section>
 
   <section id="ladder">
@@ -1359,8 +1430,15 @@ SCUFRIS_RUNTIME_DIR=<span class="s">"$HOME/.scufris-remote"</span> scufris-deskt
 
     <div class="panel decide">
       <h3>D2 &mdash; Version policy for a surface you cannot rebuild</h3>
-      <p>A, B or C from <a href="#versions">07</a>.</p>
-      <p class="rec"><b>Recommended:</b> A. Keep L2 whole.</p>
+      <p>
+        <b>Settled on revision 1: A.</b> L2 stays whole. The host speaks one
+        version, and a client that is behind is told so plainly.
+      </p>
+      <p>
+        Two obligations came with it: Scufris announces the mismatch unprompted
+        rather than waiting to be found, and the handshake that carries the
+        announcement is frozen in shape forever. See <a href="#versions">07</a>.
+      </p>
     </div>
 
     <div class="panel decide">
@@ -1435,7 +1513,7 @@ SCUFRIS_RUNTIME_DIR=<span class="s">"$HOME/.scufris-remote"</span> scufris-deskt
 
   <footer>
     <div>
-      Task 20260828-170154 &middot; revision 1 &middot; 2026-08-28. Follows
+      Task 20260828-170154 &middot; revision 2 &middot; 2026-08-28. Follows
       <code>tasks/20260827-081702</code>, "Scufris as a service: the
       architecture inversion". Gated behind the v0.5.0 release; nothing here is
       implemented.

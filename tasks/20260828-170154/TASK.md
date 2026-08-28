@@ -73,26 +73,44 @@ What does not work, all in `native/scufris-service/src/service.rs`:
   one session, one transcript, no tenancy, and the rig is the only thing
   that ever runs the agent. This is the part that was doing the work and
   it is untouched. Exactly one clause leaves: "one surface".
-- **L5 One trust domain, and never a listener.** The service keeps
-  binding a 0600 Unix socket and keeps authenticating nothing. Whatever
-  crosses a network is WireGuard's, Tailscale's or ssh's problem.
-  Scufris never opens a TCP listener, under any conditions. This keeps
-  `server.rs:5` literally true rather than falsifying the security model.
+- **L5 Scufris does not know where you are.** Reframed on revision 2 from
+  Alex's comment: "Scufris should not even realize we call it from a
+  different machine. It should just be: I am Scufris, I am running on
+  NixOS, I respond to whatever input I get." Nothing in the service
+  distinguishes a local client from a remote one - no `remote` flag, no
+  local-or-remote branch, no capability keyed to where a connection sits.
+  This is a tripwire as well as a law: a future design that needs to know
+  whether a client is remote is breaking L5, and the design is what to
+  fix. The security clause then falls out rather than being argued for -
+  the service keeps binding a 0600 Unix socket and authenticating
+  nothing, whatever crosses a network is WireGuard's, Tailscale's or
+  ssh's problem, and Scufris never opens a TCP listener under any
+  conditions. `server.rs:5` stays literally true.
 - **L6 Any number watch, exactly one attends.** State and transcript to
   every surface; speech, widget commands and window raises to the one
   holding presence.
-- **L2 is under strain.** A phone app is the first component that cannot
-  be rebuilt in lockstep with its host. L2 does not break, but it stops
-  being free.
+- **L2 stays whole.** Settled by Alex on revision 2. A phone app is the
+  first component that cannot be rebuilt in lockstep with its host, and
+  the answer is to state the coupling rather than soften it: one version
+  on the host, and a client that is behind is told so. Two obligations
+  came with the decision. Scufris announces the mismatch unprompted -
+  "update the phone app when you can" - through the road it already has
+  for saying things, rather than leaving an error screen to be found.
+  And **the version handshake is frozen forever**: `hello`, `welcome`
+  and the version refusal must keep working across every mismatch there
+  will ever be, because they are the only messages that still run when
+  nothing else does. Everything above them stays free to change, which
+  is what L2 is for. Get that backwards and the notice is the first
+  casualty of the change it exists to announce.
 
 ## To settle
 
 - **D1** Narrow L1 and add L5 and L6, or refuse the design. Everything
   else is consequence. Recommended: narrow it, and add L5 in the same
   breath so the security clause is not quietly lost.
-- **D2** Version policy for a surface that cannot be rebuilt with the
-  host. Recommended: keep L2 whole - one version, and a stale app shows
-  one screen telling you to update.
+- **D2 SETTLED (revision 2): A, L2 stays whole.** One version on the
+  host; a client that is behind is told so plainly. The two obligations
+  it created are in the laws above.
 - **D3** How presence moves: inferred from the last submit, an explicit
   claim, or both in stages. Recommended: infer now, add the claim when a
   phone exists to send it.

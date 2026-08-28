@@ -7,10 +7,8 @@
 //
 // Two things are written from here. The weight is one field, so clicking the
 // number opens it with the number already in it. A food is a name and an
-// amount, and the name is a query rather than a row: the database usually
-// answers with more than one, and the panel is where the person says which -
-// clicking is free, and this window has more room for a list than the box that
-// took the words does.
+// amount, and the name is a database row rather than words: the field offers
+// the database as it is typed and what is taken from that list is the row.
 //
 // The words themselves are taken elsewhere. A widget window is built
 // unfocusable so a panel arriving mid-sentence cannot take the keys of whoever
@@ -34,13 +32,6 @@ interface Food {
   protein: number;
   carbs: number;
   fat: number;
-}
-
-/** One food the database offered for words that matched more than one. */
-interface Choice {
-  id: string;
-  name: string;
-  unit: string;
 }
 
 /** One small uppercase figure, the shell's own quiet register. */
@@ -199,7 +190,15 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     ctx.ask({
       title: showing === "" ? "Food" : `Food for ${showing}`,
       fields: [
-        { name: "name", label: "Food", hint: "a name from the database" },
+        {
+          name: "name",
+          label: "Food",
+          hint: "start typing a name",
+          // The database is what knows the foods, and it is asked as the
+          // person types. Taking one from the list answers with its id, so the
+          // amount is scaled against the row rather than against a guess.
+          suggest: { action: "search" },
+        },
         { name: "amount", label: "Amount", hint: "grams, or pieces" },
       ],
       action: { action: "food" },
@@ -262,74 +261,6 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
         },
       ];
     });
-  };
-
-  const picks = (data: unknown): Choice[] => {
-    const held = (data as { choices?: unknown }).choices;
-    if (!Array.isArray(held)) return [];
-    return held.flatMap((item): Choice[] => {
-      if (typeof item !== "object" || item === null) return [];
-      const choice = item as { id?: unknown; name?: unknown; unit?: unknown };
-      if (typeof choice.id !== "string" || typeof choice.name !== "string") {
-        return [];
-      }
-      return [
-        {
-          id: choice.id,
-          name: choice.name,
-          unit: typeof choice.unit === "string" ? choice.unit : "",
-        },
-      ];
-    });
-  };
-
-  /** One line of the list that can be clicked. */
-  const row = (text: string, act: () => void, quiet = false): HTMLElement => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.style.font = "inherit";
-    button.style.display = "block";
-    button.style.width = "100%";
-    button.style.textAlign = "left";
-    button.style.background = "transparent";
-    button.style.border = "none";
-    button.style.padding = "0";
-    button.style.cursor = "default";
-    button.style.overflow = "hidden";
-    button.style.textOverflow = "ellipsis";
-    button.style.whiteSpace = "nowrap";
-    button.style.color = quiet ? "var(--sw-muted)" : "var(--sw-fg)";
-    button.textContent = text;
-    return button;
-  };
-
-  /** The list, standing in for itself while a food is being named. */
-  const offer = (choices: Choice[]): void => {
-    list.replaceChildren();
-    const asked = figure();
-    asked.style.color = "var(--sw-attention)";
-    asked.textContent = "which one?";
-    list.append(asked);
-    for (const choice of choices) {
-      const named =
-        choice.unit === "" ? choice.name : `${choice.name} (${choice.unit})`;
-      list.append(
-        row(named, () => {
-          ctx.send({ action: "pick", id: choice.id });
-        }),
-      );
-    }
-    // A question with no way out is one the person has to answer to get their
-    // panel back. The amount they typed goes with it.
-    list.append(
-      row(
-        "none of these",
-        () => {
-          ctx.send({ action: "pick" });
-        },
-        true,
-      ),
-    );
   };
 
   const foods = (data: unknown): Food[] => {
@@ -412,13 +343,6 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
       draw(weighings(data));
 
       if (typeof fields.trouble === "string" && fields.trouble !== "") return;
-      // A food waiting to be named takes the list, because it is the only
-      // thing on this panel the person has to answer.
-      const choices = picks(data);
-      if (choices.length > 0) {
-        offer(choices);
-        return;
-      }
       const rows = foods(data);
       if (rows.length === 0) {
         say("Nothing logged.", "var(--sw-muted)");

@@ -1,12 +1,14 @@
-// The three desktop webview pages, run headlessly against a stub DOM.
+// The four desktop webview pages, run headlessly against a stub DOM.
 //
 // The pages are compiled by build.rs and loaded by windows that need an X
 // display, a compositor-less desktop and a microphone, so nothing about them is
 // exercised by the Rust tests. What can be exercised is what they compute: the
 // textbox reports which key was pressed and what its field holds, the deletions
 // it binds itself cut the right words, every state paints an orb at the size
-// the frame is built for, and the conversation window decides when to follow
-// the scroll and when a typed line has actually left the field.
+// the frame is built for, the conversation window decides when to follow the
+// scroll and when a typed line has actually left the field, and the form box
+// decides when to ask about a field, which candidate the keys are on, and what
+// a taken one answers with.
 //
 // The stub is a fake, and it says so. That is enough for the invariants here,
 // all of which are about which element holds what and what the page asks the
@@ -26,6 +28,7 @@ interface Compiled {
   pill: string;
   textbox: string;
   hud: string;
+  form: string;
   engine: string;
 }
 
@@ -46,6 +49,7 @@ function pages(): Compiled {
       pill: readFileSync(join(ui, "dist", "pill.js"), "utf8"),
       textbox: readFileSync(join(ui, "dist", "textbox.js"), "utf8"),
       hud: readFileSync(join(ui, "dist", "hud.js"), "utf8"),
+      form: readFileSync(join(ui, "dist", "form.js"), "utf8"),
       engine: readFileSync(join(ui, "orb-engine.js"), "utf8"),
     };
   }
@@ -249,6 +253,16 @@ class Page {
   readonly answers: Record<string, unknown> = { pill_cues: true };
   /** What `document.execCommand` does, which is a port's choice. */
   execCommand: ((command: string) => boolean) | null = null;
+  /** The timers the page is waiting on, so a debounce can be driven here. */
+  readonly timers = new Map<number, () => void>();
+  timer = 0;
+
+  /** Runs every timer that is waiting, the way the clock would. */
+  elapse(): void {
+    const waiting = [...this.timers.values()];
+    this.timers.clear();
+    for (const fire of waiting) fire();
+  }
 
   element(id: string): Stub {
     const found = this.elements.get(id);
@@ -372,6 +386,16 @@ function run(page: Page, ids: string[], scripts: string[]): void {
       },
     },
     devicePixelRatio: 1,
+    // Driven from the test rather than by the clock: a debounce measured in
+    // real milliseconds is a test that waits for one.
+    setTimeout: (fire: () => void): number => {
+      page.timer += 1;
+      page.timers.set(page.timer, fire);
+      return page.timer;
+    },
+    clearTimeout: (id: number): void => {
+      page.timers.delete(id);
+    },
   });
   global["window"] = win;
   for (const script of scripts) runInContext(script, context);
@@ -413,6 +437,73 @@ function hud(taken = true, lines: Record<string, string>[] = []): Page {
   page.answers["hud_submit"] = taken;
   run(page, ["lines", "notice", "words"], [pages().hud]);
   return page;
+}
+
+/** The form box, loaded with its title and the block the fields go in. */
+function form(): Page {
+  const page = new Page();
+  // What the host answers when nothing has been asked yet.
+  page.answers["form_ready"] = null;
+  run(page, ["title", "fields"], [pages().form]);
+  return page;
+}
+
+/** One field of an ask, as src/form.rs serializes it for the page. */
+interface FormField {
+  name: string;
+  label: string;
+  value: string;
+  lines: number;
+  hint: string;
+  suggest: boolean;
+}
+
+/** One field, filled out around what the test cares about. */
+function asking(field: Partial<FormField> & { name: string }): FormField {
+  return {
+    label: field.name,
+    value: "",
+    lines: 1,
+    hint: "",
+    suggest: false,
+    ...field,
+  };
+}
+
+/** Puts one question on the box, the way the host pushes it. */
+function put(page: Page, fields: FormField[], title = "Food"): void {
+  page.publish("scufris://ask", { title, fields });
+}
+
+/** The textarea of one field, and the list under it when it has one. */
+function box(page: Page, index: number): Stub {
+  const block = page.element("fields").children[index];
+  assert.ok(block !== undefined, `the form drew no field ${String(index)}`);
+  const input = block.children[1];
+  assert.ok(input !== undefined, "a field with no input");
+  return input;
+}
+
+function offered(page: Page, index: number): Stub | undefined {
+  const block = page.element("fields").children[index];
+  assert.ok(block !== undefined, `the form drew no field ${String(index)}`);
+  return block.children[2];
+}
+
+/** One object the page built, lifted out of the context it was built in.
+ *
+ * A page runs in a vm of its own, so what it hands the host carries that vm's
+ * prototype and never compares equal to a plain object written here. */
+function said(value: unknown): Record<string, unknown> {
+  return { ...(value as Record<string, unknown>) };
+}
+
+/** Types into a field and lets the debounce run out. */
+function type(page: Page, index: number, text: string): void {
+  const input = box(page, index);
+  input.value = text;
+  input.dispatch("input", {});
+  page.elapse();
 }
 
 function present(
@@ -879,4 +970,232 @@ test("the keys are the field's, however the window came by them", async () => {
   page.activeElement = null;
   page.window.dispatch("focus", {});
   assert.equal(page.activeElement, words);
+});
+
+// ---------- the form box ----------
+
+/** The food ask, which is the one with a typeahead on it. */
+function food(page: Page): void {
+  put(page, [
+    asking({ name: "name", label: "Food", suggest: true }),
+    asking({ name: "amount", label: "Amount" }),
+  ]);
+}
+
+/** What the backend answers a search with, inside an ordinary reading. */
+const CHICKEN = [
+  { id: "chicken:g", label: "Chicken (g)" },
+  { id: "chicken breast:g", label: "Chicken breast (g)" },
+  { id: "chicken thigh:g", label: "Chicken thigh (g)" },
+];
+
+test("the box draws the fields it was given and takes the first one", () => {
+  const page = form();
+  put(
+    page,
+    [asking({ name: "value", label: "Kilograms", value: "81.4" })],
+    "Weight for 2026-08-28",
+  );
+  assert.equal(page.element("title").textContent, "Weight for 2026-08-28");
+  const field = box(page, 0);
+  assert.equal(field.value, "81.4");
+  assert.equal(page.activeElement, field);
+  // A field that arrived with something in it is one the person is
+  // correcting, so what is there is selected and typing replaces it.
+  assert.equal(field.selectionStart, 0);
+  assert.equal(field.selectionEnd, "81.4".length);
+  assert.equal(offered(page, 0), undefined, "a field nobody offered a list");
+});
+
+test("a field that offers candidates asks once the typing stops", () => {
+  const page = form();
+  food(page);
+  const field = box(page, 0);
+
+  field.value = "chi";
+  field.dispatch("input", {});
+  field.value = "chick";
+  field.dispatch("input", {});
+  // One question for a burst of keys. A backend answering a typeahead runs a
+  // command per question, so a question per keystroke is a process per key.
+  assert.deepEqual(page.commands(), ["form_ready"]);
+  page.elapse();
+  assert.deepEqual(said(page.lastCall("form_look")), {
+    field: "name",
+    text: "chick",
+  });
+
+  // The page names a field and what is in it, and nothing else. What the
+  // backend is asked stays with the host.
+  assert.deepEqual(Object.keys(page.lastCall("form_look")), ["field", "text"]);
+});
+
+test("a field emptied again asks nothing and offers nothing", () => {
+  const page = form();
+  food(page);
+  type(page, 0, "chick");
+  page.publish("scufris://look", { choices: CHICKEN });
+  const list = offered(page, 0);
+  assert.ok(list !== undefined);
+  assert.equal(list.children.length, 3);
+
+  const before = page.commands().length;
+  type(page, 0, "   ");
+  assert.equal(page.commands().length, before, "an empty field asked anyway");
+  assert.equal(list.children.length, 0);
+});
+
+test("the list under the field is the backend's own reading", () => {
+  const page = form();
+  food(page);
+  type(page, 0, "chick");
+  page.publish("scufris://look", {
+    date: "2026-08-28",
+    choices: [...CHICKEN, { id: "oats:g" }, "oats"],
+  });
+  const list = offered(page, 0);
+  assert.ok(list !== undefined);
+  // Read the way every reading is read: what is not a candidate is dropped
+  // rather than drawn as one.
+  assert.deepEqual(
+    list.children.map((row) => row.textContent),
+    CHICKEN.map((choice) => choice.label),
+  );
+
+  // A reading with no candidates in it is the backend saying there are none,
+  // not a reading to leave the last answer standing under.
+  page.publish("scufris://look", { date: "2026-08-28" });
+  assert.equal(list.children.length, 0);
+});
+
+test("a candidate taken from the list answers with its id", () => {
+  const page = form();
+  food(page);
+  type(page, 0, "chick");
+  page.publish("scufris://look", { choices: CHICKEN });
+  const list = offered(page, 0);
+  assert.ok(list !== undefined);
+  const row = list.children[1];
+  assert.ok(row !== undefined);
+  row.dispatch("mousedown", { preventDefault: () => {} });
+
+  // What the person reads is the label; what the backend is told is the id.
+  assert.equal(box(page, 0).value, "Chicken breast (g)");
+  assert.equal(list.children.length, 0, "the list stayed open");
+  // On to the amount, which is what the person came to say next.
+  assert.equal(page.activeElement, box(page, 1));
+
+  box(page, 1).value = "150";
+  tap(page, "Enter");
+  assert.deepEqual(said(page.lastCall("form_submit")["answers"]), {
+    name: "chicken breast:g",
+    amount: "150",
+  });
+});
+
+test("typing again drops the candidate that was taken", () => {
+  // A candidate stands only for the words it was taken for. The id would
+  // otherwise outlive them and log a food nobody asked for.
+  const page = form();
+  food(page);
+  type(page, 0, "chick");
+  page.publish("scufris://look", { choices: CHICKEN });
+  const list = offered(page, 0);
+  assert.ok(list !== undefined);
+  const row = list.children[0];
+  assert.ok(row !== undefined);
+  row.dispatch("mousedown", { preventDefault: () => {} });
+
+  type(page, 0, "oats");
+  tap(page, "Enter");
+  assert.deepEqual(said(page.lastCall("form_submit")["answers"]), {
+    name: "oats",
+    amount: "",
+  });
+});
+
+test("the arrow keys walk the list and wrap at either end", () => {
+  const page = form();
+  food(page);
+  type(page, 0, "chick");
+  page.publish("scufris://look", { choices: CHICKEN });
+  const list = offered(page, 0);
+  assert.ok(list !== undefined);
+  const on = (): number[] =>
+    list.children.flatMap((row, index) =>
+      row.classes.has("on") ? [index] : [],
+    );
+
+  assert.deepEqual(on(), [], "a list opens on no row");
+  tap(page, "ArrowDown");
+  assert.deepEqual(on(), [0]);
+  tap(page, "ArrowDown");
+  tap(page, "ArrowDown");
+  assert.deepEqual(on(), [2]);
+  tap(page, "ArrowDown");
+  assert.deepEqual(on(), [0], "the list did not wrap");
+
+  // Up from nothing starts at the end, which is the key pointing that way.
+  page.publish("scufris://look", { choices: CHICKEN });
+  tap(page, "ArrowUp");
+  assert.deepEqual(on(), [2]);
+});
+
+test("enter takes the row the keys are on before it saves", () => {
+  const page = form();
+  food(page);
+  type(page, 0, "chick");
+  page.publish("scufris://look", { choices: CHICKEN });
+  tap(page, "ArrowDown");
+  tap(page, "ArrowDown");
+  tap(page, "Enter");
+  assert.ok(
+    !page.commands().includes("form_submit"),
+    "enter saved with a candidate highlighted",
+  );
+  assert.equal(box(page, 0).value, "Chicken breast (g)");
+
+  // One more Enter is the save. The same key does the same thing to whatever
+  // is in front of the person.
+  box(page, 1).value = "150";
+  tap(page, "Enter");
+  assert.deepEqual(said(page.lastCall("form_submit")["answers"]), {
+    name: "chicken breast:g",
+    amount: "150",
+  });
+});
+
+test("enter with no list open saves, and escape writes nothing", () => {
+  const page = form();
+  food(page);
+  type(page, 0, "oats:g");
+  box(page, 1).value = "80";
+  tap(page, "Enter");
+  assert.deepEqual(said(page.lastCall("form_submit")["answers"]), {
+    name: "oats:g",
+    amount: "80",
+  });
+
+  tap(page, "Escape");
+  assert.ok(page.commands().includes("form_cancel"));
+});
+
+test("a question replacing another leaves nothing of the first behind", () => {
+  // The box is one window, reused. A keystroke still settling from the last
+  // question would ask about a field this one never carried.
+  const page = form();
+  food(page);
+  const field = box(page, 0);
+  field.value = "chick";
+  field.dispatch("input", {});
+  put(page, [asking({ name: "body", label: "Note", lines: 6 })], "Note 1");
+  page.elapse();
+  assert.ok(!page.commands().includes("form_look"), "the old field asked");
+  assert.equal(page.element("fields").children.length, 1);
+
+  box(page, 0).value = "A month view.";
+  tap(page, "Enter");
+  assert.deepEqual(said(page.lastCall("form_submit")["answers"]), {
+    body: "A month view.",
+  });
 });

@@ -362,6 +362,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             form_ready,
             form_submit,
             form_cancel,
+            form_look,
             hud_ready,
             hud_submit,
             hud_close,
@@ -1023,6 +1024,16 @@ fn form_submit(
 #[tauri::command]
 fn form_cancel(widgets: tauri::State<'_, Arc<widgets::Widgets>>) {
     widgets.dropped();
+}
+
+/// Typing in a form field that offers candidates.
+///
+/// The page names a field and hands over what is in it. It cannot name the
+/// action or the panel: both come from the question this process is holding,
+/// which is the same rule the answer follows.
+#[tauri::command]
+fn form_look(widgets: tauri::State<'_, Arc<widgets::Widgets>>, field: String, text: String) {
+    widgets.looking(&field, &text);
 }
 
 /// The pointer arriving over one widget window, or leaving it.

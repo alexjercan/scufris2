@@ -317,6 +317,19 @@ impl Widgets {
         self.sent(surface, action);
     }
 
+    /// Asks the backend what a field could be, while it is being typed.
+    ///
+    /// The same road an answer takes, because it is the same kind of thing: an
+    /// action on the backend of the panel that asked. What comes back is an
+    /// ordinary reading, which reaches the box through [`form::Form::saw`].
+    pub fn looking(&self, field: &str, text: &str) {
+        let Some((surface, action)) = self.form.look(field, text) else {
+            debug!(field, "a form looked up a field nothing asked about");
+            return;
+        };
+        self.sent(surface, action);
+    }
+
     /// The question the box is holding, for a form page that has just loaded.
     pub fn asking(&self) -> Option<form::Ask> {
         self.form.asked()
@@ -694,6 +707,10 @@ impl Widgets {
                     }
                 }
                 Act::Update { surface, data } => {
+                    // The box first. It is asking on this backend's behalf, and
+                    // what it is waiting for is in the same reading the panel
+                    // draws.
+                    self.form.saw(&surface, &data);
                     self.pool.send(&surface, ShellMsg::Update { data });
                 }
                 Act::Life { surface, life } => {

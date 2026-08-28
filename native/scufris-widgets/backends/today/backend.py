@@ -25,19 +25,21 @@ Every line after it is an action:
     {"action": "add", "text": "Call the dentist"}
     {"action": "weight", "value": "81.4"}
     {"action": "note", "heading": "Standup", "body": "..."}
-    {"action": "food", "name": "chicken", "amount": "150"}
-    {"action": "pick", "id": "chicken breast:g"}
+    {"action": "edit", "index": 2, "heading": "Standup", "body": "..."}
+    {"action": "search", "name": "chick"}
+    {"action": "food", "name": "chicken breast:g", "amount": "150"}
 
-The five that write are the panel's ticks and the words the person typed into
+The ones that write are the panel's ticks and the words the person typed into
 the form box the companion raises for them; a panel has no keyboard of its own.
 Nothing is written here either way. `today` is asked to make the change and
 then asked what the day now says, so a task added from a panel and one added in
 the editor arrive by the same road.
 
-Adding a food is two questions because the database answers with more than one
-row for most words. The name and the amount come in together; if the name is
-not enough to name a food, the candidates go out in `choices` for the panel to
-offer and the amount waits here for the `pick` that follows.
+`search` is the odd one: it writes nothing and answers in `choices`, which is
+what fills the list under a field in the form box while it is typed. A food is
+named by database id, which is what a taken candidate answers with; words that
+match exactly one food are taken as that food, so the box is still answerable
+by someone who typed the whole name and never looked at the list.
 
 Each line written is an object carrying `view`, the `date` it is about, the
 real `today`, whether the entry `exists`, and `trouble` - a sentence when
@@ -128,6 +130,19 @@ def quantity(value: object) -> float | None:
     return found if math.isfinite(found) and found > 0 else None
 
 
+def named(found: dict[str, object]) -> str:
+    """What one database row reads as in a list of candidates.
+
+    The unit belongs on the label because it is the difference between two
+    rows that are otherwise the same word - an egg by the piece and an egg by
+    the gram are two foods, and the amount that follows means different things
+    for each.
+    """
+    name = str(found.get("name") or found.get("id") or "")
+    unit = found.get("unit")
+    return f"{name} ({unit})" if isinstance(unit, str) and unit else name
+
+
 def sentence(text: str) -> str:
     """Takes the first line of a program's complaint, without its prefix."""
     line = text.strip().splitlines()[0] if text.strip() else ""
@@ -148,10 +163,8 @@ class Journal:
         self.stamp: float | None = None
         self.built = 0.0
         self.frame: dict[str, object] | None = None
-        #: The foods a search matched, waiting for the panel to name one.
-        self.choices: list[dict[str, object]] = []
-        #: How much of it was asked for, held while that question stands.
-        self.amount: float | None = None
+        #: The foods the last search matched, for the list under a field.
+        self.choices: list[dict[str, str]] = []
 
     def now(self) -> str:
         """The real date, read again each time so a panel left up rolls over."""
@@ -219,11 +232,10 @@ class Journal:
             except ValueError:
                 return
             self.picked = asked
-        # A food waiting to be named was going to be logged on the day that was
-        # showing, so moving the day drops the question rather than answering
-        # it somewhere else.
+        # A search was run for a box open over the day that was showing, so
+        # moving the day drops its answer rather than offering it against
+        # another one.
         self.choices = []
-        self.amount = None
         self.forget()
 
     def forget(self) -> None:
@@ -243,6 +255,14 @@ class Journal:
             return None
         if name == "refresh":
             self.forget()
+            return None
+        if name == "search":
+            # Beside the writes rather than among them: it changes nothing, and
+            # the day it would otherwise read again has not moved.
+            try:
+                self.search(action)
+            except Trouble as trouble:
+                return str(trouble)
             return None
         selected = self.picked or self.now()
         try:
@@ -265,10 +285,10 @@ class Journal:
                 self.weigh(selected, action)
             elif name == "note":
                 self.note(selected, action)
+            elif name == "edit":
+                self.rewrite(selected, action)
             elif name == "food":
                 self.food(selected, action)
-            elif name == "pick":
-                self.take(selected, action)
             else:
                 return None
         except Trouble as trouble:
@@ -305,18 +325,63 @@ class Journal:
             arguments += ["--title", heading.strip()]
         self.on(selected, arguments)
 
-    def food(self, selected: str, action: dict[str, object]) -> None:
-        """Looks one food up, and logs it when the answer is not ambiguous.
+    def rewrite(self, selected: str, action: dict[str, object]) -> None:
+        """Replaces one structured note that is already in the day.
 
-        The name is a query rather than a row: `today macros add` takes a
-        `what 100g,protein,carbs,fat` line, which is a thing to compose rather
-        than to type. The database is what knows the numbers, so it is asked.
+        An empty heading keeps the one the note has - that is `today note
+        edit`'s own rule, and it is the right one: the box opens on the note
+        as it stands, so an empty heading is a note that never had one.
         """
-        # Cleared, and said so now rather than on the way out: what follows may
-        # not get there, and a panel left showing the last search's candidates
-        # would be offering an answer to a question nobody is holding.
+        index = action.get("index")
+        if isinstance(index, bool) or not isinstance(index, int) or index < 1:
+            return
+        body = action.get("body")
+        if not isinstance(body, str) or not body.strip():
+            raise Trouble("a note with nothing in it is a note to remove")
+        arguments = ["note", "edit", str(index), body.strip()]
+        heading = action.get("heading")
+        if isinstance(heading, str) and heading.strip():
+            arguments += ["--heading", heading.strip()]
+        self.on(selected, arguments)
+
+    def search(self, action: dict[str, object]) -> None:
+        """Answers what the database has for the words typed so far.
+
+        The only action here that changes nothing. What it produces is the list
+        under a field in the form box, so it holds the candidates on the frame
+        and lets the next reading carry them - the same road every other answer
+        takes.
+        """
         self.choices = []
-        self.amount = None
+        name = action.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return
+        self.choices = [
+            {"id": str(found.get("id")), "label": named(found)}
+            for found in self.matches(name)[:CHOICES]
+        ]
+
+    def matches(self, name: str) -> list[dict[str, object]]:
+        """The database rows for one query, in the order `today` ranked them."""
+        found = self.run(["macros", "query", name.strip(), "--json"])
+        results = found.get("results") if isinstance(found, dict) else None
+        if not isinstance(results, list):
+            return []
+        return [row for row in results if isinstance(row, dict)]
+
+    def food(self, selected: str, action: dict[str, object]) -> None:
+        """Logs one food, by database id or by words that name exactly one.
+
+        The name is a database id rather than a row: `today macros add` takes a
+        `what 100g,protein,carbs,fat` line, which is a thing to compose rather
+        than to type, and the database is what knows the numbers.
+
+        A taken candidate answers with an id and goes straight through. Words
+        the person typed and never picked from are looked up, and a search that
+        answers with more than one row is said out loud rather than guessed at:
+        the list was under the field the whole time.
+        """
+        self.choices = []
         self.forget()
         name = action.get("name")
         if not isinstance(name, str) or not name.strip():
@@ -324,32 +389,17 @@ class Journal:
         amount = quantity(action.get("amount"))
         if amount is None:
             raise Trouble("an amount is a number of grams or pieces")
-        found = self.run(["macros", "query", name.strip(), "--json"])
-        results = found.get("results") if isinstance(found, dict) else None
-        results = results if isinstance(results, list) else []
-        if not results:
+        found = self.matches(name)
+        wanted = name.strip().lower()
+        exact = [row for row in found if str(row.get("id")).lower() == wanted]
+        if exact:
+            self.log(selected, str(exact[0].get("id")), amount)
+        elif len(found) == 1:
+            self.log(selected, str(found[0].get("id")), amount)
+        elif not found:
             raise Trouble(f"no food matching {name.strip()}")
-        if len(results) == 1:
-            self.log(selected, str(results[0].get("id")), amount)
-            return
-        # More than one, so the person names it. The amount waits here rather
-        # than being asked for again: they already answered that question.
-        self.choices = results[:CHOICES]
-        self.amount = amount
-
-    def take(self, selected: str, action: dict[str, object]) -> None:
-        """Logs the food the panel named, or drops the question."""
-        identifier = action.get("id")
-        amount = self.amount
-        self.choices = []
-        self.amount = None
-        self.forget()
-        if not isinstance(identifier, str) or not identifier:
-            # The panel's way of saying none of these.
-            return
-        if amount is None:
-            raise Trouble("that search is over")
-        self.log(selected, identifier, amount)
+        else:
+            raise Trouble(f"{len(found)} foods match {name.strip()} - pick one")
 
     def log(self, selected: str, identifier: str, amount: float) -> None:
         """Scales one database food to an amount and writes the row."""
@@ -368,14 +418,19 @@ class Journal:
             or said.get("today") != self.now()
             or time.monotonic() - self.built > FLOOR
         )
-        if not self.moved(selected) and not fresh:
-            return dict(said)
-        self.built = time.monotonic()
-        try:
-            self.frame = self.build(view, selected)
-        except Trouble as trouble:
-            self.frame = self.bare(view, selected, str(trouble))
-        return dict(self.frame)
+        if self.moved(selected) or fresh:
+            self.built = time.monotonic()
+            try:
+                self.frame = self.build(view, selected)
+            except Trouble as trouble:
+                self.frame = self.bare(view, selected, str(trouble))
+        reading = dict(self.frame or {})
+        if view == "macros":
+            # Laid on the reading rather than built into it. A search is not
+            # part of the day, and one that made the day stale would cost a
+            # `show` and a month of weights per keystroke.
+            reading["choices"] = self.choices
+        return reading
 
     def bare(self, view: str, selected: str, trouble: str | None) -> dict[str, object]:
         """What every reading says, whether or not the day could be read."""
@@ -438,9 +493,6 @@ class Journal:
             "weight": day.get("weight"),
             "change": trend.get("change"),
             "recent": trend.get("recent") or [],
-            # A question standing rather than an answer: the words matched more
-            # than one food and the panel is where the person names which.
-            "choices": self.choices,
         }
 
 

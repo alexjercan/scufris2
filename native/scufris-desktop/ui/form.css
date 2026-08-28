@@ -126,6 +126,42 @@ body {
   background: rgba(149, 169, 159, 0.26);
 }
 
+/* ROW tall each, ROWS of them, LIST_GAP over the first. The room is kept
+ * whether or not there is anything in it: the window is sized before it maps
+ * and cannot be resized once it is up, so a list that made the box taller would
+ * be a list the frame cut off. */
+.choices {
+  flex: 0 0 auto;
+  margin-top: 6px;
+  height: 95px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.choice {
+  flex: 0 0 auto;
+  height: 19px;
+  line-height: 19px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--quartz);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.choice:hover,
+.choice.on {
+  background: rgba(149, 169, 159, 0.16);
+  color: var(--fg1);
+}
+
 /* KEYS, with KEYS_GAP over it. */
 .keys {
   flex: 0 0 auto;

@@ -234,6 +234,21 @@ refused the same way and lands on the same badge. A retired surface forgets its
 pending question with the rest of itself: an answer that outlived the panel that
 asked would have nowhere to go.
 
+A typeahead takes the same two roads rather than a third. The page sends a field
+name and what is in it to `form_look`; `Ask::look` builds the question out of
+that field's own declared `suggest` object, and it goes to the backend through
+`Cmd::Sent` like any other action. The answer comes back as an ordinary reading,
+and `Form::saw` hands it to the box while the box is up for that surface -
+readings from any other panel are another day's news. So the page never learns
+what it asked, `suggest` reaches it as a bare `true`, and a field's list has no
+correlation ids, no timeouts and no state to lose.
+
+The height is arithmetic, which is why a field that offers candidates reserves
+room for the list whether or not anything is in it yet. The window is sized
+before it maps, because a window manager places a floating window when it maps
+it, and equal minimum and maximum hints are what make i3 float this one at all.
+A box that grew as the person typed would move the field they were typing in.
+
 ## Warm shells
 
 Building a webview window and waiting for its page to load takes long enough to
@@ -301,6 +316,21 @@ The companion asks the person in a window of its own and, if they answer, sends
 the action with each field's name carrying what was typed under it. Nothing
 comes back to the widget: the answer arrives as the next reading, down the road
 every other change already takes. See [The form window](#the-form-window).
+
+A one-line field may also carry `suggest`, an action of its own, and the box
+then offers a list under it:
+
+```ts
+{ name: "name", label: "Food", suggest: { action: "search" } }
+```
+
+Each pause in the typing sends that action with the field's name carrying what
+is in it, exactly as the answer is sent. The backend answers in its next
+reading, under `choices`, as `{ id, label }` rows - the same readings the panel
+gets, so a typeahead needs no second road with its own failures and timeouts. A
+candidate taken from the list answers with its `id` rather than with the words
+that were read. A block field may not carry one: prose has no candidates, and an
+ask that asked for both is refused rather than quietly drawn without the list.
 
 The widget draws its first frame from `ctx.spawn`, inside `mount`. The shell
 never hands that payload to `update`, because the two are not the same shape:
@@ -461,14 +491,27 @@ through `ctx.ask` and land as ordinary actions. Every one of them uses the day
 the panel is showing, not today, because the day on screen is the day the person
 means.
 
-Logging a food is two questions in one box and, sometimes, a third on the panel.
-`today macros query` is asked for the name; one match is calculated and added
-straight away, and several are handed to the panel as `choices` with the amount
-held. The panel offers them as clicks - it has the room, and the person already
-answered the amount once. A day change or a second attempt drops the held
-question rather than logging against a name nobody is looking at any more.
-`today macros calculate` resolves its database from `MACROS_DATABASE`, which the
-Home Manager module writes from `programs.scufris.desktop.macrosDatabase`.
+Logging a food is two questions in one box, and the first of them offers the
+database as it is typed. The `name` field carries a `suggest` action, so every
+pause in the typing sends `today macros query` and the rows come back as
+`choices` on the next macros reading. Taking one answers with its database id;
+words nobody took are looked up on the way out, and a name that matches exactly
+one row is that row. Anything else is a sentence beside the day - the list was
+under the field the whole time, and guessing which of three chickens was meant
+is worse than saying there were three.
+
+A search writes nothing and reads no day: it is handled beside `select` and
+`refresh` rather than among the writes, and `choices` is laid onto the reading
+rather than built into it. Otherwise one keystroke would cost a `show` and a
+month of weights. `today macros calculate` resolves its database from
+`MACROS_DATABASE`, which the Home Manager module writes from
+`programs.scufris.desktop.macrosDatabase`.
+
+A note on screen is the way back into itself. Clicking one opens the same two
+fields with what it says already in them and sends `edit`, which runs
+`today note edit` for that index. An empty heading keeps the one the note has,
+which is `today`'s own rule and the right one: the box opened on the note as it
+stands, so a heading that comes back empty is a note that never had one.
 
 The keyboard is still never the panel's. A click has never needed focus, and a
 widget shell is built unfocusable for a specific reason (see

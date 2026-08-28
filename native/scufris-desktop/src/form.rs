@@ -50,6 +50,14 @@ pub const LABEL: &str = "form";
 /// The question, pushed when one is asked.
 pub const ASK_EVENT: &str = "scufris://ask";
 
+/// A reading from the backend the box is asking on behalf of.
+///
+/// The same readings the panel gets. A typeahead is a question the backend
+/// answers, and it answers in the one way it can answer anything - so the box
+/// listens to the panel's own feed rather than opening a second road that
+/// would need its own answers, its own failures and its own timeouts.
+pub const LOOK_EVENT: &str = "scufris://look";
+
 /// Box width in logical pixels. `form.css` lays out to exactly this.
 ///
 /// Narrower than the transcript box, which holds a paragraph somebody spoke.
@@ -82,6 +90,19 @@ const BOX: f64 = 14.0;
 /// The gap between two fields.
 const FIELD_GAP: f64 = 10.0;
 
+/// One row of a field's candidate list, the most rows shown, and the gap over
+/// them.
+///
+/// The room is kept whether or not there is anything in it. The box is its own
+/// window and cannot draw past its edge, so a list has to be inside the height
+/// the window was given - and the height is given before the window maps,
+/// because a window manager places a floating window when it maps it. Growing
+/// the box under the person's hands as they type would move the field they are
+/// typing in.
+const ROW: f64 = 19.0;
+const ROWS: f64 = 5.0;
+const LIST_GAP: f64 = 6.0;
+
 /// The keys line at the foot, and the gap over it.
 const KEYS_GAP: f64 = 10.0;
 const KEYS: f64 = 14.0;
@@ -102,7 +123,7 @@ const WORDS: usize = 64;
 static WINDOW: AtomicU32 = AtomicU32::new(0);
 
 /// One field on the form, as the page draws it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Field {
     /// The key the answer arrives under.
     pub name: String,
@@ -114,6 +135,22 @@ pub struct Field {
     pub lines: u32,
     /// Grey words in an empty field.
     pub hint: String,
+    /// The action sent to the backend while this field is typed.
+    ///
+    /// The page is told only that there is one. What it carries is between the
+    /// widget and its backend, exactly as [`Ask::action`] is: the page hands
+    /// back words and never keys, so a page cannot turn a typeahead into a way
+    /// to send whatever it likes.
+    #[serde(serialize_with = "offered")]
+    pub suggest: Option<Map<String, Value>>,
+}
+
+/// Tells the page that a field offers candidates, and nothing more about it.
+fn offered<S: serde::Serializer>(
+    suggest: &Option<Map<String, Value>>,
+    out: S,
+) -> Result<S::Ok, S::Error> {
+    out.serialize_bool(suggest.is_some())
 }
 
 /// One question, as a widget asked it.
@@ -177,8 +214,24 @@ impl Ask {
                 total += FIELD_GAP;
             }
             total += NAME + NAME_GAP + f64::from(field.lines) * LINE + BOX;
+            if field.suggest.is_some() {
+                total += LIST_GAP + ROW * ROWS;
+            }
         }
         total.min(CEILING)
+    }
+
+    /// The action that asks the backend what a field could be.
+    ///
+    /// Nothing for a field that offers no candidates, and nothing for one the
+    /// page named that this ask does not carry: the page is answering about a
+    /// question this process is holding, and a name it made up is a name that
+    /// question never asked about.
+    pub fn look(&self, field: &str, text: &str) -> Option<Value> {
+        let asked = self.fields.iter().find(|one| one.name == field)?;
+        let mut action = asked.suggest.clone()?;
+        action.insert(asked.name.clone(), Value::String(tidy(text, asked.lines)));
+        Some(Value::Object(action))
     }
 
     /// Lays the answers into the action the widget sent, and nothing else.
@@ -215,6 +268,18 @@ fn field(value: &Value) -> Result<Field, String> {
         Some(Value::Number(lines)) => lines.as_u64().unwrap_or(1).clamp(1, u64::from(LINES)) as u32,
         _ => 1,
     };
+    let suggest = match asked.get("suggest") {
+        // A block field is prose, and prose has no candidates. Refused rather
+        // than ignored: a widget that asked for both wrote one of them by
+        // mistake, and a list that silently never appears is the harder half to
+        // find out about.
+        Some(Value::Object(_)) if lines > 1 => {
+            return Err("a field with candidates is one line".into());
+        }
+        Some(Value::Object(suggest)) => Some(suggest.clone()),
+        Some(_) => return Err("a field's suggest is an action object".into()),
+        None => None,
+    };
     Ok(Field {
         name: name.clone(),
         label,
@@ -227,6 +292,7 @@ fn field(value: &Value) -> Result<Field, String> {
             Some(Value::String(hint)) => clip(hint),
             _ => String::new(),
         },
+        suggest,
     })
 }
 
@@ -348,6 +414,36 @@ impl Form {
     /// The question the box is holding, for a page that has just loaded.
     pub fn asked(&self) -> Option<Ask> {
         self.held().as_ref().map(|pending| pending.ask.clone())
+    }
+
+    /// Says where a look at what has been typed goes, without moving the box.
+    ///
+    /// The question stays on: this is a keystroke, not an answer. What comes
+    /// back arrives as an ordinary reading, and [`Form::saw`] is what puts it
+    /// in front of the person.
+    pub fn look(&self, field: &str, text: &str) -> Option<(String, Value)> {
+        let pending = self.held();
+        let held = pending.as_ref()?;
+        let action = held.ask.look(field, text)?;
+        Some((held.surface.clone(), action))
+    }
+
+    /// Hands the box a reading from the backend it is asking on behalf of.
+    ///
+    /// Only that backend's, and only while the box is up. A reading from
+    /// another panel is another day's news, and one arriving after the box went
+    /// down has nowhere to be drawn.
+    pub fn saw(&self, surface: &str, data: &Value) {
+        let mine = self
+            .held()
+            .as_ref()
+            .is_some_and(|pending| pending.surface == surface);
+        if !mine || !up(&self.app) {
+            return;
+        }
+        if let Err(error) = self.app.emit_to(LABEL, LOOK_EVENT, data) {
+            debug!("the form did not take a reading: {error}");
+        }
     }
 
     /// Takes the answers, puts the box away, and says where they go.
@@ -628,6 +724,78 @@ mod tests {
         ))
         .expect("an ask");
         assert_eq!(two.height(), 273.0);
+    }
+
+    /// The list has to fit inside a window that was sized before it mapped, so
+    /// a field that offers candidates is a taller box whether or not anything
+    /// has been typed into it yet.
+    #[test]
+    fn a_field_that_offers_candidates_keeps_the_room_for_them() {
+        let plain = Ask::parse(asking(json!([{"name": "name"}]))).expect("an ask");
+        let offering = Ask::parse(asking(
+            json!([{"name": "name", "suggest": {"action": "search"}}]),
+        ))
+        .expect("an ask");
+        assert_eq!(offering.height() - plain.height(), LIST_GAP + ROW * ROWS);
+    }
+
+    /// What the field asks with is between the widget and its backend, exactly
+    /// as the ask's own action is. The page is told there is a list and never
+    /// what fills it, so a page cannot turn a typeahead into a way to send the
+    /// backend whatever it likes.
+    #[test]
+    fn the_page_is_told_a_field_offers_candidates_and_nothing_else() {
+        let ask = Ask::parse(asking(json!([
+            {"name": "name", "suggest": {"action": "search", "table": "foods"}},
+            {"name": "amount"},
+        ])))
+        .expect("an ask");
+        let drawn = serde_json::to_value(&ask).expect("an ask the page can read");
+        assert_eq!(drawn["fields"][0]["suggest"], json!(true));
+        assert_eq!(drawn["fields"][1]["suggest"], json!(false));
+        assert_eq!(drawn.get("action"), None);
+        assert!(!drawn.to_string().contains("foods"));
+    }
+
+    /// Refused rather than ignored: a widget that asked for a block and a list
+    /// wrote one of them by mistake, and a list that silently never appears is
+    /// the harder half to find out about.
+    #[test]
+    fn a_suggest_that_is_not_an_action_on_one_line_is_refused() {
+        for (asked, why) in [
+            (
+                json!([{"name": "body", "lines": 6, "suggest": {"action": "search"}}]),
+                "a block field with a list",
+            ),
+            (
+                json!([{"name": "name", "suggest": "search"}]),
+                "a suggest that is not an object",
+            ),
+            (
+                json!([{"name": "name", "suggest": ["search"]}]),
+                "a suggest that is an array",
+            ),
+        ] {
+            assert!(Ask::parse(asking(asked)).is_err(), "{why} was accepted");
+        }
+    }
+
+    /// The page sends a field name and what is in it. The action is built here,
+    /// out of the question this process is holding, so the words are the only
+    /// thing the page decides.
+    #[test]
+    fn a_look_is_built_from_the_field_the_widget_declared() {
+        let ask = Ask::parse(asking(json!([
+            {"name": "name", "suggest": {"action": "search"}},
+            {"name": "amount"},
+        ])))
+        .expect("an ask");
+        assert_eq!(
+            ask.look("name", "  chick  en "),
+            Some(json!({"action": "search", "name": "chick en"}))
+        );
+        assert_eq!(ask.look("amount", "80"), None, "a field with no list");
+        assert_eq!(ask.look("den", "/etc"), None, "a field nobody asked about");
     }
 
     /// The page is handed labels and hands back words. What those words mean

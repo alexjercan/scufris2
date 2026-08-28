@@ -4,6 +4,12 @@
 // them. It never learns what they mean: a widget said what to ask and what to
 // do with the answer, the host is holding that, and this page is the field.
 //
+// A field may also offer candidates. The page sends what has been typed and the
+// backend answers in its next reading; the list under the field is that answer.
+// The page never learns what it asked - the host builds the question from the
+// field's own name - and a field picked from answers with the candidate's id
+// rather than the words the person read.
+//
 // The keys are the same bargain the transcript box and the conversation window
 // make. Enter saves, Shift+Enter is a newline, Escape closes with nothing
 // written. One rule in every window of this companion that takes words.
@@ -51,10 +57,102 @@
   const LINE = 20;
   const BOX = 14;
 
-  /** The fields on screen, in the order they were asked. */
-  let asked: HTMLTextAreaElement[] = [];
+  /** How long a field waits after a keystroke before asking.
+   *
+   * A backend answering a typeahead runs a command per question, so every
+   * keystroke asking would be a process per keystroke. Short enough that the
+   * list arrives while the person is still looking at the field. */
+  const SETTLE = 120;
 
-  const draw = (field: FormField): HTMLTextAreaElement => {
+  /** One field on screen, and the candidate it has been given. */
+  interface Asked {
+    name: string;
+    input: HTMLTextAreaElement;
+    /** The list under it, or nothing for a field with no candidates. */
+    list: HTMLElement | undefined;
+    /** What a taken candidate answers with, until the field is typed in. */
+    picked: string | undefined;
+    /** Which row the keys are on, or -1 for none. */
+    row: number;
+    /** What is in the list now. */
+    choices: FormChoice[];
+  }
+
+  /** The fields on screen, in the order they were asked. */
+  let asked: Asked[] = [];
+
+  /** The keystroke waiting to be asked about, if any. */
+  let settling: number | undefined;
+
+  /** The field the person is in, or the first that offers candidates. */
+  const current = (): Asked | undefined => {
+    const focused = asked.find((one) => one.input === document.activeElement);
+    if (focused !== undefined) return focused;
+    return asked.find((one) => one.list !== undefined);
+  };
+
+  const put = (one: Asked, choices: FormChoice[]): void => {
+    if (one.list === undefined) return;
+    one.choices = choices;
+    one.row = -1;
+    one.list.replaceChildren();
+    for (const [index, choice] of choices.entries()) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "choice";
+      row.textContent = choice.label;
+      // The pointer is the plain way in and the keys are the fast one. Mousedown
+      // rather than click: a click would first take the keyboard off the field,
+      // and the field is where the person goes back to.
+      row.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        take(one, index);
+      });
+      one.list.append(row);
+    }
+  };
+
+  const mark = (one: Asked): void => {
+    if (one.list === undefined) return;
+    for (const [index, row] of [...one.list.children].entries()) {
+      row.classList.toggle("on", index === one.row);
+    }
+    const row = one.list.children[one.row];
+    if (row !== undefined) row.scrollIntoView({ block: "nearest" });
+  };
+
+  const take = (one: Asked, index: number): void => {
+    const choice = one.choices[index];
+    if (choice === undefined) return;
+    one.picked = choice.id;
+    one.input.value = choice.label;
+    put(one, []);
+    // On to the next field, because a taken candidate is a finished answer and
+    // the amount is what the person came to say next. The last field keeps the
+    // keys: there is nowhere after it but Enter.
+    const next = asked[asked.indexOf(one) + 1];
+    if (next === undefined) one.input.focus();
+    else next.input.focus();
+  };
+
+  const looked = (one: Asked): void => {
+    if (one.list === undefined) return;
+    // A candidate stands only for the words it was taken for. Typing again is
+    // the person saying those were not the words.
+    one.picked = undefined;
+    const text = one.input.value.trim();
+    if (settling !== undefined) window.clearTimeout(settling);
+    if (text === "") {
+      put(one, []);
+      return;
+    }
+    settling = window.setTimeout(() => {
+      settling = undefined;
+      void invoke("form_look", { field: one.name, text });
+    }, SETTLE);
+  };
+
+  const draw = (field: FormField): Asked => {
     const block = document.createElement("div");
     block.className = "field";
 
@@ -76,26 +174,52 @@
     input.spellcheck = false;
 
     block.append(name, input);
+
+    let list: HTMLElement | undefined;
+    if (field.suggest) {
+      list = document.createElement("div");
+      list.className = "choices";
+      block.append(list);
+    }
+
     fields.append(block);
-    return input;
+    const one: Asked = {
+      name: field.name,
+      input,
+      list,
+      picked: undefined,
+      row: -1,
+      choices: [],
+    };
+    if (list !== undefined) {
+      input.addEventListener("input", () => {
+        looked(one);
+      });
+    }
+    return one;
   };
 
   const show = (ask: FormAsk): void => {
     title.textContent = ask.title;
     fields.replaceChildren();
+    if (settling !== undefined) window.clearTimeout(settling);
+    settling = undefined;
     asked = ask.fields.map(draw);
     const first = asked[0];
     if (first === undefined) return;
-    first.focus();
+    first.input.focus();
     // A field that arrived with something in it is a field the person is
     // correcting, so the old value is selected and typing replaces it. The
     // weight tick is the reason: it opens on the weight already logged.
-    if (first.value !== "") first.setSelectionRange(0, first.value.length);
+    const value = first.input.value;
+    if (value !== "") first.input.setSelectionRange(0, value.length);
   };
 
   const save = (): void => {
     const answers: Record<string, string> = {};
-    for (const input of asked) answers[input.name] = input.value;
+    // A picked candidate answers with its id. The words in the field are what
+    // the person read, and the backend was never told them.
+    for (const one of asked) answers[one.name] = one.picked ?? one.input.value;
     void invoke("form_submit", { answers });
   };
 
@@ -105,7 +229,33 @@
       void invoke("form_cancel");
       return;
     }
+    const one = current();
+    const open = one !== undefined && one.choices.length > 0;
+    if (open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      event.preventDefault();
+      const down = event.key === "ArrowDown";
+      const count = one.choices.length;
+      // Wraps, and starts at whichever end the key was pointing at. There is no
+      // row to land back on once a list is open: the field is still there to
+      // type in, and typing is what closes it.
+      one.row =
+        one.row < 0
+          ? down
+            ? 0
+            : count - 1
+          : (one.row + (down ? 1 : -1) + count) % count;
+      mark(one);
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey) {
+      // A highlighted candidate is what Enter means while a list is open. It is
+      // one more Enter to save, which is the same key doing the same thing to
+      // whatever is in front of the person.
+      if (open && one.row >= 0) {
+        event.preventDefault();
+        take(one, one.row);
+        return;
+      }
       // Shift+Enter is the newline, in a block field and in a one-line one
       // alike. The host flattens a one-line answer on the way out, so a
       // newline that gets in never reaches the journal.
@@ -120,12 +270,35 @@
   window.addEventListener("focus", () => {
     const first = asked[0];
     if (first === undefined) return;
-    if (asked.includes(document.activeElement as HTMLTextAreaElement)) return;
-    first.focus();
+    if (asked.some((one) => one.input === document.activeElement)) return;
+    first.input.focus();
   });
 
   void listen("scufris://ask", (event) => {
     show(event.payload as FormAsk);
+  });
+
+  const choices = (data: unknown): FormChoice[] => {
+    if (typeof data !== "object" || data === null) return [];
+    const held = (data as { choices?: unknown }).choices;
+    if (!Array.isArray(held)) return [];
+    return held.flatMap((item): FormChoice[] => {
+      if (typeof item !== "object" || item === null) return [];
+      const choice = item as { id?: unknown; label?: unknown };
+      if (typeof choice.id !== "string") return [];
+      if (typeof choice.label !== "string") return [];
+      return [{ id: choice.id, label: choice.label }];
+    });
+  };
+
+  // Every reading from the backend the box is asking on behalf of, which is
+  // where a typeahead's answer arrives. A reading with no candidates in it is
+  // the backend saying there are none, so the list is emptied rather than left
+  // showing the last question's answer.
+  void listen("scufris://look", (event) => {
+    const one = current();
+    if (one === undefined || one.list === undefined) return;
+    put(one, choices(event.payload));
   });
 
   // The window is built at startup and the question is pushed just before it

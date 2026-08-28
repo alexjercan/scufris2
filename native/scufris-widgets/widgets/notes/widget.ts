@@ -8,6 +8,11 @@
 //
 // A note keeps its own line breaks. The block field is what makes that possible
 // from here rather than only from `today note add`.
+//
+// A note on screen is also the way back into itself: clicking one opens the
+// same two fields with what it says already in them, and what comes back
+// replaces it. So the panel is where a note is read and where it is corrected,
+// which is the two things a person does with a note they wrote that morning.
 
 const MONTHS = [
   "January",
@@ -182,7 +187,19 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
       }
       list.replaceChildren();
       for (const note of notes) {
-        const block = document.createElement("div");
+        // A button, because a note is the way back into itself: clicking one
+        // opens the same two fields it was written with, filled in. The chrome
+        // is stripped rather than styled - a note reads as a note, and the
+        // pointer is what says it can be changed.
+        const block = document.createElement("button");
+        block.type = "button";
+        block.title = "Rewrite this note";
+        block.style.font = "inherit";
+        block.style.background = "transparent";
+        block.style.border = "none";
+        block.style.padding = "0";
+        block.style.textAlign = "left";
+        block.style.cursor = "pointer";
         block.style.display = "flex";
         block.style.flexDirection = "column";
         block.style.gap = "3px";
@@ -199,6 +216,22 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
         body.style.whiteSpace = "pre-wrap";
         body.style.overflowWrap = "anywhere";
         body.textContent = note.body;
+
+        block.addEventListener("click", () => {
+          ctx.ask({
+            title: `Note ${String(note.index)}`,
+            fields: [
+              {
+                name: "heading",
+                label: "Heading",
+                value: note.heading,
+                hint: "what it is about",
+              },
+              { name: "body", label: "Note", value: note.body, lines: 6 },
+            ],
+            action: { action: "edit", index: note.index },
+          });
+        });
 
         block.append(heading, body);
         list.append(block);

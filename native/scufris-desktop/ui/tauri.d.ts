@@ -61,6 +61,15 @@ interface FormField {
   value: string;
   lines: number;
   hint: string;
+  /** Whether the field offers candidates. What it asks for them with stays
+   * with the host: the page sends a field name and what is in it. */
+  suggest: boolean;
+}
+
+/** One candidate a backend offered, read out of an ordinary reading. */
+interface FormChoice {
+  id: string;
+  label: string;
 }
 
 interface FormAsk {

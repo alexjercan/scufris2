@@ -11,6 +11,18 @@
 // a hidden page, so anything that ticks in here stops when the window is put
 // away and lies about the time when it comes back.
 
+/** One candidate a backend offered for what has been typed so far.
+ *
+ * Read out of `choices` in an ordinary reading. A backend that offers none, or
+ * a widget that asked nothing, simply leaves the key off.
+ */
+interface WidgetChoice {
+  /** What the field answers with when this one is taken. */
+  id: string;
+  /** What the person reads in the list. */
+  label: string;
+}
+
 /** One field on a form a widget asked for. */
 interface WidgetField {
   /** The key the answer arrives under, beside the action's own keys. */
@@ -23,6 +35,18 @@ interface WidgetField {
   lines?: number;
   /** Grey words in an empty field. */
   hint?: string;
+  /**
+   * Ask the backend what this field could be, as it is typed.
+   *
+   * The action sent while typing, with the field's own text laid in under its
+   * name - the same shape as `action`, and for the same reason: the page
+   * supplies words, never keys. The backend answers in its next reading, under
+   * `choices`, and the person picks one from a list under the field. A field
+   * that is picked from answers with the choice's `id` rather than its label.
+   *
+   * One line only. A block is prose, and prose has no candidates.
+   */
+  suggest?: Record<string, unknown>;
 }
 
 /** A question a widget cannot ask on its own page. */

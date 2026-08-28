@@ -291,12 +291,14 @@ what makes a habit ticked here and one ticked in your editor the same habit.
 - **Tick** a habit or a task on the agenda to mark it done.
 - **Add** a task with the `+` beside the day's tasks.
 - **Log** a weight by clicking the number on the macros panel.
-- **Log** a food with the `+` beside the day's food. You give a name and an
-  amount in grams. One matching food is logged; several are offered on the
-  panel as a short list to click, because there is more room there than in the
-  box.
+- **Log** a food with the `+` beside the day's food. Start typing the name and
+  the box offers what your database has: click one or walk the list with the
+  arrow keys and take it with Enter, then give the amount. A name you type in
+  full works too, as long as it is one food and not three.
 - **Write** a note with the `+` on the notes panel. The heading is optional and
   the body keeps the line breaks you type into it.
+- **Rewrite** a note by clicking it. The box opens on what it says now; leave
+  the heading alone to keep the one it has.
 
 A panel still never takes the keyboard. The ones that need words open a small
 box that does, in the middle of the panel that asked. Enter sends it, Escape

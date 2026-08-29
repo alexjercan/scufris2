@@ -1,8 +1,8 @@
 # Give an unattended job an ambient signal again
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 40
-- TAGS: desktop,service,protocol
+- TAGS: desktop, service, protocol
 
 ## Source
 
@@ -65,3 +65,37 @@ detail.
 - A `Companion` test that a raised notice shows `attention` and that
   clearing it returns the tray to the assistant state.
 - An end-to-end check that a blocked job reaches the tray.
+
+## Decision
+
+Notices are tray-only. Their detail goes to the tray tooltip and status item,
+not to the pill or conversation window. The wake response already puts the
+same event in the conversation.
+
+Local recording, transcription, and companion failures keep precedence. Among
+open job notices, `error` wins over `attention`. A service `welcome` starts a
+complete notice replay, so the companion first clears its old local set.
+
+## Delivered
+
+- Protocol v3 carries identified `notice` updates with `attention`, `error`, or
+  `clear`.
+- The service keeps the open set by job identifier and replays it to a frontend
+  that connects.
+- Workflow events restore the prior mapping: `blocked` raises attention,
+  `failed` raises error, and ordinary progress or completion clears that job.
+- The desktop link and companion compose notices into an independent tray state
+  and detail.
+
+## Verification
+
+- `npm run typecheck`: passed.
+- Focused TypeScript agent and service tests: 26 passed.
+- `cargo test --workspace`: 389 passed.
+- Focused Prettier check and `git diff --check`: passed.
+- Full `npm run check`: project tests reached 90 passed and one unrelated
+  environment failure because the installed Pi store path lacks
+  `dist/modes/interactive/theme/dark.json`.
+- Full `npm run format:check`: blocked only by the unrelated untracked
+  `tasks/20260828-232631/TASK.md`; every file changed for this task passes the
+  focused Prettier check.

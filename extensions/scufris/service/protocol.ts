@@ -50,6 +50,9 @@ export const MAX_WIDGET_DATA_BYTES = 8 * 1024;
  */
 export const MAX_TRANSCRIPT_TEXT_BYTES = 4 * 1024;
 
+/** Maximum accepted size of one human-readable protocol detail. */
+export const MAX_DETAIL_BYTES = 4 * 1024;
+
 const identifierPattern = /^[A-Za-z0-9._-]+$/;
 
 /**
@@ -123,6 +126,13 @@ export type ClientMessage =
   | { v: 3; type: "hello"; role: "agent" }
   | { v: 3; type: "said"; text: string }
   | { v: 3; type: "speak"; text: string }
+  | {
+      v: 3;
+      type: "notice";
+      id: string;
+      state: "attention" | "error" | "clear";
+      detail: string;
+    }
   | { v: 3; type: "widget"; command: WidgetCommand }
   | { v: 3; type: "conversation"; id: string; up: boolean };
 
@@ -181,6 +191,15 @@ export function encodeClientMessage(message: ClientMessage): string {
         `${message.type} requires bounded text`,
         "invalid_text",
       );
+    }
+  }
+  if (message.type === "notice") {
+    identifier(message.id, "notice id");
+    if (
+      !["attention", "error", "clear"].includes(message.state) ||
+      Buffer.byteLength(message.detail, "utf8") > MAX_DETAIL_BYTES
+    ) {
+      throw new ProtocolError("notice is invalid", "invalid_notice");
     }
   }
   if (message.type === "widget") {

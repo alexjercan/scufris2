@@ -22,6 +22,7 @@ import {
 import service, {
   resolveSocketPath,
 } from "../extensions/scufris/service/index.ts";
+import { ATTENTION_NOTICE_EVENT } from "../extensions/scufris/shared/attention-notice.ts";
 import { SPOKEN_EVENT } from "../extensions/scufris/shared/spoken.ts";
 import { DESKTOP_CONTROL_EVENT } from "../extensions/scufris/service/client.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -107,6 +108,17 @@ test("an agent encodes only what an agent may say", () => {
   assert.equal(
     encodeClientMessage({ v: 3, type: "said", text: "the harness is green" }),
     '{"v":3,"type":"said","text":"the harness is green"}\n',
+  );
+  assert.equal(
+    encodeClientMessage({
+      v: 3,
+      type: "notice",
+      id: "abcdef123456",
+      state: "attention",
+      detail: "Job abcdef123456 is blocked",
+    }),
+    '{"v":3,"type":"notice","id":"abcdef123456","state":"attention",' +
+      '"detail":"Job abcdef123456 is blocked"}\n',
   );
   assert.equal(
     encodeClientMessage({
@@ -295,9 +307,16 @@ test("the client says hello as an agent and carries what it is told to say", asy
 
     client.said("the harness is green");
     client.speak("the harness is green");
-    assert.deepEqual((await listening.until(3)).slice(1), [
+    client.notice({
+      id: "abcdef123456",
+      state: "attention",
+      detail: "Job abcdef123456 is blocked",
+    });
+    assert.deepEqual((await listening.until(4)).slice(1), [
       '{"v":3,"type":"said","text":"the harness is green"}',
       '{"v":3,"type":"speak","text":"the harness is green"}',
+      '{"v":3,"type":"notice","id":"abcdef123456","state":"attention",' +
+        '"detail":"Job abcdef123456 is blocked"}',
     ]);
   } finally {
     client.stop();
@@ -535,9 +554,16 @@ test("only the foreground Scufris connects, and it carries what was said", async
 
     api.events.emit(SPOKEN_EVENT, { said: "the harness is green" });
     api.events.emit(SPOKEN_EVENT, { speak: "the harness is green" });
-    assert.deepEqual((await listening.until(3)).slice(1), [
+    api.events.emit(ATTENTION_NOTICE_EVENT, {
+      id: "abcdef123456",
+      state: "attention",
+      detail: "Job abcdef123456 is blocked",
+    });
+    assert.deepEqual((await listening.until(4)).slice(1), [
       '{"v":3,"type":"said","text":"the harness is green"}',
       '{"v":3,"type":"speak","text":"the harness is green"}',
+      '{"v":3,"type":"notice","id":"abcdef123456","state":"attention",' +
+        '"detail":"Job abcdef123456 is blocked"}',
     ]);
 
     // Withdrawn before the link closes, so nothing sends a command into a

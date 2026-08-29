@@ -18,8 +18,10 @@ import {
   TERMINAL_OWNERSHIP_STATES,
   toolBatchAllowsAction,
   wakeModeFromEntries,
+  workerAttentionSignal,
   workerEventWakes,
 } from "../extensions/scufris/workflow/orchestration.ts";
+import { ATTENTION_NOTICE_EVENT } from "../extensions/scufris/shared/attention-notice.ts";
 import {
   WORKER_REPORT_EVENTS,
   WORKER_REPORT_TOOL,
@@ -259,6 +261,33 @@ test("wake mode restores the latest valid session entry", () => {
   );
 });
 
+test("worker notices are identified and clear on ordinary progress", () => {
+  const job = { job_id: "abcdef123456", project: "personal/scufris2" };
+  assert.deepEqual(
+    workerAttentionSignal(job as never, {
+      type: "blocked",
+      value: "needs mediation",
+    }),
+    {
+      id: "abcdef123456",
+      state: "attention",
+      detail: "Job abcdef123456 is blocked: needs mediation",
+    },
+  );
+  assert.deepEqual(
+    workerAttentionSignal(job as never, { type: "failed", value: "crashed" }),
+    {
+      id: "abcdef123456",
+      state: "error",
+      detail: "Job abcdef123456 failed: crashed",
+    },
+  );
+  assert.deepEqual(
+    workerAttentionSignal(job as never, { type: "done", value: "complete" }),
+    { id: "abcdef123456", state: "clear", detail: "" },
+  );
+});
+
 test("orchestration delivers exact worker wakes and quiet progress by mode", () => {
   const job = {
     job_id: "abcdef123456",
@@ -274,7 +303,13 @@ test("orchestration delivers exact worker wakes and quiet progress by mode", () 
   for (const mode of ["minimal", "all"] as const) {
     const messages: Array<{ message: any; options: any }> = [];
     const notices: Array<{ message: string; type: string }> = [];
+    const signals: Array<{ event: string; value: unknown }> = [];
     const pi = {
+      events: {
+        emit(event: string, value: unknown) {
+          signals.push({ event, value });
+        },
+      },
       sendMessage(message: any, options: any) {
         messages.push({ message, options });
       },
@@ -298,10 +333,37 @@ test("orchestration delivers exact worker wakes and quiet progress by mode", () 
       mode,
     );
 
-    // `blocked` and `failed` are in both lists, and that is the whole of how a
-    // stuck job reaches the person: the wake is the channel. There is no
-    // second, ambient one - the tray signal this used to raise beside the wake
-    // had no consumer after the inversion and was removed.
+    // Waking and ambient notice delivery are independent. Every event updates
+    // this job's notice even when the wake mode keeps ordinary progress quiet.
+    assert.deepEqual(
+      signals.map(({ event, value }) => [event, value]),
+      [
+        [
+          ATTENTION_NOTICE_EVENT,
+          { id: job.job_id, state: "clear", detail: "" },
+        ],
+        [
+          ATTENTION_NOTICE_EVENT,
+          {
+            id: job.job_id,
+            state: "attention",
+            detail: `Job ${job.job_id} is blocked: needs mediation`,
+          },
+        ],
+        [
+          ATTENTION_NOTICE_EVENT,
+          { id: job.job_id, state: "clear", detail: "" },
+        ],
+        [
+          ATTENTION_NOTICE_EVENT,
+          {
+            id: job.job_id,
+            state: "error",
+            detail: `Job ${job.job_id} failed: worker harness exited unexpectedly`,
+          },
+        ],
+      ],
+    );
     const expectedTypes =
       mode === "minimal"
         ? ["blocked", "done", "failed"]

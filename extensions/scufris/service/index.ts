@@ -3,6 +3,10 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import {
+  ATTENTION_NOTICE_EVENT,
+  type AttentionNoticeSignal,
+} from "../shared/attention-notice.ts";
 import { SPOKEN_EVENT, type SpokenSignal } from "../shared/spoken.ts";
 import { SERVICE_FILE_NAME, SOCKET_DIRECTORY_NAME } from "./protocol.ts";
 import {
@@ -66,6 +70,23 @@ export default function service(pi: ExtensionAPI): void {
     const signal = value as Partial<SpokenSignal> | undefined;
     if (typeof signal?.said === "string") client?.said(signal.said);
     if (typeof signal?.speak === "string") client?.speak(signal.speak);
+  });
+
+  pi.events.on(ATTENTION_NOTICE_EVENT, (value: unknown) => {
+    const signal = value as Partial<AttentionNoticeSignal> | undefined;
+    if (
+      typeof signal?.id !== "string" ||
+      (signal.state !== "attention" &&
+        signal.state !== "error" &&
+        signal.state !== "clear")
+    ) {
+      return;
+    }
+    client?.notice({
+      id: signal.id,
+      state: signal.state,
+      detail: typeof signal.detail === "string" ? signal.detail : "",
+    });
   });
 
   pi.on("session_start", (_event, ctx) => {

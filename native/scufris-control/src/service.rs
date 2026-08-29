@@ -141,6 +141,18 @@ impl ScufrisState {
     }
 }
 
+/// What one identified ambient notice asks the tray to show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoticeState {
+    /// Work is waiting for the person.
+    Attention,
+    /// Unattended work failed.
+    Error,
+    /// This identifier no longer has anything waiting.
+    Clear,
+}
+
 /// Who said one line of the conversation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -401,6 +413,16 @@ pub enum ClientBody {
         /// What to synthesise.
         text: String,
     },
+    /// Raises, replaces, or clears one durable ambient notice. Agents only.
+    Notice {
+        /// Stable owner of this notice. Clearing it leaves every other notice.
+        id: String,
+        /// What the tray should show, or that this notice is clear.
+        state: NoticeState,
+        /// Short human-readable reason, empty when clearing.
+        #[serde(default)]
+        detail: String,
+    },
     /// Asks the frontend for something on the screen. Agents only.
     Widget {
         /// What to do.
@@ -440,6 +462,7 @@ impl ClientBody {
             Self::Debug { .. } => "debug",
             Self::Said { .. } => "said",
             Self::Speak { .. } => "speak",
+            Self::Notice { .. } => "notice",
             Self::Widget { .. } => "widget",
             Self::Conversation { .. } => "conversation",
             Self::Report { .. } => "report",
@@ -531,6 +554,16 @@ pub enum ServiceBody {
         /// What to synthesise.
         text: String,
     },
+    /// One identified ambient notice update. Pushed to frontends.
+    Notice {
+        /// Stable owner of this notice.
+        id: String,
+        /// What the tray should show, or that this notice is clear.
+        state: NoticeState,
+        /// Short human-readable reason, empty when clearing.
+        #[serde(default)]
+        detail: String,
+    },
     /// One widget command from the agent. Pushed to the frontend.
     Widget {
         /// What to do.
@@ -563,6 +596,7 @@ impl ServiceBody {
             Self::Transcript { .. } => "transcript",
             Self::Debug { .. } => "debug",
             Self::Speak { .. } => "speak",
+            Self::Notice { .. } => "notice",
             Self::Widget { .. } => "widget",
             Self::Conversation { .. } => "conversation",
             Self::Report { .. } => "report",
@@ -596,6 +630,11 @@ impl ServiceBody {
             },
             Self::Speak { text } => Self::Speak {
                 text: crate::truncate(&text, MAX_TRANSCRIPT_TEXT_BYTES),
+            },
+            Self::Notice { id, state, detail } => Self::Notice {
+                id,
+                state,
+                detail: crate::truncate(&detail, MAX_DETAIL_BYTES),
             },
             Self::Report {
                 report: WidgetReport::Failed { id, code, detail },
@@ -760,6 +799,14 @@ pub fn read_client_message(
                 return Err(MessageError::InvalidSubmission("text"));
             }
         }
+        ClientBody::Notice { id, detail, .. } => {
+            if !is_identifier(id) {
+                return Err(MessageError::InvalidSubmission("id"));
+            }
+            if !is_detail_text(detail) {
+                return Err(MessageError::InvalidSubmission("detail"));
+            }
+        }
         ClientBody::Widget { command } => check_widget_command(command)?,
         ClientBody::Report { report } => check_widget_report(report)?,
         ClientBody::Hello { .. } => {}
@@ -820,6 +867,14 @@ pub fn read_service_message(
                 return Err(MessageError::InvalidSubmission("text"));
             }
         }
+        ServiceBody::Notice { id, detail, .. } => {
+            if !is_identifier(id) {
+                return Err(MessageError::InvalidSubmission("id"));
+            }
+            if !is_detail_text(detail) {
+                return Err(MessageError::InvalidSubmission("detail"));
+            }
+        }
         ServiceBody::Widget { command } => check_widget_command(command)?,
         ServiceBody::Report { report } => check_widget_report(report)?,
         ServiceBody::Welcome { .. } | ServiceBody::Conversation { .. } => {}
@@ -866,6 +921,11 @@ mod tests {
             ClientBody::Abort { id: "c-2".into() },
             ClientBody::GetState { id: "c-3".into() },
             ClientBody::Debug { id: "c-4".into() },
+            ClientBody::Notice {
+                id: "job-one".into(),
+                state: NoticeState::Attention,
+                detail: "Job job-one is blocked".into(),
+            },
         ] {
             let message = ClientMessage::new(body);
             assert_eq!(
@@ -1044,6 +1104,11 @@ mod tests {
                 detail: howl.clone(),
             },
             ServiceBody::Speak { text: howl.clone() },
+            ServiceBody::Notice {
+                id: "job-one".into(),
+                state: NoticeState::Error,
+                detail: howl.clone(),
+            },
             ServiceBody::Transcript {
                 entry: TranscriptEntry {
                     speaker: Speaker::Assistant,

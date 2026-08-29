@@ -280,6 +280,8 @@ struct Surfaced {
     payload: PresentationPayload,
     /// Tray state name for the same moment.
     tray: &'static str,
+    /// Detail for the tray tooltip and status item, independent of the pill.
+    tray_detail: String,
 }
 
 /// One change to the companion, and where it sits among all of them.
@@ -658,6 +660,7 @@ impl App {
             LinkEvent::Connected => self.set_connected(true),
             LinkEvent::Disconnected => self.set_connected(false),
             LinkEvent::State(state, detail) => self.set_assistant(state.into(), detail),
+            LinkEvent::Notice(id, state, detail) => self.set_notice(id, state, detail),
             LinkEvent::Accepted(id) => {
                 debug!(id = %id, "submission accepted");
                 self.handle(Event::Acknowledged(id))
@@ -719,6 +722,20 @@ impl App {
             }
             companion.set_assistant(state, detail);
         }
+        self.publish();
+    }
+
+    /// Applies one ambient notice update and redraws only from companion state.
+    fn set_notice(
+        self: &Arc<Self>,
+        id: String,
+        state: scufris_control::service::NoticeState,
+        detail: String,
+    ) {
+        self.companion
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .set_notice(id, state, detail);
         self.publish();
     }
 
@@ -875,6 +892,7 @@ impl App {
 
     fn stamp(&self, companion: &Companion) -> Decision {
         let presentation = companion.presentation();
+        let (tray, tray_detail) = companion.tray_presentation();
         Decision {
             surfaced: Surfaced {
                 posture: companion.posture(),
@@ -885,7 +903,8 @@ impl App {
                     editable: presentation.editable,
                     recording: presentation.recording,
                 },
-                tray: companion.tray_state(),
+                tray,
+                tray_detail,
             },
             version: self.decisions.fetch_add(1, Ordering::SeqCst) + 1,
         }
@@ -979,7 +998,7 @@ impl App {
                 match self
                     .ports
                     .surface
-                    .tray(surfaced.tray, &surfaced.payload.detail)
+                    .tray(surfaced.tray, &surfaced.tray_detail)
                 {
                     Ok(()) => on_tray = true,
                     Err(reason) => trouble.push(reason),

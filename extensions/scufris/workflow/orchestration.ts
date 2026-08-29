@@ -12,6 +12,10 @@ import {
   ACKNOWLEDGMENT_STATE_EVENT,
   type AcknowledgmentState,
 } from "../shared/acknowledgment.ts";
+import {
+  ATTENTION_NOTICE_EVENT,
+  type AttentionNoticeSignal,
+} from "../shared/attention-notice.ts";
 import { runPrivateHelper, toolResult } from "../shared/runtime.ts";
 import {
   startQuickReviewAgent,
@@ -196,13 +200,36 @@ export function deliveredWorkerEventIds(
   return result;
 }
 
+/** Maps one worker event to the durable tray notice owned by that job. */
+export function workerAttentionSignal(
+  job: WorkerEventTarget,
+  event: WorkerEvent,
+): AttentionNoticeSignal {
+  if (event.type === "blocked") {
+    return {
+      id: job.job_id,
+      state: "attention",
+      detail: `Job ${job.job_id} is blocked: ${event.value}`,
+    };
+  }
+  if (event.type === "failed") {
+    return {
+      id: job.job_id,
+      state: "error",
+      detail: `Job ${job.job_id} failed: ${event.value}`,
+    };
+  }
+  return { id: job.job_id, state: "clear", detail: "" };
+}
+
 export function deliverWorkerEvent(
-  pi: Pick<ExtensionAPI, "sendMessage">,
+  pi: Pick<ExtensionAPI, "events" | "sendMessage">,
   context: Pick<ExtensionContext, "hasUI" | "ui">,
   job: WorkerEventTarget,
   event: WorkerEvent,
   mode: WakeMode,
 ): void {
+  pi.events.emit(ATTENTION_NOTICE_EVENT, workerAttentionSignal(job, event));
   if (!workerEventWakes(event.type, mode)) {
     if (context.hasUI)
       context.ui.notify(`${job.job_id}: ${event.value}`, "info");
@@ -228,7 +255,7 @@ export function deliverWorkerEvent(
 }
 
 export function deliverRuntimeFailure(
-  pi: Pick<ExtensionAPI, "sendMessage">,
+  pi: Pick<ExtensionAPI, "events" | "sendMessage">,
   context: Pick<ExtensionContext, "hasUI" | "ui">,
   job: WorkerEventTarget,
   error: string,

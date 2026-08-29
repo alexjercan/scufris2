@@ -21,7 +21,7 @@
 //! to be left detached with no way back.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     io::BufRead,
     path::PathBuf,
     sync::{
@@ -33,8 +33,8 @@ use std::{
 };
 
 use scufris_control::service::{
-    CatalogEntry, MAX_DETAIL_BYTES, Role, ScufrisState, ServiceBody, ServiceMessage, Speaker,
-    TranscriptEntry, WidgetCommand, WidgetReport, refusal,
+    CatalogEntry, MAX_DETAIL_BYTES, NoticeState, Role, ScufrisState, ServiceBody, ServiceMessage,
+    Speaker, TranscriptEntry, WidgetCommand, WidgetReport, refusal,
 };
 use tracing::{debug, error, info, warn};
 
@@ -102,6 +102,8 @@ struct Inner {
     detail: String,
     session_file: Option<PathBuf>,
     transcript: VecDeque<TranscriptEntry>,
+    /// Ambient notices still waiting, ordered for deterministic replay.
+    notices: BTreeMap<String, (NoticeState, String)>,
     /// The widgets the frontend last announced, kept for an agent that
     /// connects after it. The agent types its tools from this, and an agent
     /// that restarted has to be told again.
@@ -262,6 +264,7 @@ impl Service {
                 detail: String::new(),
                 session_file: None,
                 transcript: VecDeque::new(),
+                notices: BTreeMap::new(),
                 catalog: Vec::new(),
                 clients: HashMap::new(),
                 lease: None,
@@ -548,6 +551,9 @@ impl Service {
                 for entry in inner.transcript.clone() {
                     inner.send(client, ServiceBody::Transcript { entry });
                 }
+                for (id, (state, detail)) in inner.notices.clone() {
+                    inner.send(client, ServiceBody::Notice { id, state, detail });
+                }
             }
             Role::Agent => {
                 if !inner.agent_joined {
@@ -599,6 +605,28 @@ impl Service {
             return;
         }
         inner.push_frontends(ServiceBody::Speak { text });
+    }
+
+    /// Raises, replaces, or clears one ambient notice owned by the agent.
+    pub fn notice(&self, client: u64, id: String, state: NoticeState, detail: String) {
+        let mut inner = self.lock();
+        if !inner.is_agent(client) {
+            return;
+        }
+        let detail = if state == NoticeState::Clear {
+            String::new()
+        } else {
+            scufris_control::truncate(&detail, MAX_DETAIL_BYTES)
+        };
+        let changed = if state == NoticeState::Clear {
+            inner.notices.remove(&id).is_some()
+        } else {
+            inner.notices.insert(id.clone(), (state, detail.clone()))
+                != Some((state, detail.clone()))
+        };
+        if changed {
+            inner.push_frontends(ServiceBody::Notice { id, state, detail });
+        }
     }
 
     /// Relays one widget command from the agent to the frontend.
@@ -975,6 +1003,43 @@ mod tests {
         // it is never handed a backlog it did not ask for.
         let control = connect(&service, 2, Role::Control);
         assert!(drain(&control).is_empty());
+    }
+
+    #[test]
+    fn an_ambient_notice_is_kept_by_id_and_replayed_to_a_late_frontend() {
+        let service = service();
+        let agent = connect(&service, 1, Role::Agent);
+        service.notice(
+            1,
+            "job-one".into(),
+            NoticeState::Attention,
+            "Job job-one is blocked".into(),
+        );
+        service.notice(
+            1,
+            "job-two".into(),
+            NoticeState::Error,
+            "Job job-two failed".into(),
+        );
+        service.notice(1, "job-one".into(), NoticeState::Clear, String::new());
+        assert!(drain(&agent).is_empty());
+
+        let frontend = connect(&service, 2, Role::Frontend);
+        assert_eq!(
+            drain(&frontend),
+            [
+                ServiceBody::State {
+                    id: None,
+                    state: ScufrisState::Starting,
+                    detail: String::new(),
+                },
+                ServiceBody::Notice {
+                    id: "job-two".into(),
+                    state: NoticeState::Error,
+                    detail: "Job job-two failed".into(),
+                },
+            ]
+        );
     }
 
     #[test]

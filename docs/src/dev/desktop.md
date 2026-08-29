@@ -542,8 +542,8 @@ unavailable in the tray and refuses to submit rather than queueing.
 
 The protocol itself belongs to the service; see
 [Background service](service.md) for the message table. What a frontend is
-pushed is state, transcript, spoken paragraphs, and widget commands; what it
-sends is submissions, aborts, and widget reports.
+pushed is state, transcript, ambient notices, spoken paragraphs, and widget
+commands; what it sends is submissions, aborts, and widget reports.
 
 Listening and transcribing stay companion-local. The service never sees audio.
 
@@ -586,16 +586,19 @@ else. See [Background service](service.md).
 The companion composes its own states over that word, because they are things
 it is doing and the service cannot see them:
 
-| State          | Where it comes from                    |
-| -------------- | -------------------------------------- |
-| `listening`    | The microphone is open                 |
-| `transcribing` | A recording is at the endpoint         |
-| `speaking`     | The synthesiser is playing             |
-| `attention`    | A transcript is waiting for the person |
-| `disconnected` | The link to the service is closed      |
+| State          | Where it comes from                  |
+| -------------- | ------------------------------------ |
+| `listening`    | The microphone is open               |
+| `transcribing` | A recording is at the endpoint       |
+| `speaking`     | The synthesiser is playing           |
+| `attention`    | A transcript or unattended job waits |
+| `disconnected` | The link to the service is closed    |
 
 Each state has a distinct tray colour drawn at runtime from the state name, so
-there is no per-state image to keep in sync.
+there is no per-state image to keep in sync. Ambient notices are composed only
+into the tray, not the pill or conversation window. An error notice wins over
+an attention notice; recording, transcription, and companion-local failures
+stay above both. The notice detail appears in the tray tooltip and status item.
 
 ## Tray
 

@@ -26,8 +26,8 @@ use std::{
 use scufris_control::{
     MessageError,
     service::{
-        ClientBody, ClientMessage, Role, ScufrisState, ServiceBody, TranscriptEntry, WidgetCommand,
-        WidgetReport, read_service_message,
+        ClientBody, ClientMessage, NoticeState, Role, ScufrisState, ServiceBody, TranscriptEntry,
+        WidgetCommand, WidgetReport, read_service_message,
     },
     write_message,
 };
@@ -68,6 +68,8 @@ pub enum LinkEvent {
     Transcript(TranscriptEntry),
     /// One paragraph the agent wants spoken. The companion owns the speaker.
     Speak(String),
+    /// One identified ambient notice was raised, replaced, or cleared.
+    Notice(String, NoticeState, String),
     /// The agent asked the widgets runtime to do something. Widget traffic
     /// never reaches the pill's state machine.
     Widget(WidgetCommand),
@@ -211,6 +213,9 @@ fn serve(
             ServiceBody::State { state, detail, .. } => observe(LinkEvent::State(state, detail)),
             ServiceBody::Transcript { entry } => observe(LinkEvent::Transcript(entry)),
             ServiceBody::Speak { text } => observe(LinkEvent::Speak(text)),
+            ServiceBody::Notice { id, state, detail } => {
+                observe(LinkEvent::Notice(id, state, detail))
+            }
             // Widget commands belong to the widgets runtime, never to the
             // pill's state machine.
             ServiceBody::Widget { command } => observe(LinkEvent::Widget(command)),
@@ -302,6 +307,20 @@ mod tests {
         assert_eq!(
             received.recv_timeout(Duration::from_secs(5)).unwrap(),
             LinkEvent::State(ScufrisState::Working, String::new())
+        );
+        writer
+            .write_all(
+                b"{\"v\":3,\"type\":\"notice\",\"id\":\"job-one\",\"state\":\"attention\",\
+                  \"detail\":\"Job job-one is blocked\"}\n",
+            )
+            .unwrap();
+        assert_eq!(
+            received.recv_timeout(Duration::from_secs(5)).unwrap(),
+            LinkEvent::Notice(
+                "job-one".into(),
+                NoticeState::Attention,
+                "Job job-one is blocked".into(),
+            )
         );
 
         link.submit("pill-1".into(), "hello there".into()).unwrap();

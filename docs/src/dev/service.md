@@ -29,6 +29,8 @@ keeps the conversation and a terminal over ssh reaches it.
   [staging](staging.md).
 - **The last screenful of the conversation.** A ring of 200 text entries, so a
   frontend that connects has something to show before the next thing is said.
+- **Open ambient notices.** An identified set, so one unattended job clears
+  only its own signal and a frontend that connects later sees what still waits.
 
 ## The socket
 
@@ -46,10 +48,12 @@ second one:
 Three roles.
 
 - `agent` is the Pi process, through its `service` extension. It reports what
-  Scufris said, the paragraph Scufris wants spoken, and the widgets it asks
-  for. There is one, and a second one takes the first one's place.
+  Scufris said, the paragraph Scufris wants spoken, ambient notices, and the
+  widgets it asks for. There is one, and a second one takes the first one's
+  place.
 - `frontend` is a surface. It submits text, and is pushed every state change,
-  every transcript entry, every spoken paragraph, and every widget command.
+  every transcript entry, every ambient notice, every spoken paragraph, and
+  every widget command.
 - `control` is `scufris-ctl`. It asks one thing, reads the answer, and is
   pushed nothing.
 
@@ -77,6 +81,7 @@ and get no answer:
 | -------------------------------------------- | --------------------------------------- |
 | `{"type":"said","text":"..."}`               | the transcript ring, and every frontend |
 | `{"type":"speak","text":"..."}`              | every frontend, and is never kept       |
+| `{"type":"notice","id":"job-1",...}`         | the open set, and every frontend        |
 | `{"type":"widget","command":{...}}`          | every frontend                          |
 | `{"type":"conversation","id":"1","up":true}` | every frontend, and is answered here    |
 
@@ -108,6 +113,11 @@ never hears about it.
 
 A frontend is pushed `state` whenever it changes, and `transcript` for each
 line that was said. Both arrive unasked and neither carries an `id`.
+
+An ambient `notice` is separate from state because it answers what is waiting,
+not what Scufris is doing. It carries an owner `id`, a state of `attention`,
+`error`, or `clear`, and a detail for the tray tooltip. The service keeps each
+non-clear notice by identifier and replays the open set after `welcome`.
 
 ## The debug lease
 

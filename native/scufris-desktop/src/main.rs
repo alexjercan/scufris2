@@ -599,6 +599,11 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                         observer.observe(LinkEvent::State(state, detail));
                         surfaces.assistant(observer.shown_assistant());
                     }
+                    // Ambient notices belong to the tray and not to the
+                    // conversation window or widget surfaces.
+                    LinkEvent::Notice(id, state, detail) => {
+                        observer.observe(LinkEvent::Notice(id, state, detail));
+                    }
                 },
             ));
             widgets.attach(Arc::clone(&link));

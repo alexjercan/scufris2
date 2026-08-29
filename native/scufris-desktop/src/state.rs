@@ -4,7 +4,9 @@
 //! produces the actions the host must run. It holds no window, audio, socket, or
 //! file handle so the whole interaction is testable without a desktop session.
 
-use scufris_control::service::ScufrisState;
+use std::collections::BTreeMap;
+
+use scufris_control::service::{NoticeState, ScufrisState};
 
 use crate::pending::Pending;
 
@@ -352,6 +354,8 @@ pub struct Companion {
     phase: Phase,
     assistant: Assistant,
     assistant_detail: String,
+    /// Ambient notices last replayed by the service, keyed by their owner.
+    notices: BTreeMap<String, (NoticeState, String)>,
     /// True while the companion is speaking an answer. Its own doing, and not
     /// the service's word, so it sits beside the reported state rather than
     /// replacing it: what the agent is doing is still what it was doing.
@@ -385,6 +389,7 @@ impl Companion {
             phase: Phase::Resting,
             assistant: Assistant::Idle,
             assistant_detail: String::new(),
+            notices: BTreeMap::new(),
             speaking: false,
             connected: false,
             prefix: prefix.into(),
@@ -538,9 +543,22 @@ impl Companion {
     /// Records whether the service connection is currently open.
     pub fn set_connected(&mut self, connected: bool) {
         self.connected = connected;
-        if !connected {
+        if connected {
+            // Welcome begins a new replay. Anything absent from the service's
+            // following notice set was cleared while this frontend was away.
+            self.notices.clear();
+        } else {
             self.assistant = Assistant::Idle;
             self.assistant_detail.clear();
+        }
+    }
+
+    /// Raises, replaces, or clears one identified ambient notice.
+    pub fn set_notice(&mut self, id: String, state: NoticeState, detail: String) {
+        if state == NoticeState::Clear {
+            self.notices.remove(&id);
+        } else {
+            self.notices.insert(id, (state, detail));
         }
     }
 
@@ -994,20 +1012,39 @@ impl Companion {
         }
     }
 
-    /// Returns the tray state name for the current companion and service state.
-    pub fn tray_state(&self) -> &'static str {
-        if self.blind.is_some() {
-            return "error";
+    /// Returns the tray state and its own detail for the current companion.
+    pub fn tray_presentation(&self) -> (&'static str, String) {
+        if let Some(reason) = &self.blind {
+            return ("error", reason.clone());
         }
-        match self.phase {
-            Phase::Listening => "listening",
-            Phase::Transcribing => "transcribing",
-            Phase::Failed { .. } => "error",
+        match &self.phase {
+            Phase::Listening => return ("listening", String::new()),
+            Phase::Transcribing => return ("transcribing", String::new()),
+            Phase::Failed { reason } => return ("error", reason.clone()),
             // An accepted transcript the service has not taken needs the user,
             // whatever the service itself is doing.
-            Phase::Retained { .. } => "attention",
-            _ => self.resting_state(),
+            Phase::Retained { reason, .. } => return ("attention", reason.clone()),
+            _ => {}
         }
+        let notice = self
+            .notices
+            .values()
+            .find(|(state, _)| *state == NoticeState::Error)
+            .or_else(|| self.notices.values().next());
+        if let Some((state, detail)) = notice {
+            let state = match state {
+                NoticeState::Error => "error",
+                NoticeState::Attention => "attention",
+                NoticeState::Clear => unreachable!("clear notices are not retained"),
+            };
+            return (state, detail.clone());
+        }
+        (self.resting_state(), self.resting_detail())
+    }
+
+    /// Returns the tray state name for the current companion and service state.
+    pub fn tray_state(&self) -> &'static str {
+        self.tray_presentation().0
     }
 
     fn resting_state(&self) -> &'static str {
@@ -1868,6 +1905,47 @@ mod tests {
             companion.presentation().detail,
             "The Scufris service is unavailable."
         );
+    }
+
+    #[test]
+    fn ambient_notices_override_the_assistant_and_clear_independently() {
+        let mut companion = Companion::new("pill");
+        companion.set_connected(true);
+        companion.set_assistant(Assistant::Working, "packing".into());
+        companion.set_notice(
+            "job-one".into(),
+            NoticeState::Attention,
+            "Job job-one is blocked".into(),
+        );
+        assert_eq!(
+            companion.tray_presentation(),
+            ("attention", "Job job-one is blocked".into())
+        );
+
+        companion.set_notice(
+            "job-two".into(),
+            NoticeState::Error,
+            "Job job-two failed".into(),
+        );
+        assert_eq!(
+            companion.tray_presentation(),
+            ("error", "Job job-two failed".into())
+        );
+        companion.set_notice("job-two".into(), NoticeState::Clear, String::new());
+        assert_eq!(companion.tray_state(), "attention");
+        companion.set_notice("job-one".into(), NoticeState::Clear, String::new());
+        assert_eq!(companion.tray_presentation(), ("working", "packing".into()));
+
+        // Welcome starts a complete replay, so a notice cleared while this
+        // frontend was away cannot survive by being absent from the replay.
+        companion.set_notice(
+            "stale".into(),
+            NoticeState::Attention,
+            "stale detail".into(),
+        );
+        companion.set_connected(false);
+        companion.set_connected(true);
+        assert_eq!(companion.tray_state(), "idle");
     }
 
     #[test]

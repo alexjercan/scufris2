@@ -1,5 +1,6 @@
 import { connect, type Socket } from "node:net";
 import {
+  MAX_DETAIL_BYTES,
   MAX_TRANSCRIPT_TEXT_BYTES,
   ProtocolError,
   SERVICE_VERSION,
@@ -11,6 +12,7 @@ import {
   type WidgetCommand,
   type WidgetReport,
 } from "./protocol.ts";
+import type { AttentionNoticeSignal } from "../shared/attention-notice.ts";
 
 /** Shortest wait before reconnecting. */
 export const MIN_BACKOFF_MS = 250;
@@ -187,7 +189,7 @@ export class ServiceClient implements DesktopControl {
    * a tool call rather than an assistant text block.
    */
   said(text: string): void {
-    const line = bounded(text);
+    const line = bounded(text, MAX_TRANSCRIPT_TEXT_BYTES);
     if (line) this.tell({ v: SERVICE_VERSION, type: "said", text: line });
   }
 
@@ -198,8 +200,22 @@ export class ServiceClient implements DesktopControl {
    * and may refuse it, which is why nothing here waits for an answer.
    */
   speak(text: string): void {
-    const line = bounded(text);
+    const line = bounded(text, MAX_TRANSCRIPT_TEXT_BYTES);
     if (line) this.tell({ v: SERVICE_VERSION, type: "speak", text: line });
+  }
+
+  /** Raises, replaces, or clears one unattended job's durable notice. */
+  notice(signal: AttentionNoticeSignal): void {
+    this.tell({
+      v: SERVICE_VERSION,
+      type: "notice",
+      id: signal.id,
+      state: signal.state,
+      detail:
+        signal.state === "clear"
+          ? ""
+          : bounded(signal.detail, MAX_DETAIL_BYTES),
+    });
   }
 
   /**
@@ -504,13 +520,10 @@ function rest(command: WidgetRequest): Record<string, unknown> {
  * the halves of an astral character, and `encodeClientMessage` refuses a lone
  * surrogate - so the cut meant to preserve the line would be what drops it.
  */
-function bounded(text: string): string {
+function bounded(text: string, maximum: number): string {
   const points = [...text.trim()];
   let cut = points.join("");
-  while (
-    points.length &&
-    Buffer.byteLength(cut, "utf8") > MAX_TRANSCRIPT_TEXT_BYTES
-  ) {
+  while (points.length && Buffer.byteLength(cut, "utf8") > maximum) {
     points.length = Math.floor(points.length * 0.9);
     cut = points.join("");
   }

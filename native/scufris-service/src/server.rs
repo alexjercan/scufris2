@@ -185,6 +185,7 @@ fn act(service: &Arc<Service>, client: u64, body: ClientBody) {
         ClientBody::Debug { id } => service.begin_debug(client, id),
         ClientBody::Said { text } => service.said(client, text),
         ClientBody::Speak { text } => service.speak(client, text),
+        ClientBody::Notice { id, state, detail } => service.notice(client, id, state, detail),
         ClientBody::Widget { command } => service.relay_widget(client, command),
         ClientBody::Conversation { id, up } => service.relay_conversation(client, id, up),
         ClientBody::Report { report } => service.relay_report(client, report),

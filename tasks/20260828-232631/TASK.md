@@ -308,9 +308,11 @@ Create these as separate tasks only after this spike is reviewed. Keep the
 order and dependencies explicit.
 
 1. **Release and deploy v0.5.0**
+
    - Satisfy the existing implementation gate.
 
 2. **Protocol v4: multiple frontends and presence**
+
    - Remove frontend eviction while retaining one agent.
    - Fan out transcript and state.
    - Route speech, widget commands, and window requests to presence.
@@ -323,6 +325,7 @@ order and dependencies explicit.
      client removal, concurrent submit, presence movement, and catalog changes.
 
 3. **Run Scufris desktop from a second Linux laptop**
+
    - Package the existing companion for the target laptop.
    - Add the supervised SSH Unix-socket tunnel and runtime directory.
    - Keep microphone, transcription, and speech local to that laptop unless a
@@ -330,18 +333,21 @@ order and dependencies explicit.
    - Verify laptop/host handoff, disconnects, sleep/wake, and service restart.
 
 4. **Spike an iOS SSH transport to the Scufris Unix socket**
+
    - If the proof is not completed in this task, promote it as the next blocking
      task before any iOS UI.
    - Prove Tailscale reachability, SSH host-key validation, Keychain key storage,
      a full-duplex bridge, disconnect, and reconnect.
 
 5. **Build the iOS text surface**
+
    - Transcript, state, submit, abort, reconnect, and bounded protocol parsing.
    - Foreground presence claim and release.
    - Protocol mismatch and plain update notice.
    - No widgets, background notifications, public relay, or second conversation.
 
 6. **Add voice to the iOS surface**
+
    - Microphone permission, visible recording state, transcription, editable
      result, and submit.
    - Native local speech for `speak`, mute, and barge-in.

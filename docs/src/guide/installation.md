@@ -9,7 +9,7 @@ Install Nix with flakes enabled.
 Run the normal package from the current release tag:
 
 ```bash
-nix run github:alexjercan/scufris2/v0.4.0#scufris
+nix run github:alexjercan/scufris2/v0.5.0#scufris
 ```
 
 There is one launcher and no voice variant of it. Nothing in the agent's
@@ -31,7 +31,7 @@ Pin a release tag and share `nixpkgs` with the parent flake:
 ```nix
 {
   inputs.scufris = {
-    url = "github:alexjercan/scufris2/v0.4.0";
+    url = "github:alexjercan/scufris2/v0.5.0";
     inputs.nixpkgs.follows = "nixpkgs";
   };
 }

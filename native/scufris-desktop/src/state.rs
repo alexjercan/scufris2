@@ -1043,6 +1043,7 @@ impl Companion {
     }
 
     /// Returns the tray state name for the current companion and service state.
+    #[cfg(test)]
     pub fn tray_state(&self) -> &'static str {
         self.tray_presentation().0
     }

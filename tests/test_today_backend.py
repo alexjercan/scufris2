@@ -249,9 +249,7 @@ class Reading(unittest.TestCase):
         self.assertEqual(frame["date"], DAY)
         self.assertTrue(frame["exists"])
         self.assertIsNone(frame["trouble"])
-        self.assertEqual(
-            [habit["name"] for habit in frame["habits"]], ["Gym", "Read"]
-        )
+        self.assertEqual([habit["name"] for habit in frame["habits"]], ["Gym", "Read"])
         self.assertEqual([task["index"] for task in frame["tasks"]], [1, 2])
         # Strictly after the selected day: the day's own task is above, in
         # `tasks`, and naming it twice would be naming it twice.
@@ -627,9 +625,7 @@ class Driving(unittest.TestCase):
     def test_a_spawn_payload_picks_the_view_and_an_action_moves_the_day(self) -> None:
         den = Den(self, plan())
         den.entry(DAY)
-        first = self.start(
-            den, {"view": "macros"}, {"action": "select", "date": DAY}
-        )
+        first = self.start(den, {"view": "macros"}, {"action": "select", "date": DAY})
         self.assertEqual(first["view"], "macros")
         self.assertEqual(first["date"], DAY)
         self.assertEqual(first["macros"]["calories"], 1962)

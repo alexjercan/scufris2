@@ -56,7 +56,7 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 #: How often the selected day's file is looked at. An idle panel costs one
 #: `stat` this often and nothing else.
@@ -168,7 +168,7 @@ class Journal:
 
     def now(self) -> str:
         """The real date, read again each time so a panel left up rolls over."""
-        return date.today().isoformat()
+        return datetime.now().astimezone().date().isoformat()
 
     def run(self, arguments: list[str]) -> object:
         """Runs one `today` subcommand and returns what its JSON said."""
@@ -178,7 +178,11 @@ class Journal:
         line += arguments
         try:
             done = subprocess.run(
-                line, capture_output=True, text=True, timeout=DEADLINE
+                line,
+                capture_output=True,
+                text=True,
+                timeout=DEADLINE,
+                check=False,
             )
         except FileNotFoundError:
             raise Trouble(f"{self.command} is not on the path") from None

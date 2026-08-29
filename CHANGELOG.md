@@ -9,6 +9,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-29
+
 ### Added
 
 - Ambient tray notices for unattended jobs. A blocked job paints the tray
@@ -305,7 +307,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/alexjercan/scufris2/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/alexjercan/scufris2/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/alexjercan/scufris2/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/alexjercan/scufris2/compare/v0.1.0...v0.2.0

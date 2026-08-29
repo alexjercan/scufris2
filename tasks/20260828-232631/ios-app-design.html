@@ -1,0 +1,1068 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scufris iOS surface</title>
+    <style>
+      :root {
+        --page: #181818;
+        --phone: #101010;
+        --panel: #1c1c1c;
+        --line: #33302e;
+        --line-strong: #52494e;
+        --fg: #e4e4ef;
+        --fg-strong: #f4f4ff;
+        --muted: #6c7772;
+        --quartz: #95a99f;
+        --yellow: #ffdd33;
+        --brown: #cc8c3c;
+        --niagara: #96a6c8;
+        --wisteria: #9e95c7;
+        --green: #73c936;
+        --red: #f43841;
+        --mono: "Iosevka", "JetBrains Mono", "SFMono-Regular", Consolas,
+          monospace;
+        --accent: var(--quartz);
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+      }
+
+      body {
+        background: var(--page);
+        color: var(--fg);
+        font-family: var(--mono);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      button,
+      textarea {
+        font: inherit;
+      }
+
+      button {
+        color: inherit;
+      }
+
+      .page {
+        display: grid;
+        grid-template-columns: minmax(390px, 470px) minmax(320px, 520px);
+        gap: 54px;
+        align-items: start;
+        justify-content: center;
+        min-height: 100vh;
+        padding: 42px 28px 64px;
+      }
+
+      .stage {
+        position: sticky;
+        top: 28px;
+        display: flex;
+        justify-content: center;
+      }
+
+      .device {
+        width: 414px;
+        height: min(896px, calc(100vh - 56px));
+        min-height: 690px;
+        padding: 10px;
+        border: 1px solid var(--line-strong);
+        border-radius: 44px;
+        background: #080808;
+        box-shadow: 0 26px 70px rgba(0, 0, 0, 0.38);
+      }
+
+      .screen {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        border: 1px solid #242220;
+        border-radius: 35px;
+        background: var(--phone);
+      }
+
+      .island {
+        position: absolute;
+        z-index: 10;
+        top: 11px;
+        left: 50%;
+        width: 110px;
+        height: 29px;
+        border-radius: 18px;
+        transform: translateX(-50%);
+        background: #000;
+      }
+
+      .system-bar {
+        display: flex;
+        flex: 0 0 50px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 21px 0;
+        color: var(--fg-strong);
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .system-icons {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .signal {
+        width: 14px;
+        height: 9px;
+        border-bottom: 2px solid currentColor;
+        border-left: 2px solid currentColor;
+        transform: skew(-18deg);
+      }
+
+      .battery {
+        width: 20px;
+        height: 9px;
+        border: 1px solid currentColor;
+        border-radius: 2px;
+      }
+
+      .battery::after {
+        content: "";
+        display: block;
+        width: 13px;
+        height: 5px;
+        margin: 1px;
+        background: currentColor;
+      }
+
+      .app-head {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px 12px;
+        align-items: baseline;
+        flex: 0 0 auto;
+        padding: 14px 17px 11px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand {
+        color: var(--quartz);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+      }
+
+      .state {
+        color: var(--accent);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .route {
+        grid-column: 1 / -1;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 9px;
+        letter-spacing: 0.08em;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .conversation {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        gap: 17px;
+        overflow-y: auto;
+        padding: 22px 17px 18px;
+        scroll-behavior: smooth;
+        scrollbar-width: none;
+      }
+
+      .conversation::-webkit-scrollbar {
+        width: 0;
+      }
+
+      .message {
+        display: grid;
+        grid-template-columns: 67px minmax(0, 1fr);
+        gap: 12px;
+        align-items: baseline;
+      }
+
+      .message:first-child {
+        margin-top: auto;
+      }
+
+      .speaker {
+        color: var(--muted);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.13em;
+        text-align: right;
+        text-transform: uppercase;
+      }
+
+      .message[data-speaker="user"] .speaker {
+        color: var(--quartz);
+      }
+
+      .message[data-speaker="assistant"] .speaker {
+        color: var(--wisteria);
+      }
+
+      .words {
+        min-width: 0;
+        color: var(--fg);
+        font-size: 13px;
+        line-height: 1.58;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+
+      .message[data-speaker="assistant"] .words {
+        color: var(--fg-strong);
+      }
+
+      .ambient {
+        display: none;
+        flex: 0 0 auto;
+        margin: 0 17px 10px;
+        padding: 8px 10px;
+        border-left: 2px solid var(--wisteria);
+        background: rgba(158, 149, 199, 0.07);
+        color: var(--wisteria);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .ambient.visible {
+        display: block;
+      }
+
+      .interaction {
+        flex: 0 0 auto;
+        border-top: 1px solid var(--line);
+        background: #101010;
+      }
+
+      .composer,
+      .review {
+        padding: 12px 15px 0;
+      }
+
+      .composer-row {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+        min-height: 40px;
+        padding: 8px 0 7px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .prompt {
+        flex: 0 0 auto;
+        padding-bottom: 2px;
+        color: var(--quartz);
+      }
+
+      .typed,
+      .review-text {
+        flex: 1 1 auto;
+        width: 100%;
+        border: 0;
+        outline: 0;
+        resize: none;
+        background: transparent;
+        color: var(--fg-strong);
+        caret-color: var(--yellow);
+      }
+
+      .typed {
+        min-height: 22px;
+        max-height: 76px;
+        line-height: 1.45;
+      }
+
+      .typed::placeholder {
+        color: var(--muted);
+      }
+
+      .send-icon {
+        position: relative;
+        flex: 0 0 29px;
+        width: 29px;
+        height: 29px;
+        border: 1px solid var(--quartz);
+        border-radius: 50%;
+        background: transparent;
+        cursor: pointer;
+      }
+
+      .send-icon::before {
+        content: "";
+        position: absolute;
+        top: 9px;
+        left: 9px;
+        width: 8px;
+        height: 8px;
+        border-top: 1px solid var(--quartz);
+        border-right: 1px solid var(--quartz);
+        transform: rotate(-45deg);
+      }
+
+      .send-icon::after {
+        content: "";
+        position: absolute;
+        top: 8px;
+        left: 13px;
+        width: 1px;
+        height: 13px;
+        background: var(--quartz);
+      }
+
+      .send-icon:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
+
+      .review {
+        display: none;
+      }
+
+      .review.visible {
+        display: block;
+      }
+
+      .composer.hidden {
+        display: none;
+      }
+
+      .review-box {
+        padding: 11px 12px 9px;
+        border: 1px solid var(--quartz);
+        background: #101010;
+      }
+
+      .review-label {
+        margin-bottom: 7px;
+        color: var(--quartz);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .review-text {
+        min-height: 68px;
+        max-height: 120px;
+        line-height: 1.5;
+      }
+
+      .review-actions {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 8px;
+      }
+
+      .text-action {
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      .text-action.primary {
+        color: var(--quartz);
+      }
+
+      .voice-dock {
+        position: relative;
+        display: grid;
+        grid-template-columns: 1fr 104px 1fr;
+        align-items: center;
+        min-height: 126px;
+        padding: 8px 20px 18px;
+      }
+
+      .dock-side {
+        display: flex;
+        justify-content: center;
+      }
+
+      .stop {
+        display: none;
+        border: 0;
+        background: transparent;
+        color: var(--red);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      .stop.visible {
+        display: block;
+      }
+
+      .orb-control {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 104px;
+        border: 0;
+        background: transparent;
+        cursor: pointer;
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      .orb-wrap {
+        position: relative;
+        width: 82px;
+        height: 82px;
+      }
+
+      #orb {
+        display: block;
+        width: 82px;
+        height: 82px;
+        transition: transform 100ms linear;
+      }
+
+      .privacy-ring {
+        position: absolute;
+        inset: -5px;
+        border: 1px solid transparent;
+        border-radius: 50%;
+        pointer-events: none;
+      }
+
+      [data-app-state="listening"] .privacy-ring {
+        border-color: var(--red);
+      }
+
+      .orb-hint {
+        height: 15px;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 8px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .timer {
+        color: var(--yellow);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .home-indicator {
+        position: absolute;
+        bottom: 7px;
+        left: 50%;
+        width: 130px;
+        height: 4px;
+        border-radius: 3px;
+        transform: translateX(-50%);
+        background: rgba(244, 244, 255, 0.78);
+      }
+
+      .notes {
+        padding-top: 18px;
+      }
+
+      .kicker {
+        margin-bottom: 12px;
+        color: var(--quartz);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 14ch;
+        color: var(--fg-strong);
+        font-size: clamp(28px, 4vw, 42px);
+        line-height: 1.08;
+        letter-spacing: -0.035em;
+      }
+
+      .lead {
+        max-width: 52ch;
+        margin-top: 18px;
+        color: var(--fg);
+        font-size: 15px;
+      }
+
+      .control-panel {
+        margin-top: 30px;
+        padding: 18px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      .control-panel h2,
+      .law h2 {
+        margin-bottom: 13px;
+        color: var(--fg-strong);
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .state-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 7px;
+      }
+
+      .state-button {
+        padding: 8px 6px;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--muted);
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      .state-button:hover,
+      .state-button.active {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .instruction {
+        margin-top: 13px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .law {
+        margin-top: 18px;
+        padding: 18px;
+        border-left: 2px solid var(--wisteria);
+        background: rgba(158, 149, 199, 0.05);
+      }
+
+      .law p {
+        max-width: 55ch;
+        color: var(--fg);
+        font-size: 12px;
+      }
+
+      .flow {
+        display: grid;
+        gap: 11px;
+        margin-top: 28px;
+        list-style: none;
+      }
+
+      .flow li {
+        display: grid;
+        grid-template-columns: 28px 1fr;
+        gap: 9px;
+        color: var(--fg);
+        font-size: 12px;
+      }
+
+      .flow b {
+        color: var(--line-strong);
+        font-size: 10px;
+      }
+
+      .flow strong {
+        display: block;
+        margin-bottom: 2px;
+        color: var(--fg-strong);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      @media (max-width: 930px) {
+        .page {
+          grid-template-columns: 1fr;
+          gap: 30px;
+          padding-top: 20px;
+        }
+
+        .stage {
+          position: static;
+        }
+
+        .notes {
+          width: min(100%, 520px);
+          margin: 0 auto;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .page {
+          display: block;
+          padding: 0;
+        }
+
+        .device {
+          width: 100%;
+          height: 100dvh;
+          min-height: 620px;
+          padding: 0;
+          border: 0;
+          border-radius: 0;
+        }
+
+        .screen {
+          border: 0;
+          border-radius: 0;
+        }
+
+        .island {
+          display: none;
+        }
+
+        .system-bar {
+          flex-basis: 38px;
+          padding-top: 3px;
+        }
+
+        .notes {
+          padding: 42px 22px 60px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="stage" aria-label="Interactive iPhone mockup">
+        <div class="device">
+          <div id="screen" class="screen" data-app-state="idle">
+            <div class="island" aria-hidden="true"></div>
+            <div class="system-bar" aria-hidden="true">
+              <span>9:41</span>
+              <span class="system-icons">
+                <span class="signal"></span>
+                <span>5G</span>
+                <span class="battery"></span>
+              </span>
+            </div>
+
+            <header class="app-head">
+              <span class="brand">scufris</span>
+              <span id="state" class="state">idle</span>
+              <span class="route">nixos.tail4d8a87.ts.net / foreground presence</span>
+            </header>
+
+            <ol id="conversation" class="conversation" aria-label="Conversation">
+              <li class="message" data-speaker="user">
+                <span class="speaker">you</span>
+                <p class="words">Can you check why the usage panel stopped updating?</p>
+              </li>
+              <li class="message" data-speaker="assistant">
+                <span class="speaker">scufris</span>
+                <p class="words">The endpoint is returning HTTP 429 after repeated refreshes. I would slow the poll interval and add backoff before changing the panel itself.</p>
+              </li>
+            </ol>
+
+            <p id="ambient" class="ambient">one unattended task needs attention</p>
+
+            <section class="interaction" aria-label="Input">
+              <form id="composer" class="composer">
+                <div class="composer-row">
+                  <span class="prompt" aria-hidden="true">&gt;</span>
+                  <textarea
+                    id="typed"
+                    class="typed"
+                    rows="1"
+                    maxlength="4096"
+                    placeholder="Type a message"
+                    aria-label="Type a message"
+                  ></textarea>
+                  <button id="send" class="send-icon" type="submit" aria-label="Send" disabled></button>
+                </div>
+              </form>
+
+              <section id="review" class="review" aria-label="Review transcription">
+                <div class="review-box">
+                  <p class="review-label">review transcription</p>
+                  <textarea id="reviewText" class="review-text" aria-label="Transcription">Could you explain what changed and whether we need to restart the service?</textarea>
+                  <div class="review-actions">
+                    <button id="discard" class="text-action" type="button">discard</button>
+                    <button id="accept" class="text-action primary" type="button">send</button>
+                  </div>
+                </div>
+              </section>
+
+              <div class="voice-dock">
+                <div class="dock-side">
+                  <button id="stop" class="stop" type="button">stop</button>
+                </div>
+                <button id="orbControl" class="orb-control" type="button" aria-label="Hold to talk">
+                  <span class="orb-wrap">
+                    <canvas id="orb" width="164" height="164"></canvas>
+                    <span class="privacy-ring"></span>
+                  </span>
+                  <span id="orbHint" class="orb-hint">hold to talk</span>
+                </button>
+                <div class="dock-side"></div>
+              </div>
+            </section>
+
+            <div class="home-indicator" aria-hidden="true"></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="notes">
+        <p class="kicker">Scufris / iOS surface / interaction study</p>
+        <h1>One conversation. One hand.</h1>
+        <p class="lead">
+          The HUD is the app. The pill stays as the voice control and state
+          grammar, while typed input and transcript review live in the same
+          bottom workspace.
+        </p>
+
+        <section class="control-panel">
+          <h2>Prototype states</h2>
+          <div id="stateGrid" class="state-grid">
+            <button class="state-button active" data-state="idle">idle</button>
+            <button class="state-button" data-state="listening">listening</button>
+            <button class="state-button" data-state="transcribing">transcribing</button>
+            <button class="state-button" data-state="editing">review</button>
+            <button class="state-button" data-state="working">working</button>
+            <button class="state-button" data-state="speaking">speaking</button>
+            <button class="state-button" data-state="attention">attention</button>
+            <button class="state-button" data-state="error">error</button>
+            <button class="state-button" data-state="disconnected">offline</button>
+          </div>
+          <p class="instruction">
+            Hold the orb with a mouse or finger, then release. Type and send to
+            exercise the conversation flow.
+          </p>
+        </section>
+
+        <ol class="flow">
+          <li>
+            <b>01</b>
+            <span><strong>Read</strong>The newest exchange rests next to the input, not at the top of an empty screen.</span>
+          </li>
+          <li>
+            <b>02</b>
+            <span><strong>Speak</strong>Hold the orb for an explicit microphone boundary. Releasing starts transcription.</span>
+          </li>
+          <li>
+            <b>03</b>
+            <span><strong>Review</strong>The draft expands in place. Context remains visible and the text stays editable.</span>
+          </li>
+          <li>
+            <b>04</b>
+            <span><strong>Steer</strong>The composer remains available while Scufris works. Stop ends the current run.</span>
+          </li>
+        </ol>
+
+        <section class="law">
+          <h2>No phone widgets</h2>
+          <p>
+            The phone announces an empty widget catalog. When it holds
+            presence, widget tools are inactive and Scufris answers in ordinary
+            conversation text and local speech. Desktop panels stay desktop
+            processes on desktop monitors.
+          </p>
+        </section>
+      </aside>
+    </main>
+
+    <script src="../../native/scufris-desktop/ui/orb-engine.js"></script>
+    <script>
+      const palette = {
+        idle: "#95a99f",
+        listening: "#ffdd33",
+        transcribing: "#cc8c3c",
+        editing: "#95a99f",
+        working: "#96a6c8",
+        speaking: "#73c936",
+        attention: "#9e95c7",
+        error: "#f43841",
+        disconnected: "#52494e",
+      };
+
+      const screen = document.querySelector("#screen");
+      const stateLabel = document.querySelector("#state");
+      const orbHint = document.querySelector("#orbHint");
+      const composer = document.querySelector("#composer");
+      const review = document.querySelector("#review");
+      const reviewText = document.querySelector("#reviewText");
+      const typed = document.querySelector("#typed");
+      const send = document.querySelector("#send");
+      const stop = document.querySelector("#stop");
+      const ambient = document.querySelector("#ambient");
+      const conversation = document.querySelector("#conversation");
+      const orbControl = document.querySelector("#orbControl");
+      const canvas = document.querySelector("#orb");
+      const context = canvas.getContext("2d");
+      const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      let state = "idle";
+      let held = false;
+      let holdStarted = 0;
+      let timer = null;
+      let workingTimer = null;
+
+      const engine = window.OrbEngine;
+      const ORB_SIZE = 82;
+      const ORB_PRESET = 64;
+      const PANEL = [16, 16, 16];
+      const STILL = 2.35;
+      const orbLooks = {
+        idle: { state: "breathing", speed: 1 },
+        listening: { state: "listening", speed: 1 },
+        transcribing: { state: "composing", speed: 1 },
+        editing: { state: "breathing", speed: 1 },
+        working: { state: "working", speed: 1 },
+        speaking: { state: "listening", speed: 1 },
+        attention: { state: "breathing", speed: 1 },
+        error: { state: "breathing", speed: 0.35 },
+        disconnected: { state: "connecting", speed: 1 },
+      };
+      const orbScale = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = ORB_SIZE * orbScale;
+      canvas.height = ORB_SIZE * orbScale;
+      context.scale(orbScale, orbScale);
+
+      function setState(next) {
+        state = next;
+        screen.dataset.appState = next;
+        screen.style.setProperty("--accent", palette[next]);
+        stateLabel.textContent = next === "editing" ? "review" : next === "disconnected" ? "offline" : next;
+
+        document.querySelectorAll(".state-button").forEach((button) => {
+          button.classList.toggle("active", button.dataset.state === next);
+        });
+
+        review.classList.toggle("visible", next === "editing");
+        composer.classList.toggle("hidden", next === "editing");
+        stop.classList.toggle("visible", next === "working");
+        ambient.classList.toggle("visible", next === "attention");
+
+        const hints = {
+          idle: "hold to talk",
+          listening: "00:00",
+          transcribing: "transcribing",
+          editing: "review above",
+          working: "working",
+          speaking: "speaking",
+          attention: "attention",
+          error: "connection error",
+          disconnected: "not connected",
+        };
+        orbHint.textContent = hints[next];
+        orbHint.classList.toggle("timer", next === "listening");
+      }
+
+      function addMessage(speaker, text) {
+        const item = document.createElement("li");
+        item.className = "message";
+        item.dataset.speaker = speaker;
+
+        const who = document.createElement("span");
+        who.className = "speaker";
+        who.textContent = speaker === "user" ? "you" : "scufris";
+
+        const words = document.createElement("p");
+        words.className = "words";
+        words.textContent = text;
+
+        item.append(who, words);
+        conversation.append(item);
+        conversation.scrollTop = conversation.scrollHeight;
+      }
+
+      function beginWork(text) {
+        clearTimeout(workingTimer);
+        addMessage("user", text);
+        setState("working");
+        workingTimer = setTimeout(() => {
+          addMessage(
+            "assistant",
+            "I received that from the phone surface. The full answer appears here as conversation text; no widget is opened on this screen.",
+          );
+          setState("speaking");
+          workingTimer = setTimeout(() => setState("idle"), 1700);
+        }, 1300);
+      }
+
+      function resizeTyped() {
+        typed.style.height = "auto";
+        typed.style.height = `${Math.min(typed.scrollHeight, 76)}px`;
+        send.disabled = typed.value.trim().length === 0;
+      }
+
+      typed.addEventListener("input", resizeTyped);
+      typed.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          composer.requestSubmit();
+        }
+      });
+
+      composer.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const text = typed.value.trim();
+        if (!text) return;
+        typed.value = "";
+        resizeTyped();
+        beginWork(text);
+      });
+
+      document.querySelector("#discard").addEventListener("click", () => {
+        setState("idle");
+      });
+
+      document.querySelector("#accept").addEventListener("click", () => {
+        const text = reviewText.value.trim();
+        if (!text) return;
+        setState("idle");
+        beginWork(text);
+      });
+
+      stop.addEventListener("click", () => {
+        clearTimeout(workingTimer);
+        setState("idle");
+      });
+
+      function updateListeningTime() {
+        const elapsed = Math.max(0, Date.now() - holdStarted);
+        const seconds = Math.floor(elapsed / 1000);
+        const minutes = Math.floor(seconds / 60);
+        orbHint.textContent = `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+      }
+
+      function startHold(event) {
+        if (state === "transcribing" || state === "editing") return;
+        event.preventDefault();
+        held = true;
+        holdStarted = Date.now();
+        clearTimeout(workingTimer);
+        orbControl.setPointerCapture?.(event.pointerId);
+        setState("listening");
+        clearInterval(timer);
+        timer = setInterval(updateListeningTime, 200);
+      }
+
+      function endHold(event) {
+        if (!held) return;
+        event.preventDefault();
+        held = false;
+        clearInterval(timer);
+        setState("transcribing");
+        setTimeout(() => {
+          if (state === "transcribing") {
+            setState("editing");
+            reviewText.focus();
+            reviewText.select();
+          }
+        }, 950);
+      }
+
+      orbControl.addEventListener("pointerdown", startHold);
+      orbControl.addEventListener("pointerup", endHold);
+      orbControl.addEventListener("pointercancel", endHold);
+      orbControl.addEventListener("contextmenu", (event) => event.preventDefault());
+
+      document.querySelectorAll(".state-button").forEach((button) => {
+        button.addEventListener("click", () => {
+          clearTimeout(workingTimer);
+          setState(button.dataset.state);
+        });
+      });
+
+      function colorToRgb(hex) {
+        return [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16));
+      }
+
+      function mix(from, to, amount, alpha) {
+        const channels = from.map((value, index) =>
+          Math.round(value + (to[index] - value) * amount),
+        );
+        return `rgba(${channels[0]},${channels[1]},${channels[2]},${alpha})`;
+      }
+
+      function ink(white) {
+        return 1 - Math.min(1, Math.max(0, white));
+      }
+
+      function drawOrb(now) {
+        const look = orbLooks[state] ?? orbLooks.idle;
+        const preset = engine.resolvePreset(look.state, ORB_PRESET);
+        const seconds = reduced ? STILL : now / 1000;
+        const instant = engine.MODE_FRAMES[preset.mode](
+          ORB_SIZE,
+          seconds * preset.speed * look.speed,
+          preset.opts,
+        );
+        const accent = colorToRgb(palette[state]);
+
+        context.clearRect(0, 0, ORB_SIZE, ORB_SIZE);
+        for (const line of instant.lines) {
+          context.strokeStyle = mix(PANEL, accent, ink(line.white), line.a ?? 1);
+          context.lineWidth = line.w;
+          context.beginPath();
+          context.moveTo(line.x1, line.y1);
+          context.lineTo(line.x2, line.y2);
+          context.stroke();
+        }
+        for (const dot of instant.dots) {
+          context.fillStyle = mix(PANEL, accent, ink(dot.white), dot.a ?? 1);
+          context.beginPath();
+          context.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
+          context.fill();
+        }
+
+        const pulse = state === "listening" ? 1 + 0.045 * Math.sin(now * 0.008) : 1;
+        canvas.style.transform = `scale(${pulse})`;
+        requestAnimationFrame(drawOrb);
+      }
+
+      setState("idle");
+      resizeTyped();
+      requestAnimationFrame(drawOrb);
+    </script>
+  </body>
+</html>

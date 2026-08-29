@@ -177,6 +177,117 @@ devices is likely less disruptive than free weekly reprovisioning. TestFlight is
 useful for review builds but is not permanent installation. The spike must
 record the chosen route and the update procedure.
 
+### iOS build environment decision (2026-08-29)
+
+Alex has no Mac with Xcode and decided not to build the iOS demo now. Nix can
+provide a Swift compiler on Linux, but it cannot provide Apple's proprietary iOS
+SDK, Xcode build tools, device signing, provisioning, or direct installation to
+an iPhone. A Linux-only build would therefore not produce a testable native iOS
+app. Cloud macOS is possible but makes signing and interactive device testing
+awkward and is not justified for this disposable proof.
+
+The transport research also narrowed the library choice. Citadel 0.12.1 is
+maintained and supports non-interactive command execution and streamed command
+output. Its documented high-level client API only streams command stdin through
+a PTY or TTY, so it cannot by itself provide the required binary-clean,
+full-duplex exec bridge. It remains suitable for a command-based demo using
+`scufris-ctl send` and `scufris-ctl watch`; a direct protocol client needs a
+lower-level SwiftNIO SSH channel or another proved library.
+
+Outcome: defer the native app and its SSH transport proof until a Mac with Xcode
+is available. Do not add an unbuildable iOS project to this repository.
+
+### iOS interaction design (2026-08-29)
+
+Interactive design: `ios-app-design.html` in this directory. The prototype
+loads the same vendored `thinking-orbs` engine and state-to-orb mapping as the
+desktop pill rather than carrying a second approximation.
+
+The phone is one screen rather than a pill page, a review page, and a HUD page.
+The conversation occupies the available height. A compact typed composer and
+the orb share one bottom interaction workspace. Holding the orb records,
+releasing it transcribes, and the editable review box expands in that workspace
+without hiding the conversation. The orb keeps the desktop state grammar and
+barge-in rule. Typed input remains available while Scufris works so it can
+steer, and a visible stop action ends the run.
+
+The phone has no widget runtime. It announces an empty catalog, and when it
+holds presence the service must make widget tools inactive so the agent answers
+in ordinary conversation text and local speech. Desktop widgets remain host
+processes on host monitors.
+
+Separate observations were intentionally parked rather than folded into this
+design: the current four-widget limit, Claude usage polling eventually receiving
+HTTP 429, Dashboardd replacement coverage, and general desktop polish. They
+need use evidence and separate work if promoted.
+
+### Presence lease research (2026-08-29, proposed)
+
+Implementation plan: `MULTI_SURFACE_PLAN.md` in this directory. Work is paused
+before implementation and the foreground-versus-first-touch trigger is not yet
+settled.
+
+"Sleep" must mean passive, not disconnected. Every connected surface continues
+to receive state, transcript, and notices. Exactly one active surface receives
+speech, widget commands, and conversation-window requests. It is therefore a
+presence lease in the service and an `active` or `watching` state in the UI;
+calling a watcher asleep would hide that it remains current and can still submit
+or abort.
+
+A connection-only lease is too sticky, and a submit-only lease is too late for
+unprompted contact. The proposed acquisition rule combines lifecycle and
+intent:
+
+- the first frontend becomes active;
+- a phone claims when its app enters the foreground;
+- either surface claims on deliberate Scufris interaction: microphone start,
+  composer or HUD activation, or desktop activation gesture;
+- every submit also claims as a final invariant; and
+- a claim is revocable immediately by a newer claim and never blocks one.
+
+A foreground event is only a claim, not ownership for the app's whole lifetime.
+If the desktop hotkey or HUD is used while the phone stays open, the desktop
+claims presence back. Opening the phone to read briefly moves output there;
+touching Scufris on the desktop moves it back.
+
+The service should keep claimants in recency order. Claim moves a connected
+surface to the top. Explicit release, backgrounding, SSH loss, or frontend
+disconnect removes it; the most recent still-connected claimant resumes. Thus a
+phone foregrounds over the desktop and the desktop wakes automatically when the
+phone backgrounds, without naming either one as local, remote, primary, or
+fallback. If no claimant remains, there is no side-effect destination until a
+surface acts. Do not add a timer: expiry during a long visible answer would move
+speech unexpectedly, while connection loss already gives the lease a bounded
+lifetime.
+
+Protocol v4 needs explicit `claim` and `release` requests plus a pushed presence
+update so every UI knows whether it is active or watching. The service can still
+infer claim from `submit`. Connection IDs are sufficient for lease ownership;
+no remote bit or device class is needed. A stable surface identifier may be
+useful for diagnostics but must not decide routing.
+
+The implementation shape remains bounded but is larger than removing frontend
+eviction:
+
+- retain all frontends and their individual widget catalogs;
+- add recency and one active frontend to service state;
+- fan state, transcript, and notices out to all frontends;
+- route speech, widgets, and conversation requests only to presence;
+- remove a disconnected holder and restore the previous connected claimant;
+- make desktop activation paths claim without making ordinary transcript replay
+  claim;
+- make phone foreground claim and background release, with disconnect as the
+  authoritative fallback; and
+- defer active widget-tool changes to the turn boundary while preserving the
+  catalog of a widget already executing.
+
+The unresolved product fork is whether merely foregrounding the phone should
+claim, or whether the first touch inside Scufris should claim. Foreground claim
+is recommended: the whole app is a Scufris surface, iOS provides a reliable
+foreground transition, and any later desktop interaction can revoke it. A
+touch-only claim avoids moving output when the app is opened only to read, but
+makes passive reading disagree with where unprompted speech and attention go.
+
 ## Hostname and private reachability finding (2026-08-28)
 
 The website name and the private machine name are separate DNS records. They do

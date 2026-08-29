@@ -18,7 +18,7 @@ import unittest.mock
 from pathlib import Path
 from types import ModuleType
 
-BACKENDS = Path(__file__).parents[1] / "native" / "scufris-widgets" / "backends"
+BACKENDS = Path(__file__).parents[1] / "surfaces" / "desktop" / "backends"
 
 #: A stub standing in for `today`. It answers the subcommands the backend asks
 #: for out of a plan file, records every call, and refuses what the plan tells

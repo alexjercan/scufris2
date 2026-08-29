@@ -16,15 +16,15 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/scufris/workflow/index.ts",
-      "./extensions/scufris/response.ts",
-      "./extensions/scufris/calm.ts",
-      "./extensions/scufris/service/index.ts",
-      "./extensions/scufris/widgets/index.ts",
-      "./extensions/scufris/conversation.ts"
+      "./agent/extensions/scufris/workflow/index.ts",
+      "./agent/extensions/scufris/response.ts",
+      "./agent/extensions/scufris/calm.ts",
+      "./agent/extensions/scufris/service/index.ts",
+      "./agent/extensions/scufris/widgets/index.ts",
+      "./agent/extensions/scufris/conversation.ts"
     ],
     "skills": [
-      "./skills"
+      "./agent/skills"
     ]
   },
   "peerDependencies": {

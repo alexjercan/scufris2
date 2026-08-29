@@ -9,8 +9,8 @@ checks, and the documents that describe them.
 Grep both sides of every pair the change touches:
 
 - Protocol: version 3 is implemented twice.
-  `native/scufris-control/src/service.rs` is the service and every
-  native client, and `extensions/scufris/service/protocol.ts` is the
+  `shared/control/src/service.rs` is the service and every native client, and
+  `agent/extensions/scufris/service/protocol.ts` is the
   agent; `SERVICE_VERSION` lives in both, as do
   `MAX_TRANSCRIPT_TEXT_BYTES` and `MAX_MESSAGE_BYTES`. A message shape,
   a role name, a refusal code, or a cap changed on one side only is a
@@ -18,7 +18,7 @@ Grep both sides of every pair the change touches:
   Every stable refusal code belongs in the `refusal` module; one
   written as a literal at its send site is invisible to a client author
   enumerating the module.
-- Identity: the sentence in `extensions/scufris/workflow/identity.ts`
+- Identity: the sentence in `agent/extensions/scufris/workflow/identity.ts`
   is asserted byte-for-byte in `tests/identity.test.ts`.
 - Launcher: the argv built in `nix/launcher.nix` is asserted exactly
   in `nix/checks/launcher.nix`. A new skill directory or extension

@@ -181,9 +181,9 @@ in
       pkgs.runCommand "scufris-native-format-check" {
         nativeBuildInputs = [pkgs.cargo pkgs.rustfmt];
       } ''
-        cp -R ${../../native} native
-        chmod -R u+w native
-        cd native
+        cp -R ${scufris.rustSource} source
+        chmod -R u+w source
+        cd source
         cargo fmt --all --check
         touch "$out"
       '';

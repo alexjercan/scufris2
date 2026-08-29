@@ -39,7 +39,7 @@ Build the companion and print what it resolved. This starts no window, so it
 is the cheapest proof that the working tree builds and configures:
 
 ```bash
-cargo run --manifest-path native/scufris-desktop/Cargo.toml -- --print-config
+cargo run --manifest-path surfaces/desktop/Cargo.toml -- --print-config
 ```
 
 ```text
@@ -61,11 +61,11 @@ running a working-tree service first. Use two terminals, both inside
 
 ```bash
 # 1. the service that owns the conversation
-cargo run --manifest-path native/scufris-service/Cargo.toml -- \
+cargo run --manifest-path host/service/Cargo.toml -- \
   --agent "$(nix build --no-link --print-out-paths .#scufris)/bin/scufris"
 
 # 2. the companion
-cargo run --manifest-path native/scufris-desktop/Cargo.toml
+cargo run --manifest-path surfaces/desktop/Cargo.toml
 ```
 
 `--agent` is optional when a `scufris` is already on `PATH`; the service takes
@@ -80,7 +80,7 @@ Then hold `Super+D`, speak, and let go. The take stops and the words
 arrive in a textbox above the pill, where `Enter` sends them to the agent the
 service supervises as an ordinary user message and `Escape` throws them away.
 Watch the same conversation from a third terminal with
-`cargo run --manifest-path native/scufris-service/Cargo.toml --bin scufris-ctl -- watch`.
+`cargo run --manifest-path host/service/Cargo.toml --bin scufris-ctl -- watch`.
 
 Both processes must see the same `XDG_RUNTIME_DIR`, because that is where the
 socket is. With no service the companion reports the backend as unavailable
@@ -93,7 +93,7 @@ companion's.
 
 ```bash
 SCUFRIS_DESKTOP_SPEAK_COMMAND="$(nix build --no-link --print-out-paths .#scufris-speak)/bin/scufris-speak" \
-  cargo run --manifest-path native/scufris-desktop/Cargo.toml
+  cargo run --manifest-path surfaces/desktop/Cargo.toml
 ```
 
 A companion started without it says so once in its log and stays silent, which
@@ -121,7 +121,7 @@ default:
 
 ```bash
 SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10302/inference \
-  cargo run --manifest-path native/scufris-desktop/Cargo.toml
+  cargo run --manifest-path surfaces/desktop/Cargo.toml
 ```
 
 With no server anywhere, start one on its own port:
@@ -142,7 +142,7 @@ the hooks. Point them at absolute executables to exercise them:
 ```bash
 SCUFRIS_DESKTOP_CHAT_COMMAND=/path/to/open-chat \
 SCUFRIS_DESKTOP_RESTART_COMMAND=/path/to/restart-backend \
-  cargo run --manifest-path native/scufris-desktop/Cargo.toml
+  cargo run --manifest-path surfaces/desktop/Cargo.toml
 ```
 
 The companion is Linux and X11 only. Without a display it starts and does no
@@ -162,7 +162,7 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 ruff check .
 ruff format --check .
 shellcheck scripts/scufris-agent scripts/scufris-dev scripts/scufris-staging
-(cd native && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace)
+(cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace)
 nix fmt -- --check .
 nix flake check -L
 git diff --check
@@ -186,7 +186,7 @@ Test ownership:
   orchestration, response shaping, Calm, identity, and repository structure. `tests/service.test.ts` covers the agent side of the version 3
   protocol: the hello, what the agent reports, and what it does with a widget
   report.
-- `native/`: the Rust workspace. `scufris-control` owns the protocol encoding,
+- `Cargo.toml`: the root Rust workspace. `shared/control/` owns the protocol encoding,
   `scufris-desktop` owns the state machine, the pending transcript store, audio
   conversion, the speaker, and the tray, and `scufris-service` owns the agent,
   the session, and the version 3 socket. Every port is faked and the service's stand-in

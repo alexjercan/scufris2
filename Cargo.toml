@@ -1,5 +1,5 @@
 [workspace]
-members = ["scufris-control", "scufris-desktop", "scufris-service"]
+members = ["host/service", "shared/control", "surfaces/desktop"]
 resolver = "2"
 
 [workspace.package]

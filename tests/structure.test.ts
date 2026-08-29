@@ -20,21 +20,44 @@ test("package loads only capability-owned Scufris extensions", async () => {
     await readFile(join(root, "package.json"), "utf8"),
   );
   assert.deepEqual(manifest.pi.extensions, [
-    "./extensions/scufris/workflow/index.ts",
-    "./extensions/scufris/response.ts",
-    "./extensions/scufris/calm.ts",
-    "./extensions/scufris/service/index.ts",
-    "./extensions/scufris/widgets/index.ts",
-    "./extensions/scufris/conversation.ts",
+    "./agent/extensions/scufris/workflow/index.ts",
+    "./agent/extensions/scufris/response.ts",
+    "./agent/extensions/scufris/calm.ts",
+    "./agent/extensions/scufris/service/index.ts",
+    "./agent/extensions/scufris/widgets/index.ts",
+    "./agent/extensions/scufris/conversation.ts",
   ]);
+  assert.deepEqual(manifest.pi.skills, ["./agent/skills"]);
 
-  const files = await typeScriptFiles(join(root, "extensions", "scufris"));
+  await Promise.all([
+    access(join(root, "host", "service", "Cargo.toml")),
+    access(join(root, "shared", "control", "Cargo.toml")),
+    access(join(root, "surfaces", "desktop", "Cargo.toml")),
+    access(join(root, "surfaces", "desktop", "widgets", "widget.d.ts")),
+    access(
+      join(root, "surfaces", "desktop", "backends", "today", "backend.py"),
+    ),
+  ]);
+  await assert.rejects(access(join(root, "native")));
+  await assert.rejects(access(join(root, "surfaces", "ios")));
+  await assert.rejects(access(join(root, "host", "gateway")));
+
+  const files = await typeScriptFiles(
+    join(root, "agent", "extensions", "scufris"),
+  );
   for (const file of files) {
     assert.doesNotMatch(await readFile(file, "utf8"), /scripts\/scufris-/);
   }
 
   const orchestration = await readFile(
-    join(root, "extensions", "scufris", "workflow", "orchestration.ts"),
+    join(
+      root,
+      "agent",
+      "extensions",
+      "scufris",
+      "workflow",
+      "orchestration.ts",
+    ),
     "utf8",
   );
   assert.doesNotMatch(orchestration, /setInterval|setTimeout/);
@@ -42,7 +65,14 @@ test("package loads only capability-owned Scufris extensions", async () => {
   assert.match(orchestration, /watch\(job\.status_file/);
   assert.match(orchestration, /eventReadController\?\.abort\(\)/);
   await access(
-    join(root, "extensions", "scufris", "workflow", "worker-report.ts"),
+    join(
+      root,
+      "agent",
+      "extensions",
+      "scufris",
+      "workflow",
+      "worker-report.ts",
+    ),
   );
   await access(join(root, "tools", "jobs", "scufris-report"));
   await access(join(root, "tools", "voice", "scufris-speak"));

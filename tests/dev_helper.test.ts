@@ -151,12 +151,12 @@ function expectedArgs(projectRoot: string, sessionDirectory: string): string[] {
   return [
     ...extensions.flatMap((name) => [
       "--extension",
-      join(projectRoot, "extensions", "scufris", name),
+      join(projectRoot, "agent", "extensions", "scufris", name),
     ]),
     "--skill",
-    join(projectRoot, "skills", "workflow"),
+    join(projectRoot, "agent", "skills", "workflow"),
     "--skill",
-    join(projectRoot, "skills", "widgets"),
+    join(projectRoot, "agent", "skills", "widgets"),
     "--session-dir",
     sessionDirectory,
     "--continue",

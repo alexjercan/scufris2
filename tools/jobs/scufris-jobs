@@ -1474,6 +1474,7 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
     if job["harness"] == "pi":
         report_extension = (
             Path(__file__).resolve().parents[2]
+            / "agent"
             / "extensions"
             / "scufris"
             / "workflow"

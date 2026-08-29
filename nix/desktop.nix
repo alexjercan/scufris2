@@ -54,7 +54,7 @@ in
     mkdir -p "$out/bin" "$out/share/applications" \
       "$out/share/icons/hicolor/scalable/apps"
     ln -s ${unwrapped}/bin/scufris-desktop "$out/bin/scufris-desktop"
-    cp ${source}/scufris-desktop/icons/scufris.svg \
+    cp ${source}/surfaces/desktop/icons/scufris.svg \
       "$out/share/icons/hicolor/scalable/apps/scufris.svg"
     cat > "$out/share/applications/scufris-desktop.desktop" <<EOF
     [Desktop Entry]

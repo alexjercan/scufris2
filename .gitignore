@@ -7,7 +7,7 @@ docs/book/
 .direnv/
 .env
 *.log
-native/target/
-native/scufris-desktop/gen/
-native/scufris-desktop/ui/dist/
-native/scufris-widgets/widgets/dist/
+target/
+surfaces/desktop/gen/
+surfaces/desktop/ui/dist/
+surfaces/desktop/widgets/dist/

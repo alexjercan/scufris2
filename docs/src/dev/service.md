@@ -195,7 +195,6 @@ agent has not connected back. The usual cause is an older `scufris` earlier on
 ## Running it by hand
 
 ```bash
-cd native
 nix develop --offline -c cargo build -p scufris-service
 SCUFRIS_SERVICE_AGENT="$(command -v scufris)" ./target/debug/scufris-service
 ```
@@ -204,8 +203,9 @@ Then, from another terminal, `./target/debug/scufris-ctl state`.
 
 ## Packaging
 
-`nix/service.nix` builds `-p scufris-service` out of the `native/` workspace and
-splits the result into two packages, `scufris-service` and `scufris-ctl`, from
+`nix/service.nix` builds `-p scufris-service` from the root workspace member
+under `host/service/` and splits the result into two packages,
+`scufris-service` and `scufris-ctl`, from
 one build. Neither pulls in GTK or WebKitGTK, which `nix/checks/service.nix`
 asserts against their closures.
 

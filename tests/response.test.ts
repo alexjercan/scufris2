@@ -22,12 +22,12 @@ import response, {
   promptInspectionMarkdown,
   responseText,
   splitDirectResponse,
-} from "../extensions/scufris/response.ts";
+} from "../agent/extensions/scufris/response.ts";
 import {
   FINAL_RESPONSE_TOOL,
   registerForegroundAcknowledgmentLifecycle,
-} from "../extensions/scufris/workflow/orchestration.ts";
-import { SPOKEN_EVENT } from "../extensions/scufris/shared/spoken.ts";
+} from "../agent/extensions/scufris/workflow/orchestration.ts";
+import { SPOKEN_EVENT } from "../agent/extensions/scufris/shared/spoken.ts";
 
 /**
  * The paragraph the speaker was last handed, if any.

@@ -9,8 +9,8 @@ Read `AGENTS.md` first. This brief only says where to look.
 
 - Extension complexity where a product skill or a small deterministic
   helper would do. Orchestration stays narrow: Pi lifecycle, native
-  tools, session state, and polling belong in `extensions/scufris/`;
-  model-facing workflows in `skills/`; process and filesystem work in
+  tools, session state, and polling belong in `agent/extensions/scufris/`;
+  model-facing workflows in `agent/skills/`; process and filesystem work in
   small Bash or Python scripts.
 - TypeScript that loosens: a widened type, an `any`, an assertion
   where a narrow type would hold, a check `strict` and

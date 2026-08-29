@@ -6,7 +6,18 @@
   pkgs,
   system,
 }: let
+  inherit (pkgs) lib;
   version = (builtins.fromJSON (builtins.readFile ../package.json)).version;
+  rustSource = lib.fileset.toSource {
+    root = ../.;
+    fileset = lib.fileset.unions [
+      ../Cargo.toml
+      ../Cargo.lock
+      ../host
+      ../shared
+      ../surfaces
+    ];
+  };
   voice = import ./voice.nix {inherit pkgs;};
   resources = import ./resources.nix {inherit pkgs;};
   piPackage = inputs.llm-agents.packages.${system}.pi;
@@ -26,16 +37,16 @@
   };
   desktop = import ./desktop.nix {
     inherit pkgs version;
-    source = ../native;
-    lockFile = ../native/Cargo.lock;
+    source = rustSource;
+    lockFile = ../Cargo.lock;
   };
-  native = import ./service.nix {
+  headless = import ./service.nix {
     inherit pkgs version;
-    source = ../native;
-    lockFile = ../native/Cargo.lock;
+    source = rustSource;
+    lockFile = ../Cargo.lock;
   };
-  service = native.service;
-  ctl = native.ctl;
+  service = headless.service;
+  ctl = headless.ctl;
   staging = import ./staging.nix {
     inherit pkgs self service desktop speak;
   };
@@ -43,6 +54,7 @@
   docs = import ./docs.nix {inherit inputs self pkgs;};
 in {
   inherit
+    rustSource
     voice
     resources
     piPackage

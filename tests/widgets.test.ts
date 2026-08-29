@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { CatalogEntry } from "../extensions/scufris/service/protocol.ts";
+import type { CatalogEntry } from "../agent/extensions/scufris/service/protocol.ts";
 import {
   DESKTOP_CONTROL_EVENT,
   WidgetCommandError,
@@ -9,10 +9,10 @@ import {
   type DesktopControl,
   type WidgetNotice,
   type WidgetRequest,
-} from "../extensions/scufris/service/client.ts";
+} from "../agent/extensions/scufris/service/client.ts";
 import widgets, {
   WIDGET_EVENT_MESSAGE,
-} from "../extensions/scufris/widgets/index.ts";
+} from "../agent/extensions/scufris/widgets/index.ts";
 
 type Handler = (event: any, context: any) => any;
 

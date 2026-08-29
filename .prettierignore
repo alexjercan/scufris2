@@ -1,7 +1,10 @@
-native/target/
+target/
 docs/book/
-native/scufris-desktop/gen/
-native/scufris-desktop/ui/dist/
+# Preserve historical design records as authored.
+tasks/20260828-232631/ios-app-design.html
+tasks/20260828-232631/MULTI_SURFACE_PLAN.md
+surfaces/desktop/gen/
+surfaces/desktop/ui/dist/
 flake.lock
-native/scufris-desktop/ui/orb-engine.js
+surfaces/desktop/ui/orb-engine.js
 tasks/20260822-132001/scufris-hud.html

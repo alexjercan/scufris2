@@ -10,7 +10,7 @@ Follow its links to `docs/tui.md`, `docs/packages.md`, and relevant installed
 examples when those interfaces are involved.
 
 - Keep lifecycle events, native tools, session state, and polling in
-  `extensions/scufris/`. Move deterministic mechanics to owning helpers.
+  `agent/extensions/scufris/`. Move deterministic mechanics to owning helpers.
 - Keep native tool schemas narrow and harness-neutral. Never expose unrestricted
   commands, paths, URLs, filesystem access, or desktop operations to the model.
 - Start background resources from `session_start` or on demand, never from the
@@ -21,7 +21,7 @@ examples when those interfaces are involved.
   state reconstruction.
 - Put Pi-provided APIs in `peerDependencies`. Put other runtime libraries in
   `dependencies`.
-- Keep distributed model workflows under `skills/`; do not mix them with
+- Keep distributed model workflows under `agent/skills/`; do not mix them with
   development skills under `.agents/skills/`.
 
 Run focused tests first, then `npm run check` when the extension surface changed.

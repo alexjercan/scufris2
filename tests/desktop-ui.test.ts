@@ -22,7 +22,7 @@ import test from "node:test";
 import { createContext, runInContext } from "node:vm";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
-const ui = join(root, "native", "scufris-desktop", "ui");
+const ui = join(root, "surfaces", "desktop", "ui");
 
 interface Compiled {
   pill: string;

@@ -30,9 +30,9 @@ Scufris packages six capability-owned Pi extensions:
 - `conversation` puts the companion's own conversation window up and down. It
   is the one window Scufris can ask for that is not a widget.
 
-`scufris-service` is the half that owns the conversation. It is built from the
-`native/` cargo workspace and shipped as its own package with no graphical
-dependency at all. It supervises one `pi --mode rpc` agent, owns the session
+`scufris-service` is the half that owns the conversation. Its crate lives under
+`host/service/` in the root cargo workspace and ships as its own package with no
+graphical dependency at all. It supervises one `pi --mode rpc` agent, owns the session
 directory, and serves the socket every surface connects to. `scufris-ctl` talks
 to it from a terminal. See [Background service](dev/service.md).
 
@@ -46,7 +46,7 @@ screen still has one. See [Desktop companion](dev/desktop.md).
 
 Deterministic executables called by extensions live under `tools/`. Commands
 for people live under `scripts/`. Model-facing workflow policy lives in small
-skills under `skills/`.
+skills under `agent/skills/`.
 
 ## Responsibilities
 

@@ -1,5 +1,5 @@
 # The helpers that are neither Rust nor TypeScript. `npm test` globs
-# `tests/*.test.ts` and `cargo test` knows nothing outside `native/`, so the
+# `tests/*.test.ts` and `cargo test` know nothing about these helpers, so the
 # Python beside them - the job runner, the artifact prune, the quick-review
 # agent, and the subscription backends - was covered by tests that no gate ran.
 # This is the gate.

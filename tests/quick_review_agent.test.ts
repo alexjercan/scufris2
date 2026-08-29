@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { startQuickReviewAgent } from "../extensions/scufris/workflow/quick-review-agent.ts";
+import { startQuickReviewAgent } from "../agent/extensions/scufris/workflow/quick-review-agent.ts";
 
 const base = "1".repeat(40);
 const revision = "2".repeat(40);

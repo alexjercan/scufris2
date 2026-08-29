@@ -8,7 +8,7 @@ import {
   initTheme,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import calm, { resolveCalmCommand } from "../extensions/scufris/calm.ts";
+import calm, { resolveCalmCommand } from "../agent/extensions/scufris/calm.ts";
 
 initTheme("dark", false);
 

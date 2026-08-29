@@ -4,8 +4,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   DESKTOP_CONTROL_EVENT,
   WidgetCommandError,
-} from "../extensions/scufris/service/client.ts";
-import conversation from "../extensions/scufris/conversation.ts";
+} from "../agent/extensions/scufris/service/client.ts";
+import conversation from "../agent/extensions/scufris/conversation.ts";
 
 /** The control the service link hands over, with the socket taken out. */
 class FakeControl {

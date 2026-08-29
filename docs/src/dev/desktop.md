@@ -1,7 +1,7 @@
 # Desktop companion
 
 `scufris-desktop` is the Scufris voice pill and tray companion. It is a Tauri
-application built from the `native/` cargo workspace and shipped as its own
+application built from `surfaces/desktop/` in the root cargo workspace and shipped as its own
 flake package, so consumers who never enable it never build Tauri.
 
 ## Ownership
@@ -99,7 +99,7 @@ retained as **uncertain** instead: `Ctrl+C` copies it, `Escape` discards it, and
 `Enter` says what sending it again would risk before a second `Enter` does it.
 Activation never discards a retained transcript.
 
-Every one of these transitions lives in `native/scufris-desktop/src/state.rs`
+Every one of these transitions lives in `surfaces/desktop/src/state.rs`
 as a pure state machine, so the whole interaction is tested without a display.
 Everything the runtime reaches outside itself - the microphone, the endpoint,
 the socket, the window, the disk, and where deferred work runs - is a port on
@@ -116,7 +116,7 @@ The panels' form window is the same half - it comes up because a tick was
 clicked, and it hands the keyboard back when it goes (see
 [Widgets](widgets.md#the-form-window)).
 
-`native/scufris-desktop/src/command.rs` listens on a Unix socket at
+`surfaces/desktop/src/command.rs` listens on a Unix socket at
 `$XDG_RUNTIME_DIR/scufris/desktop.sock`, beside the service socket and not it.
 This is the one place the companion is the server: `link.rs` connects out to
 the service, and this listens for the person's own window manager. One LF-terminated JSON line
@@ -160,7 +160,7 @@ The socket is the person's alone, in their own runtime directory under a private
 one; anything that can open it can already act as them. A session with no
 runtime directory gets no command socket and starts anyway.
 
-`native/scufris-desktop/src/keys.rs` is the other half. It grabs two modified
+`surfaces/desktop/src/keys.rs` is the other half. It grabs two modified
 accelerators from the display - `Super+Escape` and `Super+Delete`, for the
 default `Super+D` - built from the activation hotkey's own modifiers, and it
 grabs them only while the pill is on screen: an accelerator held all session is
@@ -399,7 +399,7 @@ delivered it is unknowable, so the recovered text is frozen - see below.
 
 ## The conversation window
 
-`native/scufris-desktop/src/conversation.rs` holds every decision the window
+`surfaces/desktop/src/conversation.rs` holds every decision the window
 makes and `src/hud.rs` runs them, the way `state.rs` and `pill.rs` split the
 pill. It is a sibling of the pill's state machine rather than a phase of it:
 the pill machine is about one take and ends with it, and the conversation
@@ -533,7 +533,7 @@ the words are still on disk.
 
 ## The link to the service
 
-`native/scufris-desktop/src/link.rs` holds one connection to
+`surfaces/desktop/src/link.rs` holds one connection to
 `$XDG_RUNTIME_DIR/scufris/service.sock` and reconnects with a bounded backoff,
 250 ms doubling to 5 s, for as long as the companion runs. It says
 `{"v":3,"type":"hello","role":"frontend"}` and then never says hello again on
@@ -553,7 +553,7 @@ The agent shapes every answer as one prose paragraph and pushes it as `speak`.
 It is not a speech decision: the paragraph is the shape of a Scufris answer
 whether or not anything is listening, and what it makes possible is that a
 speaker has something safe to say. Every decision about sound is here.
-`native/scufris-desktop/src/speech.rs` runs the configured
+`surfaces/desktop/src/speech.rs` runs the configured
 `SCUFRIS_DESKTOP_SPEAK_COMMAND` with the paragraph on its standard input. A
 companion with no synthesiser configured stays silent, which is a deployment
 without one rather than a fault.

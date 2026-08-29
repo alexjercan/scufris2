@@ -10,7 +10,7 @@ import {
   decodeServiceMessage,
   encodeClientMessage,
   takeLines,
-} from "../extensions/scufris/service/protocol.ts";
+} from "../agent/extensions/scufris/service/protocol.ts";
 import {
   ServiceClient,
   WidgetCommandError,
@@ -18,13 +18,13 @@ import {
   MAX_BACKOFF_MS,
   MIN_BACKOFF_MS,
   type WidgetNotice,
-} from "../extensions/scufris/service/client.ts";
+} from "../agent/extensions/scufris/service/client.ts";
 import service, {
   resolveSocketPath,
-} from "../extensions/scufris/service/index.ts";
-import { ATTENTION_NOTICE_EVENT } from "../extensions/scufris/shared/attention-notice.ts";
-import { SPOKEN_EVENT } from "../extensions/scufris/shared/spoken.ts";
-import { DESKTOP_CONTROL_EVENT } from "../extensions/scufris/service/client.ts";
+} from "../agent/extensions/scufris/service/index.ts";
+import { ATTENTION_NOTICE_EVENT } from "../agent/extensions/scufris/shared/attention-notice.ts";
+import { SPOKEN_EVENT } from "../agent/extensions/scufris/shared/spoken.ts";
+import { DESKTOP_CONTROL_EVENT } from "../agent/extensions/scufris/service/client.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** One service standing in for the real one, on a socket in a scratch directory. */

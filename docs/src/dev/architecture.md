@@ -4,34 +4,35 @@
 
 Repository ownership follows the runtime architecture:
 
-- `extensions/scufris/` contains the Pi extensions: `workflow/`, `service/`,
-  `widgets/`, and the independent `response.ts`, `calm.ts` and
+- `agent/extensions/scufris/` contains the Pi extensions: `workflow/`,
+  `service/`, `widgets/`, and the independent `response.ts`, `calm.ts`, and
   `conversation.ts`. Extensions own lifecycle events, native tools, session
-  state, and notifications. `shared/` holds what more than one of them needs
-  and is not an extension itself.
-- `native/` is a cargo workspace holding `scufris-control`, the wire protocols,
-  `scufris-desktop`, the Tauri voice pill, widget runtime, and tray companion,
-  and `scufris-service`, the headless background service and its `scufris-ctl`
-  client. Each ships as its own flake package, and the service package builds
-  with no graphical dependency at all. Beside the workspace,
-  `native/scufris-widgets/` holds the widgets themselves under `widgets/` and
-  the backends that feed them under `backends/`; both are compiled into the
-  companion by its `build.rs`. It is not a crate and holds no Rust. See
-  [Background service](service.md), [Desktop companion](desktop.md), and
-  [Widgets](widgets.md).
+  state, and notifications. Extension-local shared code stays under
+  `agent/extensions/scufris/shared/`.
+- `agent/skills/` contains the distributed model-facing `workflow` and
+  `widgets` skills. Development-only skills live in `.agents/skills/`.
+- `host/service/` contains the authoritative headless service and its
+  `scufris-ctl` client. It builds with no graphical dependency.
+- `surfaces/desktop/` contains the Linux Tauri companion, including the pill,
+  conversation window, widget runtime, tray, widget sources under `widgets/`,
+  and widget backends under `backends/`. Widgets and backends are compiled into
+  the companion by its `build.rs`.
+- `shared/control/` contains the `scufris-control` crate and protocol encoding
+  shared by the service and desktop surface.
+- Root `Cargo.toml` and `Cargo.lock` define the workspace across `host/`,
+  `shared/`, and `surfaces/`. See [Background service](service.md),
+  [Desktop companion](desktop.md), and [Widgets](widgets.md).
 - `tools/` contains deterministic executables called by extensions:
   `jobs/scufris-jobs`, `jobs/scufris-report`,
   `quick-review-agent/scufris-quick-review-agent`, and `voice/scufris-speak`.
 - `scripts/` contains commands called directly by people:
   `scufris-jobs` (inspection CLI), `scufris-artifacts-prune`, and the
   development launcher `scufris-dev`.
-- `skills/` contains the distributed model-facing skills, `workflow` and
-  `widgets`. Development-only skills live in `.agents/skills/`.
 - `nix/` contains one file per build concern: `resources.nix`, `launcher.nix`,
   `speak.nix`, `voice.nix`, `desktop.nix`, `service.nix`, `whisper.nix`,
-  `dev-shell.nix`, `docs.nix`, and `home-manager.nix`. `nix/scufris.nix` composes them into the
-  component set for one system, `nix/checks/` asserts that composition, and
-  `flake.nix` only selects the outputs.
+  `dev-shell.nix`, `docs.nix`, and `home-manager.nix`. `nix/scufris.nix`
+  composes them into the component set for one system, `nix/checks/` asserts
+  that composition, and `flake.nix` only selects the outputs.
 
 Keep orchestration narrow. Extensions route and validate; deterministic
 process and filesystem work lives in the small owning helper scripts.
@@ -58,7 +59,7 @@ is inherited unchanged.
 ## Helper protocol
 
 Extensions never shell out ad hoc. Each capability calls its private helper
-through `runPrivateHelper` in `extensions/scufris/shared/runtime.ts`:
+through `runPrivateHelper` in `agent/extensions/scufris/shared/runtime.ts`:
 
 - One subprocess per request: `helper COMMAND` with a JSON request on stdin.
 - One JSON envelope on stdout: `{"ok": true, "result": ...}` or
@@ -115,8 +116,9 @@ and exit codes instead of JSON.
 under the `pi` key, so a checkout also works as a Pi package. Pi APIs are
 `peerDependencies`; pinned copies are `devDependencies`.
 
-The flake builds one `resources` derivation that copies `extensions`,
-`scripts`, `skills`, and `tools` into the store, then removes the development
+The flake builds one `resources` derivation that copies `agent/extensions`,
+`scripts`, `agent/skills`, and `tools` into their compatible installed paths,
+then removes the development
 launcher and `tools/voice`. Nothing in the agent's process tree makes sound, so
 the synthesiser is not among what the agent is handed; `scufris-speak` takes it
 from the source tree instead. The launcher is a shell application that:
@@ -142,7 +144,7 @@ check groups under `nix/checks/` assert the exact rendered arguments
 (`voice.nix`), the resolved companion configuration (`desktop.nix`), and the
 headless service and its client (`service.nix`).
 
-`scufris-desktop` is built from the `native/` cargo workspace by
+`scufris-desktop` is built from the `surfaces/desktop/` workspace member by
 `nix/desktop.nix` as a separate package output. It is absent from the launcher
 closure, which the desktop closure check enforces.
 `scufris-service` and `scufris-ctl` come from the same workspace by

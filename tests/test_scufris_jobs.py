@@ -1084,7 +1084,7 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         argv = json.loads((review_directory / "worker-argv.json").read_text())
         self.assertIn("read,grep,find,ls,scufris_report", argv)
         self.assertIn(
-            str(REPOSITORY / "extensions/scufris/workflow/worker-report.ts"),
+            str(REPOSITORY / "agent/extensions/scufris/workflow/worker-report.ts"),
             argv,
         )
         self.assertFalse((self.project / "PI_MUTATION").exists())

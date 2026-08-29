@@ -21,9 +21,9 @@ Global `~/AGENTS.md` applies. This file defines project-specific instructions.
 ## Conventions
 
 - Keep Pi lifecycle, native tools, session state, and polling in
-  `extensions/scufris/`.
-- Keep distributed model-facing workflows in `skills/`. Keep development skills
-  in `.agents/skills/`.
+  `agent/extensions/scufris/`.
+- Keep distributed model-facing workflows in `agent/skills/`. Keep development
+  skills in `.agents/skills/`.
 - Keep deterministic process and filesystem work in small Bash or Python
   scripts.
 - Add files with their first tested behavior. Do not add empty placeholders.

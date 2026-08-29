@@ -109,10 +109,10 @@ service="${SCUFRIS_STAGING_SERVICE:-}"
 desktop="${SCUFRIS_STAGING_DESKTOP:-}"
 if [[ -z "$service" || -z "$desktop" ]]; then
   printf 'scufris-staging: building the working tree\n'
-  cargo build --manifest-path "$root/native/Cargo.toml" \
+  cargo build --manifest-path "$root/Cargo.toml" \
     --bin scufris-service --bin scufris-desktop
-  : "${service:=$root/native/target/debug/scufris-service}"
-  : "${desktop:=$root/native/target/debug/scufris-desktop}"
+  : "${service:=$root/target/debug/scufris-service}"
+  : "${desktop:=$root/target/debug/scufris-desktop}"
 fi
 for binary in "$service" "$desktop"; do
   if [[ ! -x "$binary" ]]; then

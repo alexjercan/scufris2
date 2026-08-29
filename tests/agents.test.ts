@@ -20,13 +20,13 @@ import {
   wakeModeFromEntries,
   workerAttentionSignal,
   workerEventWakes,
-} from "../extensions/scufris/workflow/orchestration.ts";
-import { ATTENTION_NOTICE_EVENT } from "../extensions/scufris/shared/attention-notice.ts";
+} from "../agent/extensions/scufris/workflow/orchestration.ts";
+import { ATTENTION_NOTICE_EVENT } from "../agent/extensions/scufris/shared/attention-notice.ts";
 import {
   WORKER_REPORT_EVENTS,
   WORKER_REPORT_TOOL,
   workerReportTerminatesTurn,
-} from "../extensions/scufris/workflow/worker-report.ts";
+} from "../agent/extensions/scufris/workflow/worker-report.ts";
 
 test("worker events use only the replacement protocol", () => {
   assert.deepEqual(parseWorkerEvent("working: checking docs"), {

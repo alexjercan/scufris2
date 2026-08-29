@@ -8,9 +8,5 @@
     "target": "ES2022",
     "types": []
   },
-  "include": [
-    "contract.d.ts",
-    "../../scufris-widgets/widgets/widget.d.ts",
-    "shell.ts"
-  ]
+  "include": ["contract.d.ts", "../widgets/widget.d.ts", "shell.ts"]
 }

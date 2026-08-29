@@ -64,16 +64,16 @@ fi
 export PATH="$system_path"
 
 extensions=(
-  "$root/extensions/scufris/workflow/index.ts"
-  "$root/extensions/scufris/response.ts"
-  "$root/extensions/scufris/calm.ts"
-  "$root/extensions/scufris/service/index.ts"
-  "$root/extensions/scufris/widgets/index.ts"
-  "$root/extensions/scufris/conversation.ts"
+  "$root/agent/extensions/scufris/workflow/index.ts"
+  "$root/agent/extensions/scufris/response.ts"
+  "$root/agent/extensions/scufris/calm.ts"
+  "$root/agent/extensions/scufris/service/index.ts"
+  "$root/agent/extensions/scufris/widgets/index.ts"
+  "$root/agent/extensions/scufris/conversation.ts"
 )
 skills=(
-  "$root/skills/workflow"
-  "$root/skills/widgets"
+  "$root/agent/skills/workflow"
+  "$root/agent/skills/widgets"
 )
 # No Piper. This process makes no sound whatever it is given: the agent shapes
 # the answer and the frontend synthesises it, so there is nothing here for a

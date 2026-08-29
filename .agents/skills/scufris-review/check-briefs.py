@@ -26,8 +26,8 @@ ROOT = BRIEFS.parents[2]
 # whole way down from the repository root, and often just `state.rs`.
 BASES = [
     ROOT,
-    ROOT / "native" / "scufris-desktop",
-    ROOT / "native" / "scufris-desktop" / "src",
+    ROOT / "surfaces" / "desktop",
+    ROOT / "surfaces" / "desktop" / "src",
     BRIEFS,
 ]
 

@@ -5,7 +5,7 @@ and by the Nix launcher, together with the workflow and widgets skills.
 
 ## workflow
 
-`extensions/scufris/workflow/index.ts` composes two orchestrator modules:
+`agent/extensions/scufris/workflow/index.ts` composes two orchestrator modules:
 
 - `identity.ts` appends the canonical Scufris identity policy to the system
   prompt: foreground pairing, one decision at a time, delegation by scope and

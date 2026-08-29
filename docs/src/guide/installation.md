@@ -78,13 +78,18 @@ configuration that manages Pi itself can pass its own package:
 ```nix
 programs.scufris = {
   enable = true;
-  piPackage = inputs.llm-agents.packages.${pkgs.system}.pi;
+  service.agent.piPackage = inputs.llm-agents.packages.${pkgs.system}.pi;
 };
 ```
 
-Set `programs.scufris.projectRoots` to control which directories Scufris
-searches for workflow projects. The default is `~/personal`, `~/work`, and
-`~/third-party`.
+Set `programs.scufris.service.agent.projectRoots` to control which directories
+Scufris searches for workflow projects. The default is `~/personal`, `~/work`,
+and `~/third-party`.
+
+The former top-level `piPackage`, `projectRoots`, `finalPackage`, and `voice`
+options, plus `service.agentPackage` and `desktop.stt`, remain deprecated aliases
+for one release. New configurations should use the architecture-owned paths
+shown here.
 
 ## The background service
 
@@ -96,7 +101,9 @@ programs.scufris = {
 };
 ```
 
-The service owns the conversation. Enabling it defines the
+The service owns the conversation and always supervises one agent. There is no
+separate agent service to enable. Configure its Pi package, project roots, or
+complete launcher under `service.agent`. Enabling the service defines the
 `scufris-service.service` user service, wants it from `default.target` rather
 than from a graphical session, and installs `scufris-ctl` beside it. A machine
 with no display keeps the conversation, and a terminal over ssh reaches it.
@@ -105,24 +112,24 @@ See [Background service](../dev/service.md).
 `service.sessionDirectory` says where the conversation lives; the default is
 `$XDG_DATA_HOME/scufris/sessions`.
 
-## Voice
+## Desktop speech
 
 ```nix
 programs.scufris = {
   enable = true;
 
-  voice.enable = true;
+  desktop.speech.enable = true;
 };
 ```
 
-Voice requires Linux. It selects a private patched Piper 1.4.2 package, the
-pinned `en_US-lessac-medium` model, and PipeWire playback. Overrides must keep
+Desktop speech requires Linux. It selects a private patched Piper 1.4.2
+package, the pinned `en_US-lessac-medium` model, and PipeWire playback. Overrides must keep
 Piper version 1.4.2 and an immutable store model with its configuration
 adjacent as `model.onnx.json`.
 
-Voice means one thing: the companion gets a synthesiser. Nothing about it
+Speech means one thing: the companion gets a synthesiser. Nothing about it
 reaches the service or the agent, which shape the same prose answer whatever is
-listening. A deployment with voice and no companion has nowhere for the
+listening. Speech configured for a disabled companion has nowhere for the
 paragraph to go, which is not a fault, and silencing Scufris is the tray's
 "Mute Scufris" rather than anything in the conversation.
 
@@ -132,10 +139,12 @@ paragraph to go, which is not a fault, and silencing Scufris is the tray's
 programs.scufris = {
   enable = true;
 
-  voice.enable = true;
   service.enable = true;
 
-  desktop.enable = true;
+  desktop = {
+    enable = true;
+    speech.enable = true;
+  };
 };
 ```
 
@@ -149,13 +158,13 @@ bundled loopback `whisper-server` on `127.0.0.1:10302` with a pinned model, so
 voice input works on any Nix system. Point it at an existing server instead:
 
 ```nix
-programs.scufris.desktop.stt.endpoint = "http://127.0.0.1:10301/inference";
+programs.scufris.desktop.transcription.endpoint = "http://127.0.0.1:10301/inference";
 ```
 
 A configured endpoint turns the bundled server off, because
-`stt.whisper.enable` defaults to `stt.endpoint == null`. Reuse the server you
-already run rather than a second copy of the same model. Setting both
-`stt.endpoint` and `stt.whisper.enable` is an error.
+`transcription.whisper.enable` defaults to `transcription.endpoint == null`.
+Reuse the server you already run rather than a second copy of the same model. Setting both
+`transcription.endpoint` and `transcription.whisper.enable` is an error.
 
 The conversation window ships with the companion and needs no configuration;
 bind `scufris-ctl hud` in your window manager to reach it. The terminal

@@ -79,12 +79,13 @@ journalctl --user -u scufris-service.service
 - Piper assertion fails: overrides must keep Piper 1.4.2 and the
   configuration adjacent to the model as `model.onnx.json`.
 - Speech produces no audio: the companion is the only thing that makes sound,
-  so everything to check is on its side. Confirm `programs.scufris.voice` is
-  enabled so it has a synthesiser, confirm the tray does not say "Unmute
-  Scufris", and read its log for Piper or PipeWire errors. Speech failures
+  so everything to check is on its side. Confirm
+  `programs.scufris.desktop.speech` is enabled so it has a synthesiser, confirm
+  the tray does not say "Unmute Scufris", and read its log for Piper or
+  PipeWire errors. Speech failures
   never fail the assistant turn.
-- Voice input does not work: speech-to-text is Pi configuration, not
-  Scufris.
+- Voice input does not work: check `programs.scufris.desktop.transcription`
+  and the companion log.
 - A job shows `failed: worker execution was lost`: startup reconciliation
   found no live pane for a running record, for example after a reboot. The
   report and conversation survive; steer the job to continue it in a new

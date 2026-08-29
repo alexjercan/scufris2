@@ -10,6 +10,7 @@
   mkHome = {
     settings ? {},
     modules ? [],
+    configureAgent ? true,
   }:
     inputs.home-manager.lib.homeManagerConfiguration {
       inherit pkgs;
@@ -22,10 +23,11 @@
               homeDirectory = "/home/scufris-test";
               stateVersion = "25.05";
             };
-            programs.scufris = {
-              enable = true;
-              piPackage = fixtures.systemPi;
-            };
+            programs.scufris =
+              {enable = true;}
+              // pkgs.lib.optionalAttrs configureAgent {
+                service.agent.piPackage = fixtures.systemPi;
+              };
           }
           {programs.scufris = settings;}
         ]

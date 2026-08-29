@@ -9,6 +9,15 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Changed
+
+- Home Manager now groups the supervised agent under `service.agent`, desktop
+  speech under `desktop.speech`, and speech-to-text under
+  `desktop.transcription`. The former option paths remain deprecated aliases
+  for one release.
+- The README Quickstart now runs the complete isolated staging stack with one
+  command.
+
 ## [0.5.0] - 2026-08-29
 
 ### Added

@@ -30,11 +30,11 @@
   serviceSettings = {
     enable = true;
     package = scufris.service;
-    agentPackage = testAgent;
+    agent.package = testAgent;
   };
   desktopHome = mkHome {
     settings = {
-      voice.enable = true;
+      desktop.speech.enable = true;
       service = serviceSettings;
       desktop = {
         enable = true;
@@ -43,7 +43,7 @@
         todayCommand = testToday;
         denPath = "/home/tester/the-den";
         macrosDatabase = "/home/tester/macros.csv";
-        stt.whisper = {
+        transcription.whisper = {
           package = testWhisper;
           model = testWhisperModel;
         };
@@ -58,7 +58,7 @@
         package = desktop;
         cancelKey = "Control+Alt+Q";
         stopKey = "none";
-        stt.endpoint = "http://127.0.0.1:10301/inference";
+        transcription.endpoint = "http://127.0.0.1:10301/inference";
       };
     };
   };
@@ -66,12 +66,12 @@
     settings.desktop = {
       enable = true;
       package = desktop;
-      stt.endpoint = "http://127.0.0.1:10301/inference";
+      transcription.endpoint = "http://127.0.0.1:10301/inference";
     };
   };
   desktopConfig = desktopHome.config.programs.scufris.desktop;
   desktopUnit = desktopHome.config.systemd.user.services.${desktopConfig.serviceName};
-  whisperUnit = desktopHome.config.systemd.user.services.${desktopConfig.stt.whisper.serviceName};
+  whisperUnit = desktopHome.config.systemd.user.services.${desktopConfig.transcription.whisper.serviceName};
   configuredDesktop = configuredEndpointHome.config;
   desktopWithoutServiceEvaluation = builtins.tryEval (builtins.deepSeq desktopWithoutServiceHome.activationPackage true);
   normalClosure = pkgs.closureInfo {rootPaths = [launcher];};
@@ -192,8 +192,8 @@ in
 
     desktop-interface = assert !(mkHome {}).config.programs.scufris.desktop.enable;
     assert !desktopWithoutServiceEvaluation.success;
-    assert desktopConfig.endpoint == "http://127.0.0.1:10302/inference";
-    assert desktopConfig.stt.whisper.enable;
+    assert desktopConfig.transcription.resolvedEndpoint == "http://127.0.0.1:10302/inference";
+    assert desktopConfig.transcription.whisper.enable;
     assert desktopConfig.serviceName == "scufris-desktop";
     assert desktopUnit.Install.WantedBy == ["graphical-session.target"];
     assert desktopUnit.Service.Restart == "on-failure";
@@ -228,8 +228,8 @@ in
     assert lib.hasInfix "--port 10302" (builtins.head whisperUnit.Service.ExecStart);
     assert lib.hasInfix "--host 127.0.0.1" (builtins.head whisperUnit.Service.ExecStart);
     assert lib.hasInfix "--inference-path /inference" (builtins.head whisperUnit.Service.ExecStart);
-    assert configuredDesktop.programs.scufris.desktop.endpoint == "http://127.0.0.1:10301/inference";
-    assert !configuredDesktop.programs.scufris.desktop.stt.whisper.enable;
+    assert configuredDesktop.programs.scufris.desktop.transcription.resolvedEndpoint == "http://127.0.0.1:10301/inference";
+    assert !configuredDesktop.programs.scufris.desktop.transcription.whisper.enable;
     assert !(builtins.hasAttr "scufris-whisper" configuredDesktop.systemd.user.services);
       pkgs.runCommand "scufris-desktop-interface-check" {} ''
         restart=${lib.getExe desktopConfig.restartCommand}

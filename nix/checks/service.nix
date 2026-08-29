@@ -17,7 +17,7 @@
     settings.service = {
       enable = true;
       package = service;
-      agentPackage = testAgent;
+      agent.package = testAgent;
     };
   };
   serviceConfig = serviceHome.config.programs.scufris.service;

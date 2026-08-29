@@ -620,7 +620,7 @@ downmix, resampling, and WAV encoding are pure functions with their own tests.
 
 The endpoint is chosen by the deployment, following the Piper precedent:
 
-- `programs.scufris.desktop.stt.endpoint` names an existing server.
+- `programs.scufris.desktop.transcription.endpoint` names an existing server.
 - Otherwise the module runs a bundled loopback `whisper-server` on
   `127.0.0.1:10302` with a pinned model, so voice works out of the box.
 

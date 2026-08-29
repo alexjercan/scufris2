@@ -92,9 +92,10 @@ whoever owns the speaker.
 
 The desktop companion is the only thing that owns one. A session with no
 companion is silent, and so is a companion with no synthesiser, which is what
-`programs.scufris.voice` gives it. To stop Scufris talking without changing the
-conversation, use "Mute Scufris" in the tray. Speech input is Pi
-configuration, not Scufris.
+`programs.scufris.desktop.speech` gives it. To stop Scufris talking without
+changing the conversation, use "Mute Scufris" in the tray. Microphone
+transcription is also companion-owned and configured under
+`programs.scufris.desktop.transcription`.
 
 ## The voice pill
 

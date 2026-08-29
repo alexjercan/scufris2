@@ -10,12 +10,15 @@
   voiceRuntime = import ./voice.nix {inherit pkgs;};
   whisperRuntime = import ./whisper.nix {inherit pkgs;};
   serviceCfg = cfg.service;
+  agentCfg = serviceCfg.agent;
   desktopCfg = cfg.desktop;
-  whisperCfg = desktopCfg.stt.whisper;
+  speechCfg = desktopCfg.speech;
+  transcriptionCfg = desktopCfg.transcription;
+  whisperCfg = transcriptionCfg.whisper;
   bundledEndpoint = "http://${whisperCfg.host}:${toString whisperCfg.port}${whisperRuntime.inferencePath}";
   resolvedEndpoint =
-    if desktopCfg.stt.endpoint != null
-    then desktopCfg.stt.endpoint
+    if transcriptionCfg.endpoint != null
+    then transcriptionCfg.endpoint
     else bundledEndpoint;
   # The companion may only restart the backend service this module owns, so the
   # hook is generated here instead of accepting a command from the model or the
@@ -31,28 +34,30 @@
   launcher = import ./launcher.nix {
     inherit pkgs;
     resources = defaults.resources;
-    piPackage = cfg.piPackage;
-    projectRoots = cfg.projectRoots;
+    piPackage = agentCfg.piPackage;
+    projectRoots = agentCfg.projectRoots;
   };
   # The frontend owns the speaker, so the synthesiser is bound here and handed
-  # to the companion. A deployment with no voice hands it nothing and the
+  # to the companion. A deployment with no speech hands it nothing and the
   # companion stays silent.
   speak = import ./speak.nix {
     inherit pkgs;
-    piperPackage = cfg.voice.piper.package;
-    piperModel = cfg.voice.piper.model;
-    piperConfig = cfg.voice.piper.config;
+    piperPackage = speechCfg.piper.package;
+    piperModel = speechCfg.piper.model;
+    piperConfig = speechCfg.piper.config;
   };
 in {
+  imports = [
+    (lib.mkRenamedOptionModule ["programs" "scufris" "piPackage"] ["programs" "scufris" "service" "agent" "piPackage"])
+    (lib.mkRenamedOptionModule ["programs" "scufris" "projectRoots"] ["programs" "scufris" "service" "agent" "projectRoots"])
+    (lib.mkRenamedOptionModule ["programs" "scufris" "finalPackage"] ["programs" "scufris" "service" "agent" "package"])
+    (lib.mkRenamedOptionModule ["programs" "scufris" "service" "agentPackage"] ["programs" "scufris" "service" "agent" "package"])
+    (lib.mkRenamedOptionModule ["programs" "scufris" "voice"] ["programs" "scufris" "desktop" "speech"])
+    (lib.mkRenamedOptionModule ["programs" "scufris" "desktop" "stt"] ["programs" "scufris" "desktop" "transcription"])
+  ];
+
   options.programs.scufris = {
     enable = lib.mkEnableOption "Scufris Pi launcher";
-
-    piPackage = lib.mkOption {
-      type = lib.types.package;
-      default = defaults.piPackage;
-      defaultText = lib.literalExpression "inputs.llm-agents.packages.${system}.pi";
-      description = "Pi package used by the Scufris launcher.";
-    };
 
     ctlPackage = lib.mkOption {
       type = lib.types.package;
@@ -65,43 +70,6 @@ in {
       '';
     };
 
-    finalPackage = lib.mkOption {
-      type = lib.types.package;
-      readOnly = true;
-      description = "Rendered Scufris launcher package for desktop consumers.";
-    };
-
-    projectRoots = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = ["~/personal" "~/work" "~/third-party"];
-      description = "Directories recursively searched for workflow projects.";
-    };
-
-    voice = {
-      enable = lib.mkEnableOption "local Piper speech";
-
-      piper = {
-        package = lib.mkOption {
-          type = lib.types.package;
-          default = voiceRuntime.piperPackage;
-          defaultText = lib.literalExpression "Scufris private patched Piper 1.4.2";
-          description = "Trusted Piper 1.4.2 package used only by voice-enabled Scufris.";
-        };
-        model = lib.mkOption {
-          type = lib.types.pathInStore;
-          default = voiceRuntime.model;
-          defaultText = lib.literalExpression "the pinned en_US-lessac-medium model";
-          description = "Trusted immutable Piper ONNX model path.";
-        };
-        config = lib.mkOption {
-          type = lib.types.pathInStore;
-          default = voiceRuntime.config;
-          defaultText = lib.literalExpression "the pinned adjacent en_US-lessac-medium config";
-          description = "Trusted immutable Piper model configuration path.";
-        };
-      };
-    };
-
     service = {
       enable = lib.mkEnableOption "the headless scufris-service background service";
 
@@ -112,15 +80,30 @@ in {
         description = "scufris-service package.";
       };
 
-      agentPackage = lib.mkOption {
-        type = lib.types.package;
-        default = cfg.finalPackage;
-        defaultText = lib.literalExpression "programs.scufris.finalPackage";
-        description = ''
-          Launcher the service runs as its one Pi agent. The service starts it
-          in RPC mode, and `scufris-ctl debug` hands a terminal the same
-          session, so there is one Scufris rather than one per surface.
-        '';
+      agent = {
+        piPackage = lib.mkOption {
+          type = lib.types.package;
+          default = defaults.piPackage;
+          defaultText = lib.literalExpression "inputs.llm-agents.packages.${system}.pi";
+          description = "Pi package used by the service's Scufris agent.";
+        };
+
+        projectRoots = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = ["~/personal" "~/work" "~/third-party"];
+          description = "Directories recursively searched for workflow projects.";
+        };
+
+        package = lib.mkOption {
+          type = lib.types.package;
+          default = launcher;
+          defaultText = lib.literalExpression "the Scufris agent launcher rendered by this module";
+          description = ''
+            Launcher the service runs as its one Pi agent. The service starts it
+            in RPC mode, and `scufris-ctl debug` hands a terminal the same
+            session, so there is one Scufris rather than one per surface.
+          '';
+        };
       };
 
       sessionDirectory = lib.mkOption {
@@ -150,6 +133,31 @@ in {
         default = defaults.desktopPackage;
         defaultText = lib.literalExpression "self.packages.\${system}.scufris-desktop";
         description = "scufris-desktop companion package.";
+      };
+
+      speech = {
+        enable = lib.mkEnableOption "local Piper speech from the desktop companion";
+
+        piper = {
+          package = lib.mkOption {
+            type = lib.types.package;
+            default = voiceRuntime.piperPackage;
+            defaultText = lib.literalExpression "Scufris private patched Piper 1.4.2";
+            description = "Trusted Piper 1.4.2 package used only by speech-enabled Scufris.";
+          };
+          model = lib.mkOption {
+            type = lib.types.pathInStore;
+            default = voiceRuntime.model;
+            defaultText = lib.literalExpression "the pinned en_US-lessac-medium model";
+            description = "Trusted immutable Piper ONNX model path.";
+          };
+          config = lib.mkOption {
+            type = lib.types.pathInStore;
+            default = voiceRuntime.config;
+            defaultText = lib.literalExpression "the pinned adjacent en_US-lessac-medium config";
+            description = "Trusted immutable Piper model configuration path.";
+          };
+        };
       };
 
       hotkey = lib.mkOption {
@@ -228,7 +236,7 @@ in {
         '';
       };
 
-      stt = {
+      transcription = {
         endpoint = lib.mkOption {
           type = lib.types.nullOr (lib.types.strMatching "https?://.*");
           default = null;
@@ -241,8 +249,8 @@ in {
         whisper = {
           enable = lib.mkOption {
             type = lib.types.bool;
-            default = desktopCfg.stt.endpoint == null;
-            defaultText = lib.literalExpression "programs.scufris.desktop.stt.endpoint == null";
+            default = transcriptionCfg.endpoint == null;
+            defaultText = lib.literalExpression "programs.scufris.desktop.transcription.endpoint == null";
             description = "Run the bundled loopback whisper-server for the companion.";
           };
 
@@ -279,12 +287,12 @@ in {
             description = "Stable systemd user service identity for the bundled whisper-server.";
           };
         };
-      };
 
-      endpoint = lib.mkOption {
-        type = lib.types.str;
-        readOnly = true;
-        description = "Transcription endpoint the companion actually uses.";
+        resolvedEndpoint = lib.mkOption {
+          type = lib.types.str;
+          readOnly = true;
+          description = "Transcription endpoint the companion actually uses.";
+        };
       };
 
       serviceName = lib.mkOption {
@@ -304,31 +312,28 @@ in {
 
   config = lib.mkMerge [
     {
-      programs.scufris = {
-        finalPackage = launcher;
-        desktop = {
-          endpoint = resolvedEndpoint;
-          restartCommand = backendRestart;
-        };
+      programs.scufris.desktop = {
+        transcription.resolvedEndpoint = resolvedEndpoint;
+        restartCommand = backendRestart;
       };
     }
     (lib.mkIf cfg.enable {
       assertions = [
         {
-          assertion = !cfg.voice.enable || (cfg.voice.piper.package.version or null) == "1.4.2";
-          message = "programs.scufris.voice requires Piper 1.4.2";
+          assertion = !speechCfg.enable || (speechCfg.piper.package.version or null) == "1.4.2";
+          message = "programs.scufris.desktop.speech requires Piper 1.4.2";
         }
         {
-          assertion = !cfg.voice.enable || toString cfg.voice.piper.config == "${toString cfg.voice.piper.model}.json";
-          message = "programs.scufris.voice requires the Piper config adjacent to the model as model.onnx.json";
+          assertion = !speechCfg.enable || toString speechCfg.piper.config == "${toString speechCfg.piper.model}.json";
+          message = "programs.scufris.desktop.speech requires the Piper config adjacent to the model as model.onnx.json";
         }
       ];
 
-      home.packages = [cfg.finalPackage];
+      home.packages = [agentCfg.package];
     })
-    (lib.mkIf (cfg.enable && cfg.voice.enable) {
+    (lib.mkIf (cfg.enable && speechCfg.enable) {
       assertions = [
-        (lib.hm.assertions.assertPlatform "programs.scufris.voice" pkgs lib.platforms.linux)
+        (lib.hm.assertions.assertPlatform "programs.scufris.desktop.speech" pkgs lib.platforms.linux)
       ];
     })
     (lib.mkIf (cfg.enable && serviceCfg.enable) {
@@ -353,7 +358,7 @@ in {
           # prose paragraph whatever is listening, and whether a sound is
           # made is the companion's, which is where the speaker is.
           Environment = [
-            "SCUFRIS_SERVICE_AGENT=${lib.getExe serviceCfg.agentPackage}"
+            "SCUFRIS_SERVICE_AGENT=${lib.getExe agentCfg.package}"
             "SCUFRIS_SERVICE_SESSION_DIR=${serviceCfg.sessionDirectory}"
           ];
           # The service restarts its own agent, so it going down is a fault of
@@ -374,8 +379,8 @@ in {
           message = "programs.scufris.desktop.enable requires programs.scufris.service.enable, because the companion is a client of the service that owns the conversation";
         }
         {
-          assertion = !(desktopCfg.stt.endpoint != null && whisperCfg.enable);
-          message = "programs.scufris.desktop.stt.endpoint conflicts with programs.scufris.desktop.stt.whisper.enable";
+          assertion = !(transcriptionCfg.endpoint != null && whisperCfg.enable);
+          message = "programs.scufris.desktop.transcription.endpoint conflicts with programs.scufris.desktop.transcription.whisper.enable";
         }
       ];
 
@@ -408,7 +413,7 @@ in {
             "DEN_PATH=${desktopCfg.denPath}"
             ++ lib.optional (desktopCfg.macrosDatabase != null)
             "MACROS_DATABASE=${desktopCfg.macrosDatabase}"
-            ++ lib.optional cfg.voice.enable
+            ++ lib.optional speechCfg.enable
             "SCUFRIS_DESKTOP_SPEAK_COMMAND=${lib.getExe speak}";
           # The companion must survive its own faults; a backend crash is
           # reported in the tray instead of taking the companion down.

@@ -100,8 +100,7 @@ in {
           defaultText = lib.literalExpression "the Scufris agent launcher rendered by this module";
           description = ''
             Launcher the service runs as its one Pi agent. The service starts it
-            in RPC mode, and `scufris-ctl debug` hands a terminal the same
-            session, so there is one Scufris rather than one per surface.
+            in RPC mode and accepts exactly one protocol v4 agent connection.
           '';
         };
       };
@@ -111,9 +110,8 @@ in {
         default = "${config.xdg.dataHome}/scufris/sessions";
         defaultText = lib.literalExpression "\"\${config.xdg.dataHome}/scufris/sessions\"";
         description = ''
-          Absolute directory the service keeps its conversation in. The service
-          owns it, and `scufris-ctl debug` hands a terminal the same session
-          out of it.
+          Absolute directory the service keeps its Pi conversation in. The
+          service is its only owner.
         '';
       };
 
@@ -185,8 +183,7 @@ in {
         description = ''
           Accelerator that stops what Scufris is doing. When null it is derived
           from the hotkey's own modifiers, so `Super+D` gives `Super+Delete`.
-          Set it to `"none"` to leave the key to the desktop; `scufris-ctl
-          abort` stops a run without it.
+          Set it to `"none"` to leave the key to the desktop.
 
           The companion holds this key only while the pill is on screen.
         '';
@@ -196,9 +193,8 @@ in {
         type = lib.types.nullOr lib.types.package;
         default = null;
         description = ''
-          Executable that opens the conversation in a terminal from the tray.
-          Scufris ships no window manager, so the desktop session supplies this
-          hook; `scufris-ctl debug` is what it is usually wrapped around.
+          Executable that opens a deployment-specific terminal view from the
+          tray. Scufris ships no terminal session handoff protocol.
         '';
       };
 

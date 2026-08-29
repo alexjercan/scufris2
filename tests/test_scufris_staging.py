@@ -34,7 +34,7 @@ from pathlib import Path
 
 role = sys.argv[0].rsplit("/", 1)[-1]
 if "--print-config" in sys.argv:
-    print("socket=" + os.environ["SCUFRIS_RUNTIME_DIR"] + "/service.sock")
+    print("socket=" + os.environ["SCUFRIS_RUNTIME_DIR"] + "/surface.sock")
     raise SystemExit(0)
 
 report = Path(os.environ["SCUFRIS_STAGING_REPORT"])
@@ -43,7 +43,7 @@ report.mkdir(parents=True, exist_ok=True)
     json.dumps({"pid": os.getpid(), "env": dict(os.environ)})
 )
 if role == "service":
-    Path(os.environ["SCUFRIS_RUNTIME_DIR"], "service.sock").touch()
+    Path(os.environ["SCUFRIS_RUNTIME_DIR"], "surface.sock").touch()
 
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 while True:

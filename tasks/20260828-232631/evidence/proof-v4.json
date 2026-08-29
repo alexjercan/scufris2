@@ -1,0 +1,69 @@
+{
+  "assistant_identical": true,
+  "assistant_surface": "synthetic-one",
+  "channel_violation_eof": true,
+  "live_one": [
+    {
+      "role": "user",
+      "surface": "synthetic-one",
+      "text": "Reply with one short sentence confirming protocol v4.",
+      "type": "surface.message",
+      "v": 4
+    },
+    {
+      "id": "proof-1",
+      "type": "surface.message_ack",
+      "v": 4
+    },
+    {
+      "detail": "",
+      "state": "working",
+      "type": "surface.state",
+      "v": 4
+    },
+    {
+      "role": "assistant",
+      "surface": "synthetic-one",
+      "text": "Protocol v4 confirmed.",
+      "type": "surface.message",
+      "v": 4
+    }
+  ],
+  "live_two": [
+    {
+      "role": "user",
+      "surface": "synthetic-one",
+      "text": "Reply with one short sentence confirming protocol v4.",
+      "type": "surface.message",
+      "v": 4
+    },
+    {
+      "detail": "",
+      "state": "working",
+      "type": "surface.state",
+      "v": 4
+    },
+    {
+      "role": "assistant",
+      "surface": "synthetic-one",
+      "text": "Protocol v4 confirmed.",
+      "type": "surface.message",
+      "v": 4
+    }
+  ],
+  "replay_one_types": [
+    "surface.state",
+    "surface.ready"
+  ],
+  "replay_two_types": [
+    "surface.state",
+    "surface.ready"
+  ],
+  "second_agent": {
+    "code": "agent_exists",
+    "detail": "One agent is already connected.",
+    "type": "agent.rejected",
+    "v": 4
+  },
+  "wrong_version_eof": true
+}

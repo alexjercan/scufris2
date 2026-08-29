@@ -23,7 +23,7 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
-use scufris_control::{is_identifier, service::CatalogEntry};
+use scufris_control::{is_identifier, service::WidgetDefinition};
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::{debug, warn};
@@ -211,13 +211,16 @@ impl Catalog {
     ///
     /// The script is left behind: the agent types a tool from these entries
     /// and never runs the module.
-    pub fn entries(&self) -> Vec<CatalogEntry> {
+    pub fn entries(&self) -> Vec<WidgetDefinition> {
         self.widgets
             .values()
-            .map(|widget| CatalogEntry {
-                id: widget.id.clone(),
-                name: widget.name.clone(),
-                description: widget.description.clone(),
+            .map(|widget| WidgetDefinition {
+                name: widget.id.clone(),
+                description: format!("{}: {}", widget.name, widget.description),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "additionalProperties": true
+                }),
             })
             .collect()
     }
@@ -437,8 +440,8 @@ height = 110
             Catalog::build(&[source("note", NOTE)], BACKENDS).expect("the manifest is well formed");
         let entries = catalog.entries();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].id, "note");
-        assert_eq!(entries[0].description, "Show a short note");
+        assert_eq!(entries[0].name, "note");
+        assert_eq!(entries[0].description, "Note: Show a short note");
     }
 
     #[test]

@@ -657,10 +657,11 @@ impl App {
     /// one transcript must not settle the transcript that replaced it.
     pub fn observe(self: &Arc<Self>, event: LinkEvent) {
         match event {
-            LinkEvent::Connected => self.set_connected(true),
+            LinkEvent::ReplayStarted => {}
+            LinkEvent::Ready => self.set_connected(true),
             LinkEvent::Disconnected => self.set_connected(false),
+            LinkEvent::HandshakeFailed => self.set_connection_failure(crate::link::UPDATE_TOGETHER),
             LinkEvent::State(state, detail) => self.set_assistant(state.into(), detail),
-            LinkEvent::Notice(id, state, detail) => self.set_notice(id, state, detail),
             LinkEvent::Accepted(id) => {
                 debug!(id = %id, "submission accepted");
                 self.handle(Event::Acknowledged(id))
@@ -669,17 +670,7 @@ impl App {
                 debug!(id = %id, detail = %detail, "submission refused");
                 self.handle(Event::SubmissionFailed { id, reason: detail })
             }
-            // Three things the pill is not the audience for. The transcript
-            // and the window belong to whatever shows the conversation, and
-            // the speaker is wired up where the speech is played.
-            LinkEvent::Transcript(_) | LinkEvent::Speak(_) | LinkEvent::Conversation(_) => {}
-            // Widget commands belong to the widgets runtime, which is a
-            // sibling of this state machine rather than a part of it. The
-            // wiring routes them there before they reach the pill, so a
-            // command that arrives here is one nothing is listening for.
-            LinkEvent::Widget(command) => {
-                debug!(id = %command.id(), "widget command reached the pill")
-            }
+            LinkEvent::Message { .. } => {}
         }
     }
 
@@ -725,17 +716,11 @@ impl App {
         self.publish();
     }
 
-    /// Applies one ambient notice update and redraws only from companion state.
-    fn set_notice(
-        self: &Arc<Self>,
-        id: String,
-        state: scufris_control::service::NoticeState,
-        detail: String,
-    ) {
+    fn set_connection_failure(self: &Arc<Self>, detail: &str) {
         self.companion
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .set_notice(id, state, detail);
+            .set_connection_failure(detail.to_string());
         self.publish();
     }
 

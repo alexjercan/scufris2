@@ -418,8 +418,8 @@ function textbox(): Page {
 }
 
 /** One line of the conversation, as the service pushes it. */
-function line(speaker: string, text: string): Record<string, string> {
-  return { speaker, text };
+function line(role: string, text: string): Record<string, string> {
+  return { role, surface: "desktop", text };
 }
 
 /**

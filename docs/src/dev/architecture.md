@@ -5,12 +5,11 @@
 Repository ownership follows the runtime architecture:
 
 - `agent/extensions/scufris/` contains the Pi extensions: `workflow/`,
-  `service/`, `widgets/`, and the independent `response.ts`, `calm.ts`, and
-  `conversation.ts`. Extensions own lifecycle events, native tools, session
-  state, and notifications. Extension-local shared code stays under
-  `agent/extensions/scufris/shared/`.
-- `agent/skills/` contains the distributed model-facing `workflow` and
-  `widgets` skills. Development-only skills live in `.agents/skills/`.
+  `service/`, `response.ts`, and `calm.ts`. Extensions own lifecycle events,
+  native tools, session state, and notifications. Extension-local shared code
+  stays under `agent/extensions/scufris/shared/`.
+- `agent/skills/` contains the distributed model-facing `workflow` skill.
+  Development-only skills live in `.agents/skills/`.
 - `host/service/` contains the authoritative headless service and its
   `scufris-ctl` client. It builds with no graphical dependency.
 - `surfaces/desktop/` contains the Linux Tauri companion, including the pill,
@@ -26,8 +25,7 @@ Repository ownership follows the runtime architecture:
   `jobs/scufris-jobs`, `jobs/scufris-report`,
   `quick-review-agent/scufris-quick-review-agent`, and `voice/scufris-speak`.
 - `scripts/` contains commands called directly by people:
-  `scufris-jobs` (inspection CLI), `scufris-artifacts-prune`, and the
-  development launcher `scufris-dev`.
+  `scufris-jobs` (inspection CLI) and the development launcher `scufris-dev`.
 - `nix/` contains one file per build concern: `resources.nix`, `launcher.nix`,
   `speak.nix`, `voice.nix`, `desktop.nix`, `service.nix`, `whisper.nix`,
   `dev-shell.nix`, `docs.nix`, and `home-manager.nix`. `nix/scufris.nix`
@@ -99,16 +97,16 @@ and exit codes instead of JSON.
   prompt, report, status, conversation, authorization, and the harness
   session transcript. Cleanup archives finished workflows into
   `jobs/_archive/` instead of deleting them.
-- `<session>.jsonl.scufris/` sidecars beside each Pi session hold private
-  response detail artifacts.
 - Each active job can hold `quick-review-agent/`, the private artifact and
   completion root for its standalone review.
 - `$XDG_STATE_HOME/scufris/dev-sessions/` holds resumable development
   sessions; the service uses its configured session directory.
-- `$XDG_RUNTIME_DIR/scufris/service.sock` is the service socket. `scufris-service`
-  is the only process that binds it, and only for the current user. The
-  companion keeps its own `desktop.sock` beside it for window manager
-  bindings, which is a different socket with a different protocol.
+- `$XDG_RUNTIME_DIR/scufris/` holds mode-0600 `surface.sock`, `agent.sock`,
+  and `control.sock`. `scufris-service` binds all three. The companion keeps
+  `desktop.sock` beside them for window manager bindings; it is a separate
+  surface-local protocol.
+- `$XDG_STATE_HOME/scufris-desktop/surface-id` holds the desktop's private,
+  stable registered surface ID.
 
 ## Package composition
 

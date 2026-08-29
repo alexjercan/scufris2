@@ -1,9 +1,7 @@
 //! The conversation window, and the way in for typed words.
 //!
 //! The pill says what Scufris is doing and the textbox holds one take. Neither
-//! of them shows what was actually said, and until this window there was one
-//! place that did: a terminal running `scufris-ctl debug`. That is a whole Pi
-//! session and it stays - it is the deep tool - but reading the last four lines
+//! of them shows the canonical conversation. Reading the last four lines
 //! should not cost a terminal.
 //!
 //! So this is a frontend surface like the widget shelf is: it draws the
@@ -23,7 +21,7 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
 };
 
-use scufris_control::service::TranscriptEntry;
+use scufris_control::service::ConversationMessage;
 use serde::Serialize;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
@@ -70,10 +68,10 @@ pub const HEIGHT: f64 = 560.0;
 static WINDOW: AtomicU32 = AtomicU32::new(0);
 
 /// What one page is handed when it says hello.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Backlog {
     /// Everything said so far, oldest first.
-    pub lines: Vec<TranscriptEntry>,
+    pub lines: Vec<ConversationMessage>,
     /// What the window is waiting for right now.
     pub notice: Notice,
 }
@@ -155,7 +153,7 @@ impl Hud {
     /// sends a frontend on connect and including lines somebody typed in a
     /// terminal. The window does not have to be up: a page that is loaded and
     /// down still appends, so opening it is never a wait for content.
-    pub fn said(&self, entry: TranscriptEntry) {
+    pub fn said(&self, entry: ConversationMessage) {
         self.lock().said(entry.clone());
         if let Err(error) = self.app.emit_to(LABEL, SAID_EVENT, entry) {
             debug!("the HUD did not take a line: {error}");
@@ -168,6 +166,12 @@ impl Hud {
     /// keeping what is here would put every line on screen twice.
     pub fn reconnected(&self) {
         self.lock().restart();
+        self.show_all();
+    }
+
+    /// Replay ended with `surface.ready`; the field may become live.
+    pub fn ready(&self) {
+        self.lock().ready();
         self.show_all();
     }
 

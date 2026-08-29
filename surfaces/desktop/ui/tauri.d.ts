@@ -34,12 +34,13 @@ interface Tick {
   level: number;
 }
 
-// The conversation window's shapes. TranscriptEntry is the service's own,
-// relayed by src/hud.rs without being reshaped; the other two are src/hud.rs
-// and src/conversation.rs.
-interface TranscriptEntry {
-  speaker: string;
+// Canonical protocol v4 conversation entry, relayed without reshaping.
+interface ConversationEntry {
+  role: "user" | "assistant";
+  surface: string;
   text: string;
+  details?: string;
+  widgets?: Array<{ id: string; name: string; arguments: unknown }>;
 }
 
 interface Notice {
@@ -48,7 +49,7 @@ interface Notice {
 }
 
 interface Backlog {
-  lines: TranscriptEntry[];
+  lines: ConversationEntry[];
   notice: Notice;
 }
 

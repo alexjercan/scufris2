@@ -194,7 +194,9 @@ mod tests {
         Config {
             agent: PathBuf::from(agent),
             session_dir,
-            socket: PathBuf::from("/run/user/1000/scufris/service.sock"),
+            surface_socket: PathBuf::from("/run/user/1000/scufris/surface.sock"),
+            agent_socket: PathBuf::from("/run/user/1000/scufris/agent.sock"),
+            control_socket: PathBuf::from("/run/user/1000/scufris/control.sock"),
             working_dir: std::env::temp_dir(),
         }
     }

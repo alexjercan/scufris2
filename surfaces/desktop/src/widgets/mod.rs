@@ -12,21 +12,19 @@
 pub mod backends;
 pub mod catalog;
 pub mod pool;
+pub mod protocol;
 pub mod runtime;
 pub mod turn;
 pub mod windows;
 
 use std::{
     collections::BTreeMap,
-    sync::{
-        Arc, Mutex, MutexGuard, OnceLock, Weak,
-        atomic::{AtomicBool, AtomicU32, Ordering},
-    },
+    sync::{Arc, Mutex, MutexGuard, Weak, atomic::AtomicU32},
     thread,
     time::{Duration, Instant},
 };
 
-use scufris_control::service::{Posture, WidgetCommand, WidgetReport};
+use scufris_control::service::{WidgetCall, WidgetDefinition};
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, ipc::Channel};
 use tracing::{debug, info, warn};
@@ -34,12 +32,12 @@ use tracing::{debug, info, warn};
 use crate::{
     display,
     form::{self, Form},
-    link::ServiceLink,
     state::Assistant,
     widgets::{
         backends::{Backends, News, Order},
         catalog::{Catalog, CatalogError, Source},
         pool::{Pool, ShellMsg},
+        protocol::{Posture, WidgetReport},
         runtime::{Act, Cmd, Runtime, Still},
         turn::Turn,
     },
@@ -92,10 +90,6 @@ pub struct Widgets {
     /// the answer is an action for a surface's backend, and this is what knows
     /// which surfaces there are.
     form: Form,
-    link: OnceLock<Arc<ServiceLink>>,
-    /// Whether the service welcomed this companion before there was a link to
-    /// answer on.
-    owed_catalog: AtomicBool,
     /// The last assistant state the companion showed. The turn boundary is read
     /// off the change rather than off a message of its own.
     assistant: Mutex<Assistant>,
@@ -141,8 +135,6 @@ impl Widgets {
             turn: Turn::new(),
             backends: Backends::new(),
             form: Form::new(app.clone()),
-            link: OnceLock::new(),
-            owed_catalog: AtomicBool::new(false),
             assistant: Mutex::new(Assistant::Idle),
             app,
         });
@@ -397,42 +389,14 @@ impl Widgets {
         self.decide(Cmd::Conceal { hidden });
     }
 
-    /// Gives the runtime the link its answers travel on.
-    ///
-    /// Separate from [`Widgets::start`] because the link is started with a
-    /// closure that already routes commands here: one of the two has to exist
-    /// first, and it is this one.
-    pub fn attach(&self, link: Arc<ServiceLink>) {
-        if self.link.set(link).is_err() {
-            return;
-        }
-        // The link's reader thread starts inside `ServiceLink::start`, which
-        // returns before this runs, so a welcome can arrive with nowhere to
-        // answer it. What that welcome wanted is the catalog, and this is the
-        // first moment there is a way to send it.
-        if self.owed_catalog.swap(false, Ordering::SeqCst) {
-            self.announce();
-        }
+    /// Widget definitions registered in `surface.hello` on every connection.
+    pub fn definitions(&self) -> Vec<WidgetDefinition> {
+        self.catalog.entries()
     }
 
-    /// Tells the service what widgets are installed.
-    ///
-    /// Sent once per connection, right after the service welcomes the hello.
-    /// The agent types its widget tool from this, so a companion that never
-    /// sends
-    /// it is a companion whose widgets cannot be named.
-    pub fn announce(&self) {
-        if self.link.get().is_none() {
-            // The welcome beat the attach. Remembered rather than dropped: this
-            // is the one message a session cannot do without, and losing it
-            // leaves the model with no widget it is allowed to name for as long
-            // as the session lasts.
-            self.owed_catalog.store(true, Ordering::SeqCst);
-            return;
-        }
-        self.report(WidgetReport::Catalog {
-            widgets: self.catalog.entries(),
-        });
+    /// Executes one live atomic response call as best-effort presentation.
+    pub fn call(&self, call: WidgetCall) {
+        self.open(Some(call.id), call.name, Posture::Exhibit, call.arguments);
     }
 
     /// Returns every widget window the display has named.
@@ -467,23 +431,6 @@ impl Widgets {
     pub fn module(&self, surface: &str) -> Option<String> {
         let widget = self.runtime().surface(surface)?.widget.clone();
         self.catalog.get(&widget).map(|found| found.script.clone())
-    }
-
-    /// Carries out one command from the service.
-    pub fn command(&self, command: WidgetCommand) {
-        match command {
-            WidgetCommand::Open {
-                id,
-                widget,
-                posture,
-                data,
-            } => self.open(Some(id), widget, posture, data),
-            WidgetCommand::Update { id, surface, data } => {
-                self.decide(Cmd::Update { id, surface, data });
-            }
-            WidgetCommand::Close { id, surface } => self.decide(Cmd::Close { id, surface }),
-            WidgetCommand::Clear { id } => self.decide(Cmd::Clear { id }),
-        }
     }
 
     /// Records that the person closed one surface with its own chrome tick.
@@ -878,13 +825,9 @@ impl Widgets {
     }
 
     fn report(&self, report: WidgetReport) {
-        let Some(link) = self.link.get() else {
-            debug!("a widget answer had no link to travel on");
-            return;
-        };
-        if let Err(error) = link.report(report) {
-            debug!("a widget answer did not reach the agent: {error}");
-        }
+        // Widget execution is best-effort presentation in protocol v4. Runtime
+        // outcomes remain local and never produce protocol acknowledgements.
+        debug!(?report, "widget presentation outcome");
     }
 
     fn runtime(&self) -> MutexGuard<'_, Runtime> {

@@ -9,13 +9,9 @@
 //! The defaults exist so the binary can be run by hand from a terminal, which
 //! is how it gets tested before there is a unit for it.
 
-use std::{
-    env,
-    ffi::OsString,
-    path::{Path, PathBuf},
-};
+use std::{env, ffi::OsString, path::PathBuf};
 
-use scufris_control::service::service_socket_path;
+use scufris_control::service::{agent_socket_path, control_socket_path, surface_socket_path};
 
 /// Environment variable naming the agent program to supervise.
 pub const AGENT_VARIABLE: &str = "SCUFRIS_SERVICE_AGENT";
@@ -38,8 +34,12 @@ pub struct Config {
     pub agent: PathBuf,
     /// Directory the agent stores and resumes its sessions in.
     pub session_dir: PathBuf,
-    /// Socket the service binds.
-    pub socket: PathBuf,
+    /// Surface socket the service binds.
+    pub surface_socket: PathBuf,
+    /// Agent socket the service binds.
+    pub agent_socket: PathBuf,
+    /// Control socket the service binds.
+    pub control_socket: PathBuf,
     /// Directory the agent runs in.
     pub working_dir: PathBuf,
 }
@@ -62,8 +62,14 @@ impl Config {
         )
         .and_then(|partial| {
             Ok(Self {
-                socket: service_socket_path().map_err(|error| {
-                    ConfigError::Missing(format!("the service socket has no path: {error}"))
+                surface_socket: surface_socket_path().map_err(|error| {
+                    ConfigError::Missing(format!("the surface socket has no path: {error}"))
+                })?,
+                agent_socket: agent_socket_path().map_err(|error| {
+                    ConfigError::Missing(format!("the agent socket has no path: {error}"))
+                })?,
+                control_socket: control_socket_path().map_err(|error| {
+                    ConfigError::Missing(format!("the control socket has no path: {error}"))
                 })?,
                 ..partial
             })
@@ -109,7 +115,9 @@ impl Config {
         Ok(Self {
             agent,
             session_dir,
-            socket: PathBuf::new(),
+            surface_socket: PathBuf::new(),
+            agent_socket: PathBuf::new(),
+            control_socket: PathBuf::new(),
             working_dir: home,
         })
     }
@@ -129,26 +137,16 @@ impl Config {
         ]
     }
 
-    /// The command line that resumes one session in a terminal.
-    ///
-    /// Given the session the agent was actually using, that exact file rather
-    /// than `--continue`, so there is no question about which session the
-    /// terminal took over. Before the agent has said which file that is, the
-    /// directory and `--continue` are the best answer available and mean the
-    /// same thing.
-    pub fn debug_args(&self, session: Option<&Path>) -> Vec<String> {
-        let mut args = vec![
-            "--session-dir".to_string(),
-            self.session_dir.display().to_string(),
-        ];
-        match session {
-            Some(file) => {
-                args.push("--session".to_string());
-                args.push(file.display().to_string());
-            }
-            None => args.push("--continue".to_string()),
+    #[cfg(test)]
+    pub fn test(runtime: PathBuf) -> Self {
+        Self {
+            agent: PathBuf::from("/nonexistent/scufris"),
+            session_dir: PathBuf::from("/srv/sessions"),
+            surface_socket: runtime.join("surface.sock"),
+            agent_socket: runtime.join("agent.sock"),
+            control_socket: runtime.join("control.sock"),
+            working_dir: std::env::temp_dir(),
         }
-        args
     }
 }
 
@@ -284,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn the_agent_runs_in_rpc_mode_and_the_terminal_gets_the_same_session() {
+    fn the_agent_runs_in_rpc_mode() {
         let config = resolved(os("/bin/scufris"), os("/srv/sessions"));
         assert_eq!(
             config.agent_args(),
@@ -296,21 +294,6 @@ mod tests {
                 "rpc"
             ]
             .map(OsString::from)
-        );
-        assert_eq!(
-            config.debug_args(Some(Path::new("/srv/sessions/one.jsonl"))),
-            [
-                "--session-dir",
-                "/srv/sessions",
-                "--session",
-                "/srv/sessions/one.jsonl"
-            ]
-        );
-        // No session yet means the agent has not said which file it is on.
-        // `--continue` is the same conversation by a different name.
-        assert_eq!(
-            config.debug_args(None),
-            ["--session-dir", "/srv/sessions", "--continue"]
         );
     }
 }

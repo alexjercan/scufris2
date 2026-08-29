@@ -24,8 +24,6 @@ test("package loads only capability-owned Scufris extensions", async () => {
     "./agent/extensions/scufris/response.ts",
     "./agent/extensions/scufris/calm.ts",
     "./agent/extensions/scufris/service/index.ts",
-    "./agent/extensions/scufris/widgets/index.ts",
-    "./agent/extensions/scufris/conversation.ts",
   ]);
   assert.deepEqual(manifest.pi.skills, ["./agent/skills"]);
 
@@ -81,7 +79,6 @@ test("package loads only capability-owned Scufris extensions", async () => {
     // script because the service starts an agent on a session directory of its
     // own choosing, which a runner that picks one cannot be.
     "scufris-agent",
-    "scufris-artifacts-prune",
     "scufris-dev",
     "scufris-jobs",
     "scufris-staging",

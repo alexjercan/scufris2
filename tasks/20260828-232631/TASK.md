@@ -1,500 +1,351 @@
-# Spike remote laptop and iOS surfaces
+# Spike registered remote laptop and iOS surfaces
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 65
 - TAGS: architecture, spike, remote
 
 ## Ask
 
-Turn the settled design in `20260828-170154`, "Scufris on more than one
-surface", into a reviewed implementation plan for:
+Prepare a reviewed implementation plan for:
 
-- a second laptop that accesses the existing Scufris host; and
-- a personal iOS app that acts as another Scufris surface.
+- several simultaneous Scufris surfaces sharing one host conversation;
+- a compatible laptop running the desktop companion remotely; and
+- a personal iOS app with bounded conversation, typed input, and later voice.
 
-This is a spike. It may build disposable proofs to answer transport and platform
-questions, but it does not land protocol v4, a supported remote deployment, or
-the iOS product.
+The design is approved. The next phase implements protocol v4 through the local
+desktop and synthetic multi-surface proof in this task. The gateway, remote
+laptop, iOS product, and inference repository remain later batches.
 
-## Gate
+## Artifacts
 
-The implementation gate from `20260828-170154` remains in force: protocol and
-product work does not start before `v0.5.0` is tagged and deployed. At the time
-this task was created, the latest tag and package version were still `v0.4.0`.
-Research and disposable proofs in this spike do not weaken that gate.
+- Current protocol and implementation plan: `PLAN-PROTOCOL-V4.md`
+- New-session protocol implementation prompt: `HANDOFF.md`
+- Standalone AI tools API repository prompt: `HANDOFF-AI-TOOLS-API.md`
+- Accepted interactive iOS design: `ios-app-design.html`
+- Earlier settled design: `tasks/20260828-170154/`
 
-## Settled constraints inherited from `20260828-170154`
+The current plan supersedes the presence-lease, SSH transport, mixed-role v4,
+and separate speech-message sketches retained in Git history.
 
-- One host owns `pi --mode rpc`, the session, and `scufris-service`.
-- A laptop or phone is a surface, not another host or conversation.
-- Scufris does not distinguish local and remote clients. Do not add a `remote`
-  flag or location-dependent service behavior.
-- `scufris-service` keeps its mode-0600 Unix socket and never opens a TCP
-  listener. SSH, WireGuard, or Tailscale owns network reachability and
-  authentication.
-- Any number of surfaces may watch. Exactly one surface attends: transcript and
-  state fan out, while speech, widget commands, and conversation-window requests
-  go to the presence holder.
-- Presence first follows the last surface that submitted. A phone may later
-  claim presence from its foreground state.
-- The host and clients remain one tightly coupled version. The `hello`,
-  `welcome`, and version-refusal exchange must remain stable across all future
-  mismatches, and an outdated phone must receive a plain update notice.
-- Widgets remain host processes on host monitors. The phone does not render
-  them.
-- There is no public endpoint, relay, account, tenancy, push-notification road,
-  or second Pi client.
-- The laptop is proved before the phone.
+## Current project state
 
-## Current code finding
+- `v0.5.0` is tagged and deployed.
+- The repository uses `agent/`, `host/`, `surfaces/`, and `shared/` boundaries.
+- Protocol v3 still permits only one frontend and uses one mixed-role socket.
+- The service keeps a bounded 200-entry human-facing transcript ring.
+- The private service socket remains mode 0600.
+- Tailscale is deployed on the NixOS host and iPhone.
+- The iPhone has reached the host through Tailscale and public-key SSH.
+- No compatible laptop is currently visible in the tailnet.
 
-Nothing from the settled multi-surface design is implemented yet.
+## Settled v4 direction
 
-In `native/scufris-service/src/service.rs`, registering a second client in the
-same non-control role removes the first. Two desktop companions therefore fight:
-each reconnect replaces the other, and `native/scufris-desktop/src/link.rs`
-retries up to the five-second backoff ceiling. The conversation window clears on
-each reconnect.
+### One authoritative host
 
-The current service also:
+The NixOS host owns Pi, its session, the service, canonical state, and the
+bounded conversation. A desktop, laptop, or phone is a replicated surface, not
+another agent or conversation.
 
-- broadcasts `speak`, causing two surfaces to speak one answer;
-- broadcasts widget commands, allowing duplicate reports;
-- stores one last-writer-wins widget catalog, so a phone with no widgets can
-  remove the host's widget tools; and
-- broadcasts conversation-window requests, including to a phone in a pocket.
+### Registered surfaces
 
-Protocol v4 must resolve these before two full frontends can coexist.
+Every installation generates a stable opaque ID and registers it once in
+`surface.hello` with a diagnostic name and widget schemas. Registration binds
+the connection. Later requests do not repeat sender identity.
 
-## Feasibility findings
+Registering the same ID replaces its old connection. A connection generation
+prevents the old connection's late close from removing its replacement.
 
-### Second laptop
+### Broadcast and replay
 
-This is the cheaper case when the second laptop runs Linux/X11. OpenSSH supports
-forwarding a local Unix socket directly to a remote Unix socket:
+The service has ordinary `send` and `broadcast` helpers. `broadcast` calls
+`send` for every registered surface.
 
-```sh
-ssh -N \
-  -L "$HOME/.scufris-remote/service.sock":/run/user/1000/scufris/service.sock \
-  den
+Every accepted user message and final agent response becomes one canonical
+`surface.message` with:
 
-SCUFRIS_RUNTIME_DIR="$HOME/.scufris-remote" scufris-desktop
-```
+- LLM-style `role`;
+- associated surface ID;
+- mandatory plain `text`;
+- optional Markdown `details`; and
+- optional LLM-shaped `widgets` calls for assistant responses.
 
-The exact command needs testing, including stale local-socket removal,
-`ExitOnForwardFailure`, SSH reconnects, and systemd user supervision.
+Every live message is broadcast to every surface. Each service and UI retains
+only the latest N entries, initially the existing limit of 200.
 
-The existing companion is not portable as-is to every laptop. It depends on
-X11, GTK, WebKitGTK, and X11-specific focus, shape, and global-key behavior. A
-Linux/X11 laptop can reuse it. A macOS, Windows, Wayland-only, or otherwise
-unsupported laptop needs a new frontend and changes the estimate substantially.
-The spike must record the actual target laptop OS before fixing the plan.
+After `surface.hello`, the service sends the latest N messages and current state,
+then sends `surface.ready`. Until ready, the client stays on its loading screen,
+replaces its local conversation, and performs no presentation effects. It does
+not send a cursor or merge local history.
 
-Before protocol v4, a remote companion can only be tested with the host
-companion stopped. Running both reproduces the known eviction livelock rather
-than proving the tunnel wrong.
+### Latest-sender local presentation
 
-A no-UI rung already exists for diagnosis:
+The latest accepted surface message associates the response with that surface.
+A steer from another surface updates the association.
 
-```sh
-ssh den scufris-ctl watch
-ssh den scufris-ctl send "hello from the laptop"
-```
-
-### iPhone
-
-A native Swift iOS app is feasible and fits the settled model: it can implement
-the bounded JSON-line frontend protocol, show transcript and state, submit text,
-claim presence while foregrounded, record audio, and synthesize `speak` locally.
-
-A browser or PWA is not the preferred path. Browser code cannot directly open
-an SSH channel or Unix socket. It would require an HTTP/WebSocket gateway and a
-network service that the settled design explicitly excludes.
-
-Tailscale's iOS app can provide private IP reachability to the host. It does not
-make the Unix socket directly reachable. The phone app still needs an SSH
-transport from the tailnet to `service.sock`. The normal OpenSSH server over the
-tailnet is sufficient; Scufris does not need to know Tailscale exists.
-
-The transport is the main unknown. Swift SSH libraries such as Citadel over
-Apple's SwiftNIO SSH provide authenticated channels and streamed command output,
-but direct OpenSSH `direct-streamlocal@openssh.com` support is not a safe
-assumption. The spike must prove one full-duplex, binary-clean route. Candidate
-routes, in preference order, are:
-
-1. direct SSH local-to-remote Unix-socket forwarding;
-2. a non-PTY SSH exec/session channel running a small host bridge whose stdin
-   and stdout proxy the existing Unix socket; or
-3. a narrowly restricted SSH subsystem that provides the same proxy.
-
-The proof must reject any route that adds a Scufris TCP listener. It must pin or
-validate the host key, keep the client key in Keychain, preserve message bounds,
-and close cleanly when iOS suspends the app. Do not use an interactive PTY for
-protocol bytes unless the proof demonstrates that line discipline cannot alter
-them.
-
-Treat the first iOS app as foreground-only. When suspended, it disconnects and
-holds no presence. There is no background keepalive, push notification, or relay
-requirement.
-
-### iOS voice
-
-Voice remains surface-local. The service sees submitted text and `speak`, never
-audio.
-
-Input has two credible designs to compare after text transport works:
-
-- capture WAV on the phone and reach the host's loopback Whisper-compatible
-  endpoint through SSH; or
-- transcribe on-device and submit only the resulting text.
-
-The host currently runs its bundled Whisper endpoint on loopback, normally
-`127.0.0.1:10302`, and the companion accepts a configured endpoint. Reusing the
-host model avoids a second model and keeps results aligned, but adds an audio
-transport and latency. On-device transcription avoids sending audio and may
-work without the host endpoint, but adds a model or depends on iOS speech
-availability and behavior. This spike should select a direction, not build both.
-
-Output can use native iOS speech synthesis for `speak`. Protocol v4 presence
-must prevent both laptop and phone from speaking the same paragraph. Starting a
-phone recording must visibly indicate microphone use and cut phone-local speech,
-matching the desktop's barge-in rule.
-
-### Personal iOS distribution
-
-A native personal app is possible without public App Store release, but signing
-is operational work:
-
-- A free Xcode Personal Team permits personal on-device testing. Apple states
-  that App IDs, registered test devices, and provisioning profiles expire after
-  seven days, requiring periodic rebuild and reinstall.
-- Apple Developer Program membership is USD 99 per membership year and enables
-  app distribution and fuller capabilities.
-- TestFlight builds can be tested for up to 90 days.
-
-For one personal phone, a paid development/ad hoc installation on registered
-devices is likely less disruptive than free weekly reprovisioning. TestFlight is
-useful for review builds but is not permanent installation. The spike must
-record the chosen route and the update procedure.
-
-### iOS build environment decision (2026-08-29)
-
-Alex has no Mac with Xcode and decided not to build the iOS demo now. Nix can
-provide a Swift compiler on Linux, but it cannot provide Apple's proprietary iOS
-SDK, Xcode build tools, device signing, provisioning, or direct installation to
-an iPhone. A Linux-only build would therefore not produce a testable native iOS
-app. Cloud macOS is possible but makes signing and interactive device testing
-awkward and is not justified for this disposable proof.
-
-The transport research also narrowed the library choice. Citadel 0.12.1 is
-maintained and supports non-interactive command execution and streamed command
-output. Its documented high-level client API only streams command stdin through
-a PTY or TTY, so it cannot by itself provide the required binary-clean,
-full-duplex exec bridge. It remains suitable for a command-based demo using
-`scufris-ctl send` and `scufris-ctl watch`; a direct protocol client needs a
-lower-level SwiftNIO SSH channel or another proved library.
-
-Outcome: defer the native app and its SSH transport proof until a Mac with Xcode
-is available. Do not add an unbuildable iOS project to this repository.
-
-### iOS interaction design (2026-08-29)
-
-Interactive design: `ios-app-design.html` in this directory. The prototype
-loads the same vendored `thinking-orbs` engine and state-to-orb mapping as the
-desktop pill rather than carrying a second approximation.
-
-The phone is one screen rather than a pill page, a review page, and a HUD page.
-The conversation occupies the available height. A compact typed composer and
-the orb share one bottom interaction workspace. Holding the orb records,
-releasing it transcribes, and the editable review box expands in that workspace
-without hiding the conversation. The orb keeps the desktop state grammar and
-barge-in rule. Typed input remains available while Scufris works so it can
-steer, and a visible stop action ends the run.
-
-The phone has no widget runtime. It announces an empty catalog, and when it
-holds presence the service must make widget tools inactive so the agent answers
-in ordinary conversation text and local speech. Desktop widgets remain host
-processes on host monitors.
-
-Separate observations were intentionally parked rather than folded into this
-design: the current four-widget limit, Claude usage polling eventually receiving
-HTTP 429, Dashboardd replacement coverage, and general desktop polish. They
-need use evidence and separate work if promoted.
-
-### Presence lease research (2026-08-29, proposed)
-
-Implementation plan: `MULTI_SURFACE_PLAN.md` in this directory. Work is paused
-before implementation and the foreground-versus-first-touch trigger is not yet
-settled.
-
-"Sleep" must mean passive, not disconnected. Every connected surface continues
-to receive state, transcript, and notices. Exactly one active surface receives
-speech, widget commands, and conversation-window requests. It is therefore a
-presence lease in the service and an `active` or `watching` state in the UI;
-calling a watcher asleep would hide that it remains current and can still submit
-or abort.
-
-A connection-only lease is too sticky, and a submit-only lease is too late for
-unprompted contact. The proposed acquisition rule combines lifecycle and
-intent:
-
-- the first frontend becomes active;
-- a phone claims when its app enters the foreground;
-- either surface claims on deliberate Scufris interaction: microphone start,
-  composer or HUD activation, or desktop activation gesture;
-- every submit also claims as a final invariant; and
-- a claim is revocable immediately by a newer claim and never blocks one.
-
-A foreground event is only a claim, not ownership for the app's whole lifetime.
-If the desktop hotkey or HUD is used while the phone stays open, the desktop
-claims presence back. Opening the phone to read briefly moves output there;
-touching Scufris on the desktop moves it back.
-
-The service should keep claimants in recency order. Claim moves a connected
-surface to the top. Explicit release, backgrounding, SSH loss, or frontend
-disconnect removes it; the most recent still-connected claimant resumes. Thus a
-phone foregrounds over the desktop and the desktop wakes automatically when the
-phone backgrounds, without naming either one as local, remote, primary, or
-fallback. If no claimant remains, there is no side-effect destination until a
-surface acts. Do not add a timer: expiry during a long visible answer would move
-speech unexpectedly, while connection loss already gives the lease a bounded
-lifetime.
-
-Protocol v4 needs explicit `claim` and `release` requests plus a pushed presence
-update so every UI knows whether it is active or watching. The service can still
-infer claim from `submit`. Connection IDs are sufficient for lease ownership;
-no remote bit or device class is needed. A stable surface identifier may be
-useful for diagnostics but must not decide routing.
-
-The implementation shape remains bounded but is larger than removing frontend
-eviction:
-
-- retain all frontends and their individual widget catalogs;
-- add recency and one active frontend to service state;
-- fan state, transcript, and notices out to all frontends;
-- route speech, widgets, and conversation requests only to presence;
-- remove a disconnected holder and restore the previous connected claimant;
-- make desktop activation paths claim without making ordinary transcript replay
-  claim;
-- make phone foreground claim and background release, with disconnect as the
-  authoritative fallback; and
-- defer active widget-tool changes to the turn boundary while preserving the
-  catalog of a widget already executing.
-
-The unresolved product fork is whether merely foregrounding the phone should
-claim, or whether the first touch inside Scufris should claim. Foreground claim
-is recommended: the whole app is a Scufris surface, iOS provides a reliable
-foreground transition, and any later desktop interaction can revoke it. A
-touch-only claim avoids moving output when the app is opened only to read, but
-makes passive reading disagree with where unprompted speech and attention go.
-
-## Hostname and private reachability finding (2026-08-28)
-
-The website name and the private machine name are separate DNS records. They do
-not require the machine to serve the public website.
-
-Recommended topology:
+Every surface stores the same assistant message. Only the matching live surface
+may speak the plain text, animate the response, or render attached widgets:
 
 ```text
-alexjercan.dev, www.alexjercan.dev  -> GitHub Pages
-nixos.alexjercan.dev                -> the host's stable Tailscale IPv4
-                                            |
-iPhone with Tailscale -> SSH over WireGuard -> host Unix socket bridge
+message.surface == local registered surface ID
 ```
 
-`alexjercan.dev` can be the GitHub Pages custom domain. The existing website is
-already in `alexjercan/alexjercan.github.io`, but it has no `CNAME` file and its
-generated canonical URLs still use `https://alexjercan.github.io/`. Moving it
-requires both the GitHub Pages custom-domain setting and source/template URL
-changes. GitHub recommends verifying the domain with a DNS TXT record before
-attaching it. The registrar may also host DNS, but keeping the registrar and DNS
-provider separate is valid.
+Speech is a frontend feature. The service has no speak message, speech
+capability, audio path, mute state, or TTS routing.
 
-`nixos.alexjercan.dev` should not point to the router's public address and should
-not expose port 22 by router forwarding. A public DNS A record may contain the
-host's stable Tailscale `100.64.0.0/10` address. The record is visible publicly,
-but it does not make the address publicly routable: only an authenticated member
-of the tailnet can reach it. This gives the app the requested branded hostname
-without putting Scufris or SSH on the public Internet. The simpler alternative
-is to use the host's Tailscale MagicDNS `*.ts.net` name and reserve the bought
-domain for the website.
+### Atomic agent response
 
-A CNAME from `nixos.alexjercan.dev` to a MagicDNS name is not the preferred
-plan. MagicDNS is tailnet-local, resolver behavior through a public CNAME is an
-extra dependency, and it discloses the tailnet DNS name. Split DNS can keep the
-record private, but needs a separately reachable DNS resolver and is unnecessary
-for one stable host.
+The agent emits exactly one final shape:
 
-The `.dev` registry is HSTS-preloaded. All browser-facing pages therefore need
-HTTPS. GitHub Pages can provision that certificate for the website. This does
-not affect SSH to the private subdomain; SSH authenticates the pinned SSH host
-key, not a Web PKI certificate.
+```text
+agent.response { text, details?, widgets? }
+```
 
-Tailscale is preferable to the other deployment shapes:
+`text` is bounded plain prose. `details` is bounded Markdown. `widgets` is a
+bounded list of calls shaped like LLM tool calls.
 
-- Direct SSH port forwarding needs router control, dynamic DNS or a static
-  public IP, source filtering, and continuous hardening. It exposes an attack
-  surface and may fail behind carrier-grade NAT.
-- Cloudflare Tunnel plus Access is useful for an HTTP application, but the
-  settled phone design is SSH-to-Unix-socket, not a browser application. It
-  adds a public relay and conflicts with the no-public-endpoint constraint.
-- The host already runs LogMeIn Hamachi, but the phone plan needs a maintained
-  iOS path and the prior design already selected Tailscale as the candidate.
-  Do not run both indefinitely without a reason.
+The service adds the assistant role and latest surface ID, records the entry,
+and broadcasts it. Details become part of shared replay and can replace ordinary
+`/detail <id>` retrieval.
 
-The NixOS host is close but not ready for this deployment. OpenSSH is active on
-all addresses and allows only user `alex`, but its effective configuration still
-has password and keyboard-interactive authentication enabled. Before remote use,
-bind exposure to the tailnet with the firewall, use a dedicated phone key held
-in iOS Keychain, pin the host key, disable password and interactive login, and
-restrict that key to the socket bridge command if the Swift transport uses an
-exec channel. Scufris keeps its mode-0600 Unix socket and opens no TCP port.
+Widgets are synchronous with the final response. There are no standalone open,
+update, close, result, or acknowledgement messages. Rendering is best-effort,
+only the associated live surface executes it, and replay never executes it.
 
-The app can use `nixos.alexjercan.dev:22` after Tailscale connects. DNS is only a
-name; the actual phone transport proof, protocol v4, foreground presence, and
-personal iOS signing work remain as specified below.
+### Self-contained Pi messages
 
-The name's availability and live registrar prices were not verified because DNS
-and outbound name resolution were unavailable in this research environment.
-Check the exact name at an ICANN-accredited registrar before choosing the final
-label. Do not use registrar search results as proof until registration succeeds.
+A surface sends widget schemas only in `surface.hello`. The service puts a fresh
+snapshot of the selected surface's schemas in every `agent.message`, including a
+cross-surface steer.
 
-### Proposed rollout
+The agent channel is the only prompt ingress. The Pi extension encodes `text`
+and widget definitions together inside one `<scufris_surface_message>` block,
+using `<widgets>` with LLM-shaped `name`, `description`, and `input_schema`
+fields. It then calls `pi.sendUserMessage()`, or uses `deliverAs: "steer"` while
+Pi is busy. There is no RPC prompt road, context queue, context acknowledgement,
+or dynamic widget activation.
 
-1. Register `alexjercan.dev`, enable registrar MFA and transfer lock, and keep
-   renewal enabled.
-2. Verify the domain in GitHub. Configure the apex and `www` records for GitHub
-   Pages, set the Pages custom domain, then enable HTTPS.
-3. Enroll the host and iPhone in one locked-down Tailscale tailnet. Do not enable
-   public Funnel. Use ACL grants so only Alex's devices can reach host TCP 22.
-4. Harden NixOS SSH and its firewall. Add and test a dedicated phone key before
-   disabling password authentication.
-5. Choose either the MagicDNS hostname or public `nixos.alexjercan.dev` A record
-   to the stable Tailscale IPv4. Test it on iPhone cellular data, not only Wi-Fi.
-6. Prove the non-PTY SSH bridge to the Scufris Unix socket. Then continue the
-   protocol and iOS tasks already ordered in this spike.
-7. Document recovery for a lost phone, key revocation, tailnet removal, host-key
-   replacement, domain renewal, and DNS-provider loss.
+### Typed channels
 
-### Additional official references
+Protocol v4 separates surface, agent, and control message enums:
 
-- GitHub Pages custom domains and DNS records:
-  https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site
-- GitHub domain verification:
-  https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/verifying-your-custom-domain-for-github-pages
-- Tailscale device IP stability:
-  https://tailscale.com/kb/1033/ip-and-dns-addresses
-- Tailscale DNS and MagicDNS:
-  https://tailscale.com/kb/1054/dns
-- Tailscale access control grants:
-  https://tailscale.com/kb/1324/grants
-- `.dev` HTTPS/HSTS policy:
-  https://get.dev/
+```text
+surface:
+    -> hello, message, abort
+    <- message, message_ack, aborted, state, ready, rejected
 
-## Questions this spike must answer
+agent:
+    -> hello, response, state
+    <- ready, message, abort, rejected
 
-1. What operating system, display stack, and architecture does the second
-   laptop use?
-2. Does the documented OpenSSH Unix-socket forwarding command work end to end
-   with the existing companion when the host companion is stopped?
-3. What unit or wrapper reliably owns tunnel startup, stale socket cleanup,
-   reconnect, and shutdown?
-4. Can an iOS Swift proof hold a full-duplex, non-PTY SSH channel to the service
-   socket without any network listener in Scufris?
-5. Which SSH library and authentication method will be maintained and small
-   enough for a personal app?
-6. How does a foreground phone claim and release presence without making the
-   service know it is a phone or remote?
-7. What exact stable mismatch exchange lets an old app receive the host's
-   update notice when all newer messages are incompatible?
-8. Does phone voice use the host Whisper endpoint through SSH or on-device
-   transcription?
-9. Which iOS signing and update route will be used?
-10. Is protocol v4 still one service file plus the shared Rust and TypeScript
-    protocol definitions, or has the current tree changed that estimate?
+control:
+    -> hello, state
+    <- ready, state, rejected
+```
 
-## Proposed implementation tasks after the spike
+There is no watcher. Control watch, abort, events, debug, and session hijack are
+outside the first v4 protocol. Use `journalctl` and `systemctl` for routine
+observation and process management.
 
-Create these as separate tasks only after this spike is reviewed. Keep the
-order and dependencies explicit.
+Exactly one agent connection is accepted. Multiple surface connections are
+retained. The control channel remains local and minimal.
 
-1. **Release and deploy v0.5.0**
+### Server state precedence
 
-   - Satisfy the existing implementation gate.
+The service broadcasts one user-facing state with severity-first precedence:
 
-2. **Protocol v4: multiple frontends and presence**
+```text
+failed > blocked > working > starting > idle
+```
 
-   - Remove frontend eviction while retaining one agent.
-   - Fan out transcript and state.
-   - Route speech, widget commands, and window requests to presence.
-   - Infer presence from submit and support an explicit claim message.
-   - Register the union of widget tools and activate only the presence holder's
-     catalog, deferring activation changes at turn boundaries.
-   - Refuse widget races when the selected surface cannot render one.
-   - Freeze and test the version handshake and update notice.
-   - Add focused two-frontend integration tests, including reconnect, slow
-     client removal, concurrent submit, presence movement, and catalog changes.
+Blocked work remains visible during unrelated Pi work. Listening, transcribing,
+and speaking remain surface-local visual states and do not change server state.
 
-3. **Run Scufris desktop from a second Linux laptop**
+### No legacy compatibility
 
-   - Package the existing companion for the target laptop.
-   - Add the supervised SSH Unix-socket tunnel and runtime directory.
-   - Keep microphone, transcription, and speech local to that laptop unless a
-     reviewed deployment explicitly forwards its Whisper endpoint.
-   - Verify laptop/host handoff, disconnects, sleep/wake, and service restart.
+Protocol v4 replaces v3 outright. There is no legacy `service.sock` listener,
+v3 parser, conversion, fallback, dual protocol, or compatibility shim. The host
+and clients are tested and deployed together with `nix run .#staging -- up`.
+Mixed v3/v4 installations are unsupported and fail rather than activating old
+behavior.
 
-4. **Spike an iOS SSH transport to the Scufris Unix socket**
+### Private remote transport
 
-   - If the proof is not completed in this task, promote it as the next blocking
-     task before any iOS UI.
-   - Prove Tailscale reachability, SSH host-key validation, Keychain key storage,
-     a full-duplex bridge, disconnect, and reconnect.
+Local channels use three mode-0600 Unix sockets:
 
-5. **Build the iOS text surface**
+```text
+surface.sock
+agent.sock
+control.sock
+```
 
-   - Transcript, state, submit, abort, reconnect, and bounded protocol parsing.
-   - Foreground presence claim and release.
-   - Protocol mismatch and plain update notice.
-   - No widgets, background notifications, public relay, or second conversation.
+An optional byte-only TCP gateway proxies only `surface.sock`, binds a configured
+Tailscale address, and is disabled by default. NixOS exposes its port only on
+`tailscale0` under a tailnet grant. Router forwarding, Funnel, and public
+endpoints remain disabled.
 
-6. **Add voice to the iOS surface**
+### Products
 
-   - Microphone permission, visible recording state, transcription, editable
-     result, and submit.
-   - Native local speech for `speak`, mute, and barge-in.
-   - Test presence changes during recording and playback.
+A compatible Linux/X11 laptop can run the same desktop package with a configured
+surface endpoint rather than a remote flag.
 
-7. **Package and operate the personal iOS app**
-   - Signing, provisioning, installation, updates, Tailscale enrollment, SSH key
-     rotation, host replacement, and recovery documentation.
+The first iOS product is foreground-only and text-first. It uses `NWConnection`
+over Tailscale, a Keychain surface ID, bounded replay, loading until ready,
+state, typed messages, abort, and reconnect. Hold-to-talk and local speech
+follow.
 
-## Sources checked
+STT and TTS hosting belongs in a separate inference repository and does not
+block protocol v4.
 
-- Settled local design: `tasks/20260828-170154/TASK.md`
-- Current service protocol: `docs/src/dev/service.md`
-- Current desktop behavior: `docs/src/dev/desktop.md`
-- OpenSSH `-L local_socket:remote_socket` forwarding:
-  https://man.openbsd.org/ssh
-- Tailscale installation on iOS:
-  https://tailscale.com/docs/install/ios
-- Tailscale SSH platform and client notes:
-  https://tailscale.com/kb/1193/tailscale-ssh
-- Apple membership and Personal Team limits:
-  https://developer.apple.com/support/compare-memberships/
-- Apple TestFlight overview:
-  https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview
-- Citadel Swift SSH API, as one candidate rather than a decision:
-  https://github.com/orlandos-nl/Citadel
+## Evidence
+
+- The service protocol is bounded LF-delimited JSON and can be proxied as an
+  opaque byte stream.
+- The existing service already separates retained transcript from non-retained
+  speech and keeps a 200-entry ring.
+- The current response extension already produces mandatory plain prose plus
+  optional Markdown detail.
+- The current widget protocol is asynchronous and result-bearing, so replacing
+  it requires explicit integration coverage rather than a wire-only rename.
+- Citadel 0.12.1 did not provide the required high-level binary-clean streaming
+  stdin for an iOS SSH transport.
+- GitHub-hosted macOS runners provide Xcode, simulators, signing, and TestFlight
+  tooling unavailable on NixOS.
+- The real vendored orb renders in `ios-app-design.html`.
+
+## Protocol v4 core implementation
+
+Implemented directly on `master` from the approved `PLAN-PROTOCOL-V4.md`.
+
+Decisions applied:
+
+- Replaced protocol v3 outright with typed `surface.sock`, `agent.sock`, and
+  `control.sock`; no `service.sock`, parser, conversion, fallback, dual
+  protocol, RPC prompt path, control watch/debug/abort, speech route, or widget
+  result protocol remains.
+- Kept `desktop.sock` only as the independent surface-local window-manager
+  command protocol for `scufris-ctl open|hud|show|hide`.
+- Bound stable desktop identity from a mode-0600 `surface-id` file beside the
+  pending transcript state.
+- Made replay, state, and ready one registration lock boundary. A connection is
+  broadcast-eligible only after ready is queued.
+- Made `agent.message` the sole prompt ingress and `agent.response` the sole
+  atomic final response. Widget definitions are snapshotted per accepted
+  message. Calls are validated against the selected surface schema.
+- Removed the dynamic Pi widget extension and skill, agent-controlled
+  conversation extension, spoken event road, detail artifact store and command,
+  artifact pruning helper, and their replaced tests.
+- Kept local desktop speech, mute, recording, transcription, HUD controls, and
+  widget runtime. Replay has no presentation effects. Only the associated live
+  desktop surface speaks and executes widget calls.
+
+Verification evidence:
+
+- `cargo test --workspace`: 14 shared protocol, 312 desktop, and 24 service
+  tests passed. Coverage includes two-surface broadcast/replay, exact 200-entry
+  retention, generation-safe replacement, slow-reader removal, one agent,
+  cross-surface steer association, atomic details/widgets, and frontend-local
+  replay/presentation behavior.
+- `npm run check`: 67 TypeScript and UI tests passed, including deterministic
+  XML-safe self-contained prompts, busy steer delivery, atomic response
+  emission, wrong channel/version decode, and local handshake failure text.
+- `python3 -m unittest discover -s tests -p 'test_*.py'`: 89 helper tests
+  passed.
+- Focused Nix resource, launcher, service, desktop, documentation, and native
+  format checks passed.
+- `nix flake check`: all 35 x86_64-linux checks passed.
+- `nix run .#staging -- up` launched the built v4 service and local desktop.
+  All three service sockets were mode 0600. The desktop persisted its mode-0600
+  surface ID and reached `idle` through control v4.
+- `evidence/proof-v4.json` records the live local proof with the desktop plus
+  two synthetic registered surfaces: identical user and assistant broadcast,
+  response association to `synthetic-one`, ordered state/ready replay, strict
+  wrong-version EOF, strict cross-channel EOF, and rejection of a second agent.
+  The real Pi response was `Protocol v4 confirmed.`
+- `evidence/staging-v4.log` records the coordinated staging paths and processes.
+  The owned staging service, desktop, and wrapper PIDs were stopped explicitly
+  after the proof.
+
+## Implementation sequence
+
+Implement the v4 core in this task, then create separate product work for later
+batches:
+
+1. **Protocol v4 typed channels**
+   - three physical Unix socket endpoints;
+   - channel-specific enums and direction rejection;
+   - strict exact-version close without a response;
+   - bounds for identities, text, details, widget schemas, and calls; and
+   - Pi RPC ordering proof.
+
+2. **Registered replay and broadcast**
+   - multiple retained surfaces;
+   - bound identities and replacement generations;
+   - canonical N-entry ring;
+   - replay, state, and ready ordering; and
+   - two-surface, reconnect, and slow-reader tests.
+
+3. **Latest-sender atomic responses**
+   - self-contained Pi messages with embedded widget definitions;
+   - cross-surface steer association;
+   - one agent response with text, details, and widget calls;
+   - frontend-local speech and widget execution; and
+   - removal of separate speech and widget-result roads.
+
+4. **Optional Tailscale surface gateway**
+   - bounded byte proxy;
+   - disabled-by-default deployment;
+   - Tailscale-only bind, firewall, and grants; and
+   - real remote connection proof.
+
+5. **Remote products**
+   - compatible laptop desktop;
+   - iOS text surface;
+   - external STT/TTS service; and
+   - iOS hold-to-talk and local speech.
+
+## Required protocol verification
+
+Before networking or iOS depends on v4, prove:
+
+- different registered surfaces remain connected;
+- a repeated ID replaces only its previous generation;
+- channel and direction violations are rejected;
+- every surface receives identical conversation entries;
+- replay replaces local history and ends with ready;
+- replay never triggers speech, animation, or widgets;
+- only the associated live surface performs local presentation;
+- a cross-surface steer changes the response association;
+- details broadcast and replay but are never spoken;
+- widget calls exist only in the atomic final response;
+- widget calls produce no protocol acknowledgement or result;
+- every agent message receives the current selected widget schema;
+- only one agent is accepted;
+- slow-client removal does not affect other surfaces or a replacement; and
+- every non-exact version is logged and disconnected without response; and
+- clients show a local update-together message after handshake failure.
+
+## Deferred product input
+
+The target laptop operating system, display stack, and architecture must be
+recorded before laptop deployment. It does not block protocol v4 or the local
+multi-surface implementation.
+
+## Parked work
+
+- terminal session hijack or handoff;
+- asynchronous widgets and widget results;
+- agent-controlled conversation windows;
+- server-owned speech or audio transport;
+- control watch, abort, and event streaming;
+- public endpoints, relays, accounts, and push notifications;
+- multiple users, agents, conversations, or authoritative hosts; and
+- generic LLM APIs in the future inference repository.
 
 ## Completion criteria
 
-- The target laptop platform is recorded.
-- The laptop Unix-socket tunnel is demonstrated or rejected with exact evidence.
-- The iOS SSH-to-Unix-socket transport is demonstrated or rejected with exact
-  evidence. No Scufris TCP listener is introduced.
-- Presence, version mismatch, voice transport, and iOS distribution decisions
-  are recorded.
-- The implementation task list is revised from evidence, sized, ordered, and
-  ready for creation.
-- Review concludes with a clear go/no-go for the Linux laptop surface and the
-  personal iOS app.
+This spike can close when:
+
+- the protocol decisions are recorded;
+- the plan is reviewed against the current tree;
+- protocol, gateway, laptop, iOS, and inference work are sized separately; and
+- review gives a clear go or no-go for remote desktop and personal iOS surfaces.

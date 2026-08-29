@@ -61,9 +61,6 @@ context, and the prompt.
 - Finished workflows are archived, not deleted. Remove
   `$XDG_STATE_HOME/scufris/jobs/_archive/<id>` manually when history is no
   longer needed.
-- `scripts/scufris-artifacts-prune` removes detail artifact sidecars whose
-  owning session file is gone. It touches only sidecars with the exact
-  private layout, ownership, and modes, and stops beyond a bounded scan.
 - The background service is diagnosed like any user service:
 
 ```bash

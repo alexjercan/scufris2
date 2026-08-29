@@ -132,6 +132,7 @@ body {
 
 .line {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--step);
   align-items: baseline;
 }
@@ -162,6 +163,15 @@ body {
    * is better than a line that runs off the edge. */
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.details {
+  flex: 1 0 calc(100% - var(--gutter) - var(--step));
+  margin: 0 0 0 calc(var(--gutter) + var(--step));
+  color: var(--muted);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* Scufris is what the person opened this window to read, so it is the brighter

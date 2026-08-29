@@ -43,7 +43,7 @@ cargo run --manifest-path surfaces/desktop/Cargo.toml -- --print-config
 ```
 
 ```text
-socket=/run/user/1000/scufris/service.sock
+socket=/run/user/1000/scufris/surface.sock
 command_socket=/run/user/1000/scufris/desktop.sock
 state_file=/home/you/.local/state/scufris-desktop/pending.json
 stt_endpoint=http://127.0.0.1:10301/inference
@@ -183,13 +183,13 @@ is not installed.
 Test ownership:
 
 - `tests/*.test.ts`: extension behavior in Node with the Pi APIs stubbed:
-  orchestration, response shaping, Calm, identity, and repository structure. `tests/service.test.ts` covers the agent side of the version 3
+  orchestration, response shaping, Calm, identity, and repository structure. `tests/service.test.ts` covers the agent side of protocol v4
   protocol: the hello, what the agent reports, and what it does with a widget
   report.
 - `Cargo.toml`: the root Rust workspace. `shared/control/` owns the protocol encoding,
   `scufris-desktop` owns the state machine, the pending transcript store, audio
   conversion, the speaker, and the tray, and `scufris-service` owns the agent,
-  the session, and the version 3 socket. Every port is faked and the service's stand-in
+  the session, and the three protocol v4 sockets. Every port is faked and the service's stand-in
   agent is a `/bin/sh` script, so `cargo test` needs no display, no microphone,
   and no Pi.
 - `tests/test_scufris_jobs.py`: the jobs helper and inspection CLI. Lifecycle

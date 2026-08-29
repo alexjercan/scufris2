@@ -20,7 +20,7 @@
 
 use std::collections::VecDeque;
 
-use scufris_control::service::TranscriptEntry;
+use scufris_control::service::ConversationMessage;
 use serde::Serialize;
 
 /// How many lines the companion keeps.
@@ -40,9 +40,9 @@ pub struct Notice {
 }
 
 /// What the HUD is showing and what it is waiting for.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Conversation {
-    lines: VecDeque<TranscriptEntry>,
+    lines: VecDeque<ConversationMessage>,
     /// The identifier of the line the service has not answered for yet.
     sending: Option<String>,
     trouble: String,
@@ -72,9 +72,9 @@ impl Conversation {
     ///
     /// Everything said reaches here, whoever said it and whatever surface sent
     /// it: the service pushes its ring on connect and every line after it, so
-    /// a line typed in a terminal with `scufris-ctl send` appears in the HUD
-    /// the same way one typed into the HUD does.
-    pub fn said(&mut self, entry: TranscriptEntry) {
+    /// a line sent by another registered surface appears in the HUD the same
+    /// way one typed into this HUD does.
+    pub fn said(&mut self, entry: ConversationMessage) {
         if self.lines.len() == LINES {
             self.lines.pop_front();
         }
@@ -82,7 +82,7 @@ impl Conversation {
     }
 
     /// Everything said so far, oldest first.
-    pub fn lines(&self) -> Vec<TranscriptEntry> {
+    pub fn lines(&self) -> Vec<ConversationMessage> {
         self.lines.iter().cloned().collect()
     }
 
@@ -95,6 +95,14 @@ impl Conversation {
     /// the replay the two hold exactly the same lines.
     pub fn restart(&mut self) {
         self.lines.clear();
+        self.trouble = "Loading conversation.".into();
+    }
+
+    /// Replay is complete and live presentation may begin.
+    pub fn ready(&mut self) {
+        if self.sending.is_none() {
+            self.trouble.clear();
+        }
     }
 
     /// The connection went away, so nothing in flight is coming back.
@@ -169,28 +177,34 @@ impl Conversation {
 
 #[cfg(test)]
 mod tests {
-    use scufris_control::service::Speaker;
+    use scufris_control::service::ConversationRole;
 
     use super::*;
 
-    fn said(text: &str) -> TranscriptEntry {
-        TranscriptEntry {
-            speaker: Speaker::Assistant,
+    fn said(text: &str) -> ConversationMessage {
+        ConversationMessage {
+            role: ConversationRole::Assistant,
+            surface: "desk".into(),
             text: text.into(),
+            details: None,
+            widgets: None,
         }
     }
 
     #[test]
     fn every_line_of_the_conversation_is_kept_in_the_order_it_was_said() {
         let mut conversation = Conversation::new("p");
-        conversation.said(TranscriptEntry {
-            speaker: Speaker::User,
+        conversation.said(ConversationMessage {
+            role: ConversationRole::User,
+            surface: "desk".into(),
             text: "what time is it".into(),
+            details: None,
+            widgets: None,
         });
         conversation.said(said("half past four"));
         let lines = conversation.lines();
         assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0].speaker, Speaker::User);
+        assert_eq!(lines[0].role, ConversationRole::User);
         assert_eq!(lines[1].text, "half past four");
     }
 
@@ -304,7 +318,10 @@ mod tests {
         conversation.said(said("half past four"));
         conversation.restart();
         assert!(conversation.lines().is_empty());
+        assert_eq!(conversation.notice().trouble, "Loading conversation.");
         conversation.said(said("half past four"));
+        conversation.ready();
+        assert_eq!(conversation.notice().trouble, "");
         assert_eq!(conversation.lines().len(), 1);
     }
 

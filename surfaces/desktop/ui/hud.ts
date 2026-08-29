@@ -7,8 +7,8 @@
 // lines to draw and a notice to show; what leaves is Enter and Escape.
 //
 // The lines it draws are text. Not markdown, not tool calls, not thinking - the
-// service's transcript is what was said, and the session file and
-// `scufris-ctl debug` are where the rest of a run lives.
+// service's conversation projection is what was said. Private Pi tool and
+// thinking data stays in the session file.
 //
 // Wrapped in a block: the pages are separate classic scripts in one tsc
 // project, so a name at the top level of one is a name in the others' global
@@ -63,26 +63,29 @@
   const atBottom = (): boolean =>
     lines.scrollHeight - lines.scrollTop - lines.clientHeight < 24;
 
-  const draw = (entry: TranscriptEntry): HTMLLIElement => {
+  const draw = (entry: ConversationEntry): HTMLLIElement => {
     const line = document.createElement("li");
     line.className = "line";
-    line.dataset["speaker"] = entry.speaker;
+    line.dataset["speaker"] = entry.role;
 
     const who = document.createElement("span");
     who.className = "who";
-    who.textContent = WHO[entry.speaker] ?? entry.speaker;
+    who.textContent = WHO[entry.role] ?? entry.role;
 
     const what = document.createElement("span");
     what.className = "what";
-    // textContent, never innerHTML. What the service pushes is whatever was
-    // said, and what was said is not markup.
     what.textContent = entry.text;
-
     line.append(who, what);
+    if (entry.details) {
+      const details = document.createElement("pre");
+      details.className = "details";
+      details.textContent = entry.details;
+      line.append(details);
+    }
     return line;
   };
 
-  const append = (entry: TranscriptEntry): void => {
+  const append = (entry: ConversationEntry): void => {
     // Whether to follow is decided before the line goes in, because adding it
     // is what changes the answer. A person who has scrolled up to read
     // something is not dragged back down by the next line arriving.
@@ -91,7 +94,7 @@
     if (follow) lines.scrollTop = lines.scrollHeight;
   };
 
-  const replace = (entries: TranscriptEntry[]): void => {
+  const replace = (entries: ConversationEntry[]): void => {
     lines.replaceChildren(...entries.map(draw));
     lines.scrollTop = lines.scrollHeight;
   };
@@ -167,7 +170,7 @@
   // ---------- what the host says ----------
 
   void listen("scufris://said", (event) => {
-    append(event.payload as TranscriptEntry);
+    append(event.payload as ConversationEntry);
   });
 
   // The service replays its whole transcript ring to a frontend that connects,

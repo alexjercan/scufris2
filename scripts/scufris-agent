@@ -68,12 +68,9 @@ extensions=(
   "$root/agent/extensions/scufris/response.ts"
   "$root/agent/extensions/scufris/calm.ts"
   "$root/agent/extensions/scufris/service/index.ts"
-  "$root/agent/extensions/scufris/widgets/index.ts"
-  "$root/agent/extensions/scufris/conversation.ts"
 )
 skills=(
   "$root/agent/skills/workflow"
-  "$root/agent/skills/widgets"
 )
 # No Piper. This process makes no sound whatever it is given: the agent shapes
 # the answer and the frontend synthesises it, so there is nothing here for a

@@ -15,12 +15,6 @@
     "${resources}/share/scufris/extensions/scufris/calm.ts"
     "--extension"
     "${resources}/share/scufris/extensions/scufris/service/index.ts"
-    "--extension"
-    "${resources}/share/scufris/extensions/scufris/widgets/index.ts"
-    "--extension"
-    "${resources}/share/scufris/extensions/scufris/conversation.ts"
-    "--skill"
-    "${resources}/share/scufris/skills/widgets"
   ];
   renderedArgs = pkgs.lib.concatMapStringsSep " " pkgs.lib.escapeShellArg extensionArgs;
 in

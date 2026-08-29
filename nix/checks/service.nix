@@ -42,14 +42,15 @@ in
       ${service}/bin/scufris-service --help | grep -F 'SCUFRIS_SERVICE_SESSION_DIR'
       ! ${service}/bin/scufris-service --nonsense
 
-      # A window manager binding and a terminal both run the client by name.
-      ${ctl}/bin/scufris-ctl --help | grep -F 'Usage: scufris-ctl <COMMAND>'
-      for verb in send state watch abort debug open hud; do
+      # Protocol v4 control is intentionally diagnostic-only.
+      ${ctl}/bin/scufris-ctl --help | grep -F 'Usage: scufris-ctl [COMMAND]'
+      for verb in state open hud show hide; do
         ${ctl}/bin/scufris-ctl --help | grep -qE "^  $verb "
       done
+      for removed in send watch abort debug; do
+        ! ${ctl}/bin/scufris-ctl --help | grep -qE "^  $removed "
+      done
       ! ${ctl}/bin/scufris-ctl nonsense
-      # A verb with nothing to say is a wrong run, not an empty submission.
-      ! ${ctl}/bin/scufris-ctl send
       touch "$out"
     '';
 

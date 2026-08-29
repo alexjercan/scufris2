@@ -16,7 +16,7 @@ use std::{
     time::Duration,
 };
 
-use scufris_control::service::{Posture, WidgetReport};
+use super::protocol::{Posture, WidgetReport};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::PhysicalPosition;

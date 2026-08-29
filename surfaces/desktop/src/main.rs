@@ -16,6 +16,7 @@ mod display;
 mod focus;
 mod form;
 mod hud;
+mod identity;
 mod keys;
 mod link;
 mod logging;
@@ -55,13 +56,10 @@ use link::{LinkEvent, ServiceLink};
 use pending::{FilePendingStore, PendingStore};
 use scufris_control::{
     command::{Outcome, Verb},
-    // The widget layer's own word for where a surface lives, named apart from
-    // the pill's posture: one says whether the person owns a panel, the other
-    // says where the companion's windows are.
-    service::{Posture as Standing, WidgetCommand},
+    service::{ConversationMessage, ConversationRole, SurfaceRegistration, WidgetCall},
 };
 use speech::Speaker;
-use state::{Assistant, Event, Posture};
+use state::Event;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent, http, ipc::Channel, menu::Menu};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tracing::{debug, error, info, warn};
@@ -254,6 +252,37 @@ impl Transcriber for HttpTranscriber {
     }
 }
 
+struct LocalPresentation {
+    stop_speech: bool,
+    speak: Option<String>,
+    widgets: Vec<WidgetCall>,
+}
+
+fn local_presentation(
+    message: &ConversationMessage,
+    live: bool,
+    local_surface: &str,
+) -> LocalPresentation {
+    if !live {
+        return LocalPresentation {
+            stop_speech: false,
+            speak: None,
+            widgets: Vec::new(),
+        };
+    }
+    let associated =
+        message.role == ConversationRole::Assistant && message.surface == local_surface;
+    LocalPresentation {
+        stop_speech: true,
+        speak: associated.then(|| message.text.clone()),
+        widgets: if associated {
+            message.widgets.clone().unwrap_or_default()
+        } else {
+            Vec::new()
+        },
+    }
+}
+
 impl Backend for ServiceLink {
     fn submit(&self, id: String, text: String) -> Result<(), String> {
         ServiceLink::submit(self, id, text)
@@ -284,6 +313,8 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
         .map_err(|_| format!("{} is not a usable accelerator", config.hotkey))?;
     let chat_available = config.chat_command.is_some();
     let restart_available = config.restart_command.is_some();
+    let surface_id = identity::load_or_create(&config.state_file)?;
+    let surface_name = identity::diagnostic_name();
 
     let tauri_app = tauri::Builder::default()
         .plugin(
@@ -512,71 +543,34 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             let surfaces = Arc::clone(&widgets);
             let voice = Arc::clone(&speaker);
             let said = Arc::clone(&conversation);
+            let local_surface = surface_id.clone();
+            let registration = SurfaceRegistration {
+                id: surface_id.clone(),
+                name: surface_name.clone(),
+                widgets: widgets.definitions(),
+            };
             let link = Arc::new(ServiceLink::start(
                 config.socket.clone(),
+                registration,
                 move |event| match event {
-                    // Routed away from the pill before it can reach the state
-                    // machine. The runtime is the pill's sibling, and a widget
-                    // command has nothing to say about a conversation.
-                    //
-                    // The one thing it says is that a panel is coming, and a
-                    // panel answering a question the person asked is worth
-                    // seeing. Off this thread for the reason the conversation
-                    // window is, and unordered against the open for the same
-                    // reason it can be: the layer is one flag over every
-                    // surface, so a panel that opens first is raised with the
-                    // rest of them.
-                    LinkEvent::Widget(command) => {
-                        if answers(&command, observer.shown_assistant())
-                            && observer.posture() == Posture::Off
-                        {
-                            let workspace = Arc::clone(&observer);
-                            thread::spawn(move || workspace.handle(Event::Reveal));
+                    LinkEvent::ReplayStarted => said.reconnected(),
+                    LinkEvent::Ready => {
+                        said.ready();
+                        observer.observe(LinkEvent::Ready);
+                    }
+                    LinkEvent::Message { message, live } => {
+                        said.said(message.clone());
+                        let presentation = local_presentation(&message, live, &local_surface);
+                        if presentation.stop_speech {
+                            voice.hush();
                         }
-                        surfaces.command(command);
+                        if let Some(text) = presentation.speak {
+                            voice.say(text);
+                        }
+                        for call in presentation.widgets {
+                            surfaces.call(call);
+                        }
                     }
-                    // The agent decided this is worth saying aloud. What
-                    // becomes of it is the companion's: it owns the speaker,
-                    // and a deployment with no synthesiser configured drops it.
-                    LinkEvent::Speak(text) => voice.say(text),
-                    // What was said, whoever said it and whatever sent it. The
-                    // pill shows one take at a time and has nothing to do with
-                    // this; the HUD is the surface that shows the conversation.
-                    LinkEvent::Transcript(entry) => said.said(entry),
-                    // The agent asked for the window. It is told what to be
-                    // rather than told to flip, so this is not the toggle the
-                    // person's own gestures are.
-                    LinkEvent::Conversation(up) => {
-                        // Off this thread. `observe` runs on the link's single
-                        // reader, and showing the window blocks on the GTK loop
-                        // and then on up to half a second of asking the display
-                        // whether it came up. For that whole window the
-                        // frontend reads no transcript, no state, no answer and
-                        // no widget command: a pill waiting on an answer and a
-                        // window saying `sending` are both waiting on messages
-                        // sitting unread in the socket. Every other branch here
-                        // hands off without blocking.
-                        let window = Arc::clone(&said);
-                        thread::spawn(move || {
-                            let shown = if up { window.show() } else { window.hide() };
-                            if let Err(error) = shown {
-                                warn!("{error}");
-                            }
-                        });
-                    }
-                    // The catalog goes out once per connection, as soon as
-                    // there is a service to relay it: it is what the agent
-                    // types its widget tools from. The HUD empties itself for
-                    // the same reason: what follows a welcome is the service
-                    // replaying its whole transcript ring.
-                    LinkEvent::Connected => {
-                        surfaces.announce();
-                        said.reconnected();
-                        observer.observe(LinkEvent::Connected);
-                    }
-                    // Both senders are told. Each holds one identifier and
-                    // ignores answers for anything else, so the one this
-                    // answers is the one it reaches.
                     LinkEvent::Accepted(id) => {
                         said.accepted(&id);
                         observer.observe(LinkEvent::Accepted(id));
@@ -585,28 +579,19 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                         said.refused(&id, detail.clone());
                         observer.observe(LinkEvent::Refused(id, detail));
                     }
-                    // No reconnection brings an answer for a line that was in
-                    // flight, so the HUD gives up on it here rather than
-                    // waiting for one that is never coming.
                     LinkEvent::Disconnected => {
                         said.dropped(link::UNAVAILABLE);
                         observer.observe(LinkEvent::Disconnected);
                     }
-                    // Both siblings read this one. The pill shows the state;
-                    // the widgets runtime reads the turn boundary off it, which
-                    // is what ages an exhibit out when the subject changes.
+                    LinkEvent::HandshakeFailed => {
+                        observer.observe(LinkEvent::HandshakeFailed);
+                    }
                     LinkEvent::State(state, detail) => {
                         observer.observe(LinkEvent::State(state, detail));
                         surfaces.assistant(observer.shown_assistant());
                     }
-                    // Ambient notices belong to the tray and not to the
-                    // conversation window or widget surfaces.
-                    LinkEvent::Notice(id, state, detail) => {
-                        observer.observe(LinkEvent::Notice(id, state, detail));
-                    }
                 },
             ));
-            widgets.attach(Arc::clone(&link));
             conversation.attach(Arc::clone(&link) as Arc<dyn Backend>);
             runtime.set_backend(Arc::clone(&link) as Arc<dyn Backend>);
             tauri.manage(link);
@@ -769,24 +754,6 @@ fn carry(handle: AppHandle, queued: Receiver<keys::Gesture>) {
             }
         }
     });
-}
-
-/// Answers whether one widget command is Scufris showing the person something
-/// they asked for.
-///
-/// An exhibit is opened by a turn, so one that arrives while a turn is running
-/// is an answer, and an answer behind a workspace the person put away is an
-/// answer nobody reads. Neither of the other two is: an instrument is the
-/// person's own and waits to be looked for, and an exhibit with nothing running
-/// behind it is answering nothing the person is waiting on.
-fn answers(command: &WidgetCommand, assistant: Assistant) -> bool {
-    matches!(
-        command,
-        WidgetCommand::Open {
-            posture: Standing::Exhibit,
-            ..
-        }
-    ) && matches!(assistant, Assistant::Working | Assistant::Speaking)
 }
 
 /// Puts the conversation window up, or away if it is already up.
@@ -1070,43 +1037,38 @@ fn refused() -> http::Response<Vec<u8>> {
 mod tests {
     use super::*;
 
-    fn open(posture: Standing) -> WidgetCommand {
-        WidgetCommand::Open {
-            id: "w-1".into(),
-            widget: "note".into(),
-            posture,
-            data: serde_json::Value::Null,
+    fn answer(surface: &str) -> ConversationMessage {
+        ConversationMessage {
+            role: ConversationRole::Assistant,
+            surface: surface.into(),
+            text: "Spoken text.".into(),
+            details: Some("## Details\n\nNever spoken.".into()),
+            widgets: Some(vec![WidgetCall {
+                id: "call-1".into(),
+                name: "cpu".into(),
+                arguments: serde_json::json!({}),
+            }]),
         }
     }
 
-    /// The workspace comes back for an answer and for nothing else. A panel
-    /// that raises the companion's windows over whatever the person is doing,
-    /// for a reason they did not ask for, is the obnoxious thing this whole
-    /// gesture exists to avoid.
     #[test]
-    fn only_an_exhibit_a_running_turn_opened_raises_the_workspace() {
-        assert!(answers(&open(Standing::Exhibit), Assistant::Working));
-        assert!(answers(&open(Standing::Exhibit), Assistant::Speaking));
-        assert!(
-            !answers(&open(Standing::Exhibit), Assistant::Idle),
-            "nothing was asked, so nothing is being answered"
-        );
-        assert!(
-            !answers(&open(Standing::Instrument), Assistant::Working),
-            "an instrument is the person's own and waits to be looked for"
-        );
-        // The other three say nothing about a panel arriving.
-        assert!(!answers(
-            &WidgetCommand::Update {
-                id: "w-1".into(),
-                surface: "widget-1".into(),
-                data: serde_json::Value::Null,
-            },
-            Assistant::Working
-        ));
-        assert!(!answers(
-            &WidgetCommand::Clear { id: "w-1".into() },
-            Assistant::Working
-        ));
+    fn replay_has_no_local_presentation_effects() {
+        let presentation = local_presentation(&answer("desk"), false, "desk");
+        assert!(!presentation.stop_speech);
+        assert_eq!(presentation.speak, None);
+        assert!(presentation.widgets.is_empty());
+    }
+
+    #[test]
+    fn only_the_associated_live_surface_speaks_and_executes_widgets() {
+        let associated = local_presentation(&answer("desk"), true, "desk");
+        assert!(associated.stop_speech);
+        assert_eq!(associated.speak.as_deref(), Some("Spoken text."));
+        assert_eq!(associated.widgets.len(), 1);
+
+        let other = local_presentation(&answer("phone"), true, "desk");
+        assert!(other.stop_speech);
+        assert_eq!(other.speak, None);
+        assert!(other.widgets.is_empty());
     }
 }

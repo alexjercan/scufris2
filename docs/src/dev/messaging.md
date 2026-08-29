@@ -29,9 +29,9 @@ once after restart.
 only a notification; `blocked`, `done`, and `failed` trigger turns. In `all`,
 `working` events also trigger turns. Runtime failures always notify and wake.
 
-Standalone Quick Review completion, Plannotator results, and `/detail`
-feedback use the same follow-up message channel, bounded and JSON-encoded, each ending
-with the instruction to answer with one short final response.
+Standalone Quick Review completion and Plannotator results use the same
+bounded, JSON-encoded follow-up message channel. Each ends with an instruction
+to answer with one atomic final response.
 
 ## The acknowledgment gate
 
@@ -58,19 +58,13 @@ output path:
 
 - Streamed assistant text and text beside tool calls are removed at
   `message_end`.
-- A valid final call carries a safe spoken paragraph and optional detail. The
-  detail is stored as a private sidecar artifact and the transcript renders
-  the paragraph plus a `/detail <id>` command.
-- An invalid spoken value is replaced with a fixed safe sentence and the
-  rejected content is preserved in the detail artifact.
-- A plain text-only turn is split: first paragraph spoken when safe, the
-  remainder stored as detail. While a workflow acknowledgment is pending,
-  plain text is discarded entirely; only a successful final-response call
-  speaks.
-
-Artifacts are created only when the tool executes, never during message
-validation, so blocked or rejected batches leave no artifact. Speech plays
-only the validated paragraph of the current settled run.
+- A valid final call carries mandatory bounded plain text, optional Markdown
+  details, and optional widget presentation calls.
+- The complete value is sent once as `agent.response` and becomes one canonical
+  assistant conversation entry.
+- Details are displayed on every surface and are never spoken.
+- Only the associated ready surface may speak or execute live widget calls.
+  Replay stores the same metadata without presentation effects.
 
 ## Standalone Quick Review agent
 

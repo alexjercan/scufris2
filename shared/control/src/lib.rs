@@ -1,10 +1,8 @@
 //! Framing and paths shared by every Scufris socket.
 //!
-//! Two protocols are built on this, and neither of them is here.
-//! [`service`] is version 3, the one `scufris-service` serves and the
-//! companion, the agent and `scufris-ctl` all speak. [`command`] is the tiny
-//! one the companion serves for the person's own window manager, where one verb
-//! is one connection.
+//! Two protocols are built on this. [`service`] defines the three typed
+//! version 4 service channels. [`command`] is the tiny local protocol the
+//! companion serves for the person's own window manager.
 //!
 //! What is here is what they share: one LF-terminated JSON line per message,
 //! bounded by [`MAX_MESSAGE_BYTES`], and one rule for what an identifier may
@@ -41,8 +39,7 @@ pub const RUNTIME_DIR_VARIABLE: &str = "SCUFRIS_RUNTIME_DIR";
 
 /// Maximum accepted length of one protocol identifier.
 ///
-/// Correlation, widget, and surface identifiers share one rule, so a peer that
-/// can read one can read them all.
+/// Protocol identifiers share one bounded ASCII rule.
 pub const MAX_IDENTIFIER_LENGTH: usize = 64;
 
 /// Maximum accepted size of one submitted transcript, in UTF-8 bytes.
@@ -160,9 +157,8 @@ pub fn truncate(text: &str, bound: usize) -> String {
 
 /// Reads one bounded LF-terminated line, without decoding it.
 ///
-/// Split out from [`read_message`] so a reader can look at the version before
-/// it commits to a body shape. A peer speaking another version should be told
-/// which version it spoke, not that its message did not parse.
+/// Split out from [`read_message`] so a channel decoder can reject a wrong
+/// version before it commits to a body shape.
 pub fn read_line(reader: &mut impl BufRead) -> Result<Vec<u8>, MessageError> {
     let mut bytes = Vec::new();
     let mut limited = std::io::Read::take(reader, (MAX_MESSAGE_BYTES + 1) as u64);
@@ -231,16 +227,16 @@ mod tests {
             Err(MessageError::TooLarge)
         ));
         assert_eq!(
-            read_line(&mut Cursor::new(b"{\"v\":3}\n".to_vec())).unwrap(),
-            b"{\"v\":3}"
+            read_line(&mut Cursor::new(b"{\"v\":4}\n".to_vec())).unwrap(),
+            b"{\"v\":4}"
         );
     }
 
     #[test]
     fn writing_refuses_a_message_no_peer_would_read() {
         let mut written = Vec::new();
-        write_message(&mut written, &serde_json::json!({ "v": 3 })).unwrap();
-        assert_eq!(written, b"{\"v\":3}\n");
+        write_message(&mut written, &serde_json::json!({ "v": 4 })).unwrap();
+        assert_eq!(written, b"{\"v\":4}\n");
 
         let oversized = "x".repeat(MAX_MESSAGE_BYTES);
         assert!(matches!(
@@ -285,15 +281,15 @@ mod tests {
     #[test]
     fn a_socket_path_needs_a_runtime_directory() {
         assert_eq!(
-            in_runtime_dir(None, Some("/run/user/1000".into()), "service.sock").unwrap(),
-            PathBuf::from("/run/user/1000/scufris/service.sock")
+            in_runtime_dir(None, Some("/run/user/1000".into()), "surface.sock").unwrap(),
+            PathBuf::from("/run/user/1000/scufris/surface.sock")
         );
         assert!(matches!(
-            in_runtime_dir(None, None, "service.sock"),
+            in_runtime_dir(None, None, "surface.sock"),
             Err(ControlPathError::MissingRuntimeDir)
         ));
         assert!(matches!(
-            in_runtime_dir(None, Some("".into()), "service.sock"),
+            in_runtime_dir(None, Some("".into()), "surface.sock"),
             Err(ControlPathError::MissingRuntimeDir)
         ));
     }
@@ -307,10 +303,10 @@ mod tests {
             in_runtime_dir(
                 staging.clone(),
                 Some("/run/user/1000".into()),
-                "service.sock"
+                "surface.sock"
             )
             .unwrap(),
-            PathBuf::from("/run/user/1000/scufris-staging/service.sock"),
+            PathBuf::from("/run/user/1000/scufris-staging/surface.sock"),
             "the directory named is the directory used, with no `scufris` below it"
         );
         // It answers on its own. A session that has one and not the other is
@@ -325,10 +321,10 @@ mod tests {
             in_runtime_dir(
                 Some("".into()),
                 Some("/run/user/1000".into()),
-                "service.sock"
+                "surface.sock"
             )
             .unwrap(),
-            PathBuf::from("/run/user/1000/scufris/service.sock")
+            PathBuf::from("/run/user/1000/scufris/surface.sock")
         );
     }
 }

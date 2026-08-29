@@ -103,7 +103,7 @@ in
     '';
 
     desktop-configuration = pkgs.runCommand "scufris-desktop-configuration-check" {} ''
-      export SCUFRIS_DESKTOP_SOCKET=/run/user/1000/scufris/service.sock
+      export SCUFRIS_DESKTOP_SOCKET=/run/user/1000/scufris/surface.sock
       export HOME=/home/scufris-test
       unset XDG_STATE_HOME
       # A build sandbox has no session runtime directory, which is exactly the
@@ -111,7 +111,7 @@ in
       unset XDG_RUNTIME_DIR
       ${desktop}/bin/scufris-desktop --print-config > defaults
       cat > expected-defaults <<'EOF'
-      socket=/run/user/1000/scufris/service.sock
+      socket=/run/user/1000/scufris/surface.sock
       command_socket=none
       state_file=/home/scufris-test/.local/state/scufris-desktop/pending.json
       stt_endpoint=http://127.0.0.1:10301/inference
@@ -139,7 +139,7 @@ in
         SCUFRIS_DESKTOP_SPEAK_COMMAND=/nix/store/fake/bin/scufris-speak \
         ${desktop}/bin/scufris-desktop --print-config > overridden
       cat > expected-overridden <<'EOF'
-      socket=/run/user/1000/scufris/service.sock
+      socket=/run/user/1000/scufris/surface.sock
       command_socket=/run/user/1000/scufris/desktop.sock
       state_file=/run/user/1000/scufris-desktop/pending.json
       stt_endpoint=http://127.0.0.1:10302/inference
@@ -160,12 +160,12 @@ in
       # answering on its own.
       env -u SCUFRIS_DESKTOP_SOCKET SCUFRIS_RUNTIME_DIR=/run/user/1000/scufris-staging \
         ${desktop}/bin/scufris-desktop --print-config > staged
-      grep -Fx 'socket=/run/user/1000/scufris-staging/service.sock' staged
+      grep -Fx 'socket=/run/user/1000/scufris-staging/surface.sock' staged
       grep -Fx 'command_socket=/run/user/1000/scufris-staging/desktop.sock' staged
       # A path named outright still outranks the directory.
       SCUFRIS_RUNTIME_DIR=/run/user/1000/scufris-staging \
         ${desktop}/bin/scufris-desktop --print-config | grep -Fx \
-        'socket=/run/user/1000/scufris/service.sock'
+        'socket=/run/user/1000/scufris/surface.sock'
 
       # A relative hook would let the working directory choose the executable.
       ! SCUFRIS_DESKTOP_CHAT_COMMAND=scufris-chat \

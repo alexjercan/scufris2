@@ -2,7 +2,8 @@ target/
 docs/book/
 # Preserve historical design records as authored.
 tasks/20260828-232631/ios-app-design.html
-tasks/20260828-232631/MULTI_SURFACE_PLAN.md
+tasks/20260828-232631/*.md
+tasks/20260828-232631/evidence/
 surfaces/desktop/gen/
 surfaces/desktop/ui/dist/
 flake.lock

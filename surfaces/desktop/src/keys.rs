@@ -26,7 +26,7 @@
 //! the wrong moment.
 //!
 //! Neither is required. A companion whose hotkey has no modifier is one the
-//! person puts away with the tray and stops with `scufris-ctl abort`, and every
+//! person puts away with the tray and stops with the local stop control, and every
 //! other key belongs to the textbox.
 //!
 //! Nothing any of these keys means is carried out where it is decided. The
@@ -439,7 +439,7 @@ mod tests {
     /// Escape off the desktop for every other program, for the whole session,
     /// and nothing here is worth that: the textbox holds its own Escape, a
     /// listen can always be put away with the tray, and a run can always be
-    /// stopped with `scufris-ctl abort`.
+    /// stopped with the local stop control.
     #[test]
     fn a_hotkey_with_no_modifier_leaves_the_desktops_bare_keys_alone() {
         assert_eq!(beside("F9", CANCEL), None);

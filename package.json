@@ -19,9 +19,7 @@
       "./agent/extensions/scufris/workflow/index.ts",
       "./agent/extensions/scufris/response.ts",
       "./agent/extensions/scufris/calm.ts",
-      "./agent/extensions/scufris/service/index.ts",
-      "./agent/extensions/scufris/widgets/index.ts",
-      "./agent/extensions/scufris/conversation.ts"
+      "./agent/extensions/scufris/service/index.ts"
     ],
     "skills": [
       "./agent/skills"

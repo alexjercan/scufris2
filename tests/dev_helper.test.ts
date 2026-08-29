@@ -145,8 +145,6 @@ function expectedArgs(projectRoot: string, sessionDirectory: string): string[] {
     // The service extension is how a working-tree agent reaches the service
     // at all. Without it the conversation has no client in this process.
     join("service", "index.ts"),
-    join("widgets", "index.ts"),
-    "conversation.ts",
   ];
   return [
     ...extensions.flatMap((name) => [
@@ -155,8 +153,6 @@ function expectedArgs(projectRoot: string, sessionDirectory: string): string[] {
     ]),
     "--skill",
     join(projectRoot, "agent", "skills", "workflow"),
-    "--skill",
-    join(projectRoot, "agent", "skills", "widgets"),
     "--session-dir",
     sessionDirectory,
     "--continue",

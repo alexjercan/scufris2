@@ -203,7 +203,7 @@ mod tests {
         let run = Some(std::ffi::OsString::from("/run/user/1000"));
         let command = in_runtime_dir(None, run.clone(), COMMAND_FILE_NAME)
             .expect("the runtime directory is set");
-        let service = in_runtime_dir(None, run, crate::service::SERVICE_FILE_NAME)
+        let service = in_runtime_dir(None, run, crate::service::SURFACE_FILE_NAME)
             .expect("the runtime directory is set");
         assert_eq!(command.parent(), service.parent());
         assert_ne!(command, service);

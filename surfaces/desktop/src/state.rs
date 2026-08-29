@@ -4,9 +4,7 @@
 //! produces the actions the host must run. It holds no window, audio, socket, or
 //! file handle so the whole interaction is testable without a desktop session.
 
-use std::collections::BTreeMap;
-
-use scufris_control::service::{NoticeState, ScufrisState};
+use scufris_control::service::ScufrisState;
 
 use crate::pending::Pending;
 
@@ -26,10 +24,9 @@ pub enum Assistant {
     Working,
     /// The companion is speaking an answer it was handed.
     Speaking,
-    /// A debug lease is held, so the conversation is a terminal somebody else
-    /// owns.
-    Detached,
-    /// The agent could not be kept running.
+    /// The workflow needs the user.
+    Blocked,
+    /// The agent or workflow failed.
     Error,
 }
 
@@ -41,8 +38,8 @@ impl Assistant {
             Self::Idle => "idle",
             Self::Working => "working",
             Self::Speaking => "speaking",
-            Self::Detached => "detached",
-            Self::Error => "error",
+            Self::Blocked => "blocked",
+            Self::Error => "failed",
         }
     }
 }
@@ -53,8 +50,8 @@ impl From<ScufrisState> for Assistant {
             ScufrisState::Starting => Self::Starting,
             ScufrisState::Idle => Self::Idle,
             ScufrisState::Working => Self::Working,
-            ScufrisState::Detached => Self::Detached,
-            ScufrisState::Error => Self::Error,
+            ScufrisState::Blocked => Self::Blocked,
+            ScufrisState::Failed => Self::Error,
         }
     }
 }
@@ -354,13 +351,12 @@ pub struct Companion {
     phase: Phase,
     assistant: Assistant,
     assistant_detail: String,
-    /// Ambient notices last replayed by the service, keyed by their owner.
-    notices: BTreeMap<String, (NoticeState, String)>,
     /// True while the companion is speaking an answer. Its own doing, and not
     /// the service's word, so it sits beside the reported state rather than
     /// replacing it: what the agent is doing is still what it was doing.
     speaking: bool,
     connected: bool,
+    connection_detail: String,
     prefix: String,
     /// How many commands this companion has given the service.
     commands: u64,
@@ -389,9 +385,9 @@ impl Companion {
             phase: Phase::Resting,
             assistant: Assistant::Idle,
             assistant_detail: String::new(),
-            notices: BTreeMap::new(),
             speaking: false,
             connected: false,
+            connection_detail: "The Scufris service is unavailable.".into(),
             prefix: prefix.into(),
             commands: 0,
             dismissed: true,
@@ -544,22 +540,19 @@ impl Companion {
     pub fn set_connected(&mut self, connected: bool) {
         self.connected = connected;
         if connected {
-            // Welcome begins a new replay. Anything absent from the service's
-            // following notice set was cleared while this frontend was away.
-            self.notices.clear();
+            self.connection_detail.clear();
         } else {
             self.assistant = Assistant::Idle;
             self.assistant_detail.clear();
+            if self.connection_detail.is_empty() {
+                self.connection_detail = "The Scufris service is unavailable.".into();
+            }
         }
     }
 
-    /// Raises, replaces, or clears one identified ambient notice.
-    pub fn set_notice(&mut self, id: String, state: NoticeState, detail: String) {
-        if state == NoticeState::Clear {
-            self.notices.remove(&id);
-        } else {
-            self.notices.insert(id, (state, detail));
-        }
+    pub fn set_connection_failure(&mut self, detail: String) {
+        self.connected = false;
+        self.connection_detail = detail;
     }
 
     /// Returns true while the service connection is open.
@@ -1026,19 +1019,6 @@ impl Companion {
             Phase::Retained { reason, .. } => return ("attention", reason.clone()),
             _ => {}
         }
-        let notice = self
-            .notices
-            .values()
-            .find(|(state, _)| *state == NoticeState::Error)
-            .or_else(|| self.notices.values().next());
-        if let Some((state, detail)) = notice {
-            let state = match state {
-                NoticeState::Error => "error",
-                NoticeState::Attention => "attention",
-                NoticeState::Clear => unreachable!("clear notices are not retained"),
-            };
-            return (state, detail.clone());
-        }
         (self.resting_state(), self.resting_detail())
     }
 
@@ -1057,7 +1037,7 @@ impl Companion {
 
     fn resting_detail(&self) -> String {
         if !self.connected {
-            return "The Scufris service is unavailable.".into();
+            return self.connection_detail.clone();
         }
         self.assistant_detail.clone()
     }
@@ -1204,7 +1184,7 @@ mod tests {
         for state in [
             Assistant::Starting,
             Assistant::Idle,
-            Assistant::Detached,
+            Assistant::Blocked,
             Assistant::Error,
         ] {
             companion.set_assistant(state, String::new());
@@ -1891,8 +1871,8 @@ mod tests {
         assert_eq!(companion.tray_state(), "idle");
         companion.set_assistant(Assistant::Working, String::new());
         assert_eq!(companion.tray_state(), "working");
-        companion.set_assistant(Assistant::Detached, "a terminal has the session".into());
-        assert_eq!(companion.tray_state(), "detached");
+        companion.set_assistant(Assistant::Blocked, "the workflow needs review".into());
+        assert_eq!(companion.tray_state(), "blocked");
         companion.set_assistant(Assistant::Speaking, String::new());
         assert_eq!(companion.tray_state(), "speaking");
         companion.apply(Event::Activate);
@@ -1906,47 +1886,6 @@ mod tests {
             companion.presentation().detail,
             "The Scufris service is unavailable."
         );
-    }
-
-    #[test]
-    fn ambient_notices_override_the_assistant_and_clear_independently() {
-        let mut companion = Companion::new("pill");
-        companion.set_connected(true);
-        companion.set_assistant(Assistant::Working, "packing".into());
-        companion.set_notice(
-            "job-one".into(),
-            NoticeState::Attention,
-            "Job job-one is blocked".into(),
-        );
-        assert_eq!(
-            companion.tray_presentation(),
-            ("attention", "Job job-one is blocked".into())
-        );
-
-        companion.set_notice(
-            "job-two".into(),
-            NoticeState::Error,
-            "Job job-two failed".into(),
-        );
-        assert_eq!(
-            companion.tray_presentation(),
-            ("error", "Job job-two failed".into())
-        );
-        companion.set_notice("job-two".into(), NoticeState::Clear, String::new());
-        assert_eq!(companion.tray_state(), "attention");
-        companion.set_notice("job-one".into(), NoticeState::Clear, String::new());
-        assert_eq!(companion.tray_presentation(), ("working", "packing".into()));
-
-        // Welcome starts a complete replay, so a notice cleared while this
-        // frontend was away cannot survive by being absent from the replay.
-        companion.set_notice(
-            "stale".into(),
-            NoticeState::Attention,
-            "stale detail".into(),
-        );
-        companion.set_connected(false);
-        companion.set_connected(true);
-        assert_eq!(companion.tray_state(), "idle");
     }
 
     #[test]

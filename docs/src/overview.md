@@ -13,34 +13,29 @@ decides whether the companion is handed a speech command at all.
 
 ## Components
 
-Scufris packages six capability-owned Pi extensions:
+Scufris packages four capability-owned Pi extensions:
 
 - `workflow` is the core engine. It owns the Scufris identity, the project
   agent menu, delegated job spawn and control, worker events, review, and
   landing.
-- `response` owns response shaping, and decides which paragraph of an answer is
-  worth saying aloud. Saying it belongs to the companion.
+- `response` emits one atomic plain response with optional Markdown details and
+  widget presentation calls.
 - `calm` reduces transcript and working-state clutter.
-- `service` connects the foreground agent to `scufris-service` as its one
-  `agent` client, and carries the answer, the spoken paragraph, and the widget
-  requests.
-- `widgets` opens small panels on the desktop while Scufris answers. The tools
-  are registered from the catalog the companion announces, so the widgets the
-  model can name are the ones that are installed. See [Widgets](dev/widgets.md).
-- `conversation` puts the companion's own conversation window up and down. It
-  is the one window Scufris can ask for that is not a widget.
+- `service` connects the foreground agent to `agent.sock`, injects
+  self-contained registered-surface messages through `pi.sendUserMessage()`,
+  and carries atomic responses and attention state.
 
 `scufris-service` is the half that owns the conversation. Its crate lives under
 `host/service/` in the root cargo workspace and ships as its own package with no
 graphical dependency at all. It supervises one `pi --mode rpc` agent, owns the session
-directory, and serves the socket every surface connects to. `scufris-ctl` talks
+directory, and serves separate surface, agent, and control sockets. `scufris-ctl` talks
 to it from a terminal. See [Background service](dev/service.md).
 
 `scufris-desktop` is the desktop companion: a voice pill, a conversation
 window, a widget runtime, and a tray icon, built from the same workspace and
 shipped as a separate Linux package. It is a client of the service. It records,
-transcribes locally, submits the words as an ordinary user message, draws what
-was said, and speaks whatever paragraph the agent asks it to. The conversation
+transcribes locally, submits the words as an ordinary user message, draws the
+bounded canonical conversation, and speaks only its associated live response. The conversation
 is the service's, so a companion crash never stops it and a machine with no
 screen still has one. See [Desktop companion](dev/desktop.md).
 

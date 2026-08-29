@@ -15,17 +15,8 @@
 //! service that does not would hang the agent on the first `confirm`, so
 //! [`is_dialog`] names the methods that must be answered.
 
-use scufris_control::service::{MAX_TRANSCRIPT_TEXT_BYTES, Speaker, TranscriptEntry};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-/// How a message that arrives while a run is in progress is delivered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum Streaming {
-    /// After the current turn's tool calls and before the next model call.
-    #[serde(rename = "steer")]
-    Steer,
-}
 
 /// One command the service sends the agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -34,23 +25,6 @@ pub enum Command {
     /// Asks which session the agent is on and whether it is streaming. Sent
     /// once at startup: the answer is what the service knows the session by.
     GetState {
-        /// Correlation identifier the response echoes.
-        id: String,
-    },
-    /// Sends one user message.
-    Prompt {
-        /// Correlation identifier the response echoes.
-        id: String,
-        /// The text to say.
-        message: String,
-        /// Absent when the agent is idle, and [`Streaming::Steer`] when a run
-        /// is already in progress. Pi refuses a prompt during a run that does
-        /// not say how it wants to be queued.
-        #[serde(rename = "streamingBehavior", skip_serializing_if = "Option::is_none")]
-        streaming_behavior: Option<Streaming>,
-    },
-    /// Ends the current run.
-    Abort {
         /// Correlation identifier the response echoes.
         id: String,
     },
@@ -173,44 +147,6 @@ impl SessionState {
     }
 }
 
-/// Reads one line of the conversation out of a complete message.
-///
-/// Text only, and only from the two roles a person would recognise as the
-/// conversation. Tool calls, tool results and thinking are in the session file
-/// and reachable with `get_entries`; what a frontend needs when it connects is
-/// the last screenful of what was said.
-pub fn transcript_entry(message: &Value) -> Option<TranscriptEntry> {
-    let speaker = match message.get("role").and_then(Value::as_str)? {
-        "user" => Speaker::User,
-        "assistant" => Speaker::Assistant,
-        _ => return None,
-    };
-    let text = text_of(message.get("content")?);
-    let text = text.trim();
-    if text.is_empty() {
-        // An assistant turn that only called tools said nothing.
-        return None;
-    }
-    Some(TranscriptEntry {
-        speaker,
-        text: scufris_control::truncate(text, MAX_TRANSCRIPT_TEXT_BYTES),
-    })
-}
-
-/// Joins the text blocks of one message's content.
-fn text_of(content: &Value) -> String {
-    match content {
-        Value::String(text) => text.clone(),
-        Value::Array(blocks) => blocks
-            .iter()
-            .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
-            .filter_map(|block| block.get("text").and_then(Value::as_str))
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => String::new(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -226,29 +162,6 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&Command::GetState { id: "boot".into() }).unwrap(),
             r#"{"type":"get_state","id":"boot"}"#
-        );
-        assert_eq!(
-            serde_json::to_string(&Command::Prompt {
-                id: "p-1".into(),
-                message: "hello".into(),
-                streaming_behavior: None,
-            })
-            .unwrap(),
-            r#"{"type":"prompt","id":"p-1","message":"hello"}"#
-        );
-        // The queueing rule is a camel-cased field of Pi's, not one of ours.
-        assert_eq!(
-            serde_json::to_string(&Command::Prompt {
-                id: "p-2".into(),
-                message: "actually, stop".into(),
-                streaming_behavior: Some(Streaming::Steer),
-            })
-            .unwrap(),
-            r#"{"type":"prompt","id":"p-2","message":"actually, stop","streamingBehavior":"steer"}"#
-        );
-        assert_eq!(
-            serde_json::to_string(&Command::Abort { id: "a-1".into() }).unwrap(),
-            r#"{"type":"abort","id":"a-1"}"#
         );
         assert_eq!(
             serde_json::to_string(&DialogAnswer::cancel("uuid-2".into())).unwrap(),
@@ -358,55 +271,5 @@ mod tests {
             SessionState::from_data(&Value::Null),
             SessionState::default()
         );
-    }
-
-    #[test]
-    fn the_transcript_takes_what_was_said_and_leaves_the_rest() {
-        assert_eq!(
-            transcript_entry(&json!({ "role": "user", "content": "what is on my calendar" })),
-            Some(TranscriptEntry {
-                speaker: Speaker::User,
-                text: "what is on my calendar".into(),
-            })
-        );
-        assert_eq!(
-            transcript_entry(&json!({
-                "role": "assistant",
-                "content": [
-                    { "type": "thinking", "thinking": "they want the calendar" },
-                    { "type": "text", "text": "Two things today." },
-                    { "type": "toolCall", "id": "c1", "name": "bash", "arguments": {} },
-                ],
-            })),
-            Some(TranscriptEntry {
-                speaker: Speaker::Assistant,
-                text: "Two things today.".into(),
-            })
-        );
-        // A turn that only called tools said nothing, and a tool result is not
-        // part of the conversation.
-        assert_eq!(
-            transcript_entry(&json!({
-                "role": "assistant",
-                "content": [{ "type": "toolCall", "id": "c1", "name": "bash", "arguments": {} }],
-            })),
-            None
-        );
-        assert_eq!(
-            transcript_entry(&json!({ "role": "toolResult", "content": [] })),
-            None
-        );
-    }
-
-    #[test]
-    fn a_long_line_is_cut_on_a_character_and_not_in_the_middle_of_one() {
-        let long = "\u{4f60}".repeat(MAX_TRANSCRIPT_TEXT_BYTES);
-        let entry =
-            transcript_entry(&json!({ "role": "user", "content": long })).expect("it is an entry");
-        assert!(entry.text.len() <= MAX_TRANSCRIPT_TEXT_BYTES);
-        // Cut on a boundary: the bound is not a multiple of three, so a naive
-        // slice would panic and a naive byte copy would produce invalid UTF-8.
-        assert_eq!(entry.text.len() % 3, 0);
-        assert!(entry.text.chars().all(|glyph| glyph == '\u{4f60}'));
     }
 }

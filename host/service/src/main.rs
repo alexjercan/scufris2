@@ -85,30 +85,41 @@ fn main() -> ExitCode {
             return ExitCode::from(FAILED);
         }
     };
-    let listener = match server::bind(&config.socket) {
-        Ok(listener) => listener,
-        Err(error) => {
-            error!(%error, socket = %config.socket.display(), "the socket would not bind");
-            return ExitCode::from(FAILED);
+    let paths = [
+        (config.surface_socket.clone(), server::Channel::Surface),
+        (config.agent_socket.clone(), server::Channel::Agent),
+        (config.control_socket.clone(), server::Channel::Control),
+    ];
+    let mut listeners = Vec::new();
+    for (path, channel) in &paths {
+        match server::bind(path) {
+            Ok(listener) => listeners.push((listener, *channel)),
+            Err(error) => {
+                error!(%error, socket = %path.display(), "a socket would not bind");
+                return ExitCode::from(FAILED);
+            }
         }
-    };
+    }
     info!(
-        socket = %config.socket.display(),
+        surface = %config.surface_socket.display(),
+        agent = %config.agent_socket.display(),
+        control = %config.control_socket.display(),
         sessions = %config.session_dir.display(),
         "the service is listening"
     );
 
-    let socket = config.socket.clone();
     let service = Service::new(config);
     service.start_agent();
 
-    let serving = Arc::clone(&service);
-    if let Err(error) = thread::Builder::new()
-        .name("scufris-accept".into())
-        .spawn(move || server::serve(serving, listener))
-    {
-        error!(%error, "the accept thread would not start");
-        return ExitCode::from(FAILED);
+    for (listener, channel) in listeners {
+        let serving = Arc::clone(&service);
+        if let Err(error) = thread::Builder::new()
+            .name(format!("scufris-{}-accept", channel.name()))
+            .spawn(move || server::serve(serving, listener, channel))
+        {
+            error!(%error, "an accept thread would not start");
+            return ExitCode::from(FAILED);
+        }
     }
 
     match stopping.wait() {
@@ -116,10 +127,11 @@ fn main() -> ExitCode {
         Err(error) => error!(%error, "the signal wait failed, stopping anyway"),
     }
     service.shutdown();
-    // Last, so nothing connects to a socket whose service has already let go
-    // of the agent.
-    if let Err(error) = std::fs::remove_file(&socket) {
-        error!(%error, socket = %socket.display(), "the socket could not be removed");
+    // Last, so nothing connects to sockets whose service has let go of Pi.
+    for (socket, _) in paths {
+        if let Err(error) = std::fs::remove_file(&socket) {
+            error!(%error, socket = %socket.display(), "a socket could not be removed");
+        }
     }
     ExitCode::SUCCESS
 }

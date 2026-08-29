@@ -107,8 +107,8 @@ points a terminal at staging instead of the deployed service:
 ```bash
 export SCUFRIS_RUNTIME_DIR="$XDG_RUNTIME_DIR/scufris-staging"
 scufris-ctl state
-scufris-ctl send what is in this project
-scufris-ctl watch
+scufris-ctl state
+journalctl --user -u scufris-service.service -f
 ```
 
 Without that variable the same commands reach the deployed service. That is

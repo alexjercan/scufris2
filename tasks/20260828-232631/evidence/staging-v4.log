@@ -1,0 +1,34 @@
+warning: Git tree '/home/alex/personal/scufris2' is dirty
+scufris-staging: the staging environment
+  SCUFRIS_STAGING_ROOT=/tmp/scufris-staging
+  XDG_STATE_HOME=/tmp/scufris-staging/state
+  XDG_DATA_HOME=/tmp/scufris-staging/data
+  SCUFRIS_RUNTIME_DIR=/run/user/1000/scufris-staging
+  PI_CODING_AGENT_DIR=/tmp/scufris-staging/pi-agent
+  SCUFRIS_PROJECT_ROOTS=["/tmp/scufris-staging/projects"]
+  SCUFRIS_SERVICE_AGENT=/nix/store/j65qjdzcyizl7irr04y3pn6lm77fs3b7-source/scripts/scufris-agent
+  SCUFRIS_DESKTOP_HOTKEY=Super+G
+  SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10301/inference
+  SCUFRIS_DESKTOP_SPEAK_COMMAND=/nix/store/dfgrp3xygfgxa4vf7hs83z7jkqvpnbyl-scufris-speak/bin/scufris-speak
+  service=/nix/store/2ssa9581h0sw1c2v0ck8r5d2lr0fc1x4-scufris-service-0.5.0/bin/scufris-service
+  desktop=/nix/store/s0j5n91lrx0nsvbn41013144s944q47q-scufris-desktop-0.5.0/bin/scufris-desktop
+
+scufris-staging: reach it with
+  SCUFRIS_RUNTIME_DIR=/run/user/1000/scufris-staging scufris-ctl state
+scufris-staging: the companion resolves
+  socket=/run/user/1000/scufris-staging/surface.sock
+  command_socket=/run/user/1000/scufris-staging/desktop.sock
+  state_file=/tmp/scufris-staging/state/scufris-desktop/pending.json
+  stt_endpoint=http://127.0.0.1:10301/inference
+  hotkey=Super+G
+  cancel_key=derived
+  stop_key=derived
+  chat_command=none
+  restart_command=none
+  speak_command=/nix/store/dfgrp3xygfgxa4vf7hs83z7jkqvpnbyl-scufris-speak/bin/scufris-speak
+scufris-staging: service pid 3522964, desktop pid 3522965
+
+(.scufris-desktop-wrapped:3522965): Gtk-WARNING **: 23:30:41.357: Unknown key Settings in /home/alex/.config/gtk-3.0/settings.ini
+
+(.scufris-desktop-wrapped:3522965): Gdk-CRITICAL **: 23:30:41.723: gdk_window_thaw_toplevel_updates: assertion 'window->update_and_descendants_freeze_count > 0' failed
+scufris-staging: desktop exited 143

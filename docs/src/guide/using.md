@@ -7,17 +7,10 @@ foreground, synthesizes evidence in its own voice, and stops at meaningful
 decisions. It answers conversation and narrow project questions directly and
 delegates work expected to take minutes.
 
-Every final answer is one short plain-prose paragraph. Optional Markdown
-detail is stored privately beside the session, and the transcript shows one
-compact command:
-
-```text
-/detail 4f8c7a21d3e64b829e93ab10
-```
-
-Run that command to open the artifact in Plannotator. Approval and closure
-produce one compact transcript row. Actionable feedback returns to Scufris
-privately.
+Every final answer has bounded plain prose and may include Markdown details and
+best-effort widget calls. All registered surfaces receive the same bounded
+conversation entry. Details are displayed with the response and are never
+spoken.
 
 ## Delegated jobs
 
@@ -72,9 +65,6 @@ shuts down.
 - `/wake` inspects the worker wake mode; `/wake minimal|all` sets it.
   `minimal` keeps `working` updates quiet. `all` also wakes on each `working`
   event. Mandatory continuation events cannot be disabled.
-- `/detail <id>` opens a private detail artifact in Plannotator.
-- `/scufris-prompt` creates a private artifact with the exact assembled system
-  prompt and its ordered provenance, without contacting a provider.
 
 Explicit `/calm` and `/wake` values are restored with the session.
 
@@ -84,10 +74,9 @@ desktop companion. Silence it from the tray.
 
 ## Voice
 
-Every Scufris answer is one plain paragraph, with the rest of it in a detail
-artifact. That is the shape of the assistant, not a speech setting, and it is
-the shape with nothing listening. It is also what makes the answer safe to say
-aloud, so each settled response, wake turns included, offers its paragraph to
+Every Scufris answer has one plain paragraph and may carry separate Markdown
+details. That is the shape of the assistant, not a speech setting. It also
+makes the answer safe to say aloud, so each associated live response offers its paragraph to
 whoever owns the speaker.
 
 The desktop companion is the only thing that owns one. A session with no
@@ -193,21 +182,11 @@ bindsym $mod+s exec --no-startup-id "scufris-ctl hud"
 That key puts the window up, and puts it away again. It shows what has been
 said, oldest at the top, with a line at the bottom to type on. `Enter` sends,
 `Shift+Enter` starts a new line, and `Escape` closes the window. Everything is
-there whoever said it and however it was sent, so a question you typed in a
-terminal and its answer are in the window too.
+there whoever said it and whichever registered surface sent it.
 
 It is a window you work in rather than an indicator, so it does not stay over
 what you move to. Press the key again to bring it back. There is no scrollback
 beyond the last two hundred lines, which is what the service itself keeps.
-
-Scufris can put it up as well. Ask to see the conversation and it opens the
-window, and ask it to put the window away and it does. It never flips the
-window on its own: it can only show or close, because it cannot see your screen
-and would not know which of the two it had just done.
-
-`scufris-ctl debug` in a terminal is the deeper tool and is not a fallback for
-this. It is a whole Pi session - the tools, the thinking, the lot - and this
-window is the last few lines and a place to answer them.
 
 The tray icon carries the state: idle, recording, transcribing, working,
 speaking, needs you, and backend unavailable. Recording always shows the red

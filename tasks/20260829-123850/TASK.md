@@ -1,6 +1,6 @@
 # Release and prepare deployment of Scufris v0.5.0
 
-- STATUS: IN_PROGRESS
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: release, deployment
 
@@ -65,3 +65,12 @@ Checks:
 - `git diff --check`: passed.
 
 The first ordinary JavaScript run inherited Pi's Nix package location and failed because that installed package has no theme JSON in its source layout. Unsetting `PI_PACKAGE_DIR` reproduced the ordinary CI environment and passed. Initial Ruff checks found and led to the bounded backend corrections above.
+
+Publication:
+
+- Release commit `eec186c` was pushed to `master`.
+- Annotated tag `v0.5.0` points to `eec186c` and was pushed without replacement.
+- GitHub Actions release run `33246286165` passed the reusable repository checks, verified the package version, and created the release.
+- [Scufris v0.5.0](https://github.com/alexjercan/scufris2/releases/tag/v0.5.0) is published as a stable, source-only release with no assets.
+- The separate `master` check and documentation workflows passed at the release revision.
+- Deployment remains prepared but unapplied. The canonical dotfiles still pin `v0.4.0`; its worktree contains active user-authored NixOS restructuring, so this task did not mix the release input update into it.

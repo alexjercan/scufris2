@@ -1,6 +1,6 @@
 # Spike remote laptop and iOS surfaces
 
-- STATUS: OPEN
+- STATUS: IN_PROGRESS
 - PRIORITY: 65
 - TAGS: architecture, spike, remote
 
@@ -176,6 +176,109 @@ For one personal phone, a paid development/ad hoc installation on registered
 devices is likely less disruptive than free weekly reprovisioning. TestFlight is
 useful for review builds but is not permanent installation. The spike must
 record the chosen route and the update procedure.
+
+## Hostname and private reachability finding (2026-08-28)
+
+The website name and the private machine name are separate DNS records. They do
+not require the machine to serve the public website.
+
+Recommended topology:
+
+```text
+alexjercan.dev, www.alexjercan.dev  -> GitHub Pages
+nixos.alexjercan.dev                -> the host's stable Tailscale IPv4
+                                            |
+iPhone with Tailscale -> SSH over WireGuard -> host Unix socket bridge
+```
+
+`alexjercan.dev` can be the GitHub Pages custom domain. The existing website is
+already in `alexjercan/alexjercan.github.io`, but it has no `CNAME` file and its
+generated canonical URLs still use `https://alexjercan.github.io/`. Moving it
+requires both the GitHub Pages custom-domain setting and source/template URL
+changes. GitHub recommends verifying the domain with a DNS TXT record before
+attaching it. The registrar may also host DNS, but keeping the registrar and DNS
+provider separate is valid.
+
+`nixos.alexjercan.dev` should not point to the router's public address and should
+not expose port 22 by router forwarding. A public DNS A record may contain the
+host's stable Tailscale `100.64.0.0/10` address. The record is visible publicly,
+but it does not make the address publicly routable: only an authenticated member
+of the tailnet can reach it. This gives the app the requested branded hostname
+without putting Scufris or SSH on the public Internet. The simpler alternative
+is to use the host's Tailscale MagicDNS `*.ts.net` name and reserve the bought
+domain for the website.
+
+A CNAME from `nixos.alexjercan.dev` to a MagicDNS name is not the preferred
+plan. MagicDNS is tailnet-local, resolver behavior through a public CNAME is an
+extra dependency, and it discloses the tailnet DNS name. Split DNS can keep the
+record private, but needs a separately reachable DNS resolver and is unnecessary
+for one stable host.
+
+The `.dev` registry is HSTS-preloaded. All browser-facing pages therefore need
+HTTPS. GitHub Pages can provision that certificate for the website. This does
+not affect SSH to the private subdomain; SSH authenticates the pinned SSH host
+key, not a Web PKI certificate.
+
+Tailscale is preferable to the other deployment shapes:
+
+- Direct SSH port forwarding needs router control, dynamic DNS or a static
+  public IP, source filtering, and continuous hardening. It exposes an attack
+  surface and may fail behind carrier-grade NAT.
+- Cloudflare Tunnel plus Access is useful for an HTTP application, but the
+  settled phone design is SSH-to-Unix-socket, not a browser application. It
+  adds a public relay and conflicts with the no-public-endpoint constraint.
+- The host already runs LogMeIn Hamachi, but the phone plan needs a maintained
+  iOS path and the prior design already selected Tailscale as the candidate.
+  Do not run both indefinitely without a reason.
+
+The NixOS host is close but not ready for this deployment. OpenSSH is active on
+all addresses and allows only user `alex`, but its effective configuration still
+has password and keyboard-interactive authentication enabled. Before remote use,
+bind exposure to the tailnet with the firewall, use a dedicated phone key held
+in iOS Keychain, pin the host key, disable password and interactive login, and
+restrict that key to the socket bridge command if the Swift transport uses an
+exec channel. Scufris keeps its mode-0600 Unix socket and opens no TCP port.
+
+The app can use `nixos.alexjercan.dev:22` after Tailscale connects. DNS is only a
+name; the actual phone transport proof, protocol v4, foreground presence, and
+personal iOS signing work remain as specified below.
+
+The name's availability and live registrar prices were not verified because DNS
+and outbound name resolution were unavailable in this research environment.
+Check the exact name at an ICANN-accredited registrar before choosing the final
+label. Do not use registrar search results as proof until registration succeeds.
+
+### Proposed rollout
+
+1. Register `alexjercan.dev`, enable registrar MFA and transfer lock, and keep
+   renewal enabled.
+2. Verify the domain in GitHub. Configure the apex and `www` records for GitHub
+   Pages, set the Pages custom domain, then enable HTTPS.
+3. Enroll the host and iPhone in one locked-down Tailscale tailnet. Do not enable
+   public Funnel. Use ACL grants so only Alex's devices can reach host TCP 22.
+4. Harden NixOS SSH and its firewall. Add and test a dedicated phone key before
+   disabling password authentication.
+5. Choose either the MagicDNS hostname or public `nixos.alexjercan.dev` A record
+   to the stable Tailscale IPv4. Test it on iPhone cellular data, not only Wi-Fi.
+6. Prove the non-PTY SSH bridge to the Scufris Unix socket. Then continue the
+   protocol and iOS tasks already ordered in this spike.
+7. Document recovery for a lost phone, key revocation, tailnet removal, host-key
+   replacement, domain renewal, and DNS-provider loss.
+
+### Additional official references
+
+- GitHub Pages custom domains and DNS records:
+  https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site
+- GitHub domain verification:
+  https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/verifying-your-custom-domain-for-github-pages
+- Tailscale device IP stability:
+  https://tailscale.com/kb/1033/ip-and-dns-addresses
+- Tailscale DNS and MagicDNS:
+  https://tailscale.com/kb/1054/dns
+- Tailscale access control grants:
+  https://tailscale.com/kb/1324/grants
+- `.dev` HTTPS/HSTS policy:
+  https://get.dev/
 
 ## Questions this spike must answer
 

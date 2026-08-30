@@ -100,11 +100,12 @@ process matching.
 | `SCUFRIS_DESKTOP_COMMAND_SOCKET`  | Local desktop command socket override                           |
 | `SCUFRIS_RUNTIME_DIR`             | Coordinated local socket directory                              |
 | `SCUFRIS_DESKTOP_STATE_FILE`      | Pending transcript path; its directory also stores `surface-id` |
-| `SCUFRIS_STT_ENDPOINT`            | HTTP transcription endpoint                                     |
+| `SCUFRIS_STT_ENDPOINT`            | ai-tools-api transcription route                                |
+| `SCUFRIS_TTS_ENDPOINT`            | ai-tools-api speech route used by the playback helper           |
 | `SCUFRIS_DESKTOP_HOTKEY`          | Activation accelerator                                          |
 | `SCUFRIS_DESKTOP_CANCEL_KEY`      | Local cancel accelerator or `none`                              |
 | `SCUFRIS_DESKTOP_STOP_KEY`        | Local stop accelerator or `none`                                |
-| `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | Local stdin-driven synthesizer helper                           |
+| `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | Local stdin-driven HTTP synthesis and playback helper           |
 | `SCUFRIS_DESKTOP_RESTART_COMMAND` | Owned service restart helper                                    |
 | `SCUFRIS_WIDGET_PATH`             | Additional compiled widget roots                                |
 

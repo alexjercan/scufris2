@@ -47,17 +47,19 @@ also exits 3 when no staging backend is running.
 
 `up` prints this block before it starts either process.
 
-| Variable                 | Value                                |
-| ------------------------ | ------------------------------------ |
-| `SCUFRIS_STAGING_ROOT`   | `/tmp/scufris-staging`               |
-| `XDG_STATE_HOME`         | `$SCUFRIS_STAGING_ROOT/state`        |
-| `XDG_DATA_HOME`          | `$SCUFRIS_STAGING_ROOT/data`         |
-| `SCUFRIS_RUNTIME_DIR`    | `$XDG_RUNTIME_DIR/scufris-staging`   |
-| `PI_CODING_AGENT_DIR`    | `$SCUFRIS_STAGING_ROOT/pi-agent`     |
-| `SCUFRIS_PROJECT_ROOTS`  | `["$SCUFRIS_STAGING_ROOT/projects"]` |
-| `SCUFRIS_SERVICE_AGENT`  | `scripts/scufris-agent`              |
-| `SCUFRIS_DESKTOP_HOTKEY` | `Super+G`                            |
-| `SCUFRIS_STT_ENDPOINT`   | `http://127.0.0.1:10301/inference`   |
+| Variable                       | Value                                            |
+| ------------------------------ | ------------------------------------------------ |
+| `SCUFRIS_STAGING_ROOT`         | `/tmp/scufris-staging`                           |
+| `XDG_STATE_HOME`               | `$SCUFRIS_STAGING_ROOT/state`                    |
+| `XDG_DATA_HOME`                | `$SCUFRIS_STAGING_ROOT/data`                     |
+| `SCUFRIS_RUNTIME_DIR`          | `$XDG_RUNTIME_DIR/scufris-staging`               |
+| `PI_CODING_AGENT_DIR`          | `$SCUFRIS_STAGING_ROOT/pi-agent`                 |
+| `SCUFRIS_PROJECT_ROOTS`        | `["$SCUFRIS_STAGING_ROOT/projects"]`             |
+| `SCUFRIS_SERVICE_AGENT`        | `scripts/scufris-agent`                          |
+| `SCUFRIS_DESKTOP_HOTKEY`       | `Super+G`                                        |
+| `SCUFRIS_STT_ENDPOINT`         | `http://127.0.0.1:10300/v1/audio/transcriptions` |
+| `SCUFRIS_TTS_ENDPOINT`         | `http://127.0.0.1:10300/v1/audio/speech`         |
+| `SCUFRIS_STAGING_AI_TOOLS_API` | `external`                                       |
 
 A named frontend instead uses
 `$SCUFRIS_STAGING_ROOT/frontends/NAME/{state,data}` and
@@ -66,8 +68,9 @@ in frontend output too; see [speech](#speech) below for where its value comes
 from.
 
 The root is disposable and a reboot wipes it. `SCUFRIS_STAGING_ROOT`,
-`SCUFRIS_DESKTOP_HOTKEY`, and `SCUFRIS_STT_ENDPOINT` are taste, so a value
-already in the environment wins; the rest is isolation and the script owns it.
+`SCUFRIS_DESKTOP_HOTKEY`, both inference endpoints, and
+`SCUFRIS_STAGING_AI_TOOLS_API` are taste, so a value already in the environment
+wins; the rest is isolation and the script owns it.
 
 `XDG_RUNTIME_DIR` itself is not overridden. PipeWire and the session bus live
 in it, and a socket path is capped at 108 bytes, which a runtime directory
@@ -86,8 +89,8 @@ pointed at a different model without editing the deployed file.
 
 ## What is shared on purpose
 
-- The transcription server on port 10301. One whisper server, one model in
-  memory, and a transcription carries no session state.
+- The deployed `ai-tools-api` on port 10300 by default. One API owns Whisper,
+  Piper, and their models for every frontend.
 - The tmux server. Job sessions are namespaced by job ID, so the two stacks
   do not collide, and `scufris-jobs` in a staging environment reads the
   staging `XDG_STATE_HOME`.
@@ -96,21 +99,10 @@ pointed at a different model without editing the deployed file.
 
 ## Speech
 
-Staging speaks. `nix run .#staging -- up` gives the companion the packaged
-`scufris-speak`, the same synthesiser a deployment runs, which binds Piper, the
-model, and the configuration itself. The voice you hear from staging is the
-voice the deployment would have.
-
-The script looks in three places, in the order of who knows most about the
-machine:
-
-1. `SCUFRIS_DESKTOP_SPEAK_COMMAND`, which is a person saying so.
-2. `SCUFRIS_STAGING_SPEAK`, which the flake wrapper sets to the packaged
-   `scufris-speak`.
-3. `tools/voice/scufris-speak` from this checkout, used only where
-   `SCUFRIS_PIPER_MODEL` and `SCUFRIS_PIPER_CONFIG` are bound. That is what a
-   dev shell does, so `scripts/scufris-staging up` inside `nix develop` speaks
-   with the working tree's helper.
+Staging speaks through the same API contract as a deployment.
+`nix run .#staging -- up` gives each companion the packaged `scufris-speak`
+HTTP/playback helper. `SCUFRIS_DESKTOP_SPEAK_COMMAND` overrides it;
+`SCUFRIS_STAGING_SPEAK` is the packaged default.
 
 With none of the three the companion stays silent, and `up` says so on start
 rather than leaving a missing voice to look like a broken one. A command that
@@ -118,9 +110,17 @@ is named but cannot be run is refused with exit 2, for the same reason: a
 synthesiser the companion logs once and gives up on is indistinguishable from
 no synthesiser at all.
 
-Every frontend runs its own synthesiser process. Nothing is shared here but
-the pinned voice, and two Scufrises talking at once is the ordinary cost of
-running two. "Mute Scufris" in a staging companion's tray silences that one.
+Every frontend runs its own HTTP/playback helper, but all use one API. By
+default staging consumes the deployed API. To make `backend` or `up` own the
+pinned complete runtime instead:
+
+```bash
+SCUFRIS_STAGING_AI_TOOLS_API=managed nix run .#staging -- backend
+```
+
+That foreground command records and stops the API process it starts. Never set
+managed mode on two backends. "Mute Scufris" in a staging companion's tray
+silences only that frontend.
 
 ## Reaching the staging stack
 

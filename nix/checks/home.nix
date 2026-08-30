@@ -27,7 +27,7 @@
       projectRoots = ["/legacy/projects"];
       voice.enable = true;
       service.agentPackage = pkgs.hello;
-      desktop.stt.endpoint = "http://127.0.0.1:10301/inference";
+      desktop.stt.endpoint = "http://127.0.0.1:10300/v1/audio/transcriptions";
     };
   };
   speechConfig = speechHome.config;
@@ -48,7 +48,7 @@ in
     assert legacyConfig.service.agent.package == pkgs.hello;
     assert legacyConfig.finalPackage == legacyConfig.service.agent.package;
     assert legacyConfig.desktop.speech.enable;
-    assert legacyConfig.desktop.transcription.endpoint == "http://127.0.0.1:10301/inference";
+    assert legacyConfig.desktop.transcription.endpoint == "http://127.0.0.1:10300/v1/audio/transcriptions";
     assert speechConfig.programs.scufris.desktop.speech.enable;
     assert !(scufrisOptions.service.agent.package.internal or false);
     assert lib.elem speechConfig.programs.scufris.service.agent.package speechConfig.home.packages;

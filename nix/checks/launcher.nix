@@ -23,9 +23,6 @@ in {
       orchestrator
 
 
-
-
-
       system-pi
       --extension
       ${resources}/share/scufris/extensions/scufris/workflow/index.ts

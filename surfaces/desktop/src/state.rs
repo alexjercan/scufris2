@@ -1337,12 +1337,14 @@ mod tests {
         let mut companion = opened();
         companion.apply(Event::Activate);
         assert_eq!(
-            companion.apply(Event::TranscriptionFailed("Whisper is unreachable.".into())),
+            companion.apply(Event::TranscriptionFailed(
+                "Speech recognition is unreachable.".into()
+            )),
             Vec::new()
         );
         let presentation = companion.presentation();
         assert_eq!(presentation.state, "error");
-        assert_eq!(presentation.detail, "Whisper is unreachable.");
+        assert_eq!(presentation.detail, "Speech recognition is unreachable.");
         assert!(!companion.holds_unsent_transcript());
         assert_eq!(
             companion.apply(Event::Activate),

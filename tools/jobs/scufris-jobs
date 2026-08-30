@@ -1436,8 +1436,6 @@ def worker_environment() -> dict[str, str]:
         "SCUFRIS_ROLE",
         "SCUFRIS_SPEECH",
         "SCUFRIS_CALM",
-        "SCUFRIS_PIPER_MODEL",
-        "SCUFRIS_PIPER_CONFIG",
         "PI_SESSION_ID",
         "PI_SESSION_FILE",
         "PI_PROVIDER",

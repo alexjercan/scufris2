@@ -72,10 +72,8 @@ extensions=(
 skills=(
   "$root/agent/skills/workflow"
 )
-# No Piper. This process makes no sound whatever it is given: the agent shapes
-# the answer and the frontend synthesises it, so there is nothing here for a
-# voice mode to turn on.
-unset SCUFRIS_PIPER_MODEL SCUFRIS_PIPER_CONFIG
+# No speech inference or playback. The agent shapes the answer and the frontend
+# chooses whether to send it to the shared API, so no voice mode exists here.
 
 args=()
 for extension in "${extensions[@]}"; do

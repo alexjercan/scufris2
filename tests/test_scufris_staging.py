@@ -88,7 +88,7 @@ class StagingTests(unittest.TestCase):
 
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        for role in ("service", "desktop"):
+        for role in ("service", "desktop", "ai-tools-api"):
             stub = self.bin / role
             stub.write_text(STUB)
             stub.chmod(0o755)
@@ -105,6 +105,7 @@ class StagingTests(unittest.TestCase):
                 "SCUFRIS_STAGING_ROOT": str(self.staging),
                 "SCUFRIS_STAGING_SERVICE": str(self.bin / "service"),
                 "SCUFRIS_STAGING_DESKTOP": str(self.bin / "desktop"),
+                "SCUFRIS_STAGING_AI_TOOLS_API_PACKAGE": str(self.bin / "ai-tools-api"),
                 "SCUFRIS_STAGING_REPORT": str(self.report),
             }
         )
@@ -112,12 +113,8 @@ class StagingTests(unittest.TestCase):
             "XDG_STATE_HOME",
             "XDG_DATA_HOME",
             "PI_CODING_AGENT_DIR",
-            # A dev shell exports these, and the script reads them as leave to
-            # use the working tree's synthesiser. Dropped so a test says what
-            # it means rather than what the shell around it happens to hold.
-            "SCUFRIS_PIPER_MODEL",
-            "SCUFRIS_PIPER_CONFIG",
             "SCUFRIS_DESKTOP_SPEAK_COMMAND",
+            "SCUFRIS_TTS_ENDPOINT",
             "SCUFRIS_STAGING_SPEAK",
         ):
             env.pop(name, None)
@@ -197,6 +194,14 @@ class StagingTests(unittest.TestCase):
             )
             # Not Super+D. The deployed companion keeps its own activation key.
             self.assertEqual(env["SCUFRIS_DESKTOP_HOTKEY"], "Super+G")
+            self.assertEqual(
+                env["SCUFRIS_STT_ENDPOINT"],
+                "http://127.0.0.1:10300/v1/audio/transcriptions",
+            )
+            self.assertEqual(
+                env["SCUFRIS_TTS_ENDPOINT"],
+                "http://127.0.0.1:10300/v1/audio/speech",
+            )
             # With no synthesiser anywhere staging is silent, and says so
             # rather than assembling a voice a deployment would not have.
             self.assertNotIn("SCUFRIS_DESKTOP_SPEAK_COMMAND", env)
@@ -214,9 +219,8 @@ class StagingTests(unittest.TestCase):
     def test_the_companion_is_given_a_synthesiser_when_one_can_be_found(self) -> None:
         """Speech is the companion's, so this is the one process that gets it.
 
-        Three sources in one order: a command already named, then the packaged
-        one the flake wrapper points at, then the working tree's helper where a
-        dev shell has bound the Piper paths it reads.
+        Two sources have one order: a command already named, then the packaged
+        HTTP adapter the flake wrapper points at.
         """
         packaged = self.bin / "packaged-speak"
         packaged.write_text("#!/bin/sh\nexit 0\n")
@@ -242,19 +246,6 @@ class StagingTests(unittest.TestCase):
         self.assertEqual(
             self.reported("desktop")["env"]["SCUFRIS_DESKTOP_SPEAK_COMMAND"],
             str(self.speaker),
-        )
-
-        # And with only the Piper paths bound, the working tree's own helper.
-        self.stop(started)
-        shutil.rmtree(self.report)
-        started = self.up(
-            SCUFRIS_PIPER_MODEL="/pinned/model.onnx",
-            SCUFRIS_PIPER_CONFIG="/pinned/model.onnx.json",
-        )
-        self.started_or_fail(started, "desktop")
-        self.assertEqual(
-            self.reported("desktop")["env"]["SCUFRIS_DESKTOP_SPEAK_COMMAND"],
-            str(REPOSITORY / "tools" / "voice" / "scufris-speak"),
         )
 
     def test_a_synthesiser_that_cannot_be_run_is_refused_rather_than_ignored(
@@ -334,9 +325,7 @@ class StagingTests(unittest.TestCase):
         self.assertEqual(started.returncode, 0, output)
         for pid in pids:
             self.assertFalse(alive(pid), f"{pid} outlived the run:\n{output}")
-        self.assertFalse(
-            (self.runtime / "scufris-staging" / "desktop.sock").exists()
-        )
+        self.assertFalse((self.runtime / "scufris-staging" / "desktop.sock").exists())
         # The lock is released with the process, so the next run is not
         # refused by a file the last one left behind.
         shutil.rmtree(self.report)
@@ -401,6 +390,23 @@ class StagingTests(unittest.TestCase):
         )
         self.assertIsNone(backend.poll())
         self.assertIsNone(two.poll())
+
+    def test_a_managed_backend_owns_one_shared_ai_tools_api(self) -> None:
+        backend = self.start(
+            "backend",
+            SCUFRIS_STAGING_AI_TOOLS_API="managed",
+        )
+        self.started_or_fail(backend, "service", "ai-tools-api")
+        self.assertFalse((self.report / "desktop.json").exists())
+        self.assertEqual(
+            self.reported("ai-tools-api")["env"]["SCUFRIS_STAGING_AI_TOOLS_API"],
+            "managed",
+        )
+
+        pids = [self.reported(role)["pid"] for role in ("service", "ai-tools-api")]
+        self.stop(backend)
+        for pid in pids:
+            self.assertFalse(alive(pid), f"managed child {pid} outlived backend")
 
     def test_a_frontend_requires_a_backend_and_a_safe_name(self) -> None:
         absent = subprocess.run(

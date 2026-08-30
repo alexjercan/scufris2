@@ -10,8 +10,8 @@ npm ci
 ```
 
 The shell includes Node.js, Python, Ruff, ShellCheck, Alejandra, mdBook, Git,
-and tmux. On Linux it also includes the private Piper runtime, PipeWire, and
-trusted model paths, so `tools/voice/scufris-speak` runs from a checkout.
+and tmux. On Linux it also includes PipeWire for local playback. Run the pinned
+`ai-tools-api` app separately when the machine does not already deploy it.
 
 Run working-tree Scufris with system Pi and dedicated resumable sessions:
 
@@ -46,7 +46,7 @@ cargo run --manifest-path surfaces/desktop/Cargo.toml -- --print-config
 socket=/run/user/1000/scufris/surface.sock
 command_socket=/run/user/1000/scufris/desktop.sock
 state_file=/home/you/.local/state/scufris-desktop/pending.json
-stt_endpoint=http://127.0.0.1:10301/inference
+stt_endpoint=http://127.0.0.1:10300/v1/audio/transcriptions
 hotkey=Super+D
 cancel_key=derived
 stop_key=derived
@@ -80,7 +80,7 @@ Then hold `Super+D`, speak, and let go. The take stops and the words
 arrive in a textbox above the pill, where `Enter` sends them to the agent the
 service supervises as an ordinary user message and `Escape` throws them away.
 Watch the same conversation from a third terminal with
-`cargo run --manifest-path host/service/Cargo.toml --bin scufris-ctl -- watch`.
+`cargo run --manifest-path host/service/Cargo.toml --bin scufris-ctl -- state`.
 
 Both processes must see the same `XDG_RUNTIME_DIR`, because that is where the
 socket is. With no service the companion reports the backend as unavailable
@@ -100,39 +100,35 @@ A companion started without it says so once in its log and stays silent, which
 is not a fault. "Mute Scufris" in the tray silences one that has a
 synthesiser.
 
-### Transcription in development
+### Speech inference in development
 
-The companion posts to `SCUFRIS_STT_ENDPOINT`, which defaults to
-`http://127.0.0.1:10301/inference`. A whisper server already listening there,
-such as the one an existing speech-to-text configuration runs, needs no
-override and no second server. Confirm it answers before blaming the pill:
+Both desktop inference requests use the shared API on port 10300. Start the
+pinned complete runtime when the machine does not already deploy it:
 
 ```bash
-curl -s -X POST http://127.0.0.1:10301/inference \
-  -F file=@recording.wav -F response_format=json
+nix run .#ai-tools-api
 ```
 
-```json
-{ "text": " the words it heard" }
-```
-
-Any whisper-server-compatible endpoint works. Name another one instead of the
-default:
+Confirm transcription independently:
 
 ```bash
-SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10302/inference \
-  cargo run --manifest-path surfaces/desktop/Cargo.toml
+curl --fail http://127.0.0.1:10300/v1/audio/transcriptions \
+  -F file=@recording.wav -F model=whisper-1 \
+  -F language=auto -F response_format=json
 ```
 
-With no server anywhere, start one on its own port:
+Synthesis returns WAV but does not play it:
 
 ```bash
-curl -L -o /tmp/ggml-base.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
-nix shell nixpkgs#whisper-cpp -c whisper-server \
-  --model /tmp/ggml-base.bin \
-  --host 127.0.0.1 --port 10302 --inference-path /inference --language auto
+curl --fail http://127.0.0.1:10300/v1/audio/speech \
+  -H 'content-type: application/json' \
+  -d '{"model":"piper-1","voice":"en_US-lessac-medium","input":"The API works.","response_format":"wav"}' \
+  -o /tmp/scufris.wav
+pw-play /tmp/scufris.wav
 ```
+
+Override `SCUFRIS_STT_ENDPOINT` or `SCUFRIS_TTS_ENDPOINT` only for another
+compatible deployment. Scufris does not start Whisper or Piper directly.
 
 ### Hooks and limits
 
@@ -175,7 +171,7 @@ with a short `TMPDIR` such as `/tmp`.
 
 `npm run check` runs strict TypeScript, the Node test suite, and Prettier.
 `nix flake check` builds the launcher, resources, Home Manager
-configurations, closure separation, the real Piper fixture, and this manual,
+configurations, API and closure separation, the speech adapter, and this manual,
 and its `helper-tests` derivation runs the Python suite above. Sprout is not
 part of the flake, so the two tests that make a Sprout workspace skip where it
 is not installed.

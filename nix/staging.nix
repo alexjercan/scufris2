@@ -13,6 +13,7 @@
   service,
   desktop,
   speak,
+  aiToolsApi,
 }:
 pkgs.writeShellApplication {
   name = "scufris-staging";
@@ -23,11 +24,10 @@ pkgs.writeShellApplication {
   text = ''
     export SCUFRIS_STAGING_SERVICE=${pkgs.lib.getExe' service "scufris-service"}
     export SCUFRIS_STAGING_DESKTOP=${pkgs.lib.getExe' desktop "scufris-desktop"}
-    # The synthesiser is the packaged one, which binds Piper, the model, and
-    # the configuration itself. Staging hears the deployed voice rather than
-    # one assembled here, and the script still lets an environment override
-    # name another.
+    # The packaged frontend helper calls the shared API and plays its WAV.
+    # Staging may consume a deployed API or own this pinned complete package.
     export SCUFRIS_STAGING_SPEAK=${pkgs.lib.getExe' speak "scufris-speak"}
+    export SCUFRIS_STAGING_AI_TOOLS_API_PACKAGE=${pkgs.lib.getExe' aiToolsApi "ai-tools-api"}
     exec ${self}/scripts/scufris-staging "$@"
   '';
   meta = {

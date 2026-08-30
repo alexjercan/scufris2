@@ -25,11 +25,11 @@ programs.scufris = {
   desktop = {
     enable = true;
     speech.enable = true;
-    transcription.endpoint = "http://127.0.0.1:10301/inference";
   };
 };
 ```
 
-This uses the default Pi package, project roots, and Piper voice. Setting the
-transcription endpoint uses that existing server and disables the bundled local
-Whisper server. Without an endpoint, the bundled server is enabled by default.
+This uses the default Pi package and project roots. The desktop enables the
+pinned `ai-tools-api` service by default and uses its loopback transcription and
+speech routes. Set `desktop.aiToolsApi.manage = false` when another deployment
+already owns the configured API endpoint.

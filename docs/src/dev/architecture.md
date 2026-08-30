@@ -27,8 +27,8 @@ Repository ownership follows the runtime architecture:
 - `scripts/` contains commands called directly by people:
   `scufris-jobs` (inspection CLI) and the development launcher `scufris-dev`.
 - `nix/` contains one file per build concern: `resources.nix`, `launcher.nix`,
-  `speak.nix`, `voice.nix`, `desktop.nix`, `service.nix`, `whisper.nix`,
-  `dev-shell.nix`, `docs.nix`, and `home-manager.nix`. `nix/scufris.nix`
+  `speak.nix`, `desktop.nix`, `service.nix`, `staging.nix`, `dev-shell.nix`,
+  `docs.nix`, and `home-manager.nix`. `nix/scufris.nix`
   composes them into the component set for one system, `nix/checks/` asserts
   that composition, and `flake.nix` only selects the outputs.
 
@@ -49,7 +49,7 @@ One codebase serves two roles selected by `SCUFRIS_ROLE`:
   relays its terminal outcome to the orchestrator.
 
 Before the harness starts, the launch wrapper removes `SCUFRIS_ROLE`, the
-Calm variable, the Piper paths, the report capability, and the `PI_*` session
+Calm variable, the report capability, and the `PI_*` session
 variables from the inherited environment, then sets `SCUFRIS_ROLE=worker`, the
 job ID, the generation, and a fresh report capability. `SCUFRIS_PROJECT_ROOTS`
 is inherited unchanged.
@@ -129,18 +129,17 @@ There is one launcher and it has no voice variant. No synthesiser and no
 player enter its closure, and nothing it sets turns speech on: the agent
 shapes the answer, and the companion owns the speaker.
 
-`nix/speak.nix` builds `scufris-speak`, the synthesiser the companion runs. It
-binds the pinned Piper package, model, and configuration, so the voice is a
-property of the package rather than a run-time setting.
+`nix/speak.nix` builds `scufris-speak`, the bounded HTTP-to-PipeWire adapter the
+companion runs. It sends fixed `piper-1` and `en_US-lessac-medium` requests to
+`ai-tools-api`; no Piper executable or model enters a Scufris closure.
 
-The Home Manager module renders the same launcher from its options and adds the
-background service, the desktop companion, and the bundled whisper-server
-services. The
-check groups under `nix/checks/` assert the exact rendered arguments
-(`launcher.nix`), the distributed files (`resources.nix`), the module interface
-(`home.nix`), closure separation with a real Piper synthesis fixture
-(`voice.nix`), the resolved companion configuration (`desktop.nix`), and the
-headless service and its client (`service.nix`).
+The Home Manager module renders the same launcher, adds the background service
+and desktop companion. It uses an enabled `services.ai-tools-api` provider from
+the surrounding composition when present. Otherwise managed mode runs the
+pinned complete API package as one fallback unit; external mode only consumes
+its base URL. The check groups under `nix/checks/` assert the rendered launcher,
+distributed files, module interface, API/closure separation, resolved companion
+configuration, and headless service.
 
 `scufris-desktop` is built from the `surfaces/desktop/` workspace member by
 `nix/desktop.nix` as a separate package output. It is absent from the launcher

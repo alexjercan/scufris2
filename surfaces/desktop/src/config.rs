@@ -14,7 +14,7 @@ use std::{
 use thiserror::Error;
 
 /// Endpoint used when the deployment configures none.
-pub const DEFAULT_STT_ENDPOINT: &str = "http://127.0.0.1:10301/inference";
+pub const DEFAULT_STT_ENDPOINT: &str = "http://127.0.0.1:10300/v1/audio/transcriptions";
 
 /// Activation accelerator used when the deployment configures none.
 pub const DEFAULT_HOTKEY: &str = "Super+D";
@@ -45,7 +45,7 @@ pub struct Config {
     /// companion still starts: the socket is how a window manager binding
     /// reaches the pill, and the hotkey and the tray reach it without one.
     pub command_socket: Option<PathBuf>,
-    /// whisper-server-compatible transcription endpoint.
+    /// ai-tools-api OpenAI-compatible transcription endpoint.
     pub stt_endpoint: String,
     /// Accelerator that opens the pill and starts recording.
     pub hotkey: String,
@@ -355,11 +355,14 @@ mod tests {
     fn a_configured_endpoint_overrides_the_bundled_one() {
         let config = resolve(
             "/run/user/1000/scufris/surface.sock",
-            Some("http://127.0.0.1:9000/inference"),
+            Some("http://127.0.0.1:9000/v1/audio/transcriptions"),
             None,
         )
         .unwrap();
-        assert_eq!(config.stt_endpoint, "http://127.0.0.1:9000/inference");
+        assert_eq!(
+            config.stt_endpoint,
+            "http://127.0.0.1:9000/v1/audio/transcriptions"
+        );
     }
 
     #[test]
@@ -388,7 +391,7 @@ mod tests {
                 "socket=/run/user/1000/scufris/surface.sock\n",
                 "command_socket=/run/user/1000/scufris/desktop.sock\n",
                 "state_file=/run/user/1000/scufris-desktop/pending.json\n",
-                "stt_endpoint=http://127.0.0.1:10301/inference\n",
+                "stt_endpoint=http://127.0.0.1:10300/v1/audio/transcriptions\n",
                 "hotkey=Super+D\n",
                 "cancel_key=derived\n",
                 "stop_key=derived\n",

@@ -1,4 +1,4 @@
-//! Local transcription against a whisper-server-compatible HTTP endpoint.
+//! Local transcription against the ai-tools-api OpenAI-compatible endpoint.
 //!
 //! The companion owns the audio and the request. Nothing is submitted when
 //! transcription fails, so every failure path returns a short message the pill
@@ -13,7 +13,7 @@ use thiserror::Error;
 const BOUNDARY: &str = "scufris-desktop-boundary";
 
 /// Longest a single transcription may take.
-pub const TRANSCRIPTION_TIMEOUT: Duration = Duration::from_secs(60);
+pub const TRANSCRIPTION_TIMEOUT: Duration = Duration::from_secs(125);
 
 /// Longest transcript the companion accepts from the endpoint.
 pub const MAX_TRANSCRIPT_BYTES: usize = 8 * 1024;
@@ -48,8 +48,9 @@ pub fn multipart_body(wav: &[u8]) -> Vec<u8> {
         body.extend_from_slice(value.as_bytes());
         body.extend_from_slice(b"\r\n");
     };
+    field("model", "whisper-1");
+    field("language", "auto");
     field("response_format", "json");
-    field("temperature", "0.0");
     body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
     body.extend_from_slice(
         b"Content-Disposition: form-data; name=\"file\"; filename=\"recording.wav\"\r\n",
@@ -147,7 +148,10 @@ mod tests {
     fn the_body_carries_the_recording_and_the_requested_format() {
         let body = multipart_body(b"RIFFfake");
         let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("name=\"model\"\r\n\r\nwhisper-1"));
+        assert!(text.contains("name=\"language\"\r\n\r\nauto"));
         assert!(text.contains("name=\"response_format\"\r\n\r\njson"));
+        assert!(!text.contains("temperature"));
         assert!(text.contains("filename=\"recording.wav\""));
         assert!(text.contains("Content-Type: audio/wav"));
         assert!(text.contains("RIFFfake"));

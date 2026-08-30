@@ -1,25 +1,21 @@
 {
   pkgs,
-  piperPackage,
-  piperModel,
-  piperConfig,
+  endpoint ? "http://127.0.0.1:10300/v1/audio/speech",
 }: let
   inherit (pkgs) lib;
 in
   pkgs.writeShellApplication {
     name = "scufris-speak";
-    # Piper and PipeWire are the helper's own tools, not the agent's. The
-    # speaker belongs to whoever is sitting in front of the machine, so what
-    # runs it is the companion's process tree and this is where the paths are
-    # bound.
-    runtimeInputs = [pkgs.python3 piperPackage pkgs.pipewire];
+    # Synthesis belongs to ai-tools-api. This frontend helper keeps only the
+    # bounded HTTP adapter and local PipeWire playback in its process tree.
+    runtimeInputs = [pkgs.python3 pkgs.pipewire];
     text = ''
-      export SCUFRIS_PIPER_MODEL=${lib.escapeShellArg (toString piperModel)}
-      export SCUFRIS_PIPER_CONFIG=${lib.escapeShellArg (toString piperConfig)}
+      : "''${SCUFRIS_TTS_ENDPOINT:=${lib.escapeShellArg endpoint}}"
+      export SCUFRIS_TTS_ENDPOINT
       exec python3 ${../tools/voice/scufris-speak} "$@"
     '';
     meta = {
-      description = "Speaks one paragraph read from standard input with the pinned Piper voice";
+      description = "Synthesise one stdin paragraph through ai-tools-api and play it locally";
       mainProgram = "scufris-speak";
     };
   }

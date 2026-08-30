@@ -2,7 +2,7 @@
 //!
 //! Capture runs on the default input device at whatever format it offers. The
 //! conversions below turn that into the 16 kHz mono PCM WAV every
-//! whisper-server build accepts, and they stay free of device handles so they
+//! ai-tools-api accepts, and they stay free of device handles so they
 //! are testable without hardware.
 
 use std::{

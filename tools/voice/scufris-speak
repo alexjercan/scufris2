@@ -1,21 +1,33 @@
 #!/usr/bin/env python3
 
+import json
 import os
-import selectors
 import signal
 import subprocess
 import sys
 import time
-from pathlib import Path
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import BinaryIO
 
 MAX_TEXT_BYTES = 1_000
 MAX_WAV_BYTES = 64 * 1024 * 1024
+API_TIMEOUT_SECONDS = 65.0
 MAX_PLAYBACK_SECONDS = 60.0
 STOP_GRACE_SECONDS = 0.75
+MODEL = "piper-1"
+VOICE = "en_US-lessac-medium"
 
 cancelled = False
 children: list[subprocess.Popen[bytes]] = []
+response: BinaryIO | None = None
+
+
+def debug(message: str) -> None:
+    directives = os.environ.get("RUST_LOG", "").lower()
+    if "debug" in directives or "trace" in directives:
+        print(f"speech: debug: {message}", file=sys.stderr)
 
 
 def fail(message: str, code: int) -> int:
@@ -35,6 +47,11 @@ def terminate_child(child: subprocess.Popen[bytes]) -> None:
 def request_cancel(_signum: int, _frame: object) -> None:
     global cancelled
     cancelled = True
+    if response is not None:
+        try:
+            response.close()
+        except OSError:
+            pass
     for child in reversed(children):
         terminate_child(child)
 
@@ -62,26 +79,28 @@ def stop_children() -> None:
             pass
 
 
-def trusted_file(variable: str, required: bool) -> str | None:
-    value = os.environ.get(variable)
-    if not value:
-        if required:
-            raise ValueError(f"{variable} is required")
-        return None
-    path = Path(value)
-    if not path.is_absolute() or not path.is_file():
-        raise ValueError(f"{variable} is unavailable")
-    return str(path)
+def endpoint() -> str:
+    value = os.environ.get("SCUFRIS_TTS_ENDPOINT", "")
+    parsed = urllib.parse.urlsplit(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        raise ValueError("SCUFRIS_TTS_ENDPOINT must be an HTTP or HTTPS URL")
+    return value
 
 
-def read_text(stream: BinaryIO) -> bytes:
+def read_text(stream: BinaryIO) -> str:
     content = stream.read(MAX_TEXT_BYTES + 1)
     if not content or len(content) > MAX_TEXT_BYTES:
         raise ValueError("input must be bounded non-empty UTF-8")
     text = content.decode("utf-8", errors="strict")
     if any(ord(character) < 32 or ord(character) == 127 for character in text):
         raise ValueError("input contains control characters")
-    return content
+    return text
 
 
 def valid_wav(content: bytes) -> bool:
@@ -120,85 +139,66 @@ def valid_wav(content: bytes) -> bool:
     return offset == len(content) and found_format and found_audio
 
 
-def read_synthesis(
-    piper: subprocess.Popen[bytes], text: bytes, deadline: float
-) -> tuple[bytes, str | None]:
-    if piper.stdin is None or piper.stdout is None:
-        return b"", "Piper streams are unavailable"
+def synthesize(url: str, text: str) -> tuple[bytes, str | None]:
+    global response
+    payload = json.dumps(
+        {
+            "model": MODEL,
+            "voice": VOICE,
+            "input": text,
+            "response_format": "wav",
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        method="POST",
+        headers={"Content-Type": "application/json", "Accept": "audio/wav"},
+    )
+    debug(
+        f"POST {url} model={MODEL} voice={VOICE} input_bytes={len(text.encode('utf-8'))}"
+    )
     try:
-        piper.stdin.write(text + b"\n")
-        piper.stdin.close()
-    except BrokenPipeError:
-        pass
-
-    output = bytearray()
-    selector = selectors.DefaultSelector()
-    selector.register(piper.stdout, selectors.EVENT_READ)
-    os.set_blocking(piper.stdout.fileno(), False)
-    reached_eof = False
-    try:
-        while piper.poll() is None or not reached_eof:
-            if cancelled:
-                return b"", None
-            if time.monotonic() >= deadline:
-                return b"", "playback timed out"
-            for key, _events in selector.select(timeout=0.02):
-                try:
-                    chunk = os.read(key.fd, 64 * 1024)
-                except BlockingIOError:
-                    continue
-                if not chunk:
-                    selector.unregister(key.fileobj)
-                    reached_eof = True
-                    break
-                output.extend(chunk)
-                if len(output) > MAX_WAV_BYTES:
-                    return b"", "Piper output exceeded the limit"
+        response = urllib.request.urlopen(request, timeout=API_TIMEOUT_SECONDS)
+        content_type = response.headers.get_content_type()
+        declared = response.headers.get("Content-Length")
+        if declared is not None and int(declared) > MAX_WAV_BYTES:
+            return b"", "synthesis response exceeded the limit"
+        output = response.read(MAX_WAV_BYTES + 1)
+        if len(output) > MAX_WAV_BYTES:
+            return b"", "synthesis response exceeded the limit"
+        debug(
+            f"response status={response.status} content_type={content_type} wav_bytes={len(output)}"
+        )
+        if content_type != "audio/wav":
+            return b"", "synthesis API returned an unexpected content type"
+        return output, None
+    except urllib.error.HTTPError as error:
+        return b"", f"synthesis API failed with status {error.code}"
+    except (OSError, ValueError, urllib.error.URLError):
+        return b"", "synthesis API is unavailable"
     finally:
-        selector.close()
-        piper.stdout.close()
-    return bytes(output), None
+        if response is not None:
+            response.close()
+            response = None
 
 
 def run() -> int:
     try:
-        validated_text = read_text(sys.stdin.buffer)
-        model = trusted_file("SCUFRIS_PIPER_MODEL", required=True)
-        config = trusted_file("SCUFRIS_PIPER_CONFIG", required=False)
+        text = read_text(sys.stdin.buffer)
+        url = endpoint()
     except (UnicodeDecodeError, ValueError) as error:
         return fail(str(error), 2)
 
-    piper_command = ["piper", "--model", model or "", "--output_file", "-"]
-    if config:
-        piper_command[3:3] = ["--config", config]
-
-    try:
-        piper = subprocess.Popen(
-            piper_command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            shell=False,
-        )
-    except OSError:
-        return fail("Piper is unavailable", 3)
-    children.append(piper)
-
-    deadline = time.monotonic() + MAX_PLAYBACK_SECONDS
-    wav, synthesis_error = read_synthesis(piper, validated_text, deadline)
+    wav, synthesis_error = synthesize(url, text)
     if cancelled:
         stop_children()
         return 130
     if synthesis_error:
-        stop_children()
-        return fail(
-            synthesis_error, 7 if synthesis_error == "playback timed out" else 5
-        )
-    piper.wait()
-    if piper.returncode != 0:
-        return fail("Piper failed", 5)
+        return fail(synthesis_error, 5)
     if not valid_wav(wav):
-        return fail("Piper returned invalid WAV", 5)
+        return fail("synthesis API returned invalid WAV", 5)
 
     try:
         player = subprocess.Popen(
@@ -213,7 +213,7 @@ def run() -> int:
     children.append(player)
 
     try:
-        player.communicate(wav, timeout=max(0.01, deadline - time.monotonic()))
+        player.communicate(wav, timeout=MAX_PLAYBACK_SECONDS)
     except subprocess.TimeoutExpired:
         stop_children()
         return fail("playback timed out", 7)

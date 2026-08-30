@@ -18,8 +18,8 @@
       ../surfaces
     ];
   };
-  voice = import ./voice.nix {inherit pkgs;};
   resources = import ./resources.nix {inherit pkgs;};
+  aiToolsApi = inputs.ai-tools-api.packages.${system}.ai-tools-api;
   piPackage = inputs.llm-agents.packages.${system}.pi;
   # One launcher. There used to be two, and the voice one differed only in
   # shipping a speech module and setting a variable for it. Both are gone: the
@@ -29,12 +29,7 @@
   };
   # The synthesiser belongs to whoever is sitting in front of the machine, so
   # it is its own program rather than part of the agent's launcher.
-  speak = import ./speak.nix {
-    inherit pkgs;
-    inherit (voice) piperPackage;
-    piperModel = voice.model;
-    piperConfig = voice.config;
-  };
+  speak = import ./speak.nix {inherit pkgs;};
   desktop = import ./desktop.nix {
     inherit pkgs version;
     source = rustSource;
@@ -48,14 +43,14 @@
   service = headless.service;
   ctl = headless.ctl;
   staging = import ./staging.nix {
-    inherit pkgs self service desktop speak;
+    inherit pkgs self service desktop speak aiToolsApi;
   };
-  devShell = import ./dev-shell.nix {inherit pkgs voice;};
+  devShell = import ./dev-shell.nix {inherit pkgs;};
   docs = import ./docs.nix {inherit inputs self pkgs;};
 in {
   inherit
     rustSource
-    voice
+    aiToolsApi
     resources
     piPackage
     launcher

@@ -2,24 +2,29 @@
   config,
   lib,
   pkgs,
+  options,
   ...
 }: let
   cfg = config.programs.scufris;
   system = pkgs.stdenv.hostPlatform.system;
   defaults = defaultsFor system;
-  voiceRuntime = import ./voice.nix {inherit pkgs;};
-  whisperRuntime = import ./whisper.nix {inherit pkgs;};
+  providerAvailable = lib.hasAttrByPath ["services" "ai-tools-api" "enable"] options;
+  providerEnabled = providerAvailable && config.services.ai-tools-api.enable;
+  providerBaseUrl =
+    if providerAvailable
+    then "http://${config.services.ai-tools-api.host}:${toString config.services.ai-tools-api.port}"
+    else "http://127.0.0.1:10300";
   serviceCfg = cfg.service;
   agentCfg = serviceCfg.agent;
   desktopCfg = cfg.desktop;
+  apiCfg = desktopCfg.aiToolsApi;
   speechCfg = desktopCfg.speech;
   transcriptionCfg = desktopCfg.transcription;
-  whisperCfg = transcriptionCfg.whisper;
-  bundledEndpoint = "http://${whisperCfg.host}:${toString whisperCfg.port}${whisperRuntime.inferencePath}";
   resolvedEndpoint =
     if transcriptionCfg.endpoint != null
     then transcriptionCfg.endpoint
-    else bundledEndpoint;
+    else "${apiCfg.baseUrl}/v1/audio/transcriptions";
+  speechEndpoint = "${apiCfg.baseUrl}/v1/audio/speech";
   # The companion may only restart the backend service this module owns, so the
   # hook is generated here instead of accepting a command from the model or the
   # environment.
@@ -42,9 +47,7 @@
   # companion stays silent.
   speak = import ./speak.nix {
     inherit pkgs;
-    piperPackage = speechCfg.piper.package;
-    piperModel = speechCfg.piper.model;
-    piperConfig = speechCfg.piper.config;
+    endpoint = speechEndpoint;
   };
 in {
   imports = [
@@ -133,30 +136,28 @@ in {
         description = "scufris-desktop companion package.";
       };
 
-      speech = {
-        enable = lib.mkEnableOption "local Piper speech from the desktop companion";
+      aiToolsApi = {
+        manage = lib.mkOption {
+          type = lib.types.bool;
+          default = !providerEnabled;
+          defaultText = lib.literalExpression "the inverse of an enabled services.ai-tools-api provider";
+          description = ''
+            Run the pinned complete ai-tools-api package as a fallback service.
+            This defaults off when another imported Home Manager module already
+            enables services.ai-tools-api. Set false for any other externally
+            managed endpoint.
+          '';
+        };
 
-        piper = {
-          package = lib.mkOption {
-            type = lib.types.package;
-            default = voiceRuntime.piperPackage;
-            defaultText = lib.literalExpression "Scufris private patched Piper 1.4.2";
-            description = "Trusted Piper 1.4.2 package used only by speech-enabled Scufris.";
-          };
-          model = lib.mkOption {
-            type = lib.types.pathInStore;
-            default = voiceRuntime.model;
-            defaultText = lib.literalExpression "the pinned en_US-lessac-medium model";
-            description = "Trusted immutable Piper ONNX model path.";
-          };
-          config = lib.mkOption {
-            type = lib.types.pathInStore;
-            default = voiceRuntime.config;
-            defaultText = lib.literalExpression "the pinned adjacent en_US-lessac-medium config";
-            description = "Trusted immutable Piper model configuration path.";
-          };
+        baseUrl = lib.mkOption {
+          type = lib.types.strMatching "https?://.*[^/]";
+          default = providerBaseUrl;
+          defaultText = lib.literalExpression "the enabled provider URL, otherwise http://127.0.0.1:10300";
+          description = "Base URL of the shared bounded speech inference API.";
         };
       };
+
+      speech.enable = lib.mkEnableOption "local speech synthesised through ai-tools-api";
 
       hotkey = lib.mkOption {
         type = lib.types.strMatching "[A-Za-z0-9+]+";
@@ -237,51 +238,9 @@ in {
           type = lib.types.nullOr (lib.types.strMatching "https?://.*");
           default = null;
           description = ''
-            whisper-server-compatible transcription endpoint. When null the
-            bundled loopback whisper-server provides one.
+            OpenAI-compatible transcription endpoint. When null, the
+            transcription route under desktop.aiToolsApi.baseUrl is used.
           '';
-        };
-
-        whisper = {
-          enable = lib.mkOption {
-            type = lib.types.bool;
-            default = transcriptionCfg.endpoint == null;
-            defaultText = lib.literalExpression "programs.scufris.desktop.transcription.endpoint == null";
-            description = "Run the bundled loopback whisper-server for the companion.";
-          };
-
-          package = lib.mkOption {
-            type = lib.types.package;
-            default = whisperRuntime.package;
-            defaultText = lib.literalExpression "pkgs.whisper-cpp";
-            description = "whisper.cpp package that provides whisper-server.";
-          };
-
-          model = lib.mkOption {
-            type = lib.types.package;
-            default = whisperRuntime.model;
-            defaultText = lib.literalExpression "the pinned ggml-base model";
-            description = "Pinned whisper.cpp GGML model.";
-          };
-
-          host = lib.mkOption {
-            type = lib.types.enum ["127.0.0.1"];
-            default = whisperRuntime.host;
-            description = "Loopback address for the bundled whisper-server.";
-          };
-
-          port = lib.mkOption {
-            type = lib.types.port;
-            default = whisperRuntime.port;
-            description = "Loopback port for the bundled whisper-server.";
-          };
-
-          serviceName = lib.mkOption {
-            type = lib.types.str;
-            default = "scufris-whisper";
-            readOnly = true;
-            description = "Stable systemd user service identity for the bundled whisper-server.";
-          };
         };
 
         resolvedEndpoint = lib.mkOption {
@@ -314,17 +273,6 @@ in {
       };
     }
     (lib.mkIf cfg.enable {
-      assertions = [
-        {
-          assertion = !speechCfg.enable || (speechCfg.piper.package.version or null) == "1.4.2";
-          message = "programs.scufris.desktop.speech requires Piper 1.4.2";
-        }
-        {
-          assertion = !speechCfg.enable || toString speechCfg.piper.config == "${toString speechCfg.piper.model}.json";
-          message = "programs.scufris.desktop.speech requires the Piper config adjacent to the model as model.onnx.json";
-        }
-      ];
-
       home.packages = [agentCfg.package];
     })
     (lib.mkIf (cfg.enable && speechCfg.enable) {
@@ -375,8 +323,12 @@ in {
           message = "programs.scufris.desktop.enable requires programs.scufris.service.enable, because the companion is a client of the service that owns the conversation";
         }
         {
-          assertion = !(transcriptionCfg.endpoint != null && whisperCfg.enable);
-          message = "programs.scufris.desktop.transcription.endpoint conflicts with programs.scufris.desktop.transcription.whisper.enable";
+          assertion = !(providerEnabled && apiCfg.manage);
+          message = "programs.scufris.desktop.aiToolsApi.manage conflicts with an enabled services.ai-tools-api provider";
+        }
+        {
+          assertion = !apiCfg.manage || apiCfg.baseUrl == "http://127.0.0.1:10300";
+          message = "the managed Scufris ai-tools-api fallback uses http://127.0.0.1:10300; set manage=false for another base URL";
         }
       ];
 
@@ -423,33 +375,25 @@ in {
         Install.WantedBy = ["graphical-session.target"];
       };
     })
-    (lib.mkIf (cfg.enable && desktopCfg.enable && whisperCfg.enable) {
-      systemd.user.services.${whisperCfg.serviceName} = {
+    (lib.mkIf (cfg.enable && desktopCfg.enable && apiCfg.manage) {
+      systemd.user.services.scufris-ai-tools-api = {
         Unit = {
-          Description = "Bundled loopback whisper.cpp server for Scufris";
+          Description = "Scufris fallback AI tools API";
           After = ["network.target"];
         };
         Service = {
           Type = "simple";
-          ExecStart = lib.escapeShellArgs [
-            (lib.getExe' whisperCfg.package "whisper-server")
-            "--model"
-            (toString whisperCfg.model)
-            "--host"
-            whisperCfg.host
-            "--port"
-            (toString whisperCfg.port)
-            "--inference-path"
-            whisperRuntime.inferencePath
-            "--language"
-            "auto"
-          ];
-          Restart = "no";
-          RuntimeDirectory = whisperCfg.serviceName;
-          WorkingDirectory = "%t/${whisperCfg.serviceName}";
+          ExecStart = lib.getExe defaults.aiToolsApiPackage;
+          Restart = "on-failure";
+          RestartSec = 5;
+          RuntimeDirectory = "scufris-ai-tools-api";
+          WorkingDirectory = "%t/scufris-ai-tools-api";
           NoNewPrivileges = true;
           PrivateTmp = true;
           ProtectSystem = "strict";
+          ProtectHome = "tmpfs";
+          UMask = "0077";
+          TimeoutStopSec = 10;
         };
         Install.WantedBy = ["default.target"];
       };

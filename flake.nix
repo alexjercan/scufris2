@@ -14,6 +14,13 @@
       url = "github:numtide/llm-agents.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    ai-tools-api = {
+      url = "github:alexjercan/ai-tools-api/v0.1.1";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-parts.follows = "flake-parts";
+      inputs.home-manager.follows = "home-manager";
+    };
   };
 
   outputs = inputs @ {
@@ -45,6 +52,7 @@
             inherit (scufris) docs resources;
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            ai-tools-api = scufris.aiToolsApi;
             scufris-speak = scufris.speak;
             scufris-desktop = scufris.desktop;
             scufris-service = scufris.service;
@@ -76,6 +84,11 @@
               program = "${scufris.ctl}/bin/scufris-ctl";
               meta.description = "Talk to Scufris from a terminal";
             };
+            ai-tools-api = {
+              type = "app";
+              program = "${scufris.aiToolsApi}/bin/ai-tools-api";
+              meta.description = "Run the pinned shared speech inference API";
+            };
             staging = {
               type = "app";
               program = "${scufris.staging}/bin/scufris-staging";
@@ -98,6 +111,7 @@
             desktopPackage = self.packages.${system}.scufris-desktop;
             servicePackage = self.packages.${system}.scufris-service;
             ctlPackage = self.packages.${system}.scufris-ctl;
+            aiToolsApiPackage = inputs.ai-tools-api.packages.${system}.ai-tools-api;
           };
         };
       };

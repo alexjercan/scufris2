@@ -122,10 +122,9 @@ programs.scufris = {
 };
 ```
 
-Desktop speech requires Linux. It selects a private patched Piper 1.4.2
-package, the pinned `en_US-lessac-medium` model, and PipeWire playback. Overrides must keep
-Piper version 1.4.2 and an immutable store model with its configuration
-adjacent as `model.onnx.json`.
+Desktop speech requires Linux. The companion sends bounded text to the shared
+`ai-tools-api` speech route and plays its validated WAV response through
+PipeWire. The API owns Piper and the pinned voice; Scufris owns playback.
 
 Speech means one thing: the companion gets a synthesiser. Nothing about it
 reaches the service or the agent, which shape the same prose answer whatever is
@@ -153,18 +152,22 @@ it talks to. Enabling it defines the `scufris-desktop.service` user service,
 wants it from `graphical-session.target`, and restarts it on failure so a
 backend crash never takes the tray down.
 
-Transcription needs an endpoint. With none configured the module also runs a
-bundled loopback `whisper-server` on `127.0.0.1:10302` with a pinned model, so
-voice input works on any Nix system. Point it at an existing server instead:
+The module detects an enabled `services.ai-tools-api` option supplied by the
+surrounding Home Manager composition and uses its host and port. If none is
+enabled, `desktop.aiToolsApi.manage` defaults true and runs the pinned complete
+API package as one fallback service. To consume an API owned outside Home
+Manager instead:
 
 ```nix
-programs.scufris.desktop.transcription.endpoint = "http://127.0.0.1:10301/inference";
+programs.scufris.desktop.aiToolsApi = {
+  manage = false;
+  baseUrl = "http://127.0.0.1:10300";
+};
 ```
 
-A configured endpoint turns the bundled server off, because
-`transcription.whisper.enable` defaults to `transcription.endpoint == null`.
-Reuse the server you already run rather than a second copy of the same model. Setting both
-`transcription.endpoint` and `transcription.whisper.enable` is an error.
+Transcription defaults to `BASE/v1/audio/transcriptions`; speech defaults to
+`BASE/v1/audio/speech`. `desktop.transcription.endpoint` remains an explicit
+transcription-route override.
 
 The conversation window ships with the companion and needs no configuration;
 bind `scufris-ctl hud` in your window manager to reach it. Protocol v4 does not
@@ -227,19 +230,20 @@ of journald, which is the view for watching it work; without the flag, read
 the logs with `journalctl --user -t scufris-desktop`. Every value comes from
 the environment:
 
-| Variable                          | Default                                        |
-| --------------------------------- | ---------------------------------------------- |
-| `SCUFRIS_RUNTIME_DIR`             | `$XDG_RUNTIME_DIR/scufris`                     |
-| `SCUFRIS_DESKTOP_SOCKET`          | `$SCUFRIS_RUNTIME_DIR/surface.sock`            |
-| `SCUFRIS_DESKTOP_COMMAND_SOCKET`  | `$SCUFRIS_RUNTIME_DIR/desktop.sock`            |
-| `SCUFRIS_DESKTOP_STATE_FILE`      | `$XDG_STATE_HOME/scufris-desktop/pending.json` |
-| `SCUFRIS_STT_ENDPOINT`            | `http://127.0.0.1:10301/inference`             |
-| `SCUFRIS_DESKTOP_HOTKEY`          | `Super+D`                                      |
-| `SCUFRIS_DESKTOP_CANCEL_KEY`      | derived from the hotkey                        |
-| `SCUFRIS_DESKTOP_STOP_KEY`        | derived from the hotkey                        |
-| `SCUFRIS_DESKTOP_CHAT_COMMAND`    | none                                           |
-| `SCUFRIS_DESKTOP_RESTART_COMMAND` | none                                           |
-| `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | none, and the companion stays silent           |
+| Variable                          | Default                                          |
+| --------------------------------- | ------------------------------------------------ |
+| `SCUFRIS_RUNTIME_DIR`             | `$XDG_RUNTIME_DIR/scufris`                       |
+| `SCUFRIS_DESKTOP_SOCKET`          | `$SCUFRIS_RUNTIME_DIR/surface.sock`              |
+| `SCUFRIS_DESKTOP_COMMAND_SOCKET`  | `$SCUFRIS_RUNTIME_DIR/desktop.sock`              |
+| `SCUFRIS_DESKTOP_STATE_FILE`      | `$XDG_STATE_HOME/scufris-desktop/pending.json`   |
+| `SCUFRIS_STT_ENDPOINT`            | `http://127.0.0.1:10300/v1/audio/transcriptions` |
+| `SCUFRIS_TTS_ENDPOINT`            | `http://127.0.0.1:10300/v1/audio/speech`         |
+| `SCUFRIS_DESKTOP_HOTKEY`          | `Super+D`                                        |
+| `SCUFRIS_DESKTOP_CANCEL_KEY`      | derived from the hotkey                          |
+| `SCUFRIS_DESKTOP_STOP_KEY`        | derived from the hotkey                          |
+| `SCUFRIS_DESKTOP_CHAT_COMMAND`    | none                                             |
+| `SCUFRIS_DESKTOP_RESTART_COMMAND` | none                                             |
+| `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | none, and the companion stays silent             |
 
 `SCUFRIS_RUNTIME_DIR` is the socket directory, used as named with no `scufris`
 below it. The service and `scufris-ctl` read the same variable, so one export
@@ -251,22 +255,16 @@ The companion starts without a backend and reports it as unavailable in the
 tray. It answers the pill only when `scufris-service` is on the same socket;
 see [maintenance](../dev/maintenance.md) to run one from a working tree.
 
-Transcription still needs an endpoint. A whisper server already listening on
-`http://127.0.0.1:10301/inference` is the default, so it needs no override.
-Name any other one with the environment variable:
+Transcription and speech need `ai-tools-api` on port 10300. A Home Manager
+installation manages it by default. For a manual package run, start the pinned
+API in another terminal:
 
 ```bash
-SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10302/inference nix run .#scufris-desktop
+nix run .#ai-tools-api
 ```
 
-With no server anywhere, start one with the model the module pins:
-
-```bash
-curl -L -o ggml-base.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
-nix shell nixpkgs#whisper-cpp -c whisper-server \
-  --model ggml-base.bin \
-  --host 127.0.0.1 --port 10302 --inference-path /inference
-```
+Then start the desktop. `SCUFRIS_STT_ENDPOINT` can name another compatible
+transcription route. The packaged `scufris-speak` helper similarly accepts
+`SCUFRIS_TTS_ENDPOINT` when a non-default speech route is needed.
 
 The companion is Linux and X11 only.

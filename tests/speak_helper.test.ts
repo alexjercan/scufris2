@@ -1,14 +1,25 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
+import { access, chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
 
 const helper = new URL("../tools/voice/scufris-speak", import.meta.url)
   .pathname;
-const wavBuilder = `function wav(audio = Buffer.from("fake-audio")) {
+
+interface ProcessResult {
+  code: number | null;
+  stderr: string;
+}
+
+function wav(audio = Buffer.from("fake-audio")): Buffer {
   const output = Buffer.alloc(44 + audio.length);
   output.write("RIFF", 0);
   output.writeUInt32LE(output.length - 8, 4);
@@ -16,19 +27,14 @@ const wavBuilder = `function wav(audio = Buffer.from("fake-audio")) {
   output.writeUInt32LE(16, 16);
   output.writeUInt16LE(1, 20);
   output.writeUInt16LE(1, 22);
-  output.writeUInt32LE(22050, 24);
-  output.writeUInt32LE(44100, 28);
+  output.writeUInt32LE(22_050, 24);
+  output.writeUInt32LE(44_100, 28);
   output.writeUInt16LE(2, 32);
   output.writeUInt16LE(16, 34);
   output.write("data", 36);
   output.writeUInt32LE(audio.length, 40);
   audio.copy(output, 44);
   return output;
-}`;
-
-interface ProcessResult {
-  code: number | null;
-  stderr: string;
 }
 
 async function executable(name: string): Promise<string> {
@@ -42,6 +48,31 @@ async function executable(name: string): Promise<string> {
     }
   }
   throw new Error(`${name} is unavailable`);
+}
+
+async function fakeProgram(path: string, source: string): Promise<void> {
+  await writeFile(path, `#!${process.execPath}\n${source}`, "utf8");
+  await chmod(path, 0o755);
+}
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), "scufris-speak-"));
+  const bin = join(root, "bin");
+  await import("node:fs/promises").then(({ mkdir }) => mkdir(bin));
+  return { root, bin, log: join(root, "log.jsonl") };
+}
+
+async function api(
+  handler: (request: IncomingMessage, response: ServerResponse) => void,
+): Promise<{ endpoint: string; close: () => Promise<void> }> {
+  const server = createServer(handler);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert(address && typeof address !== "string");
+  return {
+    endpoint: `http://127.0.0.1:${address.port}/v1/audio/speech`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
 }
 
 async function runHelper(
@@ -64,36 +95,6 @@ async function runHelper(
   });
 }
 
-async function fakeProgram(path: string, source: string) {
-  await writeFile(path, `#!${process.execPath}\n${source}`, "utf8");
-  await chmod(path, 0o755);
-}
-
-async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "scufris-speak-"));
-  const bin = join(root, "bin");
-  await import("node:fs/promises").then(({ mkdir }) => mkdir(bin));
-  const model = join(root, "model.onnx");
-  const config = join(root, "model.json");
-  const log = join(root, "log.jsonl");
-  await writeFile(model, "model", "utf8");
-  await writeFile(config, "config", "utf8");
-  return {
-    root,
-    bin,
-    model,
-    config,
-    log,
-    env: {
-      ...process.env,
-      PATH: bin,
-      SCUFRIS_PIPER_MODEL: model,
-      SCUFRIS_PIPER_CONFIG: config,
-      TEST_LOG: log,
-    },
-  };
-}
-
 async function waitFor(
   predicate: () => Promise<boolean>,
   timeoutMs = 3_000,
@@ -106,21 +107,8 @@ async function waitFor(
   throw new Error("condition timed out");
 }
 
-test("private speech helper composes fixed Piper and pw-play arguments", async () => {
+test("speech helper sends the fixed API request and plays returned WAV", async () => {
   const item = await fixture();
-  await fakeProgram(
-    join(item.bin, "piper"),
-    `const fs = require("node:fs");
-${wavBuilder}
-const chunks = [];
-process.stdin.on("data", chunk => chunks.push(chunk));
-process.stdin.on("end", () => {
-  const input = Buffer.concat(chunks).toString("utf8");
-  fs.appendFileSync(process.env.TEST_LOG, JSON.stringify({ program: "piper", argv: process.argv.slice(2), input }) + "\\n");
-  if (input.endsWith("\\n")) process.stdout.write(wav());
-});
-`,
-  );
   await fakeProgram(
     join(item.bin, "pw-play"),
     `const fs = require("node:fs");
@@ -128,123 +116,137 @@ const chunks = [];
 process.stdin.on("data", chunk => chunks.push(chunk));
 process.stdin.on("end", () => {
   const audio = Buffer.concat(chunks);
-  fs.appendFileSync(process.env.TEST_LOG, JSON.stringify({ program: "pw-play", argv: process.argv.slice(2), header: audio.subarray(0, 4).toString("ascii"), bytes: audio.length }) + "\\n");
+  fs.writeFileSync(process.env.TEST_LOG, JSON.stringify({ argv: process.argv.slice(2), header: audio.subarray(0, 4).toString("ascii"), bytes: audio.length }));
+});`,
+  );
+  let received: {
+    method?: string;
+    url?: string;
+    contentType?: string;
+    body?: unknown;
+  } = {};
+  const server = await api((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      received = {
+        method: request.method,
+        url: request.url,
+        contentType: request.headers["content-type"],
+        body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+      };
+      const audio = wav();
+      response.writeHead(200, {
+        "content-type": "audio/wav",
+        "content-length": audio.length,
+      });
+      response.end(audio);
+    });
+  });
+  try {
+    const result = await runHelper("A safe spoken response.", {
+      ...process.env,
+      PATH: item.bin,
+      TEST_LOG: item.log,
+      SCUFRIS_TTS_ENDPOINT: server.endpoint,
+    });
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(received, {
+      method: "POST",
+      url: "/v1/audio/speech",
+      contentType: "application/json",
+      body: {
+        model: "piper-1",
+        voice: "en_US-lessac-medium",
+        input: "A safe spoken response.",
+        response_format: "wav",
+      },
+    });
+    assert.deepEqual(JSON.parse(await readFile(item.log, "utf8")), {
+      argv: ["-"],
+      header: "RIFF",
+      bytes: 54,
+    });
+  } finally {
+    await server.close();
+  }
 });
-`,
-  );
 
-  const result = await runHelper("A safe spoken response.", item.env);
-  assert.equal(result.code, 0, result.stderr);
-  const records = (await readFile(item.log, "utf8"))
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line));
-  assert.deepEqual(records, [
-    {
-      program: "piper",
-      argv: [
-        "--model",
-        item.model,
-        "--config",
-        item.config,
-        "--output_file",
-        "-",
-      ],
-      input: "A safe spoken response.\n",
-    },
-    { program: "pw-play", argv: ["-"], header: "RIFF", bytes: 54 },
-  ]);
-
-  await writeFile(item.log, "", "utf8");
-  const withoutConfig: NodeJS.ProcessEnv = { ...item.env };
-  delete withoutConfig.SCUFRIS_PIPER_CONFIG;
-  assert.equal(
-    (await runHelper("Optional config stays optional.", withoutConfig)).code,
-    0,
-  );
-  const noConfigRecord = JSON.parse(
-    (await readFile(item.log, "utf8")).split("\n")[0] ?? "",
-  );
-  assert.deepEqual(noConfigRecord.argv, [
-    "--model",
-    item.model,
-    "--output_file",
-    "-",
-  ]);
-});
-
-test("private speech helper rejects malformed input and fixed runtime failures", async () => {
+test("speech helper rejects invalid input and bounded API failures", async () => {
   const item = await fixture();
-  assert.equal((await runHelper(Buffer.from([0xff]), item.env)).code, 2);
-  assert.equal((await runHelper("x".repeat(1_001), item.env)).code, 2);
-  assert.equal((await runHelper("Safe response.", item.env)).code, 3);
+  const base = { ...process.env, PATH: item.bin };
+  assert.equal((await runHelper(Buffer.from([0xff]), base)).code, 2);
+  assert.equal((await runHelper("x".repeat(1_001), base)).code, 2);
+  assert.equal((await runHelper("Safe response.", base)).code, 2);
 
+  let mode = "status";
+  const server = await api((_request, response) => {
+    if (mode === "status") {
+      response.writeHead(503, { "content-type": "application/json" });
+      response.end('{"error":{"code":"overloaded"}}');
+    } else if (mode === "type") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end("{}");
+    } else {
+      response.writeHead(200, { "content-type": "audio/wav" });
+      response.end("not-wave");
+    }
+  });
+  const env = { ...base, SCUFRIS_TTS_ENDPOINT: server.endpoint };
+  try {
+    const status = await runHelper("Safe response.", env);
+    assert.equal(status.code, 5);
+    assert.match(status.stderr, /status 503/);
+    mode = "type";
+    assert.equal((await runHelper("Safe response.", env)).code, 5);
+    mode = "wave";
+    const malformed = await runHelper("Safe response.", env);
+    assert.equal(malformed.code, 5);
+    assert.match(malformed.stderr, /invalid WAV/);
+  } finally {
+    await server.close();
+  }
+});
+
+test("helper cancellation stops only its exact playback child", async () => {
+  const item = await fixture();
   await fakeProgram(
     join(item.bin, "pw-play"),
-    `require("node:fs").appendFileSync(process.env.TEST_LOG, "player-started\\n");`,
-  );
-  await fakeProgram(join(item.bin, "piper"), `process.stdin.resume();`);
-  const empty = await runHelper("Safe response.", item.env);
-  assert.equal(empty.code, 5);
-  assert.match(empty.stderr, /^speech: Piper returned invalid WAV\n$/);
-  await assert.rejects(readFile(item.log, "utf8"));
-
-  await fakeProgram(
-    join(item.bin, "piper"),
-    `process.stdin.resume(); process.stdin.on("end", () => process.stdout.write("not-wave"));`,
-  );
-  const malformed = await runHelper("Safe response.", item.env);
-  assert.equal(malformed.code, 5);
-  assert.match(malformed.stderr, /^speech: Piper returned invalid WAV\n$/);
-  await assert.rejects(readFile(item.log, "utf8"));
-
-  await fakeProgram(
-    join(item.bin, "piper"),
-    `${wavBuilder}\nprocess.stdin.resume(); process.stdin.on("end", () => process.stdout.write(wav()));`,
-  );
-  await fakeProgram(join(item.bin, "pw-play"), `process.exit(8);`);
-  const unavailableAudio = await runHelper("Safe response.", item.env);
-  assert.equal(unavailableAudio.code, 6);
-
-  const missingModel = {
-    ...item.env,
-    SCUFRIS_PIPER_MODEL: join(item.root, "missing"),
-  };
-  assert.equal((await runHelper("Safe response.", missingModel)).code, 2);
-});
-
-test("helper cancellation signals only its exact synthesis and playback child", async () => {
-  const item = await fixture();
-  const hangingProgram = (name: string) => `const fs = require("node:fs");
+    `const fs = require("node:fs");
 process.on("SIGTERM", () => {
-  fs.appendFileSync(process.env.TEST_LOG, JSON.stringify({ event: "term", program: "${name}", pid: process.pid }) + "\\n");
+  fs.appendFileSync(process.env.TEST_LOG, JSON.stringify({ event: "term", pid: process.pid }) + "\\n");
   process.exit(143);
 });
-fs.appendFileSync(process.env.TEST_LOG, JSON.stringify({ event: "start", program: "${name}", pid: process.pid }) + "\\n");
+fs.appendFileSync(process.env.TEST_LOG, JSON.stringify({ event: "start", pid: process.pid }) + "\\n");
 process.stdin.resume();
-setInterval(() => {}, 1000);
-`;
-  await fakeProgram(join(item.bin, "piper"), hangingProgram("piper"));
-
+setInterval(() => {}, 1000);`,
+  );
+  const server = await api((_request, response) => {
+    response.writeHead(200, { "content-type": "audio/wav" });
+    response.end(wav());
+  });
   const unrelated = spawn(
     process.execPath,
     ["-e", "setInterval(() => {}, 1000)"],
-    { stdio: "ignore" },
+    {
+      stdio: "ignore",
+    },
   );
   const python = await executable("python3");
-  const helpers: ReturnType<typeof spawn>[] = [];
-  const cancelDuring = async (program: string) => {
-    const child = spawn(python, [helper], {
-      env: item.env,
-      stdio: ["pipe", "ignore", "ignore"],
-    });
-    helpers.push(child);
-    child.stdin.end("Cancellation stays safe.");
+  const child = spawn(python, [helper], {
+    env: {
+      ...process.env,
+      PATH: item.bin,
+      TEST_LOG: item.log,
+      SCUFRIS_TTS_ENDPOINT: server.endpoint,
+    },
+    stdio: ["pipe", "ignore", "ignore"],
+  });
+  child.stdin.end("Cancellation stays safe.");
+  try {
     await waitFor(async () => {
       try {
-        return (await readFile(item.log, "utf8")).includes(
-          `"event":"start","program":"${program}"`,
-        );
+        return (await readFile(item.log, "utf8")).includes('"event":"start"');
       } catch {
         return false;
       }
@@ -256,43 +258,20 @@ setInterval(() => {}, 1000);
       ),
       130,
     );
-  };
-
-  try {
-    await cancelDuring("piper");
-    await fakeProgram(
-      join(item.bin, "piper"),
-      `${wavBuilder}\nprocess.stdin.resume(); process.stdin.on("end", () => process.stdout.write(wav()));`,
-    );
-    await fakeProgram(join(item.bin, "pw-play"), hangingProgram("pw-play"));
-    await cancelDuring("pw-play");
-
     const records = (await readFile(item.log, "utf8"))
       .trim()
       .split("\n")
-      .map(
-        (line) =>
-          JSON.parse(line) as { event: string; program: string; pid: number },
-      );
-    const starts = new Map(
-      records
-        .filter((record) => record.event === "start")
-        .map((record) => [record.program, record.pid]),
+      .map((line) => JSON.parse(line) as { event: string; pid: number });
+    assert.deepEqual(
+      records.map(({ event }) => event),
+      ["start", "term"],
     );
-    const terms = new Map(
-      records
-        .filter((record) => record.event === "term")
-        .map((record) => [record.program, record.pid]),
-    );
-    assert.deepEqual(terms, starts);
+    assert.equal(records[0]?.pid, records[1]?.pid);
     assert.equal(unrelated.exitCode, null);
   } finally {
+    if (child.exitCode === null) child.kill("SIGKILL");
     unrelated.kill("SIGTERM");
     await new Promise((resolve) => unrelated.once("close", resolve));
-    for (const child of helpers) {
-      if (child.exitCode !== null) continue;
-      child.kill("SIGKILL");
-      await new Promise((resolve) => child.once("close", resolve));
-    }
+    await server.close();
   }
 });

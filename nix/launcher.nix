@@ -20,7 +20,7 @@
 in
   pkgs.writeShellApplication {
     name = "scufris";
-    # No Piper here. The agent decides what is worth saying aloud and the
+    # No speech inference here. The agent decides what is worth saying aloud and the
     # frontend synthesises it, so nothing in this process tree makes sound.
     runtimeInputs = [
       pkgs.python3

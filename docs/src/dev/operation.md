@@ -10,10 +10,9 @@ The launcher and helpers communicate through a small set of variables:
   workflow projects. The launcher sets the packaged default when unset.
 - `SCUFRIS_CALM`: reserved by the development launcher; Calm itself defaults
   on.
-- `SCUFRIS_PIPER_MODEL`, `SCUFRIS_PIPER_CONFIG`: trusted immutable Piper model
-  paths. They are bound inside `scufris-speak` by the package, and nothing in
-  the agent's process tree sets them.
-- `SCUFRIS_DESKTOP_SPEAK_COMMAND`: the synthesiser the companion runs. The
+- `SCUFRIS_STT_ENDPOINT`: the OpenAI-compatible transcription route.
+- `SCUFRIS_TTS_ENDPOINT`: the speech route used by `scufris-speak`.
+- `SCUFRIS_DESKTOP_SPEAK_COMMAND`: the HTTP/playback helper the companion runs. The
   desktop unit sets it when voice is enabled; a companion without it stays
   silent, which is not a fault.
 
@@ -21,8 +20,8 @@ Nothing here turns speech on. The agent shapes every answer as one prose
 paragraph whatever is listening, and whether a sound is made belongs to the
 companion, which owns the speaker.
 
-The worker launch wrapper removes `SCUFRIS_ROLE`, `SCUFRIS_CALM`, both Piper
-paths, `SCUFRIS_REPORT_CAPABILITY`, and the `PI_*` session variables, then sets
+The worker launch wrapper removes `SCUFRIS_ROLE`, `SCUFRIS_CALM`,
+`SCUFRIS_REPORT_CAPABILITY`, and the `PI_*` session variables, then sets
 `SCUFRIS_ROLE=worker`, `SCUFRIS_JOB_ID`, `SCUFRIS_JOB_GENERATION`, and a fresh
 `SCUFRIS_REPORT_CAPABILITY` for that execution. `SCUFRIS_PROJECT_ROOTS` passes
 through unchanged.
@@ -74,8 +73,9 @@ Service and desktop logs use structured `tracing` fields. INFO records major
 lifecycle events: listener startup, surface names connecting and disconnecting,
 the Pi agent connection, desktop identity, service readiness, and shutdown.
 DEBUG adds connection IDs, full protocol payloads, replay and recipient counts,
-message IDs, widget registrations, retry details, and transcription HTTP
-request/response metadata. Transcription audio and returned text are not logged.
+message IDs, widget registrations, retry details, and speech HTTP
+request/response metadata. Transcription audio, transcription text, and speech
+input text are not logged.
 DEBUG protocol payloads can contain conversation text and widget arguments, so
 enable them only while diagnosing a trusted local run.
 
@@ -105,16 +105,14 @@ all structured fields such as `F_NAME`, `F_SURFACE`, `F_CONNECTION`, and
 - Desktop evaluation fails: `desktop.enable` requires `service.enable`,
   because the companion is a client of the service that owns the conversation.
   Voice, the service, and the companion are all Linux-only.
-- Piper assertion fails: overrides must keep Piper 1.4.2 and the
-  configuration adjacent to the model as `model.onnx.json`.
-- Speech produces no audio: the companion is the only thing that makes sound,
-  so everything to check is on its side. Confirm
-  `programs.scufris.desktop.speech` is enabled so it has a synthesiser, confirm
-  the tray does not say "Unmute Scufris", and read its log for Piper or
-  PipeWire errors. Speech failures
-  never fail the assistant turn.
-- Voice input does not work: check `programs.scufris.desktop.transcription`
-  and the companion log.
+- Speech inference is unreachable: confirm either the enabled
+  `services.ai-tools-api` provider or the `scufris-ai-tools-api` fallback is
+  active and listening on the configured base URL.
+- Speech produces no audio: confirm `programs.scufris.desktop.speech` is
+  enabled, the tray does not say "Unmute Scufris", and read the companion log
+  for API or PipeWire errors. Speech failures never fail the assistant turn.
+- Voice input does not work: check the ai-tools-api transcription route and the
+  companion log.
 - A job shows `failed: worker execution was lost`: startup reconciliation
   found no live pane for a running record, for example after a reboot. The
   report and conversation survive; steer the job to continue it in a new

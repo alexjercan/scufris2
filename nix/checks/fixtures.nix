@@ -6,9 +6,6 @@
       "''${SCUFRIS_PROJECT_ROOTS-}" \
       "''${SCUFRIS_ROLE-}" \
       "''${SCUFRIS_CALM-}" \
-      "''${SCUFRIS_PIPER_MODEL-}" \
-      "''${SCUFRIS_PIPER_CONFIG-}" \
-      "$(type -P piper || true)" \
       "$(type -P pw-play || true)" \
       system-pi \
       "$@"

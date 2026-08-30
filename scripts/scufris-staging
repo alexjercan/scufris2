@@ -25,7 +25,9 @@ Environment:
   SCUFRIS_STAGING_ROOT     staging root (default: /tmp/scufris-staging)
   SCUFRIS_STAGING_SERVICE  scufris-service binary to run
   SCUFRIS_STAGING_DESKTOP  scufris-desktop binary to run
-  SCUFRIS_STAGING_SPEAK    synthesiser to give each companion
+  SCUFRIS_STAGING_SPEAK    HTTP speech/playback helper for each companion
+  SCUFRIS_STAGING_AI_TOOLS_API
+                            external (default) or managed by backend/up
   SCUFRIS_DESKTOP_HOTKEY   activation key (default: Super+G)
 EOF
 }
@@ -33,6 +35,11 @@ EOF
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 action="${1:-}"
 profile=""
+ai_tools_mode="${SCUFRIS_STAGING_AI_TOOLS_API:-external}"
+if [[ "$ai_tools_mode" != "external" && "$ai_tools_mode" != "managed" ]]; then
+  printf 'scufris-staging: SCUFRIS_STAGING_AI_TOOLS_API must be external or managed\n' >&2
+  exit 2
+fi
 case "$action:$#" in
   up:1 | backend:1) ;;
   frontend:2)
@@ -156,7 +163,8 @@ export SCUFRIS_RUNTIME_DIR="$runtime_dir"
 export PI_CODING_AGENT_DIR="$pi_agent"
 export SCUFRIS_PROJECT_ROOTS="[\"$projects\"]"
 export SCUFRIS_SERVICE_AGENT="$root/scripts/scufris-agent"
-export SCUFRIS_STT_ENDPOINT="${SCUFRIS_STT_ENDPOINT:-http://127.0.0.1:10301/inference}"
+export SCUFRIS_STT_ENDPOINT="${SCUFRIS_STT_ENDPOINT:-http://127.0.0.1:10300/v1/audio/transcriptions}"
+export SCUFRIS_TTS_ENDPOINT="${SCUFRIS_TTS_ENDPOINT:-http://127.0.0.1:10300/v1/audio/speech}"
 
 if [[ "$action" == "frontend" ]]; then
   export XDG_STATE_HOME="$frontend_root/state"
@@ -173,11 +181,6 @@ if ((need_desktop)); then
   export SCUFRIS_DESKTOP_COMMAND_SOCKET="${SCUFRIS_DESKTOP_COMMAND_SOCKET:-$runtime_dir/desktop.sock}"
   export SCUFRIS_DESKTOP_HOTKEY="${SCUFRIS_DESKTOP_HOTKEY:-Super+G}"
   speak="${SCUFRIS_DESKTOP_SPEAK_COMMAND:-${SCUFRIS_STAGING_SPEAK:-}}"
-  if [[ -z "$speak" && -n "${SCUFRIS_PIPER_MODEL:-}" && -n "${SCUFRIS_PIPER_CONFIG:-}" ]]; then
-    if [[ -x "$root/tools/voice/scufris-speak" ]]; then
-      speak="$root/tools/voice/scufris-speak"
-    fi
-  fi
   if [[ -n "$speak" ]]; then
     if [[ ! -x "$speak" ]]; then
       printf 'scufris-staging: %s is not executable\n' "$speak" >&2
@@ -200,6 +203,8 @@ scufris-staging: the staging environment
   SCUFRIS_PROJECT_ROOTS=$SCUFRIS_PROJECT_ROOTS
   SCUFRIS_SERVICE_AGENT=$SCUFRIS_SERVICE_AGENT
   SCUFRIS_STT_ENDPOINT=$SCUFRIS_STT_ENDPOINT
+  SCUFRIS_TTS_ENDPOINT=$SCUFRIS_TTS_ENDPOINT
+  ai_tools_api=$ai_tools_mode
 EOF
 if ((need_desktop)); then
   cat <<EOF
@@ -219,10 +224,11 @@ fi
 
 service_pid=""
 desktop_pid=""
+ai_tools_pid=""
 signalled=0
 stop_children() {
   local pid
-  for pid in "$desktop_pid" "$service_pid"; do
+  for pid in "$desktop_pid" "$service_pid" "$ai_tools_pid"; do
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       kill -TERM "$pid" 2>/dev/null || true
     fi
@@ -236,6 +242,16 @@ teardown() {
 }
 trap teardown INT TERM
 
+if ((need_service)) && [[ "$ai_tools_mode" == "managed" ]]; then
+  ai_tools_api="${SCUFRIS_STAGING_AI_TOOLS_API_PACKAGE:-}"
+  if [[ ! -x "$ai_tools_api" ]]; then
+    printf 'scufris-staging: managed ai-tools-api is not executable: %s\n' "$ai_tools_api" >&2
+    exit 2
+  fi
+  "$ai_tools_api" &
+  ai_tools_pid=$!
+  printf 'scufris-staging: ai-tools-api pid %d\n' "$ai_tools_pid"
+fi
 if ((need_service)); then
   "$service" &
   service_pid=$!
@@ -250,7 +266,7 @@ fi
 wait -n || true
 stop_children
 status=0
-for named in "service:$service_pid" "desktop:$desktop_pid"; do
+for named in "service:$service_pid" "desktop:$desktop_pid" "ai-tools-api:$ai_tools_pid"; do
   name="${named%%:*}"
   pid="${named#*:}"
   [[ -z "$pid" ]] && continue

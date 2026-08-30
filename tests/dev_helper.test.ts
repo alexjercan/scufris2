@@ -52,7 +52,7 @@ async function fixture() {
   );
   await executable(
     join(bin, "pi"),
-    `#!${process.execPath}\nconst { accessSync, constants, realpathSync } = require("node:fs");\nconst { delimiter, join } = require("node:path");\nconst ambientPi = (process.env.PATH ?? "").split(delimiter).map((entry) => join(entry || process.cwd(), "pi")).find((candidate) => { try { accessSync(candidate, constants.X_OK); return true; } catch { return false; } });\nconsole.log(JSON.stringify({ argv: process.argv.slice(2), foregroundPi: realpathSync(process.argv[1]), ambientPi: ambientPi ? realpathSync(ambientPi) : null, path: process.env.PATH ?? null, role: process.env.SCUFRIS_ROLE ?? null, model: process.env.SCUFRIS_PIPER_MODEL ?? null, config: process.env.SCUFRIS_PIPER_CONFIG ?? null, roots: process.env.SCUFRIS_PROJECT_ROOTS ?? null, stt: process.env.PI_STT_CONFIG ?? null, endpoint: process.env.TEST_STT_ENDPOINT ?? null }));\n`,
+    `#!${process.execPath}\nconst { accessSync, constants, realpathSync } = require("node:fs");\nconst { delimiter, join } = require("node:path");\nconst ambientPi = (process.env.PATH ?? "").split(delimiter).map((entry) => join(entry || process.cwd(), "pi")).find((candidate) => { try { accessSync(candidate, constants.X_OK); return true; } catch { return false; } });\nconsole.log(JSON.stringify({ argv: process.argv.slice(2), foregroundPi: realpathSync(process.argv[1]), ambientPi: ambientPi ? realpathSync(ambientPi) : null, path: process.env.PATH ?? null, role: process.env.SCUFRIS_ROLE ?? null, roots: process.env.SCUFRIS_PROJECT_ROOTS ?? null, stt: process.env.PI_STT_CONFIG ?? null, endpoint: process.env.TEST_STT_ENDPOINT ?? null }));\n`,
   );
   const npmBinAlias = join(directory, "npm-bin-alias");
   await symlink(repositoryNpmBin, npmBinAlias, "dir");
@@ -94,8 +94,6 @@ async function fixture() {
     TEST_STT_ENDPOINT: "inherited-endpoint",
   };
   delete env.SCUFRIS_PROJECT_ROOTS;
-  delete env.SCUFRIS_PIPER_MODEL;
-  delete env.SCUFRIS_PIPER_CONFIG;
   return { directory, bin, state, helper: fixtureHelper, systemPath, env };
 }
 
@@ -171,15 +169,12 @@ test("development runner keeps foreground and ambient Pi on the managed PATH", a
   assert.equal(packageJson.scripts.pi, undefined);
 
   const item = await fixture();
-  // Piper paths from the ambient environment are dropped rather than passed
-  // on: the trusted pair is bound inside `scufris-speak`, and the agent runs
-  // no synthesiser to hand them to.
-  const env = {
-    ...item.env,
-    SCUFRIS_PIPER_MODEL: "/untrusted/model",
-    SCUFRIS_PIPER_CONFIG: "/untrusted/config",
-  };
-  const result = await run(["user-argument"], env, item.directory, item.helper);
+  const result = await run(
+    ["user-argument"],
+    item.env,
+    item.directory,
+    item.helper,
+  );
   assert.equal(result.code, 0, result.stderr);
   const sessionDirectory = join(item.state, "scufris", "dev-sessions");
   const output = JSON.parse(result.stdout);
@@ -187,8 +182,6 @@ test("development runner keeps foreground and ambient Pi on the managed PATH", a
   assert.deepEqual(output, {
     argv: expectedArgs(item.directory, sessionDirectory),
     role: "orchestrator",
-    model: null,
-    config: null,
     roots: '["~/personal","~/work","~/third-party"]',
     stt: "/global/pi-voice-stt.json",
     endpoint: "inherited-endpoint",

@@ -241,7 +241,7 @@ impl Surface for DesktopSurface {
     }
 }
 
-/// Local transcription through the configured whisper-server endpoint.
+/// Local transcription through the configured ai-tools-api endpoint.
 struct HttpTranscriber {
     endpoint: String,
 }

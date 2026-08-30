@@ -50,6 +50,8 @@ struct ProtocolTests {
     func backendStateMapsToTheTextSurfaceGrammar() {
         #expect(SurfaceVisualState.connected(serviceState: "idle") == .idle)
         #expect(SurfaceVisualState.connected(serviceState: "working") == .working)
+        #expect(SurfaceVisualState.working.showsThinking)
+        #expect(!SurfaceVisualState.idle.showsThinking)
         #expect(SurfaceVisualState.connected(serviceState: "blocked") == .attention)
         #expect(SurfaceVisualState.connected(serviceState: "failed") == .error)
         #expect(SurfaceVisualState.connected(serviceState: "starting") == .connecting)

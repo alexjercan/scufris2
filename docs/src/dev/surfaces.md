@@ -74,14 +74,14 @@ All messages include `"v": 4`.
 
 ## Messages a client receives
 
-| Type                  | Client action                                              |
-| --------------------- | ---------------------------------------------------------- |
-| `surface.message`     | Store and display it                                       |
-| `surface.message_ack` | Settle the matching pending submission                     |
-| `surface.aborted`     | Settle the matching abort                                  |
-| `surface.state`       | Show `failed`, `blocked`, `working`, `starting`, or `idle` |
-| `surface.ready`       | End replay; enable live effects                            |
-| `surface.rejected`    | Show the bounded code/detail; keep user data when relevant |
+| Type                  | Client action                                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `surface.message`     | Store and display it                                                                                                      |
+| `surface.message_ack` | Settle the matching pending submission                                                                                    |
+| `surface.aborted`     | Settle the matching abort                                                                                                 |
+| `surface.state`       | Show `failed`, `blocked`, `working`, `starting`, or `idle`; conversation views present working as transient `thinking...` |
+| `surface.ready`       | End replay; enable live effects                                                                                           |
+| `surface.rejected`    | Show the bounded code/detail; keep user data when relevant                                                                |
 
 A conversation message contains `role`, `surface`, `text`, optional `details`,
 and optional widget calls. The `surface` field is the stable ID associated with

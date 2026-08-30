@@ -110,6 +110,7 @@ class Stub {
   readonly classes = new Set<string>();
   readonly listeners = new Map<string, Listener[]>();
   page: Page | null = null;
+  parent: Stub | null = null;
 
   get textContent(): string {
     return this.content;
@@ -139,17 +140,28 @@ class Stub {
   };
 
   appendChild(node: Stub): Stub {
+    node.parent = this;
     this.children.push(node);
     return node;
   }
 
   append(...nodes: Stub[]): void {
+    for (const node of nodes) node.parent = this;
     this.children.push(...nodes);
   }
 
   replaceChildren(...nodes: Stub[]): void {
+    for (const child of this.children) child.parent = null;
     this.children.length = 0;
+    for (const node of nodes) node.parent = this;
     this.children.push(...nodes);
+  }
+
+  remove(): void {
+    if (this.parent === null) return;
+    const index = this.parent.children.indexOf(this);
+    if (index >= 0) this.parent.children.splice(index, 1);
+    this.parent = null;
   }
 
   addEventListener(type: string, handler: Listener): void {
@@ -432,7 +444,7 @@ function hud(taken = true, lines: Record<string, string>[] = []): Page {
   const page = new Page();
   page.answers["hud_ready"] = {
     lines,
-    notice: { sending: false, trouble: "" },
+    notice: { sending: false, thinking: false, trouble: "" },
   };
   page.answers["hud_submit"] = taken;
   run(page, ["lines", "notice", "words"], [pages().hud]);
@@ -882,7 +894,11 @@ test("the notice says the worst thing that is true", async () => {
   assert.equal(notice.dataset["tone"], "keys");
   assert.equal(notice.textContent, "enter sends - esc closes");
 
-  page.publish("scufris://notice", { sending: true, trouble: "" });
+  page.publish("scufris://notice", {
+    sending: true,
+    thinking: false,
+    trouble: "",
+  });
   assert.equal(notice.dataset["tone"], "sending");
   assert.equal(notice.textContent, "sending");
 
@@ -891,13 +907,63 @@ test("the notice says the worst thing that is true", async () => {
   // person can do something about.
   page.publish("scufris://notice", {
     sending: true,
+    thinking: false,
     trouble: "Scufris is not reachable.",
   });
   assert.equal(notice.dataset["tone"], "trouble");
   assert.equal(notice.textContent, "Scufris is not reachable.");
 
-  page.publish("scufris://notice", { sending: false, trouble: "" });
+  page.publish("scufris://notice", {
+    sending: false,
+    thinking: false,
+    trouble: "",
+  });
   assert.equal(notice.dataset["tone"], "keys");
+});
+
+test("working adds one transient thinking line and terminal state hides it", async () => {
+  const page = hud(true, [line("user", "check this")]);
+  await settle();
+  const lines = page.element("lines");
+
+  page.publish("scufris://notice", {
+    sending: false,
+    thinking: true,
+    trouble: "",
+  });
+  assert.equal(lines.children.length, 2);
+  const thinking = lines.children[1];
+  assert.ok(thinking !== undefined);
+  assert.equal(thinking.dataset["transient"], "thinking");
+  assert.deepEqual(
+    thinking.children.map((part) => part.content),
+    ["scufris", "thinking..."],
+  );
+
+  page.publish("scufris://notice", {
+    sending: false,
+    thinking: true,
+    trouble: "",
+  });
+  assert.equal(lines.children.length, 2);
+
+  page.publish("scufris://notice", {
+    sending: false,
+    thinking: false,
+    trouble: "",
+  });
+  assert.equal(lines.children.length, 1);
+
+  page.publish("scufris://notice", {
+    sending: false,
+    thinking: true,
+    trouble: "",
+  });
+  const secondThinking = lines.children[1];
+  assert.ok(secondThinking !== undefined);
+  page.publish("scufris://said", line("assistant", "done"));
+  assert.equal(lines.children.length, 2);
+  assert.equal(secondThinking.parent, null);
 });
 
 test("one Enter is one message and Shift+Enter is a newline", async () => {

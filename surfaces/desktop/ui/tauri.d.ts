@@ -45,6 +45,7 @@ interface ConversationEntry {
 
 interface Notice {
   sending: boolean;
+  thinking: boolean;
   trouble: string;
 }
 

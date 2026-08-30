@@ -60,7 +60,7 @@ click pill
 scufris-ctl hud
     |
     v
-conversation window: last 200 canonical messages + input line
+conversation window: last 200 canonical messages + transient thinking state + input line
 ```
 
 `Enter` sends. `Shift+Enter` adds a line. `Escape` closes the window. A desktop

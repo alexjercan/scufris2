@@ -19,6 +19,7 @@
   --muted: #6c7772;
   --quartz: #95a99f;
   --wisteria: #9e95c7;
+  --niagara: #96a6c8;
   --yellow: #ffdd33;
   --red: #f43841;
   --mono:
@@ -182,6 +183,11 @@ body {
 
 .line[data-speaker="user"] .what {
   color: var(--fg);
+}
+
+.line[data-transient="thinking"] .who,
+.line[data-transient="thinking"] .what {
+  color: var(--niagara);
 }
 
 /* An empty conversation says so rather than showing an empty box: a window with

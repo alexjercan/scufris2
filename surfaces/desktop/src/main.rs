@@ -605,6 +605,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                         observer.observe(LinkEvent::HandshakeFailed);
                     }
                     LinkEvent::State(state, detail) => {
+                        said.assistant(state);
                         observer.observe(LinkEvent::State(state, detail));
                         surfaces.assistant(observer.shown_assistant());
                     }

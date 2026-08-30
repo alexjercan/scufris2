@@ -21,7 +21,7 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
 };
 
-use scufris_control::service::ConversationMessage;
+use scufris_control::service::{ConversationMessage, ScufrisState};
 use serde::Serialize;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
@@ -154,9 +154,19 @@ impl Hud {
     /// terminal. The window does not have to be up: a page that is loaded and
     /// down still appends, so opening it is never a wait for content.
     pub fn said(&self, entry: ConversationMessage) {
-        self.lock().said(entry.clone());
+        let finished = self.lock().said(entry.clone());
         if let Err(error) = self.app.emit_to(LABEL, SAID_EVENT, entry) {
             debug!("the HUD did not take a line: {error}");
+        }
+        if finished {
+            self.tell();
+        }
+    }
+
+    /// Presents the service's live state beside, but never inside, history.
+    pub fn assistant(&self, state: ScufrisState) {
+        if self.lock().assistant(state) {
+            self.tell();
         }
     }
 

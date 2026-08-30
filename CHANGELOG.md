@@ -36,6 +36,9 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The text-only iOS surface now follows the dark terminal interaction study:
   route and state header, speaker-column transcript, inline details, and a
   compact bottom composer. Its next TestFlight marketing version is 1.1.0.
+- Desktop and iOS conversation views show one transient `thinking...` row while
+  the service reports working. It clears on the final response or another state
+  and never enters canonical replay.
 
 ### Removed
 

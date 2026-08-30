@@ -70,12 +70,16 @@ struct ContentView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 17) {
-                    if store.conversation.isEmpty {
+                    if store.conversation.isEmpty && !store.isThinking {
                         emptyConversation
                     } else {
                         ForEach(store.conversation) { entry in
                             ConversationRow(entry: entry)
                                 .id(entry.id)
+                        }
+                        if store.isThinking {
+                            ThinkingRow()
+                                .id("thinking")
                         }
                     }
                 }
@@ -89,6 +93,13 @@ struct ContentView: View {
                 if let last = store.conversation.last {
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                }
+            }
+            .onChange(of: store.isThinking) {
+                if store.isThinking {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo("thinking", anchor: .bottom)
                     }
                 }
             }
@@ -223,6 +234,25 @@ struct ContentView: View {
                 .overlay(Rectangle().stroke(ScufrisPalette.lineStrong, lineWidth: 1))
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct ThinkingRow: View {
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("SCUFRIS")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .tracking(1.15)
+                .foregroundStyle(ScufrisPalette.niagara)
+                .frame(width: 67, alignment: .trailing)
+
+            Text("thinking...")
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(ScufrisPalette.niagara)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Scufris is thinking")
     }
 }
 
@@ -404,6 +434,10 @@ enum SurfaceVisualState: String, Equatable {
         case .offline, .error: "Scufris will keep trying in the background."
         default: "Type below to start."
         }
+    }
+
+    var showsThinking: Bool {
+        self == .working
     }
 
     var accent: Color {

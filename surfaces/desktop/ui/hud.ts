@@ -7,8 +7,8 @@
 // lines to draw and a notice to show; what leaves is Enter and Escape.
 //
 // The lines it draws are text. Not markdown, not tool calls, not thinking - the
-// service's conversation projection is what was said. Private Pi tool and
-// thinking data stays in the session file.
+// service's conversation projection is what was said. The one transient
+// `thinking...` row is presentation of service state and never enters history.
 //
 // Wrapped in a block: the pages are separate classic scripts in one tsc
 // project, so a name at the top level of one is a name in the others' global
@@ -56,6 +56,7 @@
 
   /** What one line does to the notice line, when nothing is in flight. */
   const KEYS = "enter sends - esc closes";
+  let thinkingLine: HTMLLIElement | null = null;
 
   // ---------- drawing ----------
 
@@ -86,6 +87,7 @@
   };
 
   const append = (entry: ConversationEntry): void => {
+    if (entry.role === "assistant") setThinking(false);
     // Whether to follow is decided before the line goes in, because adding it
     // is what changes the answer. A person who has scrolled up to read
     // something is not dragged back down by the next line arriving.
@@ -95,11 +97,32 @@
   };
 
   const replace = (entries: ConversationEntry[]): void => {
+    thinkingLine = null;
     lines.replaceChildren(...entries.map(draw));
     lines.scrollTop = lines.scrollHeight;
   };
 
+  const setThinking = (active: boolean): void => {
+    if (!active) {
+      thinkingLine?.remove();
+      thinkingLine = null;
+      return;
+    }
+    const follow = atBottom();
+    if (thinkingLine === null) {
+      thinkingLine = draw({
+        role: "assistant",
+        surface: "presentation",
+        text: "thinking...",
+      });
+      thinkingLine.dataset["transient"] = "thinking";
+      lines.append(thinkingLine);
+    }
+    if (follow) lines.scrollTop = lines.scrollHeight;
+  };
+
   const say = (state: Notice): void => {
+    setThinking(state.thinking === true);
     if (state.trouble !== "") {
       notice.dataset["tone"] = "trouble";
       notice.textContent = state.trouble;

@@ -20,7 +20,7 @@
 
 use std::collections::VecDeque;
 
-use scufris_control::service::ConversationMessage;
+use scufris_control::service::{ConversationMessage, ConversationRole, ScufrisState};
 use serde::Serialize;
 
 /// How many lines the companion keeps.
@@ -35,6 +35,8 @@ pub const LINES: usize = 200;
 pub struct Notice {
     /// True while a typed line is waiting for the service to take it.
     pub sending: bool,
+    /// True while the agent is working without a final response.
+    pub thinking: bool,
     /// What went wrong, empty when nothing did.
     pub trouble: String,
 }
@@ -45,6 +47,7 @@ pub struct Conversation {
     lines: VecDeque<ConversationMessage>,
     /// The identifier of the line the service has not answered for yet.
     sending: Option<String>,
+    thinking: bool,
     trouble: String,
     prefix: String,
     submissions: u64,
@@ -62,6 +65,7 @@ impl Conversation {
         Self {
             lines: VecDeque::new(),
             sending: None,
+            thinking: false,
             trouble: String::new(),
             prefix: prefix.into(),
             submissions: 0,
@@ -74,11 +78,26 @@ impl Conversation {
     /// it: the service pushes its ring on connect and every line after it, so
     /// a line sent by another registered surface appears in the HUD the same
     /// way one typed into this HUD does.
-    pub fn said(&mut self, entry: ConversationMessage) {
+    pub fn said(&mut self, entry: ConversationMessage) -> bool {
         if self.lines.len() == LINES {
             self.lines.pop_front();
         }
+        let finished = entry.role == ConversationRole::Assistant && self.thinking;
+        if finished {
+            self.thinking = false;
+        }
         self.lines.push_back(entry);
+        finished
+    }
+
+    /// Presents the service's live agent state without adding conversation.
+    pub fn assistant(&mut self, state: ScufrisState) -> bool {
+        let thinking = state == ScufrisState::Working;
+        if self.thinking == thinking {
+            return false;
+        }
+        self.thinking = thinking;
+        true
     }
 
     /// Everything said so far, oldest first.
@@ -95,6 +114,7 @@ impl Conversation {
     /// the replay the two hold exactly the same lines.
     pub fn restart(&mut self) {
         self.lines.clear();
+        self.thinking = false;
         self.trouble = "Loading conversation.".into();
     }
 
@@ -112,8 +132,9 @@ impl Conversation {
     /// reconnection brings, and the field would refuse every line after it for
     /// the rest of the session.
     pub fn dropped(&mut self, trouble: impl Into<String>) -> bool {
+        let changed = std::mem::take(&mut self.thinking);
         if self.sending.take().is_none() {
-            return false;
+            return changed;
         }
         self.trouble = trouble.into();
         true
@@ -170,6 +191,7 @@ impl Conversation {
     pub fn notice(&self) -> Notice {
         Notice {
             sending: self.sending.is_some(),
+            thinking: self.thinking,
             trouble: self.trouble.clone(),
         }
     }
@@ -268,6 +290,7 @@ mod tests {
             conversation.notice(),
             Notice {
                 sending: false,
+                thinking: false,
                 trouble: String::new(),
             }
         );
@@ -284,6 +307,7 @@ mod tests {
             conversation.notice(),
             Notice {
                 sending: false,
+                thinking: false,
                 trouble: "Scufris is not reachable.".into(),
             }
         );
@@ -308,6 +332,28 @@ mod tests {
         conversation.refused(&first, "Scufris is not reachable.");
         conversation.typed("hello").expect("the line is sent");
         assert_eq!(conversation.notice().trouble, "");
+    }
+
+    #[test]
+    fn working_is_transient_and_a_final_answer_clears_it() {
+        let mut conversation = Conversation::new("p");
+        assert!(conversation.assistant(ScufrisState::Working));
+        assert!(conversation.notice().thinking);
+        assert!(!conversation.assistant(ScufrisState::Working));
+        assert!(conversation.said(said("done")));
+        assert!(!conversation.notice().thinking);
+        assert_eq!(conversation.lines().len(), 1);
+    }
+
+    #[test]
+    fn a_terminal_state_and_disconnect_clear_thinking() {
+        let mut conversation = Conversation::new("p");
+        conversation.assistant(ScufrisState::Working);
+        assert!(conversation.assistant(ScufrisState::Blocked));
+        assert!(!conversation.notice().thinking);
+        conversation.assistant(ScufrisState::Working);
+        assert!(conversation.dropped("offline"));
+        assert!(!conversation.notice().thinking);
     }
 
     #[test]
@@ -336,6 +382,7 @@ mod tests {
             conversation.notice(),
             Notice {
                 sending: false,
+                thinking: false,
                 trouble: "Scufris is not reachable.".into(),
             }
         );

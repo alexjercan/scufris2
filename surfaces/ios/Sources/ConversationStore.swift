@@ -43,6 +43,10 @@ final class ConversationStore: ObservableObject {
         }
     }
 
+    var isThinking: Bool {
+        visualState.showsThinking
+    }
+
     var routeLabel: String {
         guard let url = URL(string: settings.backendURL), let host = url.host else {
             return "private WSS / not configured"
@@ -55,7 +59,7 @@ final class ConversationStore: ObservableObject {
         guard !serviceDetail.isEmpty, serviceDetail != "Ready" else { return false }
         switch connectionState {
         case .connected:
-            return serviceState != "idle"
+            return serviceState != "idle" && serviceState != "working"
         case .unconfigured:
             return false
         case .connecting, .disconnected:
@@ -233,6 +237,9 @@ final class ConversationStore: ObservableObject {
                     details: message.details
                 )
             )
+            if message.role == .assistant {
+                serviceState = "idle"
+            }
         case "surface.ready":
             _ = try decoder.decode(IncomingReady.self, from: data)
             connectionState = .connected

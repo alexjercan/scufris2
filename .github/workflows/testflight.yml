@@ -16,6 +16,7 @@ jobs:
     runs-on: macos-15
     environment: testflight
     env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
       APPLE_DISTRIBUTION_CERTIFICATE_P12: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_P12 }}
       APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
       APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}

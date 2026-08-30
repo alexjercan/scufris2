@@ -1,6 +1,6 @@
 # Release Scufris 0.6.0
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: release
 

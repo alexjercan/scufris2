@@ -166,6 +166,62 @@ body {
   white-space: pre-wrap;
 }
 
+.message-attachments {
+  display: flex;
+  flex: 1 0 calc(100% - var(--gutter) - var(--step));
+  flex-direction: column;
+  gap: 6px;
+  margin-left: calc(var(--gutter) + var(--step));
+}
+
+.message-attachment {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 9px;
+  border-left: 2px solid var(--line);
+  background: #161616;
+}
+
+.attachment-identity {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.attachment-identity strong,
+.attachment-identity small {
+  overflow: hidden;
+  font: inherit;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.attachment-identity small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.attachment-action,
+.attach {
+  border: 1px solid var(--line);
+  padding: 2px 6px;
+  background: transparent;
+  color: var(--quartz);
+  font: inherit;
+  cursor: pointer;
+}
+
+.attachment-action:hover,
+.attachment-action:focus,
+.attach:hover,
+.attach:focus {
+  border-color: var(--quartz);
+  outline: none;
+}
+
 .details {
   flex: 1 0 calc(100% - var(--gutter) - var(--step));
   margin: 0 0 0 calc(var(--gutter) + var(--step));
@@ -208,10 +264,55 @@ body {
 .ask {
   display: flex;
   flex: 0 0 auto;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px var(--step) 11px;
+  border-top: 1px solid var(--line);
+}
+
+.composer {
+  display: flex;
   gap: 10px;
   align-items: baseline;
-  padding: 11px var(--step);
-  border-top: 1px solid var(--line);
+}
+
+.selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.selected:empty {
+  display: none;
+}
+
+.selected-attachment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  padding: 2px 4px 2px 7px;
+  border: 1px solid var(--line);
+  color: var(--fg);
+  font-size: 11px;
+}
+
+.selected-attachment > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.attach {
+  flex: 0 0 auto;
+  width: 24px;
+  padding: 0;
+  color: var(--yellow);
+}
+
+.attach:disabled {
+  cursor: wait;
+  opacity: 0.45;
 }
 
 .caret {

@@ -34,11 +34,10 @@
     env.OPENSSL_NO_VENDOR = "1";
     preFixup = ''
       gappsWrapperArgs+=(--prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath tauriLibraries})
-      # Widget backends are Python 3 programs the companion spawns. The
-      # interpreter belongs to the package: a widget whose numbers depend on
-      # what the person's PATH happens to carry is a widget that works on the
-      # machine it was written on.
-      gappsWrapperArgs+=(--prefix PATH : ${lib.makeBinPath [pkgs.python3]})
+      # Widget backends and explicit attachment opening do not depend on the
+      # person's PATH. xdg-open selects a handler without passing content to a
+      # shell; executable and opaque attachment media types are save-only.
+      gappsWrapperArgs+=(--prefix PATH : ${lib.makeBinPath [pkgs.python3 pkgs.xdg-utils]})
     '';
     meta = {
       description = "Scufris voice pill and tray companion";

@@ -21,7 +21,7 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
 };
 
-use scufris_control::service::{ConversationMessage, ScufrisState};
+use scufris_control::service::{AttachmentDescriptor, ConversationMessage, ScufrisState};
 use serde::Serialize;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
@@ -298,22 +298,52 @@ impl Hud {
     /// field for the person to send again. The page cleared the field before
     /// asking, so they did not: the sentence went nowhere and nothing said so.
     pub fn typed(&self, text: String) -> bool {
-        let Some(id) = self.lock().typed(&text) else {
+        let Some(submission) = self.lock().typed(&text) else {
             // Blank, or a second Enter on a line that is still in flight. The
-            // words are still in the field either way.
+            // words and files are still in the composer either way.
             return false;
         };
         self.tell();
         let sent = match self.backend.get() {
-            Some(backend) => backend.submit(id.clone(), text),
+            Some(backend) => {
+                backend.submit_with_attachments(submission.id.clone(), text, submission.attachments)
+            }
             None => Err("Scufris is not reachable.".into()),
         };
         if let Err(trouble) = sent {
-            self.refused(&id, trouble);
+            self.refused(&submission.id, trouble);
         }
-        // Taken by the window, which is what the field is cleared on. Whether
-        // the service takes it is a later answer and it arrives as a notice.
+        // Taken by the window, which is what the composer is cleared on.
+        // Whether the service takes it is a later answer and arrives as notice.
         true
+    }
+
+    /// Adds one imported managed file to the composer.
+    pub fn attach_file(&self, descriptor: AttachmentDescriptor) -> Result<Notice, String> {
+        let mut state = self.lock();
+        if !state.attach(descriptor) {
+            return Err("A message can contain at most 8 different attachments.".into());
+        }
+        let notice = state.notice();
+        drop(state);
+        self.tell();
+        Ok(notice)
+    }
+
+    /// Removes one selected managed file from the composer.
+    pub fn detach(&self, id: &str) -> Notice {
+        let mut state = self.lock();
+        state.detach(id);
+        let notice = state.notice();
+        drop(state);
+        self.tell();
+        notice
+    }
+
+    /// Shows a safe local attachment operation failure.
+    pub fn attachment_failed(&self, trouble: impl Into<String>) {
+        self.lock().attachment_failed(trouble);
+        self.tell();
     }
 
     /// The service took a line. Nothing happens unless it was this window's.

@@ -45,6 +45,8 @@
   const lines = element<HTMLOListElement>("lines");
   const notice = element<HTMLElement>("notice");
   const words = element<HTMLTextAreaElement>("words");
+  const selected = element<HTMLElement>("selected");
+  const attach = element<HTMLButtonElement>("attach");
 
   // What the gutter says for each speaker. A speaker with no word here is one
   // this build does not know about, and it is drawn rather than dropped: a line
@@ -55,8 +57,41 @@
   };
 
   /** What one line does to the notice line, when nothing is in flight. */
-  const KEYS = "enter sends - esc closes";
+  const KEYS = "enter sends - + attaches - esc closes";
   let thinkingLine: HTMLLIElement | null = null;
+  let selectedAttachments: AttachmentDescriptor[] = [];
+
+  const size = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KiB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  };
+
+  const canOpen = (descriptor: AttachmentDescriptor): boolean =>
+    descriptor.media_type.startsWith("image/") ||
+    descriptor.media_type.startsWith("text/") ||
+    descriptor.media_type === "application/pdf" ||
+    descriptor.media_type === "application/json";
+
+  const action = (
+    label: string,
+    title: string,
+    run: () => Promise<unknown>,
+  ): HTMLButtonElement => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "attachment-action";
+    button.textContent = label;
+    button.title = title;
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void run().catch((error: unknown) => {
+        notice.dataset["tone"] = "trouble";
+        notice.textContent = String(error);
+      });
+    });
+    return button;
+  };
 
   // ---------- drawing ----------
 
@@ -77,6 +112,36 @@
     what.className = "what";
     what.textContent = entry.text;
     line.append(who, what);
+    if (entry.attachments && entry.attachments.length > 0) {
+      const attachments = document.createElement("span");
+      attachments.className = "message-attachments";
+      for (const descriptor of entry.attachments) {
+        const item = document.createElement("span");
+        item.className = "message-attachment";
+        const identity = document.createElement("span");
+        identity.className = "attachment-identity";
+        const name = document.createElement("strong");
+        name.textContent = descriptor.name;
+        const metadata = document.createElement("small");
+        metadata.textContent = `${descriptor.media_type} - ${size(descriptor.size)}`;
+        identity.append(name, metadata);
+        item.append(identity);
+        if (canOpen(descriptor)) {
+          item.append(
+            action("open", `Open ${descriptor.name}`, () =>
+              invoke("hud_open_attachment", { descriptor }),
+            ),
+          );
+        }
+        item.append(
+          action("save", `Save ${descriptor.name}`, () =>
+            invoke("hud_save_attachment", { descriptor }),
+          ),
+        );
+        attachments.append(item);
+      }
+      line.append(attachments);
+    }
     if (entry.details) {
       const details = document.createElement("pre");
       details.className = "details";
@@ -121,8 +186,29 @@
     if (follow) lines.scrollTop = lines.scrollHeight;
   };
 
+  const drawSelected = (attachments: AttachmentDescriptor[]): void => {
+    selectedAttachments = attachments;
+    selected.replaceChildren(
+      ...attachments.map((descriptor) => {
+        const chip = document.createElement("span");
+        chip.className = "selected-attachment";
+        const name = document.createElement("span");
+        name.textContent = `${descriptor.name} - ${size(descriptor.size)}`;
+        const remove = action("x", `Remove ${descriptor.name}`, async () => {
+          const state = (await invoke("hud_detach", {
+            id: descriptor.id,
+          })) as Notice;
+          say(state);
+        });
+        chip.append(name, remove);
+        return chip;
+      }),
+    );
+  };
+
   const say = (state: Notice): void => {
     setThinking(state.thinking === true);
+    drawSelected(state.attachments ?? []);
     if (state.trouble !== "") {
       notice.dataset["tone"] = "trouble";
       notice.textContent = state.trouble;
@@ -149,6 +235,22 @@
 
   words.addEventListener("input", fit);
 
+  attach.addEventListener("click", () => {
+    if (selectedAttachments.length >= 8 || attach.disabled) return;
+    attach.disabled = true;
+    notice.dataset["tone"] = "sending";
+    notice.textContent = "importing";
+    void invoke("hud_attach")
+      .then((state) => say(state as Notice))
+      .catch((error: unknown) => {
+        notice.dataset["tone"] = "trouble";
+        notice.textContent = String(error);
+      })
+      .finally(() => {
+        attach.disabled = false;
+      });
+  });
+
   const send = async (): Promise<void> => {
     const text = words.value;
     if (text.trim() === "") return;
@@ -165,6 +267,8 @@
     const taken = (await invoke("hud_submit", { text })) as boolean;
     if (!taken) return;
     words.value = "";
+    selectedAttachments = [];
+    selected.replaceChildren();
     fit();
   };
 

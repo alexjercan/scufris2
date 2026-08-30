@@ -137,7 +137,10 @@ in
       # Widget backends are Python 3 programs the companion spawns, so the
       # interpreter is part of the package rather than of the person's PATH.
       grep -Fx ${lib.escapeShellArg (toString pkgs.python3)} "$desktop"
+      grep -Fx ${lib.escapeShellArg (toString pkgs.xdg-utils)} "$desktop"
       grep -F ${lib.escapeShellArg (toString pkgs.python3)} \
+        "$(readlink -f ${desktop}/bin/scufris-desktop)"
+      grep -F ${lib.escapeShellArg (toString pkgs.xdg-utils)} \
         "$(readlink -f ${desktop}/bin/scufris-desktop)"
       test -f ${desktop}/share/applications/scufris-desktop.desktop
       test -f ${desktop}/share/icons/hicolor/scalable/apps/scufris.svg

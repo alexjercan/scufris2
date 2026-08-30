@@ -231,6 +231,19 @@ pub trait Transcriber: Send + Sync {
 pub trait Backend: Send + Sync {
     /// Submits one accepted transcript.
     fn submit(&self, id: String, text: String) -> Result<(), String>;
+    /// Submits one HUD message with managed attachment IDs.
+    fn submit_with_attachments(
+        &self,
+        id: String,
+        text: String,
+        attachments: Vec<String>,
+    ) -> Result<(), String> {
+        if attachments.is_empty() {
+            self.submit(id, text)
+        } else {
+            Err("This surface cannot submit attachments.".into())
+        }
+    }
     /// Ends the agent's current run.
     fn abort(&self, id: String) -> Result<(), String>;
 }

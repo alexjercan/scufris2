@@ -444,10 +444,10 @@ function hud(taken = true, lines: Record<string, string>[] = []): Page {
   const page = new Page();
   page.answers["hud_ready"] = {
     lines,
-    notice: { sending: false, thinking: false, trouble: "" },
+    notice: { sending: false, thinking: false, attachments: [], trouble: "" },
   };
   page.answers["hud_submit"] = taken;
-  run(page, ["lines", "notice", "words"], [pages().hud]);
+  run(page, ["lines", "notice", "words", "selected", "attach"], [pages().hud]);
   return page;
 }
 
@@ -863,6 +863,67 @@ test("the conversation window draws every line it is handed, and who said it", a
   );
 });
 
+test("managed attachments are selected, rendered, opened, saved, and removed by id", async () => {
+  const descriptor = {
+    id: "att_one",
+    name: "diagram.png",
+    media_type: "image/png",
+    size: 2048,
+  };
+  const page = hud();
+  page.answers["hud_attach"] = {
+    sending: false,
+    thinking: false,
+    attachments: [descriptor],
+    trouble: "",
+  };
+  page.answers["hud_detach"] = {
+    sending: false,
+    thinking: false,
+    attachments: [],
+    trouble: "",
+  };
+  await settle();
+
+  page.element("attach").dispatch("click", {});
+  await settle();
+  assert.deepEqual(page.commands(), ["hud_ready", "hud_attach"]);
+  const selected = page.element("selected");
+  assert.equal(selected.children.length, 1);
+  assert.equal(
+    selected.children[0]?.children[0]?.textContent,
+    "diagram.png - 2 KiB",
+  );
+
+  page.publish("scufris://said", {
+    ...line("assistant", "Here it is."),
+    attachments: [descriptor],
+  });
+  const rendered = page.element("lines").children[0]?.children[2];
+  assert.ok(rendered !== undefined);
+  const card = rendered.children[0];
+  assert.ok(card !== undefined);
+  assert.equal(card.children[0]?.children[0]?.textContent, "diagram.png");
+  card.children[1]?.dispatch("click", { stopPropagation: () => {} });
+  card.children[2]?.dispatch("click", { stopPropagation: () => {} });
+  await settle();
+  assert.deepEqual(
+    page.lastCall("hud_open_attachment")["descriptor"],
+    descriptor,
+  );
+  assert.deepEqual(
+    page.lastCall("hud_save_attachment")["descriptor"],
+    descriptor,
+  );
+
+  selected.children[0]?.children[1]?.dispatch("click", {
+    stopPropagation: () => {},
+  });
+  await settle();
+  assert.equal(page.lastCall("hud_detach")["id"], "att_one");
+  assert.equal(selected.children.length, 0);
+});
+
 test("a person who has scrolled up to read is not dragged back down", async () => {
   const page = hud();
   await settle();
@@ -892,7 +953,7 @@ test("the notice says the worst thing that is true", async () => {
   await settle();
   const notice = page.element("notice");
   assert.equal(notice.dataset["tone"], "keys");
-  assert.equal(notice.textContent, "enter sends - esc closes");
+  assert.equal(notice.textContent, "enter sends - + attaches - esc closes");
 
   page.publish("scufris://notice", {
     sending: true,

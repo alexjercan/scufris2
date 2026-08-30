@@ -63,8 +63,11 @@ scufris-ctl hud
 conversation window: last 200 canonical messages + transient thinking state + input line
 ```
 
-`Enter` sends. `Shift+Enter` adds a line. `Escape` closes the window. A desktop
-crash does not stop the conversation because the service owns it.
+`Enter` sends. `Shift+Enter` adds a line. `Escape` closes the window. The `+`
+control selects up to eight files for the next message. Canonical files in the
+conversation have explicit open and save controls; executable and unknown
+binary types are save-only. A desktop crash does not stop the conversation
+because the service owns it.
 
 Useful local commands:
 

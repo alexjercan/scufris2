@@ -7,6 +7,7 @@
 //! session files.
 
 mod app;
+mod attachment;
 mod audio;
 mod blob;
 mod command;
@@ -48,6 +49,7 @@ use app::{
     Ports, PresentationPayload, Shown, Surface, TICK_EVENT, ThreadExecutor, TickPayload,
     Transcriber,
 };
+use attachment::AttachmentClient;
 use audio::{CpalRecorder, Recorder};
 use config::Config;
 use focus::FocusTracker;
@@ -56,11 +58,15 @@ use link::{LinkEvent, ServiceLink};
 use pending::{FilePendingStore, PendingStore};
 use scufris_control::{
     command::{Outcome, Verb},
-    service::{ConversationMessage, ConversationRole, SurfaceRegistration, WidgetCall},
+    service::{
+        AttachmentDescriptor, ConversationMessage, ConversationRole, SurfaceRegistration,
+        WidgetCall,
+    },
 };
 use speech::Speaker;
 use state::Event;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent, http, ipc::Channel, menu::Menu};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tracing::{debug, error, info, warn};
 
@@ -291,6 +297,15 @@ impl Backend for ServiceLink {
         ServiceLink::submit(self, id, text)
     }
 
+    fn submit_with_attachments(
+        &self,
+        id: String,
+        text: String,
+        attachments: Vec<String>,
+    ) -> Result<(), String> {
+        ServiceLink::submit_with_attachments(self, id, text, attachments)
+    }
+
     fn abort(&self, id: String) -> Result<(), String> {
         ServiceLink::abort(self, id)
     }
@@ -316,6 +331,12 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
         .map_err(|_| format!("{} is not a usable accelerator", config.hotkey))?;
     let chat_available = config.chat_command.is_some();
     let restart_available = config.restart_command.is_some();
+    let content_socket = config
+        .socket
+        .parent()
+        .ok_or("the surface socket has no runtime directory")?
+        .join(scufris_control::service::CONTENT_FILE_NAME);
+    let attachment_client = Arc::new(AttachmentClient::new(content_socket)?);
     let surface_id = identity::load_or_create(&config.state_file)?;
     let surface_name = identity::diagnostic_name();
     info!(
@@ -333,6 +354,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
     );
 
     let tauri_app = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -412,6 +434,10 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             form_look,
             hud_ready,
             hud_submit,
+            hud_attach,
+            hud_detach,
+            hud_open_attachment,
+            hud_save_attachment,
             hud_close,
             hud_toggle
         ])
@@ -430,6 +456,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             let prefix = App::process_prefix();
             let conversation = Hud::start(handle.clone(), prefix.clone())?;
             tauri.manage(Arc::clone(&conversation));
+            tauri.manage(Arc::clone(&attachment_client));
 
             // Before the menu, because the menu offers what is installed: the
             // catalog is what the summon submenu is built from.
@@ -890,6 +917,84 @@ fn hud_ready(conversation: tauri::State<'_, Arc<Hud>>) -> hud::Backlog {
 #[tauri::command]
 fn hud_submit(conversation: tauri::State<'_, Arc<Hud>>, text: String) -> bool {
     conversation.typed(text)
+}
+
+/// Selects and imports one regular bounded file into service-owned storage.
+#[tauri::command]
+async fn hud_attach(
+    app: AppHandle,
+    conversation: tauri::State<'_, Arc<Hud>>,
+    attachments: tauri::State<'_, Arc<AttachmentClient>>,
+) -> Result<conversation::Notice, String> {
+    let Some(file) = app
+        .dialog()
+        .file()
+        .set_title("Attach a file")
+        .blocking_pick_file()
+    else {
+        return Ok(conversation.backlog().notice);
+    };
+    let path = file
+        .into_path()
+        .map_err(|_| "Choose a local file.".to_string())?;
+    match attachments.import(&path) {
+        Ok(descriptor) => conversation.attach_file(descriptor),
+        Err(error) => {
+            conversation.attachment_failed(error.clone());
+            Err(error)
+        }
+    }
+}
+
+/// Removes one managed file from the next message.
+#[tauri::command]
+fn hud_detach(conversation: tauri::State<'_, Arc<Hud>>, id: String) -> conversation::Notice {
+    conversation.detach(&id)
+}
+
+/// Opens one safe canonical attachment with its desktop handler.
+#[tauri::command]
+async fn hud_open_attachment(
+    conversation: tauri::State<'_, Arc<Hud>>,
+    attachments: tauri::State<'_, Arc<AttachmentClient>>,
+    descriptor: AttachmentDescriptor,
+) -> Result<(), String> {
+    match attachments.open(&descriptor) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            conversation.attachment_failed(error.clone());
+            Err(error)
+        }
+    }
+}
+
+/// Saves one canonical attachment to a destination chosen by the person.
+#[tauri::command]
+async fn hud_save_attachment(
+    app: AppHandle,
+    conversation: tauri::State<'_, Arc<Hud>>,
+    attachments: tauri::State<'_, Arc<AttachmentClient>>,
+    descriptor: AttachmentDescriptor,
+) -> Result<(), String> {
+    let Some(file) = app
+        .dialog()
+        .file()
+        .set_title("Save attachment")
+        .set_file_name(&descriptor.name)
+        .blocking_save_file()
+    else {
+        return Ok(());
+    };
+    let destination = file
+        .into_path()
+        .map_err(|_| "Choose a local destination.".to_string())?;
+    match attachments.save(&descriptor, &destination) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            conversation.attachment_failed(error.clone());
+            Err(error)
+        }
+    }
 }
 
 /// Escape in the HUD.

@@ -20,16 +20,31 @@
       <!-- The typing line. An ordinary field in a focused window, so the
            caret, the selection, and every editing key are the browser's. -->
       <form id="ask" class="ask">
-        <span class="caret" aria-hidden="true">&gt;</span>
-        <textarea
-          id="words"
-          class="words"
-          rows="1"
-          autocomplete="off"
-          autocapitalize="off"
-          spellcheck="false"
-          aria-label="Say something to Scufris"
-        ></textarea>
+        <div
+          id="selected"
+          class="selected"
+          aria-label="Selected attachments"
+        ></div>
+        <div class="composer">
+          <button
+            id="attach"
+            class="attach"
+            type="button"
+            aria-label="Attach a file"
+          >
+            +
+          </button>
+          <span class="caret" aria-hidden="true">&gt;</span>
+          <textarea
+            id="words"
+            class="words"
+            rows="1"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            aria-label="Say something to Scufris"
+          ></textarea>
+        </div>
       </form>
     </main>
     <script src="hud.js"></script>

@@ -85,12 +85,14 @@ surface.abort {id} -> surface.aborted {id}
 
 ## Messages a client sends
 
-All messages include `"v": 4`.
+All messages include `"v": 5`. Surface submissions carry only managed
+attachment IDs. The service resolves them into canonical descriptors before a
+message reaches the agent, another surface, or replay.
 
 ```json
-{"v":4,"type":"surface.hello","surface":{"id":"laptop-a","name":"Laptop A","widgets":[]}}
-{"v":4,"type":"surface.message","id":"message-1","text":"What changed?"}
-{"v":4,"type":"surface.abort","id":"abort-1"}
+{"v":5,"type":"surface.hello","surface":{"id":"laptop-a","name":"Laptop A","widgets":[]}}
+{"v":5,"type":"surface.message","id":"message-1","text":"What changed?","attachments":["att_opaque"]}
+{"v":5,"type":"surface.abort","id":"abort-1"}
 ```
 
 ## Messages a client receives
@@ -105,8 +107,9 @@ All messages include `"v": 4`.
 | `surface.rejected`    | Show the bounded code/detail; keep user data when relevant                                                                |
 
 A conversation message contains `role`, `surface`, `text`, optional `details`,
-and optional widget calls. The `surface` field is the stable ID associated with
-that turn.
+optional widget calls, and zero to eight immutable attachment descriptors. Each
+descriptor contains the opaque ID, display name, media type, and size. The
+`surface` field is the stable ID associated with that turn.
 
 ## Association rule
 
@@ -137,6 +140,10 @@ speak it or execute its live widget calls.
 | Widget definitions or calls | 32                             |
 | Widget description          | 2 KiB UTF-8                    |
 | Widget schema or arguments  | 16 KiB encoded JSON            |
+| Attachment references       | 8 unique IDs per message       |
+| Attachment object           | 16 MiB                         |
+| Attachment display name     | 255 UTF-8 bytes                |
+| Attachment media type       | 127 ASCII bytes                |
 | Retained conversation       | 200 messages                   |
 
 Reject wrong versions, unknown message types, invalid enum values, oversized

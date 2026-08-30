@@ -34,9 +34,22 @@ The HUD stores at most 200 canonical `surface.message` entries. It displays the
 LLM-style role, plain text, and optional Markdown details. It retains widget
 call metadata as part of each message but does not execute calls from replay.
 
-Typing sends `surface.message { id, text }`. The field clears only after the
-local host accepts the IPC request. `surface.message_ack` settles that exact
-submission. A rejection or disconnect leaves an explicit local failure.
+Typing sends `surface.message { id, text, attachments }`. The `+` control opens
+a native file picker. The desktop gives the selected local path only to the
+private `content.sock` import route, stores the returned canonical descriptor in
+composer state, and submits only its opaque ID. A message can contain at most
+eight different files, each at most 16 MiB.
+
+Canonical attachment descriptors render below their message with name, media
+type, size, and explicit actions. Images, text, JSON, and PDFs can be opened
+through `xdg-open` from a private mode-0600 cache copy. Executable and opaque
+media types are save-only. Save uses a native destination picker and an atomic
+mode-0600 write. Neither action invokes a shell, and attachment bytes or host
+paths never enter logs or protocol messages.
+
+The composer clears only after the local host accepts the IPC request.
+`surface.message_ack` settles that exact submission. A rejection or disconnect
+leaves an explicit local failure.
 
 The HUD is controlled locally from the tray, the pill, or `scufris-ctl hud`.
 The agent has no conversation-window protocol.
@@ -124,6 +137,7 @@ process matching.
 - user and response text: 8 KiB UTF-8;
 - response details: 32 KiB UTF-8;
 - widget definitions or calls: 32 per message;
+- attachments: 8 unique references per message and 16 MiB per object;
 - local speech paragraph: 1000 UTF-8 bytes; and
 - reconnect backoff: 250 ms to 5 seconds.
 

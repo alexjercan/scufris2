@@ -20,7 +20,9 @@
 
 use std::collections::VecDeque;
 
-use scufris_control::service::{ConversationMessage, ConversationRole, ScufrisState};
+use scufris_control::service::{
+    AttachmentDescriptor, ConversationMessage, ConversationRole, MAX_ATTACHMENTS, ScufrisState,
+};
 use serde::Serialize;
 
 /// How many lines the companion keeps.
@@ -37,8 +39,17 @@ pub struct Notice {
     pub sending: bool,
     /// True while the agent is working without a final response.
     pub thinking: bool,
+    /// Managed files selected for the next message.
+    pub attachments: Vec<AttachmentDescriptor>,
     /// What went wrong, empty when nothing did.
     pub trouble: String,
+}
+
+/// One complete submission taken from the composer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Submission {
+    pub id: String,
+    pub attachments: Vec<String>,
 }
 
 /// What the HUD is showing and what it is waiting for.
@@ -48,6 +59,7 @@ pub struct Conversation {
     /// The identifier of the line the service has not answered for yet.
     sending: Option<String>,
     thinking: bool,
+    attachments: Vec<AttachmentDescriptor>,
     trouble: String,
     prefix: String,
     submissions: u64,
@@ -66,6 +78,7 @@ impl Conversation {
             lines: VecDeque::new(),
             sending: None,
             thinking: false,
+            attachments: Vec::new(),
             trouble: String::new(),
             prefix: prefix.into(),
             submissions: 0,
@@ -140,27 +153,56 @@ impl Conversation {
         true
     }
 
-    /// Takes one typed line, and answers with the identifier to send it under.
+    /// Adds one managed file to the next message.
+    pub fn attach(&mut self, descriptor: AttachmentDescriptor) -> bool {
+        if self.attachments.len() == MAX_ATTACHMENTS
+            || self
+                .attachments
+                .iter()
+                .any(|attachment| attachment.id == descriptor.id)
+        {
+            return false;
+        }
+        self.attachments.push(descriptor);
+        self.trouble.clear();
+        true
+    }
+
+    /// Removes one selected file from the next message.
+    pub fn detach(&mut self, id: &str) -> bool {
+        let before = self.attachments.len();
+        self.attachments.retain(|attachment| attachment.id != id);
+        before != self.attachments.len()
+    }
+
+    /// Presents a local attachment operation failure.
+    pub fn attachment_failed(&mut self, trouble: impl Into<String>) {
+        self.trouble = trouble.into();
+    }
+
+    /// Takes one message and its selected IDs from the composer.
     ///
     /// Nothing is refused for being long: the socket measures the same bytes
     /// and its refusal is the one worth reporting, because it is the one that
-    /// is true. Blank is refused, because a blank line is a stray Enter rather
-    /// than a question.
-    pub fn typed(&mut self, text: &str) -> Option<String> {
+    /// is true. Blank is refused because protocol messages require text.
+    pub fn typed(&mut self, text: &str) -> Option<Submission> {
         if text.trim().is_empty() {
             return None;
         }
-        // One line at a time. A second Enter while the first is unanswered
-        // would put two questions in the conversation from one intention, and
-        // the field still holds the words either way.
+        // One message at a time. A second Enter while the first is unanswered
+        // would put two questions in the conversation from one intention.
         if self.sending.is_some() {
             return None;
         }
         self.submissions += 1;
         let id = format!("{}-h{}", self.prefix, self.submissions);
         self.sending = Some(id.clone());
+        let attachments = std::mem::take(&mut self.attachments)
+            .into_iter()
+            .map(|attachment| attachment.id)
+            .collect();
         self.trouble.clear();
-        Some(id)
+        Some(Submission { id, attachments })
     }
 
     /// The service took the line under this identifier.
@@ -192,6 +234,7 @@ impl Conversation {
         Notice {
             sending: self.sending.is_some(),
             thinking: self.thinking,
+            attachments: self.attachments.clone(),
             trouble: self.trouble.clone(),
         }
     }
@@ -249,8 +292,9 @@ mod tests {
     #[test]
     fn a_typed_line_is_sent_under_an_identifier_of_its_own() {
         let mut conversation = Conversation::new("abc");
-        let id = conversation.typed("hello").expect("the line is sent");
-        assert_eq!(id, "abc-h1");
+        let submission = conversation.typed("hello").expect("the line is sent");
+        assert_eq!(submission.id, "abc-h1");
+        assert!(submission.attachments.is_empty());
         assert!(conversation.notice().sending);
     }
 
@@ -261,10 +305,13 @@ mod tests {
         // apart, so the shape has to differ and not just the number.
         let mut conversation = Conversation::new("abc");
         let first = conversation.typed("one").expect("the line is sent");
-        conversation.accepted(&first);
+        conversation.accepted(&first.id);
         let second = conversation.typed("two").expect("the line is sent");
-        assert_eq!((first.as_str(), second.as_str()), ("abc-h1", "abc-h2"));
-        assert!(!first.starts_with("abc-1"), "a pill identifier shape");
+        assert_eq!(
+            (first.id.as_str(), second.id.as_str()),
+            ("abc-h1", "abc-h2")
+        );
+        assert!(!first.id.starts_with("abc-1"), "a pill identifier shape");
     }
 
     #[test]
@@ -286,13 +333,14 @@ mod tests {
     #[test]
     fn a_line_the_service_took_stops_being_waited_for() {
         let mut conversation = Conversation::new("p");
-        let id = conversation.typed("hello").expect("the line is sent");
-        assert!(conversation.accepted(&id));
+        let submission = conversation.typed("hello").expect("the line is sent");
+        assert!(conversation.accepted(&submission.id));
         assert_eq!(
             conversation.notice(),
             Notice {
                 sending: false,
                 thinking: false,
+                attachments: vec![],
                 trouble: String::new(),
             }
         );
@@ -303,13 +351,14 @@ mod tests {
     #[test]
     fn a_line_the_service_would_not_take_says_why() {
         let mut conversation = Conversation::new("p");
-        let id = conversation.typed("hello").expect("the line is sent");
-        assert!(conversation.refused(&id, "Scufris is not reachable."));
+        let submission = conversation.typed("hello").expect("the line is sent");
+        assert!(conversation.refused(&submission.id, "Scufris is not reachable."));
         assert_eq!(
             conversation.notice(),
             Notice {
                 sending: false,
                 thinking: false,
+                attachments: vec![],
                 trouble: "Scufris is not reachable.".into(),
             }
         );
@@ -320,20 +369,47 @@ mod tests {
         // The pill submits on the same connection and its answers arrive here
         // too. One that is not this window's must not clear this window's.
         let mut conversation = Conversation::new("p");
-        let id = conversation.typed("hello").expect("the line is sent");
+        let submission = conversation.typed("hello").expect("the line is sent");
         assert!(!conversation.accepted("p-4"));
         assert!(!conversation.refused("p-4", "nothing"));
         assert!(conversation.notice().sending);
-        assert!(conversation.accepted(&id));
+        assert!(conversation.accepted(&submission.id));
     }
 
     #[test]
     fn asking_again_clears_what_the_last_refusal_said() {
         let mut conversation = Conversation::new("p");
         let first = conversation.typed("hello").expect("the line is sent");
-        conversation.refused(&first, "Scufris is not reachable.");
+        conversation.refused(&first.id, "Scufris is not reachable.");
         conversation.typed("hello").expect("the line is sent");
         assert_eq!(conversation.notice().trouble, "");
+    }
+
+    #[test]
+    fn managed_files_are_bounded_removable_and_sent_by_id() {
+        let mut conversation = Conversation::new("p");
+        for index in 0..MAX_ATTACHMENTS {
+            assert!(conversation.attach(AttachmentDescriptor {
+                id: format!("att_{index}"),
+                name: format!("file-{index}.txt"),
+                media_type: "text/plain".into(),
+                size: 4,
+            }));
+        }
+        assert!(!conversation.attach(AttachmentDescriptor {
+            id: "att_extra".into(),
+            name: "extra.txt".into(),
+            media_type: "text/plain".into(),
+            size: 4,
+        }));
+        assert!(conversation.detach("att_3"));
+        assert_eq!(conversation.typed(""), None);
+        let submission = conversation
+            .typed("inspect these")
+            .expect("the files are sent");
+        assert_eq!(submission.attachments.len(), MAX_ATTACHMENTS - 1);
+        assert!(!submission.attachments.contains(&"att_3".to_string()));
+        assert!(conversation.notice().attachments.is_empty());
     }
 
     #[test]
@@ -385,6 +461,7 @@ mod tests {
             Notice {
                 sending: false,
                 thinking: false,
+                attachments: vec![],
                 trouble: "Scufris is not reachable.".into(),
             }
         );

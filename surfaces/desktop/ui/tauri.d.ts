@@ -35,17 +35,26 @@ interface Tick {
 }
 
 // Canonical protocol v5 conversation entry, relayed without reshaping.
+interface AttachmentDescriptor {
+  id: string;
+  name: string;
+  media_type: string;
+  size: number;
+}
+
 interface ConversationEntry {
   role: "user" | "assistant";
   surface: string;
   text: string;
   details?: string;
   widgets?: Array<{ id: string; name: string; arguments: unknown }>;
+  attachments?: AttachmentDescriptor[];
 }
 
 interface Notice {
   sending: boolean;
   thinking: boolean;
+  attachments: AttachmentDescriptor[];
   trouble: string;
 }
 

@@ -109,6 +109,15 @@ impl ServiceLink {
     }
 
     pub fn submit(&self, id: String, text: String) -> Result<(), String> {
+        self.submit_with_attachments(id, text, vec![])
+    }
+
+    pub fn submit_with_attachments(
+        &self,
+        id: String,
+        text: String,
+        attachments: Vec<String>,
+    ) -> Result<(), String> {
         if !self.ready.load(Ordering::Acquire) {
             return Err("The Scufris surface is still loading.".into());
         }
@@ -120,7 +129,7 @@ impl ServiceLink {
             SurfaceRequestBody::Message {
                 id,
                 text,
-                attachments: vec![],
+                attachments,
             },
         )
     }

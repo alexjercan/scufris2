@@ -1,6 +1,6 @@
 # Bootstrap the Scufris iOS app
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: ios
 
@@ -31,4 +31,10 @@ on a GitHub-hosted macOS runner before introducing Apple signing credentials.
 
 ## Verification
 
-Pending the first GitHub-hosted macOS build.
+- GitHub Actions run
+  [33303397076](https://github.com/alexjercan/scufris2/actions/runs/33303397076)
+  generated the project and completed the unsigned simulator build in 37
+  seconds.
+- The runner used Xcode 16.4 and Apple Swift 6.1.2.
+- The build required no Apple signing credentials or repository secrets.
+- Repository formatting and diff checks passed before the CI run.

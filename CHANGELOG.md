@@ -9,6 +9,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-30
+
 ### Fixed
 
 - Starting or restarting the background service now also starts its enabled
@@ -397,7 +399,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/alexjercan/scufris2/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/alexjercan/scufris2/compare/v0.6.0...v1.1.0
 [0.6.0]: https://github.com/alexjercan/scufris2/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/alexjercan/scufris2/compare/v0.4.0...v0.5.0

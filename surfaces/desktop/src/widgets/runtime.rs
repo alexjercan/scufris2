@@ -216,6 +216,10 @@ impl Surface {
 }
 
 /// One thing the runtime is asked to do.
+///
+/// Protocol v4 currently constructs only `Open`; the update and retirement
+/// commands remain tested runtime capabilities for local widget integrations.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cmd {
     /// Open one widget. Scufris asked.

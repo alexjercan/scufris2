@@ -78,7 +78,7 @@ fn build_widgets() {
     let status = tsc(&widgets.join("tsconfig.json")).expect("tsc was not found");
     assert!(status.success(), "tsc failed on the widgets");
 
-    let mut directories: Vec<String> = fs::read_dir(&widgets)
+    let mut directories: Vec<String> = fs::read_dir(widgets)
         .expect("surfaces/desktop/widgets is missing")
         .filter_map(|entry| {
             let entry = entry.expect("surfaces/desktop/widgets could not be read");
@@ -140,7 +140,7 @@ fn build_widgets() {
 /// them rather than imported from one place.
 fn build_backends() {
     let backends = Path::new("backends");
-    let mut directories: Vec<String> = fs::read_dir(&backends)
+    let mut directories: Vec<String> = fs::read_dir(backends)
         .expect("surfaces/desktop/backends is missing")
         .filter_map(|entry| {
             let entry = entry.expect("surfaces/desktop/backends could not be read");

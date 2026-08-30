@@ -451,14 +451,14 @@ impl Service {
                     });
                     return;
                 };
-                if let Some(calls) = &widgets {
-                    if let Err(detail) = validate_calls(calls, &registration.widgets) {
-                        inner.send_agent(AgentResponseBody::Rejected {
-                            code: "invalid_widgets".into(),
-                            detail,
-                        });
-                        return;
-                    }
+                if let Some(calls) = &widgets
+                    && let Err(detail) = validate_calls(calls, &registration.widgets)
+                {
+                    inner.send_agent(AgentResponseBody::Rejected {
+                        code: "invalid_widgets".into(),
+                        detail,
+                    });
+                    return;
                 }
                 inner.record(ConversationMessage {
                     role: ConversationRole::Assistant,
@@ -669,10 +669,10 @@ fn validate_schema(value: &Value, schema: &Value) -> Result<(), String> {
             return Err(format!("expected {expected}"));
         }
     }
-    if let Some(allowed) = schema.get("enum").and_then(Value::as_array) {
-        if !allowed.contains(value) {
-            return Err("value is not in enum".into());
-        }
+    if let Some(allowed) = schema.get("enum").and_then(Value::as_array)
+        && !allowed.contains(value)
+    {
+        return Err("value is not in enum".into());
     }
     if let (Some(object), Some(properties)) = (
         value.as_object(),

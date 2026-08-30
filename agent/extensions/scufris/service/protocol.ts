@@ -222,12 +222,13 @@ export function decodeAgentResponse(line: string): AgentResponse {
         input_schema: widget.input_schema,
       };
     });
+    const attachmentValues = message.attachments ?? [];
     if (
-      !Array.isArray(message.attachments) ||
-      message.attachments.length > MAX_ATTACHMENTS
+      !Array.isArray(attachmentValues) ||
+      attachmentValues.length > MAX_ATTACHMENTS
     )
       throw new ProtocolError("invalid attachments", "invalid_attachments");
-    const attachments = message.attachments.map(decodeAttachmentDescriptor);
+    const attachments = attachmentValues.map(decodeAttachmentDescriptor);
     if (
       new Set(attachments.map((attachment) => attachment.id)).size !==
       attachments.length

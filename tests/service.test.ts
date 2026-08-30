@@ -29,7 +29,7 @@ test("agent v5 messages are bounded and channel-specific", () => {
   );
   assert.deepEqual(
     decodeAgentResponse(
-      '{"v":5,"type":"agent.message","id":"m-1","text":"hello","widgets":[],"attachments":[]}',
+      '{"v":5,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}',
     ),
     {
       v: 5,
@@ -114,7 +114,7 @@ test("the agent client sends messages through sendUserMessage and steers while b
     socket.once("data", () => {
       socket.write('{"v":5,"type":"agent.ready"}\n');
       socket.write(
-        '{"v":5,"type":"agent.message","id":"m-1","text":"hello","widgets":[],"attachments":[]}\n',
+        '{"v":5,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}\n',
       );
     });
   });

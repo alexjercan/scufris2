@@ -11,3 +11,5 @@ target/
 surfaces/desktop/gen/
 surfaces/desktop/ui/dist/
 surfaces/desktop/widgets/dist/
+surfaces/ios/Scufris.xcodeproj/
+surfaces/ios/Supporting/Info.plist

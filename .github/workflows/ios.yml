@@ -1,0 +1,46 @@
+name: iOS
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/ios.yml"
+      - "surfaces/ios/**"
+  pull_request:
+    paths:
+      - ".github/workflows/ios.yml"
+      - "surfaces/ios/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: unsigned simulator build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec surfaces/ios/project.yml
+
+      - name: Show tool versions
+        run: |
+          xcodebuild -version
+          xcodegen --version
+          swift --version
+
+      - name: Build without signing
+        run: |
+          xcodebuild \
+            -project surfaces/ios/Scufris.xcodeproj \
+            -scheme Scufris \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build

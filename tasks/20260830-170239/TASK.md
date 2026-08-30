@@ -1,6 +1,6 @@
 # Show transient thinking feedback on every surface
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: ios, surface, presentation
 
@@ -26,5 +26,22 @@ desktop conversation surfaces while the service reports
 - Repeated working events do not duplicate it.
 - Every terminal state removes it deterministically.
 - Canonical replay never contains it.
-- Desktop UI tests, iOS simulator tests, and later physical-device review pass.
+- Desktop UI tests and iOS simulator tests pass. Physical-device review is
+  deferred to the combined 1.1.0 release candidate.
 - This task does not deploy a desktop generation or upload a TestFlight build.
+
+## Verification
+
+- The complete 315-test desktop suite passed, including focused state tests for
+  repeated working state, final response, terminal state, and disconnect.
+- All 68 Node tests passed, including the headless desktop HUD test that proves
+  one transient row, no duplicates, terminal removal, and final-response
+  removal.
+- All 93 Python helper tests and desktop Clippy with warnings denied passed.
+- iOS workflow run
+  [33318635065](https://github.com/alexjercan/scufris2/actions/runs/33318635065)
+  generated with Xcode 26.3, compiled the app, and passed simulator tests.
+- The mdBook package and Documentation workflow run
+  [33318635107](https://github.com/alexjercan/scufris2/actions/runs/33318635107)
+  passed.
+- No Home Manager activation or TestFlight upload was performed.

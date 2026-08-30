@@ -111,7 +111,13 @@ The initial contract slice passes:
 - Product/protocol consistency at product 1.1.1 and protocol 5.
 
 Swift protocol types and tests are updated. This Linux host has no `swiftc` or
-Xcode, so the iOS workflow must provide their compile evidence after push.
+Xcode. iOS simulator run
+[33325496014](https://github.com/alexjercan/scufris2/actions/runs/33325496014)
+passed on Xcode 26.3. Repository run
+[33325495864](https://github.com/alexjercan/scufris2/actions/runs/33325495864)
+and documentation run
+[33325495888](https://github.com/alexjercan/scufris2/actions/runs/33325495888)
+also passed for commit `af6643c`.
 
 ## Acceptance
 

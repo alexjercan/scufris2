@@ -1,6 +1,6 @@
 # Apply the iOS conversation design
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: ios, surface, design
 
@@ -21,7 +21,8 @@ unique build number.
   build number in parentheses; CI supplies its monotonic run number.
 - Keep protocol v4 transport and Keychain behavior unchanged except where UI
   state needs read-only presentation data.
-- Do not push this work without a separate request.
+- Use the existing protected CI and TestFlight workflows to verify and deliver
+  the physical-device review build; never expose signing material.
 
 ## Acceptance
 
@@ -31,3 +32,18 @@ unique build number.
 - The project reports marketing version 1.1.0 and a monotonic CI build number.
 - Swift tests cover any new presentation-state mapping.
 - iOS simulator CI-equivalent generation, build, and tests pass.
+
+## Verification
+
+- iOS workflow run
+  [33309518380](https://github.com/alexjercan/scufris2/actions/runs/33309518380)
+  generated the Xcode project with Xcode 26.3, compiled the application, and
+  passed all simulator tests.
+- TestFlight workflow run
+  [33309657849](https://github.com/alexjercan/scufris2/actions/runs/33309657849)
+  created the signed archive, removed ephemeral signing material, and uploaded
+  marketing version 1.1.0 successfully.
+- Static checks confirm the application source contains no microphone, audio,
+  speech, hold-to-talk, or orb implementation.
+- `git diff --check` passed. A local Nixpkgs Swift formatter attempt failed while
+  building the Linux Swift toolchain; the authoritative Xcode 26.3 build passed.

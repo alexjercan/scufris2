@@ -6,19 +6,27 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+axum = { version = "0.8.8", features = ["ws"] }
 clap = { version = "4.6.6", features = ["derive", "env"] }
+futures-util = "0.3.31"
 # Stopping the agent means stopping what the agent started, so the child gets
 # its own process group and the group is what gets signalled. The workspace
 # forbids unsafe; this is the safe wrapper around the calls that need it, and
 # the same one scufris-desktop already uses for widget backends.
 nix = { version = "0.31.3", default-features = false, features = ["signal"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "multipart", "rustls-tls", "stream"] }
 scufris-control = { path = "../../shared/control" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 thiserror = "2.0.20"
+tokio = { version = "1.49.0", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
 tracing = "0.1.41"
 tracing-journald = "0.3.1"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+
+[dev-dependencies]
+axum = { version = "0.8.8", features = ["multipart"] }
+tower = { version = "0.5.3", features = ["util"] }
 tungstenite = { version = "0.28.0", default-features = false, features = ["handshake"] }
 
 [lints]

@@ -1,9 +1,14 @@
+import AVFoundation
 import Foundation
 import SwiftUI
 import UIKit
 
+private let maximumRecordingBytes = 2 * 1024 * 1024
+private let maximumRecordingDuration: TimeInterval = 60
+private let maximumTranscriptionResponseBytes = 16 * 1024
+
 @MainActor
-final class ConversationStore: ObservableObject {
+final class ConversationStore: NSObject, ObservableObject {
     enum ConnectionState: Equatable {
         case unconfigured
         case connecting
@@ -29,6 +34,8 @@ final class ConversationStore: ObservableObject {
     @Published private(set) var serviceDetail = ""
     @Published private(set) var serviceState = "idle"
     @Published private(set) var settings = ConnectionSettings(backendURL: "", token: "")
+    @Published var draft = ""
+    @Published private(set) var dictationState: DictationState = .idle
 
     var visualState: SurfaceVisualState {
         switch connectionState {
@@ -73,8 +80,12 @@ final class ConversationStore: ObservableObject {
     private var socket: URLSessionWebSocketTask?
     private var connectionTask: Task<Void, Never>?
     private var generation = 0
+    private var dictationGeneration = 0
+    private var recorder: AVAudioRecorder?
+    private var recordingURL: URL?
+    private var transcriptionTask: Task<Void, Never>?
 
-    init() {
+    override init() {
         if let stored = try? SecureStore.read("surface-id") {
             surfaceID = stored
         } else {
@@ -82,6 +93,7 @@ final class ConversationStore: ObservableObject {
             surfaceID = generated
             try? SecureStore.write(generated, account: "surface-id")
         }
+        super.init()
         let backendURL = (try? SecureStore.read("backend-url")) ?? nil
         let token = (try? SecureStore.read("backend-token")) ?? nil
         if let backendURL, let token {
@@ -110,6 +122,91 @@ final class ConversationStore: ObservableObject {
         startConnection()
     }
 
+    func beginDictation() {
+        guard
+            case .connected = connectionState,
+            dictationState.canBegin
+        else {
+            return
+        }
+        discardRecording()
+        dictationGeneration += 1
+        let currentGeneration = dictationGeneration
+        switch AVAudioSession.sharedInstance().recordPermission {
+        case .granted:
+            startRecording(generation: currentGeneration)
+        case .denied:
+            dictationState = .failed(DictationFailure.permissionDenied.localizedDescription)
+        case .undetermined:
+            dictationState = .requestingPermission
+            AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
+                Task { @MainActor [weak self] in
+                    guard
+                        let self,
+                        currentGeneration == self.dictationGeneration,
+                        self.dictationState == .requestingPermission
+                    else {
+                        return
+                    }
+                    if granted {
+                        self.dictationState = .idle
+                    } else {
+                        self.dictationState = .failed(
+                            DictationFailure.permissionDenied.localizedDescription
+                        )
+                    }
+                }
+            }
+        @unknown default:
+            dictationState = .failed(DictationFailure.permissionDenied.localizedDescription)
+        }
+    }
+
+    func finishDictation() {
+        guard dictationState == .recording, let recorder, let recordingURL else {
+            if dictationState == .requestingPermission {
+                cancelDictation()
+            }
+            return
+        }
+        recorder.stop()
+        self.recorder = nil
+        deactivateRecordingSession()
+        dictationState = .transcribing
+        let currentGeneration = dictationGeneration
+        transcriptionTask = Task {
+            do {
+                let text = try await transcribe(recordingURL)
+                guard currentGeneration == dictationGeneration else { return }
+                draft = text
+                dictationState = .reviewing
+                discardRecording()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard currentGeneration == dictationGeneration else { return }
+                dictationState = .failed(error.localizedDescription)
+                discardRecording()
+            }
+        }
+    }
+
+    func cancelDictation() {
+        dictationGeneration += 1
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        recorder?.stop()
+        recorder = nil
+        deactivateRecordingSession()
+        discardRecording()
+        dictationState = .idle
+    }
+
+    func discardDictation() {
+        draft = ""
+        cancelDictation()
+    }
+
     func send(_ submitted: String) {
         let text = submitted.trimmingCharacters(in: .whitespacesAndNewlines)
         guard
@@ -120,6 +217,7 @@ final class ConversationStore: ObservableObject {
         else {
             return
         }
+        dictationState = .idle
         let request = SurfaceMessageRequest(
             id: "ios-\(UUID().uuidString.lowercased())",
             text: text
@@ -133,12 +231,103 @@ final class ConversationStore: ObservableObject {
         }
     }
 
+    private func startRecording(generation currentGeneration: Int) {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.record, mode: .measurement)
+            try session.setActive(true)
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("scufris-dictation-\(UUID().uuidString).wav")
+            let settings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: 16_000,
+                AVNumberOfChannelsKey: 1,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsFloatKey: false,
+            ]
+            let recorder = try AVAudioRecorder(url: url, settings: settings)
+            guard recorder.prepareToRecord(), recorder.record(forDuration: maximumRecordingDuration) else {
+                throw DictationFailure.recordingFailed
+            }
+            guard currentGeneration == dictationGeneration else {
+                recorder.stop()
+                try? FileManager.default.removeItem(at: url)
+                return
+            }
+            self.recorder = recorder
+            recordingURL = url
+            dictationState = .recording
+        } catch {
+            deactivateRecordingSession()
+            discardRecording()
+            dictationState = .failed(error.localizedDescription)
+        }
+    }
+
+    private func transcribe(_ recordingURL: URL) async throws -> String {
+        let audio = try Data(contentsOf: recordingURL, options: .mappedIfSafe)
+        guard !audio.isEmpty else { throw DictationFailure.recordingFailed }
+        guard audio.count <= maximumRecordingBytes else {
+            throw DictationFailure.recordingTooLarge
+        }
+        guard
+            let surfaceURL = URL(string: settings.backendURL),
+            let endpoint = TranscriptionEndpoint.url(for: surfaceURL)
+        else {
+            throw DictationFailure.invalidEndpoint
+        }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 135
+        request.setValue("Bearer \(settings.token)", forHTTPHeaderField: "Authorization")
+        request.setValue("audio/wav", forHTTPHeaderField: "Content-Type")
+        request.httpBody = audio
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard data.count <= maximumTranscriptionResponseBytes else {
+            throw DictationFailure.invalidResponse
+        }
+        guard let response = response as? HTTPURLResponse else {
+            throw DictationFailure.invalidResponse
+        }
+        guard response.statusCode == 200 else {
+            if let failure = try? decoder.decode(GatewayErrorResponse.self, from: data) {
+                throw DictationFailure.gateway(failure.error.message)
+            }
+            throw DictationFailure.gateway("Host transcription failed.")
+        }
+        let result = try decoder.decode(TranscriptionResponse.self, from: data)
+        let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard
+            !text.isEmpty,
+            text.utf8.count <= scufrisMaximumTextBytes,
+            !text.unicodeScalars.contains(where: {
+                CharacterSet.controlCharacters.contains($0) && $0.value != 10 && $0.value != 9
+            })
+        else {
+            throw DictationFailure.invalidResponse
+        }
+        return text
+    }
+
+    private func discardRecording() {
+        if let recordingURL {
+            try? FileManager.default.removeItem(at: recordingURL)
+        }
+        recordingURL = nil
+    }
+
+    private func deactivateRecordingSession() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
     private func startConnection() {
         generation += 1
         let currentGeneration = generation
         connectionTask?.cancel()
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
+        cancelDictation()
         conversation = []
         serviceDetail = ""
         serviceState = "starting"

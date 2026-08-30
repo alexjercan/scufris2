@@ -54,6 +54,7 @@ in
       ${service}/bin/scufris-surface-gateway --help | grep -F 'Usage: scufris-surface-gateway'
       ${service}/bin/scufris-surface-gateway --help | grep -F 'SCUFRIS_GATEWAY_TOKEN_FILE'
       ${service}/bin/scufris-surface-gateway --help | grep -F 'SCUFRIS_GATEWAY_LISTEN'
+      ${service}/bin/scufris-surface-gateway --help | grep -F 'SCUFRIS_GATEWAY_AI_TOOLS_API'
       ! ${service}/bin/scufris-surface-gateway --nonsense
 
       # Protocol v4 control is intentionally diagnostic-only.
@@ -83,7 +84,7 @@ in
     assert gatewayConfig.tailscaleServiceName == "scufris-tailscale-serve";
     assert gatewayUnit.Unit.After == ["scufris-service.service"];
     assert gatewayUnit.Unit.Requires == ["scufris-service.service"];
-    assert gatewayUnit.Service.ExecStart == ["${lib.getExe' service "scufris-surface-gateway"} --listen 127.0.0.1:10441 --token-file /run/secrets/scufris-surface-token"];
+    assert gatewayUnit.Service.ExecStart == ["${lib.getExe' service "scufris-surface-gateway"} --listen 127.0.0.1:10441 --token-file /run/secrets/scufris-surface-token --ai-tools-api http://127.0.0.1:10300"];
     assert gatewayUnit.Service.Restart == "on-failure";
     assert tailscaleUnit.Unit.After == ["scufris-surface-gateway.service"];
     assert tailscaleUnit.Unit.Wants == ["scufris-surface-gateway.service"];

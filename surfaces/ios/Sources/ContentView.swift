@@ -3,7 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var store = ConversationStore()
     @State private var isShowingSetup = false
-    @State private var draft = ""
+    @State private var isHoldingMicrophone = false
 
     var body: some View {
         ZStack {
@@ -168,13 +168,42 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Divider().overlay(ScufrisPalette.line)
 
+            if let notice = store.dictationState.notice {
+                HStack(spacing: 8) {
+                    Rectangle()
+                        .fill(dictationAccent)
+                        .frame(width: 2, height: 12)
+                    Text(notice)
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .tracking(0.7)
+                        .foregroundStyle(dictationAccent)
+                    Spacer(minLength: 0)
+                    if store.dictationState == .reviewing || isDictationFailure {
+                        Button("DISCARD") {
+                            store.discardDictation()
+                        }
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(ScufrisPalette.muted)
+                    } else if store.dictationState.isActive {
+                        Button("CANCEL") {
+                            isHoldingMicrophone = false
+                            store.cancelDictation()
+                        }
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(ScufrisPalette.red)
+                    }
+                }
+                .padding(.horizontal, 15)
+                .padding(.top, 9)
+            }
+
             HStack(alignment: .bottom, spacing: 10) {
                 Text(">")
                     .font(.system(size: 15, design: .monospaced))
                     .foregroundStyle(ScufrisPalette.quartz)
                     .padding(.bottom, 7)
 
-                TextField("Type a message", text: $draft, axis: .vertical)
+                TextField("Type a message", text: $store.draft, axis: .vertical)
                     .font(.system(size: 14, design: .monospaced))
                     .foregroundStyle(ScufrisPalette.foregroundStrong)
                     .tint(ScufrisPalette.yellow)
@@ -182,6 +211,8 @@ struct ContentView: View {
                     .submitLabel(.send)
                     .onSubmit(submit)
                     .accessibilityLabel("Type a message")
+
+                microphoneButton
 
                 Button(action: submit) {
                     ZStack {
@@ -211,16 +242,75 @@ struct ContentView: View {
     }
 
     private var canSubmit: Bool {
-        guard case .connected = store.connectionState else { return false }
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard case .connected = store.connectionState, !store.dictationState.isActive else {
+            return false
+        }
+        let text = store.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         return !text.isEmpty && text.utf8.count <= scufrisMaximumTextBytes
     }
 
     private func submit() {
         guard canSubmit else { return }
-        let text = draft
-        draft = ""
+        let text = store.draft
+        store.draft = ""
         store.send(text)
+    }
+
+    private var canDictate: Bool {
+        guard case .connected = store.connectionState else { return false }
+        return store.dictationState.canBegin
+    }
+
+    private var isDictationFailure: Bool {
+        if case .failed = store.dictationState { return true }
+        return false
+    }
+
+    private var dictationAccent: Color {
+        switch store.dictationState {
+        case .recording, .failed:
+            ScufrisPalette.red
+        case .transcribing:
+            ScufrisPalette.niagara
+        default:
+            ScufrisPalette.quartz
+        }
+    }
+
+    private var microphoneButton: some View {
+        ZStack {
+            Circle()
+                .fill(store.dictationState == .recording ? ScufrisPalette.red.opacity(0.16) : .clear)
+            Circle()
+                .stroke(dictationAccent, lineWidth: 1)
+            if store.dictationState == .transcribing {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(ScufrisPalette.niagara)
+            } else {
+                Image(systemName: store.dictationState == .recording ? "waveform" : "mic")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(dictationAccent)
+            }
+        }
+        .frame(width: 30, height: 30)
+        .contentShape(Circle())
+        .opacity(canDictate || store.dictationState.isActive ? 1 : 0.3)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    guard !isHoldingMicrophone, canDictate else { return }
+                    isHoldingMicrophone = true
+                    store.beginDictation()
+                }
+                .onEnded { _ in
+                    guard isHoldingMicrophone else { return }
+                    isHoldingMicrophone = false
+                    store.finishDictation()
+                }
+        )
+        .accessibilityLabel("Hold to dictate")
+        .accessibilityValue(store.dictationState.notice ?? "Ready")
     }
 
     private func terminalButton(_ title: String, action: @escaping () -> Void) -> some View {

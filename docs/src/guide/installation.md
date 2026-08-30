@@ -163,7 +163,7 @@ openssl rand -hex 32 >~/.local/share/scufris/credentials/remote/surface-token
 chmod 600 ~/.local/share/scufris/credentials/remote/surface-token
 ```
 
-Enable the complete private WSS endpoint:
+Enable the complete private WSS and media API endpoint:
 
 ```nix
 programs.scufris.service.remoteSurface = {
@@ -186,9 +186,10 @@ tailscale serve status
 
 ```mermaid
 flowchart LR
-    Remote[remote surface] -->|WSS| Tailscale[Tailscale Serve TLS]
+    Remote[remote surface] -->|WSS or HTTPS| Tailscale[Tailscale Serve TLS]
     Tailscale -->|loopback HTTP| Gateway[authenticated gateway]
     Gateway --> Socket[surface.sock]
+    Gateway --> Inference[loopback ai-tools-api]
 ```
 
 Never expose the plain loopback HTTP listener directly. Continue with

@@ -94,14 +94,15 @@ filesystem work that a small helper can do.
 ```mermaid
 flowchart LR
     Local[local surface] -->|Unix socket| Socket[surface.sock]
-    Remote[remote surface] -->|WSS + bearer token| Tailscale[owned Tailscale Serve route]
+    Remote[remote surface] -->|WSS or HTTPS + bearer token| Tailscale[owned Tailscale Serve route]
     Tailscale -->|loopback HTTP| Gateway[scufris-surface-gateway]
-    Gateway --> Socket
+    Gateway -->|surface frames| Socket[surface.sock]
     Socket --> Service[scufris-service]
+    Gateway -->|bounded transcription request| Inference[ai-tools-api]
 ```
 
-Only surface traffic crosses the gateway. `agent.sock` and `control.sock` stay
-local.
+Only surface traffic and bounded media API requests cross the gateway.
+`agent.sock`, `control.sock`, and the inference listener stay local.
 
 ## Trust boundaries
 

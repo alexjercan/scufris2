@@ -6,10 +6,12 @@ committed.
 
 The application connects to the authenticated protocol-v4 surface gateway over
 `wss://`, stores its URL, bearer token, and stable surface identity in the iOS
-Keychain, replays the canonical conversation, and submits text messages. Its
-text-only interface follows the terminal-style interaction study in
-`tasks/20260828-232631/ios-app-design.html`. Voice and widgets remain outside
-this milestone.
+Keychain, replays the canonical conversation, and submits text messages. Hold
+the microphone control to record a bounded local WAV take. On release, the app
+sends it through the authenticated HTTPS gateway for private host transcription
+and puts the returned text in the editable composer. It never submits a
+transcript without an explicit send action. Speech playback and widgets remain
+outside this milestone.
 
 ## Build
 

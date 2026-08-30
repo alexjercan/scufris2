@@ -29,12 +29,13 @@ exact socket variable -> SCUFRIS_RUNTIME_DIR/NAME -> XDG_RUNTIME_DIR/scufris/NAM
 
 ## Background service and gateway
 
-| Variable                      | Consumer          | Meaning and default                                                                                                    |
-| ----------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `SCUFRIS_SERVICE_AGENT`       | `scufris-service` | Absolute agent launcher. Default: first `scufris` on `PATH`.                                                           |
-| `SCUFRIS_SERVICE_SESSION_DIR` | `scufris-service` | Absolute Pi session directory. Default: `$XDG_DATA_HOME/scufris/sessions`, then `$HOME/.local/share/scufris/sessions`. |
-| `SCUFRIS_GATEWAY_LISTEN`      | surface gateway   | Loopback listen address. Default: `127.0.0.1:10440`. CLI `--listen` is equivalent.                                     |
-| `SCUFRIS_GATEWAY_TOKEN_FILE`  | surface gateway   | Absolute private token file. Required unless `--token-file` is passed.                                                 |
+| Variable                       | Consumer          | Meaning and default                                                                                                    |
+| ------------------------------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `SCUFRIS_SERVICE_AGENT`        | `scufris-service` | Absolute agent launcher. Default: first `scufris` on `PATH`.                                                           |
+| `SCUFRIS_SERVICE_SESSION_DIR`  | `scufris-service` | Absolute Pi session directory. Default: `$XDG_DATA_HOME/scufris/sessions`, then `$HOME/.local/share/scufris/sessions`. |
+| `SCUFRIS_GATEWAY_LISTEN`       | surface gateway   | Loopback listen address. Default: `127.0.0.1:10440`. CLI `--listen` is equivalent.                                     |
+| `SCUFRIS_GATEWAY_TOKEN_FILE`   | surface gateway   | Absolute private token file. Required unless `--token-file` is passed.                                                 |
+| `SCUFRIS_GATEWAY_AI_TOOLS_API` | surface gateway   | Loopback inference API base URL. Default: `http://127.0.0.1:10300`. CLI `--ai-tools-api` is equivalent.                |
 
 ## Desktop surface
 

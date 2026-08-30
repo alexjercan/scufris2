@@ -108,13 +108,22 @@ in {
       };
     };
 
-    aiToolsApi.enable = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Manage the pinned complete ai-tools-api service. Leave false when the
-        API is provided by services.ai-tools-api or outside Home Manager.
-      '';
+    aiToolsApi = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Manage the pinned complete ai-tools-api service. Leave false when the
+          API is provided by services.ai-tools-api or outside Home Manager.
+        '';
+      };
+
+      baseUrl = lib.mkOption {
+        type = lib.types.strMatching "http://.*[^/]";
+        default = providerBaseUrl;
+        defaultText = lib.literalExpression "the enabled provider URL, otherwise http://127.0.0.1:10300";
+        description = "Loopback base URL of the machine's shared inference API.";
+      };
     };
 
     service = {
@@ -193,8 +202,8 @@ in {
       aiToolsApi = {
         baseUrl = lib.mkOption {
           type = lib.types.strMatching "https?://.*[^/]";
-          default = providerBaseUrl;
-          defaultText = lib.literalExpression "the enabled provider URL, otherwise http://127.0.0.1:10300";
+          default = managedApiCfg.baseUrl;
+          defaultText = lib.literalExpression "programs.scufris.aiToolsApi.baseUrl";
           description = "Base URL of the shared bounded speech inference API.";
         };
       };
@@ -324,6 +333,10 @@ in {
           assertion = !providerEnabled;
           message = "programs.scufris.aiToolsApi.enable conflicts with an enabled services.ai-tools-api provider";
         }
+        {
+          assertion = managedApiCfg.baseUrl == "http://127.0.0.1:10300";
+          message = "the managed Scufris ai-tools-api uses http://127.0.0.1:10300; disable management for another base URL";
+        }
       ];
     })
     (lib.mkIf (cfg.enable && speechCfg.enable) {
@@ -393,7 +406,7 @@ in {
               if remoteSurfaceCfg.tokenFile == null
               then "/missing-scufris-surface-token"
               else remoteSurfaceCfg.tokenFile
-            )}";
+            )} --ai-tools-api ${lib.escapeShellArg managedApiCfg.baseUrl}";
             Restart = "on-failure";
             RestartSec = 3;
           };

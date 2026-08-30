@@ -15,11 +15,14 @@ host's private `ai-tools-api`, review on the phone, then submit ordinary text.
   deletion of local temporary audio.
 - Inference stays on the host. Do not use Apple Speech or expose
   `ai-tools-api` directly to the tailnet.
-- Extend the existing authenticated surface gateway on port 10440 with
-  `POST /audio/transcription`; do not add another public listener.
-- The gateway authenticates and bounds the upload, then forwards it through the
-  service-owned private content API to `ai-tools-api` route
-  `/v1/audio/transcriptions`.
+- Turn the existing authenticated surface gateway on port 10440 into the remote
+  HTTP and WebSocket API; do not add another public listener.
+- Keep protocol-v4 WSS on `GET /` and `GET /surface`. Add
+  `POST /audio/transcription` on the same bearer-token boundary.
+- The gateway validates a bounded mono PCM WAV and forwards it directly to the
+  loopback `ai-tools-api` route `/v1/audio/transcriptions`. A service-owned
+  content socket remains future attachment work; transcription has no durable
+  content to store.
 - The response is bounded JSON `{ "text": "..." }`. Never log audio or
   transcript text.
 - The transcript enters the mock's editable review state. Sending it uses the
@@ -34,4 +37,5 @@ host's private `ai-tools-api`, review on the phone, then submit ordinary text.
 - Authentication failures and API failures are clear and do not submit text.
 - The transcript is editable and requires explicit send or discard.
 - Protocol v4 remains byte-for-byte unchanged.
-- Gateway, Swift simulator, and physical-device tests pass.
+- Gateway and Swift simulator tests pass. Physical-device review is part of the
+  combined 1.1.0 release candidate.

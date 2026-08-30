@@ -18,7 +18,20 @@ flowchart TD
 
 The message protocol is the same on both transports. Unix transport uses one
 LF-terminated JSON object per frame. WebSocket transport uses one JSON object
-per text frame.
+per text frame. The remote gateway is also a bounded HTTP API on the same
+loopback listener and bearer-token boundary:
+
+| Method | Path                   | Purpose                                          |
+| ------ | ---------------------- | ------------------------------------------------ |
+| `GET`  | `/` or `/surface`      | Upgrade to a protocol-v4 surface WebSocket       |
+| `GET`  | `/health`              | Read the authenticated gateway identity          |
+| `POST` | `/audio/transcription` | Forward a bounded mono PCM WAV to host inference |
+
+The transcription route accepts at most 2 MiB and 60 seconds of audio. It sends
+multipart `file`, `model=whisper-1`, and `response_format=json` to the loopback
+`ai-tools-api`. Its bounded `{ "text": "..." }` response is presentation data,
+not a surface message. The iOS app places it in the editable composer and sends
+it only through an ordinary protocol-v4 `surface.message` after confirmation.
 
 ## Surface lifecycle
 

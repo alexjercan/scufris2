@@ -71,6 +71,8 @@ in
     assert !(scufrisOptions.agent.package.internal or false);
     assert !(scufrisOptions.desktop.transcription ? endpoint);
     assert scufrisOptions.aiToolsApi.enable.default == false;
+    assert speechConfig.programs.scufris.aiToolsApi.baseUrl == "http://127.0.0.1:10300";
+    assert speechConfig.programs.scufris.desktop.aiToolsApi.baseUrl == speechConfig.programs.scufris.aiToolsApi.baseUrl;
     assert scufrisOptions.desktop.popupKey.default == "Super+D";
     assert scufrisOptions.desktop.speech.model.default == "piper-1";
     assert scufrisOptions.desktop.speech.voice.default == "en_US-lessac-medium";

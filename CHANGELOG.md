@@ -14,17 +14,21 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - A native SwiftUI iOS surface delivered through TestFlight. It stores its
   stable identity, WSS URL, and bearer token in Keychain, reconnects with
   canonical replay, and submits text to the shared conversation.
-- An optional loopback-only `scufris-surface-gateway` bridges authenticated
-  WebSockets to the strict protocol-v4 surface socket. Its Home Manager option
-  also owns a declarative Tailscale Serve route that provides private TLS
-  without exposing agent or control traffic.
+- An optional loopback-only `scufris-surface-gateway` serves an authenticated
+  HTTP and WebSocket API. It bridges strict protocol-v4 surfaces and forwards
+  bounded private audio transcription to host `ai-tools-api`. Its Home Manager
+  option also owns a declarative Tailscale Serve route that provides private TLS
+  without exposing agent, control, or inference listeners.
+- iOS hold-to-dictate records up to 60 seconds locally, transcribes on the
+  private host, and returns text to the editable composer for explicit send or
+  discard.
 
 ### Changed
 
 - Home Manager now treats `programs.scufris.agent` as the core interactive
   launcher that the optional background service also runs. API process
-  ownership is top-level under `aiToolsApi.enable`, while the desktop keeps its
-  consumer base URL.
+  ownership and the shared machine endpoint are top-level under `aiToolsApi`,
+  while the desktop can override its consumer base URL.
 - Desktop speech exposes model and voice. Transcription exposes model and
   language and always derives its route from the desktop API base URL.
 - Desktop controls are named `popupKey`, `backgroundKey`, and `abortKey`.
@@ -33,7 +37,7 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - `staging up` and `staging backend` now start an isolated external-surface
   gateway. They can own an exact temporary Tailscale Serve path and remove only
   that path during teardown.
-- The text-only iOS surface now follows the dark terminal interaction study:
+- The iOS surface now follows the dark terminal interaction study:
   route and state header, speaker-column transcript, inline details, and a
   compact bottom composer. Its next TestFlight marketing version is 1.1.0.
 - Desktop and iOS conversation views show one transient `thinking...` row while

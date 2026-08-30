@@ -26,7 +26,7 @@ programs.scufris
 │   ├── piPackage
 │   ├── projectRoots
 │   └── package
-├── aiToolsApi.enable
+├── aiToolsApi.{enable,baseUrl}
 ├── service
 │   ├── enable
 │   ├── package
@@ -67,7 +67,8 @@ programs.scufris
 | Select gateway port                               | `service.remoteSurface.port`               | `10440`                                 |
 | Read gateway secret                               | `service.remoteSurface.tokenFile`          | `null`; required when enabled           |
 | Run the Linux surface                             | `desktop.enable`                           | `false`; requires service               |
-| Select inference host                             | `desktop.aiToolsApi.baseUrl`               | provider URL or `127.0.0.1:10300`       |
+| Select shared inference host                      | `aiToolsApi.baseUrl`                       | provider URL or `127.0.0.1:10300`       |
+| Override the desktop inference host               | `desktop.aiToolsApi.baseUrl`               | shared inference host                   |
 | Let Scufris manage the API                        | `aiToolsApi.enable`                        | `false`                                 |
 | Enable local speech                               | `desktop.speech.enable`                    | `false`                                 |
 | Select speech request                             | `desktop.speech.model`, `.voice`           | `piper-1`, `en_US-lessac-medium`        |
@@ -110,7 +111,10 @@ programs.scufris = {
     projectRoots = ["~/personal" "~/work"];
   };
 
-  aiToolsApi.enable = false;
+  aiToolsApi = {
+    enable = false;
+    baseUrl = "http://127.0.0.1:10300";
+  };
 
   service = {
     enable = true;
@@ -119,7 +123,6 @@ programs.scufris = {
 
   desktop = {
     enable = true;
-    aiToolsApi.baseUrl = "http://127.0.0.1:10300";
     speech.enable = true;
     popupKey = "Super+D";
     backgroundKey = "Super+Escape";

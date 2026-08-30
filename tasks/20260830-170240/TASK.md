@@ -18,7 +18,9 @@ host's private `ai-tools-api`, review on the phone, then submit ordinary text.
 - Turn the existing authenticated surface gateway on port 10440 into the remote
   HTTP and WebSocket API; do not add another public listener.
 - Keep protocol-v4 WSS on `GET /` and `GET /surface`. Add
-  `POST /audio/transcription` on the same bearer-token boundary.
+  `POST /audio/transcription` on the same bearer-token boundary. Deployment
+  prefixes such as `/scufris-staging` belong only to the reverse proxy and must
+  never appear in the gateway route table.
 - The gateway validates a bounded mono PCM WAV and forwards it directly to the
   loopback `ai-tools-api` route `/v1/audio/transcriptions`. A service-owned
   content socket remains future attachment work; transcription has no durable

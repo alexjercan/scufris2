@@ -184,8 +184,6 @@ fn router(state: GatewayState) -> Router {
         .route("/surface", get(surface_websocket))
         .route("/health", get(health))
         .route("/audio/transcription", post(transcribe))
-        .route("/scufris-staging", get(surface_websocket))
-        .route("/scufris-staging/audio/transcription", post(transcribe))
         .layer(DefaultBodyLimit::max(MAX_AUDIO_BYTES))
         .with_state(state)
 }

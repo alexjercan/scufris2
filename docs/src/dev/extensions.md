@@ -35,6 +35,12 @@ characters inside that JSON are escaped. The complete block is sent through
 attention notices are aggregated locally and sent as one `agent.state` with
 `failed`, `blocked`, or `clear`.
 
+The extension also registers `store_attachment`. It accepts one bounded file
+path, resolves relative paths against Pi's current working directory, infers a
+media type from a small suffix table, and asks the private `content.sock` API to
+import the file. The service validates and copies the regular file. The tool
+returns only the opaque managed ID for use in `scufris_final_response`.
+
 There is no RPC prompt path, context queue, context acknowledgement, dynamic
 widget tool registration, or desktop command relay in the extension.
 
@@ -43,7 +49,8 @@ widget tool registration, or desktop command relay in the extension.
 `response.ts` registers `scufris_final_response`. The tool accepts:
 
 - mandatory bounded plain `text`;
-- optional bounded Markdown `details`; and
+- optional bounded Markdown `details`;
+- optional managed attachment IDs; and
 - optional bounded widget calls with `id`, `name`, and `arguments`.
 
 It emits the complete value once to the service extension. Details are not

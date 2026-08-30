@@ -97,9 +97,11 @@ The private HTTP API accepts bounded raw uploads at `POST /attachments`, local
 regular-file imports at `POST /attachments/import`, and reads at
 `GET|HEAD /attachments/{id}`. Reads advertise byte ranges and GET accepts one
 bounded byte range, including open-ended and suffix forms. It is available only
-through `content.sock`. Import rejects relative paths, final-component symlinks, directories, devices,
-FIFOs, empty files, and files over 16 MiB. The remote gateway never forwards
-the import operation.
+through `content.sock`. Import rejects relative paths, final-component
+symlinks, directories, devices, FIFOs, empty files, and files over 16 MiB. The
+remote gateway never forwards the import operation. The orchestrator's
+`store_attachment` tool is the only model-facing importer; it submits an
+absolute path and returns the service-owned opaque ID.
 
 The store holds at most 512 objects and 256 MiB. Unreferenced uploads expire
 after 24 hours. Referenced objects survive for 30 days and canonical replay.

@@ -80,7 +80,7 @@ transcription bodies never enter INFO or DEBUG logs.
        traversal rejection, and symlink rejection.
 3. [x] Proxy authenticated upload, lookup, download, HEAD, and Range through the
        existing gateway. Keep its listener loopback-only.
-4. [ ] Add the agent `store_attachment` tool and resolve attachment IDs at the
+4. [x] Add the agent `store_attachment` tool and resolve attachment IDs at the
        service boundary in both message directions.
 5. [ ] Add desktop file selection, upload, rendering, open, and save behavior.
 6. [ ] Add iOS document and photo selection, upload, rendering, download, and share
@@ -109,6 +109,10 @@ transcription bodies never enter INFO or DEBUG logs.
   GET, HEAD, and single-range transfer. It proxies only to `content.sock`,
   preserves safe response metadata and typed errors, and does not expose the
   trusted local import operation.
+- Added the orchestrator-only `store_attachment(path)` tool. It normalizes a
+  bounded relative or absolute path, infers a conservative media type, imports
+  through `content.sock`, validates the returned descriptor, and returns the
+  opaque ID for `scufris_final_response`.
 
 ## Verification
 
@@ -150,6 +154,13 @@ bounded typed failures. Repository run
 and documentation run
 [33329028456](https://github.com/alexjercan/scufris2/actions/runs/33329028456)
 passed for gateway commit `90bbffb`.
+
+The agent-import slice passes TypeScript compilation, 74 TypeScript tests, 95
+Python tests through the Nix helper check, focused Prettier checks, and
+`nix flake check -L`. Focused tests cover content-socket resolution,
+conservative media types, the exact private import request, relative and `@`
+path normalization, opaque-ID results, typed service failures, and strict
+response descriptor validation.
 
 ## Acceptance
 

@@ -12,6 +12,7 @@ import {
   AgentClient,
   type AtomicResponse,
 } from "./client.ts";
+import { registerAttachmentTool } from "./attachments.ts";
 import { AGENT_FILE_NAME, SOCKET_DIRECTORY_NAME } from "./protocol.ts";
 
 export function resolveSocketPath(
@@ -31,6 +32,7 @@ export function resolveSocketPath(
 
 export default function service(pi: ExtensionAPI): void {
   if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
+  registerAttachmentTool(pi);
   const socketPath = resolveSocketPath();
   const notices = new Map<string, AttentionNoticeSignal>();
   let context: ExtensionContext | undefined;

@@ -4,6 +4,7 @@ export const SERVICE_VERSION = 5;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
 export const SOCKET_DIRECTORY_NAME = "scufris";
 export const AGENT_FILE_NAME = "agent.sock";
+export const CONTENT_FILE_NAME = "content.sock";
 export const MAX_IDENTIFIER_LENGTH = 64;
 export const MAX_TEXT_BYTES = 8 * 1024;
 export const MAX_DETAILS_BYTES = 32 * 1024;
@@ -88,7 +89,9 @@ function id(value: unknown, field: string): string {
   return value;
 }
 
-function decodeAttachment(value: unknown): AttachmentDescriptor {
+export function decodeAttachmentDescriptor(
+  value: unknown,
+): AttachmentDescriptor {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     throw new ProtocolError("invalid attachment", "invalid_attachments");
   const attachment = value as Record<string, unknown>;
@@ -224,7 +227,7 @@ export function decodeAgentResponse(line: string): AgentResponse {
       message.attachments.length > MAX_ATTACHMENTS
     )
       throw new ProtocolError("invalid attachments", "invalid_attachments");
-    const attachments = message.attachments.map(decodeAttachment);
+    const attachments = message.attachments.map(decodeAttachmentDescriptor);
     if (
       new Set(attachments.map((attachment) => attachment.id)).size !==
       attachments.length

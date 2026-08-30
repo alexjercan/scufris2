@@ -17,6 +17,7 @@ in {
     test -f ${resources}/share/scufris/extensions/scufris/service/index.ts
     test -f ${resources}/share/scufris/extensions/scufris/service/protocol.ts
     test -f ${resources}/share/scufris/extensions/scufris/service/client.ts
+    test -f ${resources}/share/scufris/extensions/scufris/service/attachments.ts
     test ! -e ${resources}/share/scufris/extensions/scufris/widgets/index.ts
     test ! -e ${resources}/share/scufris/extensions/scufris/conversation.ts
     # Nothing in this process tree makes sound. There is no speech module to

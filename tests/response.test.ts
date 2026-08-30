@@ -83,5 +83,6 @@ test("the final response tool emits one atomic response", async () => {
 test("the policy requires atomic details and widgets", () => {
   assert.match(finalResponsePolicy, /mandatory short plain prose/);
   assert.match(finalResponsePolicy, /optional Markdown/);
+  assert.match(finalResponsePolicy, /optional stored attachment IDs/);
   assert.match(finalResponsePolicy, /optional best-effort presentation calls/);
 });

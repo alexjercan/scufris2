@@ -13,13 +13,14 @@ worker wrapper -> private per-execution environment
 
 ## Runtime paths and agent
 
-| Variable                | Consumer                                                  | Meaning and default                                                                                            |
-| ----------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `SCUFRIS_RUNTIME_DIR`   | service, gateway, desktop, agent extension, `scufris-ctl` | Socket directory itself. Default: `$XDG_RUNTIME_DIR/scufris`. One value moves the whole local stack.           |
-| `SCUFRIS_AGENT_SOCKET`  | Pi service extension                                      | Exact `agent.sock` override. Default: resolved from `SCUFRIS_RUNTIME_DIR`, then XDG. Expert/test use.          |
-| `SCUFRIS_ROLE`          | Pi extensions, worker wrapper                             | `orchestrator` for the main agent or `worker` for a delegated Pi. Set by launchers; do not set for normal use. |
-| `SCUFRIS_PROJECT_ROOTS` | launcher, jobs helper                                     | JSON string array searched for Git projects. Packaged default: `["~/personal","~/work","~/third-party"]`.      |
-| `SCUFRIS_CALM`          | development/worker environment                            | Reserved launcher value. Calm session state defaults on and is controlled by `/calm`.                          |
+| Variable                 | Consumer                                                  | Meaning and default                                                                                            |
+| ------------------------ | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `SCUFRIS_RUNTIME_DIR`    | service, gateway, desktop, agent extension, `scufris-ctl` | Socket directory itself. Default: `$XDG_RUNTIME_DIR/scufris`. One value moves the whole local stack.           |
+| `SCUFRIS_AGENT_SOCKET`   | Pi service extension                                      | Exact `agent.sock` override. Default: resolved from `SCUFRIS_RUNTIME_DIR`, then XDG. Expert/test use.          |
+| `SCUFRIS_CONTENT_SOCKET` | Pi attachment tool                                        | Exact `content.sock` override. Default: resolved from `SCUFRIS_RUNTIME_DIR`, then XDG. Expert/test use.        |
+| `SCUFRIS_ROLE`           | Pi extensions, worker wrapper                             | `orchestrator` for the main agent or `worker` for a delegated Pi. Set by launchers; do not set for normal use. |
+| `SCUFRIS_PROJECT_ROOTS`  | launcher, jobs helper                                     | JSON string array searched for Git projects. Packaged default: `["~/personal","~/work","~/third-party"]`.      |
+| `SCUFRIS_CALM`           | development/worker environment                            | Reserved launcher value. Calm session state defaults on and is controlled by `/calm`.                          |
 
 Socket precedence:
 

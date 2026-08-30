@@ -55,6 +55,7 @@ in
       ${service}/bin/scufris-surface-gateway --help | grep -F 'SCUFRIS_GATEWAY_TOKEN_FILE'
       ${service}/bin/scufris-surface-gateway --help | grep -F 'SCUFRIS_GATEWAY_LISTEN'
       ${service}/bin/scufris-surface-gateway --help | grep -F 'SCUFRIS_GATEWAY_AI_TOOLS_API'
+      ${service}/bin/scufris-surface-gateway --help | grep -F 'SCUFRIS_GATEWAY_DOCS'
       ! ${service}/bin/scufris-surface-gateway --nonsense
 
       # Protocol v5 control is intentionally diagnostic-only.

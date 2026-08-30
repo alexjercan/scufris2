@@ -43,6 +43,8 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
+use utoipa::{Modify, OpenApi, ToSchema};
+use utoipa_swagger_ui::{Config as SwaggerConfig, SwaggerUi};
 
 const FAILED: u8 = 1;
 const DEFAULT_LISTEN: &str = "127.0.0.1:10440";
@@ -58,6 +60,9 @@ const TRANSCRIPTION_TIMEOUT: Duration = Duration::from_secs(130);
 const TOKEN_VARIABLE: &str = "SCUFRIS_GATEWAY_TOKEN_FILE";
 const LISTEN_VARIABLE: &str = "SCUFRIS_GATEWAY_LISTEN";
 const AI_TOOLS_API_VARIABLE: &str = "SCUFRIS_GATEWAY_AI_TOOLS_API";
+const DOCS_VARIABLE: &str = "SCUFRIS_GATEWAY_DOCS";
+const OPENAPI_PATH: &str = "/api/openapi.json";
+const SWAGGER_PATH: &str = "/docs";
 static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Parser)]
@@ -83,6 +88,15 @@ struct Options {
         value_name = "URL"
     )]
     ai_tools_api: Url,
+
+    /// Expose the unauthenticated staging-only OpenAPI document and Swagger UI.
+    #[arg(
+        long,
+        env = DOCS_VARIABLE,
+        default_value_t = false,
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    docs: bool,
 }
 
 #[derive(Clone)]
@@ -94,13 +108,13 @@ struct GatewayState {
     content_client: Client,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 struct HealthResponse {
     service: &'static str,
     version: u8,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct TranscriptResponse {
     text: String,
@@ -112,12 +126,12 @@ struct AttachmentUploadQuery {
     name: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 struct ErrorEnvelope {
     error: ApiErrorBody,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 struct ApiErrorBody {
     code: &'static str,
     message: &'static str,
@@ -128,6 +142,81 @@ struct ApiError {
     status: StatusCode,
     code: &'static str,
     message: &'static str,
+}
+
+struct BinaryBody;
+
+impl utoipa::PartialSchema for BinaryBody {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        use utoipa::openapi::{
+            KnownFormat, SchemaFormat,
+            schema::{ObjectBuilder, Type},
+        };
+        ObjectBuilder::new()
+            .schema_type(Type::String)
+            .format(Some(SchemaFormat::KnownFormat(KnownFormat::Binary)))
+            .into()
+    }
+}
+
+impl ToSchema for BinaryBody {}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+struct AttachmentSchema {
+    /// Opaque service-owned attachment identifier.
+    id: String,
+    /// Display name. This is never a host path.
+    name: String,
+    /// Canonical media type without parameters.
+    media_type: String,
+    /// Object size in bytes.
+    size: u64,
+}
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        health,
+        surface_websocket,
+        upload_attachment,
+        download_attachment,
+        head_attachment,
+        transcribe
+    ),
+    components(schemas(
+        HealthResponse,
+        TranscriptResponse,
+        AttachmentSchema,
+        BinaryBody,
+        ErrorEnvelope,
+        ApiErrorBody
+    )),
+    modifiers(&SecurityAddon),
+    tags(
+        (name = "gateway", description = "Gateway status and protocol transport"),
+        (name = "attachments", description = "Managed attachment transfer"),
+        (name = "audio", description = "Host transcription")
+    )
+)]
+struct ApiDoc;
+
+struct SecurityAddon;
+
+impl Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::{
+            Server,
+            security::{Http, HttpAuthScheme, SecurityScheme},
+        };
+        openapi.servers = Some(vec![Server::new("..")]);
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "bearer_token",
+                SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
+            );
+        }
+    }
 }
 
 impl ApiError {
@@ -195,13 +284,13 @@ async fn run() -> Result<(), GatewayError> {
         content_client,
     };
     let listener = TcpListener::bind(options.listen).await?;
-    info!(listen = %options.listen, "the remote surface API is listening");
-    axum::serve(listener, router(state)).await?;
+    info!(listen = %options.listen, docs = options.docs, "the remote surface API is listening");
+    axum::serve(listener, router(state, options.docs)).await?;
     Ok(())
 }
 
-fn router(state: GatewayState) -> Router {
-    Router::new()
+fn router(state: GatewayState, docs: bool) -> Router {
+    let router = Router::new()
         .route("/", get(surface_websocket))
         .route("/surface", get(surface_websocket))
         .route("/health", get(health))
@@ -217,9 +306,28 @@ fn router(state: GatewayState) -> Router {
             "/attachments/{id}",
             get(download_attachment).head(head_attachment),
         )
-        .with_state(state)
+        .with_state(state);
+    if docs {
+        router.merge(
+            SwaggerUi::new(SWAGGER_PATH)
+                .url(OPENAPI_PATH, ApiDoc::openapi())
+                .config(SwaggerConfig::new(["../api/openapi.json"])),
+        )
+    } else {
+        router
+    }
 }
 
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "gateway",
+    security(("bearer_token" = [])),
+    responses(
+        (status = 200, description = "Gateway status", body = HealthResponse),
+        (status = 401, description = "Missing or invalid bearer token", body = ErrorEnvelope)
+    )
+)]
 async fn health(
     State(state): State<GatewayState>,
     headers: HeaderMap,
@@ -231,6 +339,16 @@ async fn health(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/surface",
+    tag = "gateway",
+    security(("bearer_token" = [])),
+    responses(
+        (status = 101, description = "Upgrade to the strict protocol-v5 surface WebSocket"),
+        (status = 401, description = "Missing or invalid bearer token", body = ErrorEnvelope)
+    )
+)]
 async fn surface_websocket(
     State(state): State<GatewayState>,
     headers: HeaderMap,
@@ -315,6 +433,32 @@ async fn close(websocket: &mut ws::WebSocket, code: u16, reason: &'static str) {
         .await;
 }
 
+#[utoipa::path(
+    post,
+    path = "/attachments",
+    tag = "attachments",
+    security(("bearer_token" = [])),
+    params(
+        ("name" = String, Query, description = "Display name, not a path")
+    ),
+    request_body(
+        description = "Raw object bytes. Maximum 16 MiB.",
+        content(
+            (BinaryBody = "application/octet-stream"),
+            (BinaryBody = "image/png"),
+            (BinaryBody = "image/jpeg"),
+            (BinaryBody = "application/pdf")
+        )
+    ),
+    responses(
+        (status = 200, description = "Stored immutable descriptor", body = AttachmentSchema),
+        (status = 401, description = "Missing or invalid bearer token", body = ErrorEnvelope),
+        (status = 413, description = "Object exceeds 16 MiB", body = ErrorEnvelope),
+        (status = 422, description = "Invalid name, media type, or object", body = ErrorEnvelope),
+        (status = 507, description = "Attachment quota is full", body = ErrorEnvelope),
+        (status = 502, description = "Private attachment service unavailable", body = ErrorEnvelope)
+    )
+)]
 async fn upload_attachment(
     State(state): State<GatewayState>,
     headers: HeaderMap,
@@ -346,6 +490,27 @@ async fn upload_attachment(
     proxy_attachment_response(upstream, false).await
 }
 
+#[utoipa::path(
+    get,
+    path = "/attachments/{id}",
+    tag = "attachments",
+    security(("bearer_token" = [])),
+    params(
+        ("id" = String, Path, description = "Opaque managed attachment ID"),
+        ("Range" = Option<String>, Header, description = "One closed, open-ended, or suffix byte range")
+    ),
+    responses(
+        (status = 200, description = "Complete object", body = BinaryBody, content_type = "application/octet-stream",
+            headers(("Accept-Ranges" = String), ("Content-Length" = u64))),
+        (status = 206, description = "Selected object range", body = BinaryBody, content_type = "application/octet-stream",
+            headers(("Accept-Ranges" = String), ("Content-Length" = u64), ("Content-Range" = String))),
+        (status = 401, description = "Missing or invalid bearer token", body = ErrorEnvelope),
+        (status = 404, description = "Attachment is unavailable", body = ErrorEnvelope),
+        (status = 416, description = "Range is unavailable", body = ErrorEnvelope,
+            headers(("Accept-Ranges" = String), ("Content-Range" = String))),
+        (status = 502, description = "Private attachment service unavailable", body = ErrorEnvelope)
+    )
+)]
 async fn download_attachment(
     State(state): State<GatewayState>,
     AxumPath(id): AxumPath<String>,
@@ -367,6 +532,20 @@ async fn download_attachment(
     proxy_attachment_response(upstream, false).await
 }
 
+#[utoipa::path(
+    head,
+    path = "/attachments/{id}",
+    tag = "attachments",
+    security(("bearer_token" = [])),
+    params(("id" = String, Path, description = "Opaque managed attachment ID")),
+    responses(
+        (status = 200, description = "Object metadata without a body",
+            headers(("Accept-Ranges" = String), ("Content-Length" = u64), ("Content-Type" = String))),
+        (status = 401, description = "Missing or invalid bearer token", body = ErrorEnvelope),
+        (status = 404, description = "Attachment is unavailable", body = ErrorEnvelope),
+        (status = 502, description = "Private attachment service unavailable", body = ErrorEnvelope)
+    )
+)]
 async fn head_attachment(
     State(state): State<GatewayState>,
     AxumPath(id): AxumPath<String>,
@@ -440,6 +619,26 @@ fn attachment_unavailable() -> ApiError {
     )
 }
 
+#[utoipa::path(
+    post,
+    path = "/audio/transcription",
+    tag = "audio",
+    security(("bearer_token" = [])),
+    request_body(
+        content = BinaryBody,
+        content_type = "audio/wav",
+        description = "At most 2 MiB and 60 seconds of 16 kHz mono 16-bit PCM WAV."
+    ),
+    responses(
+        (status = 200, description = "Bounded host transcript", body = TranscriptResponse),
+        (status = 401, description = "Missing or invalid bearer token", body = ErrorEnvelope),
+        (status = 413, description = "Recording exceeds 2 MiB", body = ErrorEnvelope),
+        (status = 415, description = "Content-Type is not audio/wav", body = ErrorEnvelope),
+        (status = 422, description = "Invalid WAV format or duration", body = ErrorEnvelope),
+        (status = 502, description = "Host transcription unavailable", body = ErrorEnvelope),
+        (status = 504, description = "Host transcription timed out", body = ErrorEnvelope)
+    )
+)]
 async fn transcribe(
     State(state): State<GatewayState>,
     headers: HeaderMap,
@@ -851,7 +1050,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server =
-            tokio::spawn(async move { axum::serve(listener, router(state)).await.unwrap() });
+            tokio::spawn(async move { axum::serve(listener, router(state, false)).await.unwrap() });
 
         tokio::task::spawn_blocking(move || {
             let mut request = format!("ws://{address}/").into_client_request().unwrap();
@@ -912,7 +1111,7 @@ mod tests {
             content_client: Client::new(),
         };
 
-        let unauthorized = router(state.clone())
+        let unauthorized = router(state.clone(), false)
             .oneshot(Request::get("/health").body(Body::empty()).unwrap())
             .await
             .unwrap();
@@ -923,7 +1122,7 @@ mod tests {
             .header("content-type", "audio/wav")
             .body(Body::from(wav(32_000)))
             .unwrap();
-        let response = router(state).oneshot(request).await.unwrap();
+        let response = router(state, false).oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let response = to_bytes(response.into_body(), MAX_UPSTREAM_RESPONSE_BYTES)
             .await
@@ -1010,7 +1209,7 @@ mod tests {
             content_client: Client::builder().unix_socket(socket).build().unwrap(),
         };
 
-        let unauthorized = router(state.clone())
+        let unauthorized = router(state.clone(), false)
             .oneshot(
                 Request::get("/attachments/att_test")
                     .body(Body::empty())
@@ -1020,7 +1219,7 @@ mod tests {
             .unwrap();
         assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
 
-        let upload = router(state.clone())
+        let upload = router(state.clone(), false)
             .oneshot(
                 Request::post("/attachments?name=notes.txt")
                     .header(header::AUTHORIZATION, "Bearer test-token")
@@ -1034,7 +1233,7 @@ mod tests {
         let upload = to_bytes(upload.into_body(), 4096).await.unwrap();
         assert!(upload.starts_with(br#"{"id":"att_test""#));
 
-        let oversized = router(state.clone())
+        let oversized = router(state.clone(), false)
             .oneshot(
                 Request::post("/attachments?name=large.bin")
                     .header(header::AUTHORIZATION, "Bearer test-token")
@@ -1046,7 +1245,7 @@ mod tests {
             .unwrap();
         assert_eq!(oversized.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
-        let local_import = router(state.clone())
+        let local_import = router(state.clone(), false)
             .oneshot(
                 Request::post("/attachments/import")
                     .header(header::AUTHORIZATION, "Bearer test-token")
@@ -1057,7 +1256,7 @@ mod tests {
             .unwrap();
         assert_eq!(local_import.status(), StatusCode::METHOD_NOT_ALLOWED);
 
-        let partial = router(state.clone())
+        let partial = router(state.clone(), false)
             .oneshot(
                 Request::get("/attachments/att_test")
                     .header(header::AUTHORIZATION, "Bearer test-token")
@@ -1071,7 +1270,7 @@ mod tests {
         assert_eq!(partial.headers()[header::CONTENT_RANGE], "bytes 1-3/6");
         assert_eq!(to_bytes(partial.into_body(), 16).await.unwrap(), "bcd");
 
-        let head = router(state)
+        let head = router(state, false)
             .oneshot(
                 Request::head("/attachments/att_test")
                     .header(header::AUTHORIZATION, "Bearer test-token")
@@ -1089,6 +1288,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn staging_docs_are_opt_in_public_and_exclude_local_import() {
+        let state = GatewayState {
+            authorization: "Bearer test-token".into(),
+            surface_socket: PathBuf::from("/unused/surface.sock").into(),
+            ai_tools_api: Url::parse(DEFAULT_AI_TOOLS_API).unwrap(),
+            client: Client::new(),
+            content_client: Client::new(),
+        };
+        let hidden = router(state.clone(), false)
+            .oneshot(Request::get(OPENAPI_PATH).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(hidden.status(), StatusCode::NOT_FOUND);
+
+        let app = router(state, true);
+        let docs = app
+            .clone()
+            .oneshot(Request::get("/docs/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(docs.status(), StatusCode::OK);
+        let initializer = app
+            .clone()
+            .oneshot(
+                Request::get("/docs/swagger-initializer.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let initializer = to_bytes(initializer.into_body(), 128 * 1024).await.unwrap();
+        assert!(
+            initializer
+                .windows(b"../api/openapi.json".len())
+                .any(|part| part == b"../api/openapi.json")
+        );
+        let openapi = app
+            .oneshot(Request::get(OPENAPI_PATH).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(openapi.status(), StatusCode::OK);
+        let openapi: serde_json::Value =
+            serde_json::from_slice(&to_bytes(openapi.into_body(), 128 * 1024).await.unwrap())
+                .unwrap();
+        assert!(openapi["paths"]["/attachments"].is_object());
+        assert!(openapi["paths"]["/attachments/{id}"].is_object());
+        assert!(openapi["paths"]["/attachments/import"].is_null());
+        assert_eq!(openapi["servers"][0]["url"], "..");
+        assert_eq!(
+            openapi["components"]["schemas"]["BinaryBody"]["format"],
+            "binary"
+        );
+        assert_eq!(
+            openapi["components"]["securitySchemes"]["bearer_token"]["scheme"],
+            "bearer"
+        );
+        for path in openapi["paths"].as_object().unwrap().values() {
+            for operation in path.as_object().unwrap().values() {
+                assert_eq!(
+                    operation["security"][0]["bearer_token"],
+                    serde_json::json!([])
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn transcription_rejects_wrong_media_before_contacting_inference() {
         let state = GatewayState {
             authorization: "Bearer test-token".into(),
@@ -1102,7 +1368,7 @@ mod tests {
             .header("content-type", "audio/mp4")
             .body(Body::from("audio"))
             .unwrap();
-        let response = router(state).oneshot(request).await.unwrap();
+        let response = router(state, false).oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
     }
 

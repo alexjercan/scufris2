@@ -202,6 +202,9 @@ export SCUFRIS_RUNTIME_DIR="$runtime_dir"
 export PI_CODING_AGENT_DIR="$pi_agent"
 export SCUFRIS_PROJECT_ROOTS="[\"$projects\"]"
 export SCUFRIS_SERVICE_AGENT="$root/scripts/scufris-agent"
+# API metadata is public only inside the isolated staging gateway. Functional
+# routes still require the bearer token.
+export SCUFRIS_GATEWAY_DOCS=1
 export SCUFRIS_STT_ENDPOINT="${SCUFRIS_STT_ENDPOINT:-http://127.0.0.1:10300/v1/audio/transcriptions}"
 export SCUFRIS_TTS_ENDPOINT="${SCUFRIS_TTS_ENDPOINT:-http://127.0.0.1:10300/v1/audio/speech}"
 
@@ -262,6 +265,7 @@ if ((need_service)); then
   printf '  gateway=%s\n' "$gateway"
   printf '  gateway_token=%s\n' "$gateway_token"
   printf '  gateway_loopback=ws://127.0.0.1:%s/\n' "$gateway_port"
+  printf '  gateway_docs=http://127.0.0.1:%s/docs/\n' "$gateway_port"
   printf '\nscufris-staging: reach the backend with\n  SCUFRIS_RUNTIME_DIR=%s scufris-ctl state\n' "$runtime_dir"
 fi
 

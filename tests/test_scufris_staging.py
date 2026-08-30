@@ -209,6 +209,7 @@ class StagingTests(unittest.TestCase):
             self.assertNotIn("SCUFRIS_DESKTOP_SPEAK_COMMAND", env)
 
         gateway = self.reported("gateway")
+        self.assertEqual(gateway["env"]["SCUFRIS_GATEWAY_DOCS"], "1")
         self.assertEqual(
             gateway["argv"],
             [

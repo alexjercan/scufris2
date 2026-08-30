@@ -140,6 +140,13 @@ a stable private token at `$SCUFRIS_STAGING_ROOT/surface-token`. They print both
 the loopback URL and token path. The token is generated once with mode 0600 and
 is never printed.
 
+The staging gateway also enables an embedded Swagger UI at
+`http://127.0.0.1:10441/docs/`. Through Tailscale Serve it is available below
+`/scufris-staging/docs/`. The page and its OpenAPI document are deliberately
+unauthenticated in staging so a browser can load them. Use Swagger's
+**Authorize** control to supply the bearer token before calling any functional
+route. Production does not enable either documentation route.
+
 The default `auto` mode asks Tailscale Serve to publish the gateway at the
 `/scufris-staging` path when Tailscale is available. It does not replace the
 deployed `/` route. The resulting iOS settings are the displayed tailnet URL

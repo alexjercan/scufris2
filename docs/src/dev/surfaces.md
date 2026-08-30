@@ -31,8 +31,9 @@ loopback listener and bearer-token boundary:
 
 Attachment uploads use the object media type as `Content-Type` and return the
 canonical descriptor. Downloads support one standard byte range and return
-`Accept-Ranges`, `Content-Range`, and `206 Partial Content` as applicable. Every
-route requires the same bearer token; opaque IDs are not authorization.
+`Accept-Ranges`, `Content-Range`, and `206 Partial Content` as applicable. Every functional route requires the same bearer token; opaque IDs are not
+authorization. Staging alone enables unauthenticated `/docs/` and
+`/api/openapi.json` metadata so Swagger can load in a browser.
 
 The transcription route accepts at most 2 MiB and 60 seconds of audio. It sends
 multipart `file`, `model=whisper-1`, and `response_format=json` to the loopback

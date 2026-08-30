@@ -37,6 +37,7 @@ exact socket variable -> SCUFRIS_RUNTIME_DIR/NAME -> XDG_RUNTIME_DIR/scufris/NAM
 | `SCUFRIS_GATEWAY_LISTEN`       | surface gateway   | Loopback listen address. Default: `127.0.0.1:10440`. CLI `--listen` is equivalent.                                     |
 | `SCUFRIS_GATEWAY_TOKEN_FILE`   | surface gateway   | Absolute private token file. Required unless `--token-file` is passed.                                                 |
 | `SCUFRIS_GATEWAY_AI_TOOLS_API` | surface gateway   | Loopback inference API base URL. Default: `http://127.0.0.1:10300`. CLI `--ai-tools-api` is equivalent.                |
+| `SCUFRIS_GATEWAY_DOCS`         | surface gateway   | Boolean Swagger/OpenAPI switch. Disabled by default; the staging runner sets `1`. Do not enable in production.         |
 
 ## Desktop surface
 

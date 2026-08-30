@@ -52,8 +52,17 @@ iOS host-transcription milestones, then deploy and verify both current surfaces.
   [33322073768](https://github.com/alexjercan/scufris2/actions/runs/33322073768)
   uploaded iOS `1.1.0 (7)` and removed signing material.
 
+## v1.1.1 lifecycle follow-up
+
+A later Home Manager activation restarted `scufris-service`, and the gateway's
+`Requires` dependency stopped it. Since its unit had not changed, Home Manager
+did not include it in the start set. The reusable module must add the reverse
+`scufris-service Wants scufris-surface-gateway` start dependency, verify the
+generated unit, publish v1.1.1, and update the deployment tag.
+
 ## Remaining
 
-- Install `1.1.0 (7)` from TestFlight on the physical iPhone.
+- Release and deploy the v1.1.1 gateway lifecycle fix.
+- Install the current TestFlight build on the physical iPhone.
 - Confirm transient thinking feedback, hold/release recording, host
   transcription, editable review, discard, and explicit send.

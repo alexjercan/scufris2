@@ -394,6 +394,8 @@ in {
       home.packages = [pkgs.tailscale];
 
       systemd.user.services = {
+        ${serviceCfg.serviceName}.Unit.Wants = ["${remoteSurfaceCfg.serviceName}.service"];
+
         ${remoteSurfaceCfg.serviceName} = {
           Unit = {
             Description = "Scufris authenticated remote surface gateway";

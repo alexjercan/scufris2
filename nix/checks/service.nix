@@ -80,6 +80,7 @@ in
     assert serviceUnit.Service.ExecStart == [(lib.getExe service)];
     assert serviceUnit.Service.Restart == "on-failure";
     assert serviceUnit.Service.RuntimeDirectory == "scufris-service";
+    assert serviceUnit.Unit.Wants == ["scufris-surface-gateway.service"];
     assert gatewayConfig.serviceName == "scufris-surface-gateway";
     assert gatewayConfig.tailscaleServiceName == "scufris-tailscale-serve";
     assert gatewayUnit.Unit.After == ["scufris-service.service"];

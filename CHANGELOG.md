@@ -9,6 +9,12 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Fixed
+
+- Starting or restarting the background service now also starts its enabled
+  remote-surface gateway, so Home Manager activation cannot leave the private
+  API route without a loopback backend.
+
 ## [1.1.0] - 2026-08-30
 
 ### Added

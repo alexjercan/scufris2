@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -16,8 +17,9 @@ MAX_WAV_BYTES = 64 * 1024 * 1024
 API_TIMEOUT_SECONDS = 65.0
 MAX_PLAYBACK_SECONDS = 60.0
 STOP_GRACE_SECONDS = 0.75
-MODEL = "piper-1"
-VOICE = "en_US-lessac-medium"
+DEFAULT_MODEL = "piper-1"
+DEFAULT_VOICE = "en_US-lessac-medium"
+SETTING = re.compile(r"[A-Za-z0-9._-]{1,100}")
 
 cancelled = False
 children: list[subprocess.Popen[bytes]] = []
@@ -93,6 +95,13 @@ def endpoint() -> str:
     return value
 
 
+def setting(name: str, default: str) -> str:
+    value = os.environ.get(name, default)
+    if SETTING.fullmatch(value) is None:
+        raise ValueError(f"{name} must be a bounded model or voice name")
+    return value
+
+
 def read_text(stream: BinaryIO) -> str:
     content = stream.read(MAX_TEXT_BYTES + 1)
     if not content or len(content) > MAX_TEXT_BYTES:
@@ -139,12 +148,12 @@ def valid_wav(content: bytes) -> bool:
     return offset == len(content) and found_format and found_audio
 
 
-def synthesize(url: str, text: str) -> tuple[bytes, str | None]:
+def synthesize(url: str, text: str, model: str, voice: str) -> tuple[bytes, str | None]:
     global response
     payload = json.dumps(
         {
-            "model": MODEL,
-            "voice": VOICE,
+            "model": model,
+            "voice": voice,
             "input": text,
             "response_format": "wav",
         },
@@ -157,7 +166,7 @@ def synthesize(url: str, text: str) -> tuple[bytes, str | None]:
         headers={"Content-Type": "application/json", "Accept": "audio/wav"},
     )
     debug(
-        f"POST {url} model={MODEL} voice={VOICE} input_bytes={len(text.encode('utf-8'))}"
+        f"POST {url} model={model} voice={voice} input_bytes={len(text.encode('utf-8'))}"
     )
     try:
         response = urllib.request.urlopen(request, timeout=API_TIMEOUT_SECONDS)
@@ -188,10 +197,12 @@ def run() -> int:
     try:
         text = read_text(sys.stdin.buffer)
         url = endpoint()
+        model = setting("SCUFRIS_TTS_MODEL", DEFAULT_MODEL)
+        voice = setting("SCUFRIS_TTS_VOICE", DEFAULT_VOICE)
     except (UnicodeDecodeError, ValueError) as error:
         return fail(str(error), 2)
 
-    wav, synthesis_error = synthesize(url, text)
+    wav, synthesis_error = synthesize(url, text, model, voice)
     if cancelled:
         stop_children()
         return 130

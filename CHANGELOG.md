@@ -9,6 +9,23 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Changed
+
+- Home Manager now treats `programs.scufris.agent` as the core interactive
+  launcher that the optional background service also runs. API process
+  ownership is top-level under `aiToolsApi.enable`, while the desktop keeps its
+  consumer base URL.
+- Desktop speech exposes model and voice. Transcription exposes model and
+  language and always derives its route from the desktop API base URL.
+- Desktop controls are named `popupKey`, `backgroundKey`, and `abortKey`.
+  Terminal integration is `terminalCommand`, and journal-backed settings are
+  grouped under `desktop.widgets`.
+
+### Removed
+
+- The Home Manager transcription endpoint override. Compatible routes are
+  derived from `desktop.aiToolsApi.baseUrl` instead.
+
 ## [0.6.0] - 2026-08-30
 
 ### Added

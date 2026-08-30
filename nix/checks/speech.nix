@@ -31,6 +31,8 @@ in
     synthesiser = pkgs.runCommand "scufris-synthesiser-check" {} ''
       helper=${lib.getExe speak}
       grep -F 'SCUFRIS_TTS_ENDPOINT' "$helper"
+      grep -F 'SCUFRIS_TTS_MODEL' "$helper"
+      grep -F 'SCUFRIS_TTS_VOICE' "$helper"
       grep -F 'http://127.0.0.1:10300/v1/audio/speech' "$helper"
       grep -F scufris-speak "$helper"
       grep -F '"piper-1"' ${../../tools/voice/scufris-speak}

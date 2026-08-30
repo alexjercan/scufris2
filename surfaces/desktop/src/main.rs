@@ -244,11 +244,14 @@ impl Surface for DesktopSurface {
 /// Local transcription through the configured ai-tools-api endpoint.
 struct HttpTranscriber {
     endpoint: String,
+    model: String,
+    language: String,
 }
 
 impl Transcriber for HttpTranscriber {
     fn transcribe(&self, wav: Vec<u8>) -> Result<String, String> {
-        stt::transcribe(&self.endpoint, &wav).map_err(|error| error.to_string())
+        stt::transcribe(&self.endpoint, &self.model, &self.language, &wav)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -532,6 +535,8 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                     as Arc<dyn PendingStore>,
                 transcriber: Arc::new(HttpTranscriber {
                     endpoint: config.stt_endpoint.clone(),
+                    model: config.stt_model.clone(),
+                    language: config.stt_language.clone(),
                 }) as Arc<dyn Transcriber>,
                 executor: Arc::new(ThreadExecutor) as Arc<dyn Executor>,
                 prefix,

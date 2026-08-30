@@ -47,10 +47,12 @@ socket=/run/user/1000/scufris/surface.sock
 command_socket=/run/user/1000/scufris/desktop.sock
 state_file=/home/you/.local/state/scufris-desktop/pending.json
 stt_endpoint=http://127.0.0.1:10300/v1/audio/transcriptions
-hotkey=Super+D
-cancel_key=derived
-stop_key=derived
-chat_command=none
+stt_model=whisper-1
+stt_language=auto
+popup_key=Super+D
+background_key=derived
+abort_key=derived
+terminal_command=none
 restart_command=none
 speak_command=none
 ```

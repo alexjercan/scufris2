@@ -130,14 +130,16 @@ player enter its closure, and nothing it sets turns speech on: the agent
 shapes the answer, and the companion owns the speaker.
 
 `nix/speak.nix` builds `scufris-speak`, the bounded HTTP-to-PipeWire adapter the
-companion runs. It sends fixed `piper-1` and `en_US-lessac-medium` requests to
+companion runs. It sends the configured speech model and voice to
 `ai-tools-api`; no Piper executable or model enters a Scufris closure.
 
-The Home Manager module renders the same launcher, adds the background service
-and desktop companion. It uses an enabled `services.ai-tools-api` provider from
-the surrounding composition when present. Otherwise managed mode runs the
-pinned complete API package as one fallback unit; external mode only consumes
-its base URL. The check groups under `nix/checks/` assert the rendered launcher,
+The Home Manager module renders the top-level agent launcher, which works
+interactively and is also the executable the optional background service runs.
+API process ownership is explicit and top-level: `aiToolsApi.enable` runs the
+pinned complete API package, while false leaves ownership to an enabled
+`services.ai-tools-api` provider or another external deployment. The desktop
+only consumes its configured base URL. The check groups under `nix/checks/`
+assert the rendered launcher,
 distributed files, module interface, API/closure separation, resolved companion
 configuration, and headless service.
 

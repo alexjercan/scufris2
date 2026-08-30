@@ -36,9 +36,11 @@
   # The companion is a client, so every desktop configuration under test also
   # runs the service that owns the conversation.
   serviceSettings = {
-    enable = true;
-    package = scufris.service;
     agent.package = testAgent;
+    service = {
+      enable = true;
+      package = scufris.service;
+    };
   };
   desktopHome = mkHome {
     modules = [
@@ -58,52 +60,64 @@
         };
       }
     ];
-    settings = {
-      desktop.speech.enable = true;
-      service = serviceSettings;
-      desktop = {
-        enable = true;
-        package = desktop;
-        chatCommand = testChat;
-        todayCommand = testToday;
-        denPath = "/home/tester/the-den";
-        macrosDatabase = "/home/tester/macros.csv";
-        aiToolsApi.baseUrl = "http://127.0.0.1:10300";
+    settings =
+      serviceSettings
+      // {
+        desktop = {
+          enable = true;
+          package = desktop;
+          terminalCommand = testChat;
+          widgets = {
+            todayCommand = testToday;
+            denPath = "/home/tester/the-den";
+            macrosDatabase = "/home/tester/macros.csv";
+          };
+          aiToolsApi.baseUrl = "http://127.0.0.1:10300";
+          speech = {
+            enable = true;
+            model = "custom-piper";
+            voice = "custom-voice";
+          };
+          transcription = {
+            model = "custom-whisper";
+            language = "en";
+          };
+        };
       };
-    };
   };
   fallbackHome = mkHome {
-    settings = {
-      service = serviceSettings;
-      desktop = {
-        enable = true;
-        package = desktop;
-      };
-    };
+    settings.aiToolsApi.enable = true;
   };
-  configuredEndpointHome = mkHome {
-    settings = {
-      service = serviceSettings;
-      desktop = {
-        enable = true;
-        package = desktop;
-        cancelKey = "Control+Alt+Q";
-        stopKey = "none";
-        aiToolsApi.manage = false;
-        transcription.endpoint = "http://127.0.0.1:10400/v1/audio/transcriptions";
+  configuredRequestHome = mkHome {
+    settings =
+      serviceSettings
+      // {
+        desktop = {
+          enable = true;
+          package = desktop;
+          backgroundKey = "Control+Alt+Q";
+          abortKey = "none";
+          aiToolsApi.baseUrl = "http://127.0.0.1:10400";
+          transcription = {
+            model = "another-whisper";
+            language = "ro";
+          };
+        };
       };
-    };
   };
   desktopWithoutServiceHome = mkHome {
     settings.desktop = {
       enable = true;
       package = desktop;
-      aiToolsApi.manage = false;
     };
   };
   desktopConfig = desktopHome.config.programs.scufris.desktop;
   desktopUnit = desktopHome.config.systemd.user.services.${desktopConfig.serviceName};
-  configuredDesktop = configuredEndpointHome.config;
+  speakerCommand = lib.removePrefix "SCUFRIS_DESKTOP_SPEAK_COMMAND=" (lib.findFirst
+    (lib.hasPrefix "SCUFRIS_DESKTOP_SPEAK_COMMAND=")
+    (throw "speech-enabled desktop has no speaker")
+    desktopUnit.Service.Environment);
+  configuredDesktop = configuredRequestHome.config;
   desktopWithoutServiceEvaluation = builtins.tryEval (builtins.deepSeq desktopWithoutServiceHome.activationPackage true);
   normalClosure = pkgs.closureInfo {rootPaths = [launcher];};
   desktopClosure = pkgs.closureInfo {rootPaths = [desktop];};
@@ -146,10 +160,12 @@ in
       command_socket=none
       state_file=/home/scufris-test/.local/state/scufris-desktop/pending.json
       stt_endpoint=http://127.0.0.1:10300/v1/audio/transcriptions
-      hotkey=Super+D
-      cancel_key=derived
-      stop_key=derived
-      chat_command=none
+      stt_model=whisper-1
+      stt_language=auto
+      popup_key=Super+D
+      background_key=derived
+      abort_key=derived
+      terminal_command=none
       restart_command=none
       speak_command=none
       EOF
@@ -160,6 +176,8 @@ in
         'state_file=/home/scufris-test/.state/scufris-desktop/pending.json'
 
       SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10400/v1/audio/transcriptions \
+        SCUFRIS_STT_MODEL=another-whisper \
+        SCUFRIS_STT_LANGUAGE=ro \
         SCUFRIS_DESKTOP_HOTKEY=Super+G \
         SCUFRIS_DESKTOP_CANCEL_KEY=Control+Alt+Q \
         SCUFRIS_DESKTOP_STOP_KEY=none \
@@ -174,10 +192,12 @@ in
       command_socket=/run/user/1000/scufris/desktop.sock
       state_file=/run/user/1000/scufris-desktop/pending.json
       stt_endpoint=http://127.0.0.1:10400/v1/audio/transcriptions
-      hotkey=Super+G
-      cancel_key=Control+Alt+Q
-      stop_key=none
-      chat_command=/nix/store/fake/bin/scufris-chat
+      stt_model=another-whisper
+      stt_language=ro
+      popup_key=Super+G
+      background_key=Control+Alt+Q
+      abort_key=none
+      terminal_command=/nix/store/fake/bin/scufris-chat
       restart_command=/nix/store/fake/bin/scufris-restart-backend
       speak_command=/nix/store/fake/bin/scufris-speak
       EOF
@@ -203,6 +223,8 @@ in
         ${desktop}/bin/scufris-desktop --print-config
       ! SCUFRIS_STT_ENDPOINT=file:///etc/passwd \
         ${desktop}/bin/scufris-desktop --print-config
+      ! SCUFRIS_STT_MODEL='not a model' \
+        ${desktop}/bin/scufris-desktop --print-config
       touch "$out"
     '';
 
@@ -223,7 +245,6 @@ in
 
     desktop-interface = assert !(mkHome {}).config.programs.scufris.desktop.enable;
     assert !desktopWithoutServiceEvaluation.success;
-    assert desktopConfig.transcription.resolvedEndpoint == "http://127.0.0.1:10300/v1/audio/transcriptions";
     assert desktopConfig.serviceName == "scufris-desktop";
     assert desktopUnit.Install.WantedBy == ["graphical-session.target"];
     assert desktopUnit.Service.Restart == "on-failure";
@@ -231,6 +252,8 @@ in
     assert desktopUnit.Service.ExecStart == [(lib.getExe desktop)];
     assert lib.elem scufris.ctl desktopHome.config.home.packages;
     assert lib.elem "SCUFRIS_STT_ENDPOINT=http://127.0.0.1:10300/v1/audio/transcriptions" desktopUnit.Service.Environment;
+    assert lib.elem "SCUFRIS_STT_MODEL=custom-whisper" desktopUnit.Service.Environment;
+    assert lib.elem "SCUFRIS_STT_LANGUAGE=en" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_HOTKEY=Super+D" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe testChat}" desktopUnit.Service.Environment;
     # The journal is personal data, so the deployment names the command that
@@ -256,22 +279,27 @@ in
     assert lib.any (lib.hasPrefix "SCUFRIS_DESKTOP_SPEAK_COMMAND=") desktopUnit.Service.Environment;
     assert !(lib.any (lib.hasPrefix "SCUFRIS_DESKTOP_SPEAK_COMMAND=") configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment);
     assert desktopHome.config.services.ai-tools-api.enable;
-    assert !desktopConfig.aiToolsApi.manage;
+    assert !desktopHome.config.programs.scufris.aiToolsApi.enable;
     assert builtins.hasAttr "ai-tools-api" desktopHome.config.systemd.user.services;
     assert builtins.hasAttr "ai-tools-api-whisper" desktopHome.config.systemd.user.services;
     assert !(builtins.hasAttr "scufris-ai-tools-api" desktopHome.config.systemd.user.services);
-    assert fallbackHome.config.programs.scufris.desktop.aiToolsApi.manage;
+    assert fallbackHome.config.programs.scufris.aiToolsApi.enable;
     assert builtins.hasAttr "scufris-ai-tools-api" fallbackHome.config.systemd.user.services;
     assert fallbackHome.config.systemd.user.services.scufris-ai-tools-api.Service.ExecStart == [(lib.getExe scufris.aiToolsApi)];
     assert fallbackHome.config.systemd.user.services.scufris-ai-tools-api.Service.ProtectSystem == "strict";
     assert fallbackHome.config.systemd.user.services.scufris-ai-tools-api.Service.ProtectHome == "tmpfs";
     assert !(builtins.hasAttr "scufris-whisper" desktopHome.config.systemd.user.services);
-    assert configuredDesktop.programs.scufris.desktop.transcription.resolvedEndpoint == "http://127.0.0.1:10400/v1/audio/transcriptions";
-    assert !configuredDesktop.programs.scufris.desktop.aiToolsApi.manage;
+    assert configuredDesktop.programs.scufris.desktop.aiToolsApi.baseUrl == "http://127.0.0.1:10400";
+    assert configuredDesktop.programs.scufris.desktop.transcription.model == "another-whisper";
+    assert configuredDesktop.programs.scufris.desktop.transcription.language == "ro";
+    assert !configuredDesktop.programs.scufris.aiToolsApi.enable;
     assert !(builtins.hasAttr "ai-tools-api" configuredDesktop.systemd.user.services);
     assert !(builtins.hasAttr "ai-tools-api-whisper" configuredDesktop.systemd.user.services);
       pkgs.runCommand "scufris-desktop-interface-check" {} ''
         restart=${lib.getExe desktopConfig.restartCommand}
+        speaker=${speakerCommand}
+        grep -F 'custom-piper' "$speaker"
+        grep -F 'custom-voice' "$speaker"
         # The companion may only restart the backend service this module owns.
         grep -F 'systemctl --user restart scufris-service.service' "$restart"
         ! grep -Ei 'whisper|kitty' "$restart"

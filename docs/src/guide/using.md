@@ -113,8 +113,8 @@ arrives in a textbox above the pill, and the textbox takes the keyboard.
 
 The pill is an indicator and nothing else. It never takes the keyboard, so
 those three keys are the only ones that reach it, and they are built from
-whatever modifier your activation hotkey uses. Name them yourself with
-`cancelKey` and `stopKey` if your desktop already means something by them, or
+whatever modifier your popup key uses. Name them yourself with
+`backgroundKey` and `abortKey` if your desktop already means something by them, or
 set either to `"none"` to leave the key alone; see
 [Installation](installation.md). The textbox is an ordinary focused window, so
 the caret, the selection, and every editing key are its own.
@@ -156,7 +156,7 @@ Once i3 owns `$mod+d`, the companion cannot also take it, and it says so in the
 log at startup. That is expected here - your binding opens the pill, and it
 opens the same pill. Sway runs the same configuration. Note that a binding is
 one press: the tap and hold gestures are the companion's own grab, so a desktop
-that takes the hotkey for itself trades them for the two-press take.
+that takes the popup key for itself trades them for the two-press take.
 
 `scufris-ctl show` and `scufris-ctl hide` are the workspace on its own, with no
 microphone and no toggling. They are two verbs rather than one because a script
@@ -291,7 +291,7 @@ half-finished message off you.
 Everything written this way lands on the day the panel is showing, not on
 today, so a day you picked in the month is the day the task belongs to.
 
-These need `programs.scufris.desktop.todayCommand`. Logging a food also needs
-`programs.scufris.desktop.macrosDatabase`, unless your food database is where
+These need `programs.scufris.desktop.widgets.todayCommand`. Logging a food also needs
+`programs.scufris.desktop.widgets.macrosDatabase`, unless your food database is where
 `today` looks by default. Without them the panels still open and say what is
 missing, rather than sitting empty. See [Installation](installation.md).

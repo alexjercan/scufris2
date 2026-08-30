@@ -16,6 +16,10 @@ use thiserror::Error;
 /// Endpoint used when the deployment configures none.
 pub const DEFAULT_STT_ENDPOINT: &str = "http://127.0.0.1:10300/v1/audio/transcriptions";
 
+/// Transcription request values used when the deployment configures none.
+pub const DEFAULT_STT_MODEL: &str = "whisper-1";
+pub const DEFAULT_STT_LANGUAGE: &str = "auto";
+
 /// Activation accelerator used when the deployment configures none.
 pub const DEFAULT_HOTKEY: &str = "Super+D";
 
@@ -45,8 +49,10 @@ pub struct Config {
     /// companion still starts: the socket is how a window manager binding
     /// reaches the pill, and the hotkey and the tray reach it without one.
     pub command_socket: Option<PathBuf>,
-    /// ai-tools-api OpenAI-compatible transcription endpoint.
+    /// ai-tools-api OpenAI-compatible transcription request.
     pub stt_endpoint: String,
+    pub stt_model: String,
+    pub stt_language: String,
     /// Accelerator that opens the pill and starts recording.
     pub hotkey: String,
     /// Accelerator that puts the pill away, when the deployment names one.
@@ -78,6 +84,9 @@ pub enum ConfigError {
     /// A configured endpoint was not an absolute HTTP or HTTPS URL.
     #[error("SCUFRIS_STT_ENDPOINT must be an http or https URL")]
     Endpoint,
+    /// A configured request value was not a bounded API identifier.
+    #[error("{0} must be a bounded model or language name")]
+    Setting(&'static str),
     /// A configured hook was not an absolute path.
     #[error("{0} must be an absolute executable path")]
     Command(&'static str),
@@ -92,7 +101,11 @@ impl Config {
         Self::resolve(
             env::var_os("SCUFRIS_DESKTOP_SOCKET"),
             env::var_os("SCUFRIS_DESKTOP_COMMAND_SOCKET"),
-            env::var_os("SCUFRIS_STT_ENDPOINT"),
+            Transcription {
+                endpoint: env::var_os("SCUFRIS_STT_ENDPOINT"),
+                model: env::var_os("SCUFRIS_STT_MODEL"),
+                language: env::var_os("SCUFRIS_STT_LANGUAGE"),
+            },
             Keys {
                 hotkey: env::var_os("SCUFRIS_DESKTOP_HOTKEY"),
                 cancel: env::var_os("SCUFRIS_DESKTOP_CANCEL_KEY"),
@@ -114,7 +127,7 @@ impl Config {
     fn resolve(
         socket: Option<OsString>,
         command_socket: Option<OsString>,
-        endpoint: Option<OsString>,
+        transcription: Transcription,
         keys: Keys,
         hooks: Hooks,
         state: State,
@@ -131,13 +144,20 @@ impl Config {
             // may never use would be the worse trade.
             None => scufris_control::command::command_socket_path().ok(),
         };
-        let stt_endpoint = match non_empty(endpoint) {
+        let stt_endpoint = match non_empty(transcription.endpoint) {
             Some(value) => value.to_string_lossy().into_owned(),
             None => DEFAULT_STT_ENDPOINT.to_string(),
         };
         if !stt_endpoint.starts_with("http://") && !stt_endpoint.starts_with("https://") {
             return Err(ConfigError::Endpoint);
         }
+        let stt_model =
+            request_setting(transcription.model, DEFAULT_STT_MODEL, "SCUFRIS_STT_MODEL")?;
+        let stt_language = request_setting(
+            transcription.language,
+            DEFAULT_STT_LANGUAGE,
+            "SCUFRIS_STT_LANGUAGE",
+        )?;
         let hotkey = non_empty(keys.hotkey)
             .map(|value| value.to_string_lossy().into_owned())
             .unwrap_or_else(|| DEFAULT_HOTKEY.to_string());
@@ -145,6 +165,8 @@ impl Config {
             socket,
             command_socket,
             stt_endpoint,
+            stt_model,
+            stt_language,
             hotkey,
             cancel_key: word(keys.cancel),
             stop_key: word(keys.stop),
@@ -169,11 +191,13 @@ impl Config {
             value.as_deref().unwrap_or(DERIVED)
         }
         format!(
-            "socket={}\ncommand_socket={}\nstate_file={}\nstt_endpoint={}\nhotkey={}\ncancel_key={}\nstop_key={}\nchat_command={}\nrestart_command={}\nspeak_command={}\n",
+            "socket={}\ncommand_socket={}\nstate_file={}\nstt_endpoint={}\nstt_model={}\nstt_language={}\npopup_key={}\nbackground_key={}\nabort_key={}\nterminal_command={}\nrestart_command={}\nspeak_command={}\n",
             self.socket.display(),
             optional(&self.command_socket),
             self.state_file.display(),
             self.stt_endpoint,
+            self.stt_model,
+            self.stt_language,
             self.hotkey,
             derived(&self.cancel_key),
             derived(&self.stop_key),
@@ -182,6 +206,13 @@ impl Config {
             optional(&self.speak_command),
         )
     }
+}
+
+/// The transcription request as the environment gave it.
+struct Transcription {
+    endpoint: Option<OsString>,
+    model: Option<OsString>,
+    language: Option<OsString>,
 }
 
 /// The accelerators the deployment names, as the environment gave them.
@@ -235,6 +266,24 @@ fn non_empty(value: Option<OsString>) -> Option<OsString> {
 /// An empty variable is nothing rather than an empty accelerator: a unit file
 /// that exports a variable it has no value for is how a key would otherwise be
 /// turned off by accident.
+fn request_setting(
+    value: Option<OsString>,
+    default: &str,
+    name: &'static str,
+) -> Result<String, ConfigError> {
+    let value = non_empty(value)
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| default.to_string());
+    if value.len() > 100
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+    {
+        return Err(ConfigError::Setting(name));
+    }
+    Ok(value)
+}
+
 fn word(value: Option<OsString>) -> Option<String> {
     non_empty(value).map(|value| value.to_string_lossy().into_owned())
 }
@@ -283,6 +332,14 @@ mod tests {
         }
     }
 
+    fn transcription(endpoint: Option<&str>) -> Transcription {
+        Transcription {
+            endpoint: endpoint.map(OsString::from),
+            model: None,
+            language: None,
+        }
+    }
+
     fn resolve(
         socket: &str,
         endpoint: Option<&str>,
@@ -291,7 +348,7 @@ mod tests {
         Config::resolve(
             Some(OsString::from(socket)),
             Some(OsString::from("/run/user/1000/scufris/desktop.sock")),
-            endpoint.map(OsString::from),
+            transcription(endpoint),
             unset(),
             Hooks {
                 chat: chat.map(OsString::from),
@@ -315,6 +372,8 @@ mod tests {
     fn defaults_target_the_bundled_loopback_endpoint() {
         let config = resolve("/run/user/1000/scufris/surface.sock", None, None).unwrap();
         assert_eq!(config.stt_endpoint, DEFAULT_STT_ENDPOINT);
+        assert_eq!(config.stt_model, DEFAULT_STT_MODEL);
+        assert_eq!(config.stt_language, DEFAULT_STT_LANGUAGE);
         assert_eq!(config.hotkey, DEFAULT_HOTKEY);
         assert_eq!(config.chat_command, None);
         assert_eq!(config.restart_command, None);
@@ -330,7 +389,7 @@ mod tests {
         let config = Config::resolve(
             Some(OsString::from("/run/user/1000/scufris/surface.sock")),
             None,
-            None,
+            transcription(None),
             unset(),
             Hooks {
                 chat: None,
@@ -366,6 +425,27 @@ mod tests {
     }
 
     #[test]
+    fn transcription_request_settings_are_bounded_identifiers() {
+        assert_eq!(
+            request_setting(
+                Some(OsString::from("custom-whisper")),
+                DEFAULT_STT_MODEL,
+                "SCUFRIS_STT_MODEL"
+            )
+            .unwrap(),
+            "custom-whisper"
+        );
+        assert!(matches!(
+            request_setting(
+                Some(OsString::from("not a model")),
+                DEFAULT_STT_MODEL,
+                "SCUFRIS_STT_MODEL"
+            ),
+            Err(ConfigError::Setting("SCUFRIS_STT_MODEL"))
+        ));
+    }
+
+    #[test]
     fn non_http_endpoints_and_relative_hooks_are_rejected() {
         assert!(matches!(
             resolve("/socket", Some("file:///etc/passwd"), None),
@@ -392,10 +472,12 @@ mod tests {
                 "command_socket=/run/user/1000/scufris/desktop.sock\n",
                 "state_file=/run/user/1000/scufris-desktop/pending.json\n",
                 "stt_endpoint=http://127.0.0.1:10300/v1/audio/transcriptions\n",
-                "hotkey=Super+D\n",
-                "cancel_key=derived\n",
-                "stop_key=derived\n",
-                "chat_command=/nix/store/x/bin/scufris-chat\n",
+                "stt_model=whisper-1\n",
+                "stt_language=auto\n",
+                "popup_key=Super+D\n",
+                "background_key=derived\n",
+                "abort_key=derived\n",
+                "terminal_command=/nix/store/x/bin/scufris-chat\n",
                 "restart_command=none\n",
                 "speak_command=none\n",
             )
@@ -412,7 +494,7 @@ mod tests {
         let config = Config::resolve(
             Some(OsString::from("/run/user/1000/scufris/surface.sock")),
             Some(OsString::from("/run/user/1000/scufris/desktop.sock")),
-            None,
+            transcription(None),
             Keys {
                 hotkey: Some(OsString::from("Control+Alt+G")),
                 cancel: Some(OsString::from("Control+Alt+Q")),
@@ -429,8 +511,8 @@ mod tests {
         assert_eq!(config.hotkey, "Control+Alt+G");
         assert_eq!(config.cancel_key.as_deref(), Some("Control+Alt+Q"));
         assert_eq!(config.stop_key.as_deref(), Some(crate::keys::NONE));
-        assert!(config.describe().contains("cancel_key=Control+Alt+Q\n"));
-        assert!(config.describe().contains("stop_key=none\n"));
+        assert!(config.describe().contains("background_key=Control+Alt+Q\n"));
+        assert!(config.describe().contains("abort_key=none\n"));
     }
 
     /// An environment that sets a key to the empty string named no key. The
@@ -441,7 +523,7 @@ mod tests {
         let config = Config::resolve(
             Some(OsString::from("/run/user/1000/scufris/surface.sock")),
             None,
-            None,
+            transcription(None),
             Keys {
                 hotkey: Some(OsString::new()),
                 cancel: Some(OsString::new()),

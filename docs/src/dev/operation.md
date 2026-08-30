@@ -10,8 +10,10 @@ The launcher and helpers communicate through a small set of variables:
   workflow projects. The launcher sets the packaged default when unset.
 - `SCUFRIS_CALM`: reserved by the development launcher; Calm itself defaults
   on.
-- `SCUFRIS_STT_ENDPOINT`: the OpenAI-compatible transcription route.
-- `SCUFRIS_TTS_ENDPOINT`: the speech route used by `scufris-speak`.
+- `SCUFRIS_STT_ENDPOINT`, `SCUFRIS_STT_MODEL`, and
+  `SCUFRIS_STT_LANGUAGE`: the OpenAI-compatible transcription request.
+- `SCUFRIS_TTS_ENDPOINT`, `SCUFRIS_TTS_MODEL`, and `SCUFRIS_TTS_VOICE`: the
+  speech request used by `scufris-speak`.
 - `SCUFRIS_DESKTOP_SPEAK_COMMAND`: the HTTP/playback helper the companion runs. The
   desktop unit sets it when voice is enabled; a companion without it stays
   silent, which is not a fault.
@@ -33,8 +35,6 @@ through unchanged.
 - `$XDG_STATE_HOME/scufris/dev-sessions/`: resumable `npm run dev` sessions.
 - `~/.local/share/scufris/sessions` (default): the conversation the background
   service owns.
-- `<session>.jsonl.scufris/`: private detail artifact sidecars beside each Pi
-  session file.
 
 ## Inspecting jobs
 

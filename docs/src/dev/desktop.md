@@ -61,8 +61,8 @@ transcript is saved before submission. If delivery becomes uncertain, it is
 never resent without an explicit user confirmation. Submission IDs distinguish
 late acknowledgements from the current transcript.
 
-The activation hotkey defaults to `Super+D`. A tap shows or hides the local
-workspace. A hold records until release. Derived cancel and stop keys exist only
+The popup key defaults to `Super+D`. A tap shows or hides the local workspace.
+A hold records until release. The derived background and abort keys exist only
 while the pill is on screen. The desktop command socket remains
 `desktop.sock`; `scufris-ctl open`, `hud`, `show`, and `hide` use that local
 surface protocol rather than the service control channel.

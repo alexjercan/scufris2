@@ -38,7 +38,7 @@ pub fn content_type() -> String {
 }
 
 /// Builds the multipart body carrying one WAV recording.
-pub fn multipart_body(wav: &[u8]) -> Vec<u8> {
+pub fn multipart_body(wav: &[u8], model: &str, language: &str) -> Vec<u8> {
     let mut body = Vec::with_capacity(wav.len() + 512);
     let mut field = |name: &str, value: &str| {
         body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
@@ -48,8 +48,8 @@ pub fn multipart_body(wav: &[u8]) -> Vec<u8> {
         body.extend_from_slice(value.as_bytes());
         body.extend_from_slice(b"\r\n");
     };
-    field("model", "whisper-1");
-    field("language", "auto");
+    field("model", model);
+    field("language", language);
     field("response_format", "json");
     body.extend_from_slice(format!("--{BOUNDARY}\r\n").as_bytes());
     body.extend_from_slice(
@@ -82,9 +82,14 @@ pub fn parse_transcript(body: &str) -> Result<String, TranscriptionError> {
 /// Transcribes one WAV recording through the configured endpoint.
 ///
 /// Only sizes and timing reach the log; the transcript itself never does.
-pub fn transcribe(endpoint: &str, wav: &[u8]) -> Result<String, TranscriptionError> {
+pub fn transcribe(
+    endpoint: &str,
+    model: &str,
+    language: &str,
+    wav: &[u8],
+) -> Result<String, TranscriptionError> {
     let started = Instant::now();
-    let outcome = request(endpoint, wav);
+    let outcome = request(endpoint, model, language, wav);
     let elapsed_ms = started.elapsed().as_millis() as u64;
     match &outcome {
         Ok(text) => tracing::debug!(
@@ -104,7 +109,12 @@ pub fn transcribe(endpoint: &str, wav: &[u8]) -> Result<String, TranscriptionErr
     outcome
 }
 
-fn request(endpoint: &str, wav: &[u8]) -> Result<String, TranscriptionError> {
+fn request(
+    endpoint: &str,
+    model: &str,
+    language: &str,
+    wav: &[u8],
+) -> Result<String, TranscriptionError> {
     tracing::debug!(
         method = "POST",
         url = endpoint,
@@ -119,7 +129,7 @@ fn request(endpoint: &str, wav: &[u8]) -> Result<String, TranscriptionError> {
     let response = client
         .post(endpoint)
         .header(reqwest::header::CONTENT_TYPE, content_type())
-        .body(multipart_body(wav))
+        .body(multipart_body(wav, model, language))
         .send()
         .map_err(|_| TranscriptionError::Unreachable)?;
     let status = response.status();
@@ -146,10 +156,10 @@ mod tests {
 
     #[test]
     fn the_body_carries_the_recording_and_the_requested_format() {
-        let body = multipart_body(b"RIFFfake");
+        let body = multipart_body(b"RIFFfake", "custom-whisper", "en");
         let text = String::from_utf8_lossy(&body);
-        assert!(text.contains("name=\"model\"\r\n\r\nwhisper-1"));
-        assert!(text.contains("name=\"language\"\r\n\r\nauto"));
+        assert!(text.contains("name=\"model\"\r\n\r\ncustom-whisper"));
+        assert!(text.contains("name=\"language\"\r\n\r\nen"));
         assert!(text.contains("name=\"response_format\"\r\n\r\njson"));
         assert!(!text.contains("temperature"));
         assert!(text.contains("filename=\"recording.wav\""));

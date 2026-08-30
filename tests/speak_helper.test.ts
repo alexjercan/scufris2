@@ -149,6 +149,8 @@ process.stdin.on("end", () => {
       PATH: item.bin,
       TEST_LOG: item.log,
       SCUFRIS_TTS_ENDPOINT: server.endpoint,
+      SCUFRIS_TTS_MODEL: "custom-piper",
+      SCUFRIS_TTS_VOICE: "custom-voice",
     });
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(received, {
@@ -156,8 +158,8 @@ process.stdin.on("end", () => {
       url: "/v1/audio/speech",
       contentType: "application/json",
       body: {
-        model: "piper-1",
-        voice: "en_US-lessac-medium",
+        model: "custom-piper",
+        voice: "custom-voice",
         input: "A safe spoken response.",
         response_format: "wav",
       },
@@ -178,6 +180,13 @@ test("speech helper rejects invalid input and bounded API failures", async () =>
   assert.equal((await runHelper(Buffer.from([0xff]), base)).code, 2);
   assert.equal((await runHelper("x".repeat(1_001), base)).code, 2);
   assert.equal((await runHelper("Safe response.", base)).code, 2);
+  const invalidSetting = await runHelper("Safe response.", {
+    ...base,
+    SCUFRIS_TTS_ENDPOINT: "http://127.0.0.1:10300/v1/audio/speech",
+    SCUFRIS_TTS_MODEL: "not a model",
+  });
+  assert.equal(invalidSetting.code, 2);
+  assert.match(invalidSetting.stderr, /SCUFRIS_TTS_MODEL/);
 
   let mode = "status";
   const server = await api((_request, response) => {

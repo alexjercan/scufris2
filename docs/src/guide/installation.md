@@ -69,8 +69,9 @@ Import the module from the pinned flake input:
 }
 ```
 
-This installs the rendered launcher in `home.packages`. All six extensions are
-always present: workflow, response, Calm, service, widgets, and conversation.
+This installs the rendered interactive `scufris` agent launcher in
+`home.packages`. The same configured launcher is what the optional background
+service starts in RPC mode.
 
 The default Pi package comes from the pinned `llm-agents.nix` input. A
 configuration that manages Pi itself can pass its own package:
@@ -78,18 +79,19 @@ configuration that manages Pi itself can pass its own package:
 ```nix
 programs.scufris = {
   enable = true;
-  service.agent.piPackage = inputs.llm-agents.packages.${pkgs.system}.pi;
+  agent.piPackage = inputs.llm-agents.packages.${pkgs.system}.pi;
 };
 ```
 
-Set `programs.scufris.service.agent.projectRoots` to control which directories
+Set `programs.scufris.agent.projectRoots` to control which directories
 Scufris searches for workflow projects. The default is `~/personal`, `~/work`,
 and `~/third-party`.
 
 The former top-level `piPackage`, `projectRoots`, `finalPackage`, and `voice`
-options, plus `service.agentPackage` and `desktop.stt`, remain deprecated aliases
-for one release. New configurations should use the architecture-owned paths
-shown here.
+options remain deprecated aliases for one release. The v0.6 `service.agent`,
+`desktop.aiToolsApi.manage`, key, terminal, and widget source paths also map to
+their new ownership paths for one release. The transcription endpoint override
+and the older `desktop.stt` alias are removed.
 
 ## The background service
 
@@ -103,7 +105,7 @@ programs.scufris = {
 
 The service owns the conversation and always supervises one agent. There is no
 separate agent service to enable. Configure its Pi package, project roots, or
-complete launcher under `service.agent`. Enabling the service defines the
+complete launcher under `agent`. Enabling the service defines the
 `scufris-service.service` user service, wants it from `default.target` rather
 than from a graphical session, and installs `scufris-ctl` beside it. A machine
 with no display keeps the conversation, and a terminal over ssh reaches it.
@@ -122,9 +124,10 @@ programs.scufris = {
 };
 ```
 
-Desktop speech requires Linux. The companion sends bounded text to the shared
-`ai-tools-api` speech route and plays its validated WAV response through
-PipeWire. The API owns Piper and the pinned voice; Scufris owns playback.
+Desktop speech requires Linux. The companion sends bounded text, the configured
+`speech.model`, and `speech.voice` to the shared `ai-tools-api` speech route and
+plays its validated WAV response through PipeWire. The defaults are `piper-1`
+and `en_US-lessac-medium`. WAV is fixed because Scufris owns validated playback.
 
 Speech means one thing: the companion gets a synthesiser. Nothing about it
 reaches the service or the agent, which shape the same prose answer whatever is
@@ -152,47 +155,54 @@ it talks to. Enabling it defines the `scufris-desktop.service` user service,
 wants it from `graphical-session.target`, and restarts it on failure so a
 backend crash never takes the tray down.
 
-The module detects an enabled `services.ai-tools-api` option supplied by the
-surrounding Home Manager composition and uses its host and port. If none is
-enabled, `desktop.aiToolsApi.manage` defaults true and runs the pinned complete
-API package as one fallback service. To consume an API owned outside Home
-Manager instead:
+API process ownership is top-level and explicit. Leave
+`programs.scufris.aiToolsApi.enable = false` to consume the enabled
+`services.ai-tools-api` provider or another external service. Set it true only
+when Scufris should manage the pinned complete API service itself. The desktop
+is a consumer and names its base URL separately:
 
 ```nix
-programs.scufris.desktop.aiToolsApi = {
-  manage = false;
-  baseUrl = "http://127.0.0.1:10300";
+programs.scufris = {
+  aiToolsApi.enable = false;
+  desktop.aiToolsApi.baseUrl = "http://127.0.0.1:10300";
 };
 ```
 
-Transcription defaults to `BASE/v1/audio/transcriptions`; speech defaults to
-`BASE/v1/audio/speech`. `desktop.transcription.endpoint` remains an explicit
-transcription-route override.
+The transcription and speech routes are always derived as
+`BASE/v1/audio/transcriptions` and `BASE/v1/audio/speech`. Configure the
+transcription request rather than replacing its route:
+
+```nix
+programs.scufris.desktop.transcription = {
+  model = "whisper-1";
+  language = "auto";
+};
+```
 
 The conversation window ships with the companion and needs no configuration;
 bind `scufris-ctl hud` in your window manager to reach it. Protocol v4 does not
-provide terminal session handoff. `desktop.chatCommand` remains available for
+provide terminal session handoff. `desktop.terminalCommand` remains available for
 a deployment-specific terminal view that does not take over Pi.
 
 The backend restart hook is generated by the module and restarts only
 `scufris-service.service`. Change the activation accelerator with
-`programs.scufris.desktop.hotkey`; the default is `Super+D`.
+`programs.scufris.desktop.popupKey`; the default is `Super+D`.
 
 Two more keys answer the pill while it is on screen: one that puts it away and
-one that stops Scufris. Both are derived from the hotkey's own modifiers, so
+one that aborts Scufris. Both are derived from the popup key's own modifiers, so
 `Super+D` gives `Super+Escape` and `Super+Delete`, and both are yours to name:
 
 ```nix
 programs.scufris.desktop = {
-  hotkey = "Super+D";
-  cancelKey = "Super+Escape";
-  stopKey = "none";
+  popupKey = "Super+D";
+  backgroundKey = "Super+Escape";
+  abortKey = "none";
 };
 ```
 
 `"none"` takes a key off the companion, which is the answer where your desktop
-already means something by it. The tray puts the pill away without the cancel
-key.
+already means something by it. The tray can put the pill in the background
+without the background key.
 
 The agenda, macros, and notes panels read the-den journal, and Scufris does not
 depend on the repository that holds it. Name the command that reads it, the
@@ -200,7 +210,7 @@ journal directory when it is not where that command looks by default, and the
 food database if you log food from the macros panel:
 
 ```nix
-programs.scufris.desktop = {
+programs.scufris.desktop.widgets = {
   todayCommand = inputs.today.packages.${pkgs.system}.default;
   denPath = "/home/you/personal/the-den";
   macrosDatabase = "/home/you/.local/share/nvim/macros.csv";
@@ -237,10 +247,14 @@ the environment:
 | `SCUFRIS_DESKTOP_COMMAND_SOCKET`  | `$SCUFRIS_RUNTIME_DIR/desktop.sock`              |
 | `SCUFRIS_DESKTOP_STATE_FILE`      | `$XDG_STATE_HOME/scufris-desktop/pending.json`   |
 | `SCUFRIS_STT_ENDPOINT`            | `http://127.0.0.1:10300/v1/audio/transcriptions` |
+| `SCUFRIS_STT_MODEL`               | `whisper-1`                                      |
+| `SCUFRIS_STT_LANGUAGE`            | `auto`                                           |
 | `SCUFRIS_TTS_ENDPOINT`            | `http://127.0.0.1:10300/v1/audio/speech`         |
-| `SCUFRIS_DESKTOP_HOTKEY`          | `Super+D`                                        |
-| `SCUFRIS_DESKTOP_CANCEL_KEY`      | derived from the hotkey                          |
-| `SCUFRIS_DESKTOP_STOP_KEY`        | derived from the hotkey                          |
+| `SCUFRIS_TTS_MODEL`               | `piper-1`                                        |
+| `SCUFRIS_TTS_VOICE`               | `en_US-lessac-medium`                            |
+| `SCUFRIS_DESKTOP_HOTKEY`          | `Super+D`, the popup key                         |
+| `SCUFRIS_DESKTOP_CANCEL_KEY`      | derived background key                           |
+| `SCUFRIS_DESKTOP_STOP_KEY`        | derived abort key                                |
 | `SCUFRIS_DESKTOP_CHAT_COMMAND`    | none                                             |
 | `SCUFRIS_DESKTOP_RESTART_COMMAND` | none                                             |
 | `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | none, and the companion stays silent             |
@@ -255,16 +269,17 @@ The companion starts without a backend and reports it as unavailable in the
 tray. It answers the pill only when `scufris-service` is on the same socket;
 see [maintenance](../dev/maintenance.md) to run one from a working tree.
 
-Transcription and speech need `ai-tools-api` on port 10300. A Home Manager
-installation manages it by default. For a manual package run, start the pinned
-API in another terminal:
+Transcription and speech need `ai-tools-api` on port 10300. Home Manager leaves
+API ownership external unless `programs.scufris.aiToolsApi.enable` is true. For
+a manual package run, start the pinned API in another terminal:
 
 ```bash
 nix run .#ai-tools-api
 ```
 
-Then start the desktop. `SCUFRIS_STT_ENDPOINT` can name another compatible
-transcription route. The packaged `scufris-speak` helper similarly accepts
-`SCUFRIS_TTS_ENDPOINT` when a non-default speech route is needed.
+Then start the desktop. The Home Manager module always derives both routes from
+`desktop.aiToolsApi.baseUrl`. Direct package runs may still use the endpoint
+environment variables. The model, language, and voice variables configure the
+request fields.
 
 The companion is Linux and X11 only.

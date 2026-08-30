@@ -14,10 +14,12 @@
     printf 'scufris %s\n' "$@"
   '';
   serviceHome = mkHome {
-    settings.service = {
-      enable = true;
-      package = service;
+    settings = {
       agent.package = testAgent;
+      service = {
+        enable = true;
+        package = service;
+      };
     };
   };
   serviceConfig = serviceHome.config.programs.scufris.service;

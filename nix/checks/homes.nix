@@ -26,7 +26,7 @@
             programs.scufris =
               {enable = true;}
               // pkgs.lib.optionalAttrs configureAgent {
-                service.agent.piPackage = fixtures.systemPi;
+                agent.piPackage = fixtures.systemPi;
               };
           }
           {programs.scufris = settings;}

@@ -4,13 +4,15 @@ This directory contains the native SwiftUI companion. XcodeGen creates the
 Xcode project from `project.yml`; the generated project and Info.plist are not
 committed.
 
-The initial application is an unsigned connection shell. It does not yet save
-credentials or connect to the Scufris backend.
+The application connects to the authenticated protocol-v4 surface gateway over
+`wss://`, stores its URL, bearer token, and stable surface identity in the iOS
+Keychain, replays the canonical conversation, and submits text messages. Voice
+and widgets follow after the text transport is proven on a physical device.
 
 ## Build
 
-The `iOS` GitHub Actions workflow builds the application for the iOS simulator
-without signing. On macOS with Xcode and XcodeGen installed, run:
+The `iOS` GitHub Actions workflow builds and tests the application on an iOS
+simulator without signing. On macOS with Xcode and XcodeGen installed, run:
 
 ```bash
 xcodegen generate --spec surfaces/ios/project.yml

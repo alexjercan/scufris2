@@ -37,12 +37,25 @@ jobs:
           xcodegen --version
           swift --version
 
-      - name: Build without signing
+      - name: Build and test without signing
+        shell: bash
         run: |
+          set -euo pipefail
+          device_id="$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next(
+              device["udid"]
+              for runtime, entries in devices.items()
+              if "iOS" in runtime
+              for device in entries
+              if device["name"].startswith("iPhone") and device.get("isAvailable", True)
+          ))
+          ')"
           xcodebuild \
             -project surfaces/ios/Scufris.xcodeproj \
             -scheme Scufris \
             -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination "platform=iOS Simulator,id=$device_id" \
             CODE_SIGNING_ALLOWED=NO \
-            clean build
+            clean test

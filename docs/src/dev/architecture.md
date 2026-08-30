@@ -143,6 +143,12 @@ assert the rendered launcher,
 distributed files, module interface, API/closure separation, resolved companion
 configuration, and headless service.
 
+`scufris-surface-gateway` is an optional process in the headless package. It
+accepts bearer-authenticated WebSockets on a loopback TCP port and bridges only
+strict surface-channel messages to `surface.sock`. Tailscale Serve terminates
+TLS and supplies the private network boundary. The gateway has no path to
+`agent.sock` or `control.sock`.
+
 `scufris-desktop` is built from the `surfaces/desktop/` workspace member by
 `nix/desktop.nix` as a separate package output. It is absent from the launcher
 closure, which the desktop closure check enforces.

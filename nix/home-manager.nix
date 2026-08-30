@@ -16,6 +16,7 @@
     else "http://127.0.0.1:10300";
   agentCfg = cfg.agent;
   serviceCfg = cfg.service;
+  remoteSurfaceCfg = serviceCfg.remoteSurface;
   managedApiCfg = cfg.aiToolsApi;
   desktopCfg = cfg.desktop;
   desktopApiCfg = desktopCfg.aiToolsApi;
@@ -141,6 +142,34 @@ in {
         default = "scufris-service";
         readOnly = true;
         description = "Stable systemd user service identity for the background service, without the unit suffix.";
+      };
+
+      remoteSurface = {
+        enable = lib.mkEnableOption "the authenticated loopback WebSocket gateway for remote surfaces";
+
+        port = lib.mkOption {
+          type = lib.types.port;
+          default = 10440;
+          description = "Loopback port consumed by the private TLS proxy.";
+        };
+
+        tokenFile = lib.mkOption {
+          type = lib.types.nullOr (lib.types.strMatching "/.*");
+          default = null;
+          example = "/run/secrets/scufris-surface-token";
+          description = ''
+            Absolute path to a private file containing the remote surface
+            bearer token. The file is read at gateway startup and is never
+            copied into the Nix store.
+          '';
+        };
+
+        serviceName = lib.mkOption {
+          type = lib.types.str;
+          default = "scufris-surface-gateway";
+          readOnly = true;
+          description = "Stable systemd user service identity for the remote surface gateway.";
+        };
       };
     };
 
@@ -326,6 +355,37 @@ in {
           RestartSec = 3;
           RuntimeDirectory = serviceCfg.serviceName;
           WorkingDirectory = "%h";
+        };
+        Install.WantedBy = ["default.target"];
+      };
+    })
+    (lib.mkIf (cfg.enable && remoteSurfaceCfg.enable) {
+      assertions = [
+        {
+          assertion = serviceCfg.enable;
+          message = "programs.scufris.service.remoteSurface.enable requires programs.scufris.service.enable";
+        }
+        {
+          assertion = remoteSurfaceCfg.tokenFile != null;
+          message = "programs.scufris.service.remoteSurface.enable requires programs.scufris.service.remoteSurface.tokenFile";
+        }
+      ];
+
+      systemd.user.services.${remoteSurfaceCfg.serviceName} = {
+        Unit = {
+          Description = "Scufris authenticated remote surface gateway";
+          After = ["${serviceCfg.serviceName}.service"];
+          Requires = ["${serviceCfg.serviceName}.service"];
+        };
+        Service = {
+          Type = "simple";
+          ExecStart = "${lib.getExe' serviceCfg.package "scufris-surface-gateway"} --listen 127.0.0.1:${toString remoteSurfaceCfg.port} --token-file ${lib.escapeShellArg (
+            if remoteSurfaceCfg.tokenFile == null
+            then "/missing-scufris-surface-token"
+            else remoteSurfaceCfg.tokenFile
+          )}";
+          Restart = "on-failure";
+          RestartSec = 3;
         };
         Install.WantedBy = ["default.target"];
       };

@@ -32,12 +32,13 @@ test("package loads only capability-owned Scufris extensions", async () => {
     access(join(root, "shared", "control", "Cargo.toml")),
     access(join(root, "surfaces", "desktop", "Cargo.toml")),
     access(join(root, "surfaces", "desktop", "widgets", "widget.d.ts")),
+    access(join(root, "surfaces", "ios", "project.yml")),
+    access(join(root, "surfaces", "ios", "Sources", "ScufrisApp.swift")),
     access(
       join(root, "surfaces", "desktop", "backends", "today", "backend.py"),
     ),
   ]);
   await assert.rejects(access(join(root, "native")));
-  await assert.rejects(access(join(root, "surfaces", "ios")));
   await assert.rejects(access(join(root, "host", "gateway")));
 
   const files = await typeScriptFiles(

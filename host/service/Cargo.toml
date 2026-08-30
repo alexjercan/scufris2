@@ -19,6 +19,7 @@ thiserror = "2.0.20"
 tracing = "0.1.41"
 tracing-journald = "0.3.1"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+tungstenite = { version = "0.28.0", default-features = false, features = ["handshake"] }
 
 [lints]
 workspace = true

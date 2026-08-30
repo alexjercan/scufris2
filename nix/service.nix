@@ -13,7 +13,7 @@
     inherit version;
     src = source;
     cargoLock = {inherit lockFile;};
-    cargoBuildFlags = ["-p" "scufris-service"];
+    cargoBuildFlags = ["-p" "scufris-service" "--bins"];
     cargoTestFlags = ["-p" "scufris-service" "-p" "scufris-control"];
     meta = {
       description = "Scufris background service and its control client";
@@ -23,7 +23,7 @@
   # Two outputs from one build. The client is installed on its own because a
   # window manager binding and a terminal both want it, and neither of them
   # wants the service or the companion dragged in beside it.
-  pick = name: description:
+  pick = name: extras: description:
     pkgs.runCommand "${name}-${version}" {
       meta =
         unwrapped.meta
@@ -34,9 +34,11 @@
       passthru = {inherit unwrapped;};
     } ''
       mkdir -p "$out/bin"
-      ln -s ${unwrapped}/bin/${name} "$out/bin/${name}"
+      for executable in ${lib.escapeShellArgs ([name] ++ extras)}; do
+        ln -s ${unwrapped}/bin/"$executable" "$out/bin/$executable"
+      done
     '';
 in {
-  service = pick "scufris-service" "Scufris background service that owns the Pi agent and the session";
-  ctl = pick "scufris-ctl" "Talk to Scufris from a terminal";
+  service = pick "scufris-service" ["scufris-surface-gateway"] "Scufris background service that owns the Pi agent and the session";
+  ctl = pick "scufris-ctl" [] "Talk to Scufris from a terminal";
 }

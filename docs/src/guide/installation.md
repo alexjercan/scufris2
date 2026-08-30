@@ -179,8 +179,39 @@ programs.scufris.desktop.transcription = {
 };
 ```
 
-The conversation window ships with the companion and needs no configuration;
-bind `scufris-ctl hud` in your window manager to reach it. Protocol v4 does not
+An iOS surface reaches the same conversation through the optional authenticated
+WebSocket gateway. It binds only to loopback; a private TLS proxy such as
+Tailscale Serve is responsible for the `wss://` endpoint. Generate the bearer
+token into a private file or a SOPS-managed secret and enable the gateway:
+
+```bash
+install -d -m 700 ~/.local/share/scufris/credentials/ios
+openssl rand -hex 32 >~/.local/share/scufris/credentials/ios/surface-token
+chmod 600 ~/.local/share/scufris/credentials/ios/surface-token
+```
+
+```nix
+programs.scufris.service.remoteSurface = {
+  enable = true;
+  port = 10440;
+  tokenFile = "${config.xdg.dataHome}/scufris/credentials/ios/surface-token";
+};
+```
+
+After activation, expose that loopback HTTP endpoint only inside the tailnet:
+
+```bash
+tailscale serve --bg --yes http://127.0.0.1:10440
+tailscale serve status
+```
+
+Enter the resulting `wss://HOSTNAME` URL and the token in the iOS application.
+The gateway accepts only strict protocol-v4 surface traffic. Agent and control
+sockets remain local and are never routed through it.
+
+The conversation window ships with the desktop companion and needs no
+configuration; bind `scufris-ctl hud` in your window manager to reach it.
+Protocol v4 does not
 provide terminal session handoff. `desktop.terminalCommand` remains available for
 a deployment-specific terminal view that does not take over Pi.
 

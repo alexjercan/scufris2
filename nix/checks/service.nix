@@ -19,11 +19,18 @@
       service = {
         enable = true;
         package = service;
+        remoteSurface = {
+          enable = true;
+          port = 10441;
+          tokenFile = "/run/secrets/scufris-surface-token";
+        };
       };
     };
   };
   serviceConfig = serviceHome.config.programs.scufris.service;
   serviceUnit = serviceHome.config.systemd.user.services.${serviceConfig.serviceName};
+  gatewayConfig = serviceConfig.remoteSurface;
+  gatewayUnit = serviceHome.config.systemd.user.services.${gatewayConfig.serviceName};
   serviceClosure = pkgs.closureInfo {rootPaths = [service];};
   ctlClosure = pkgs.closureInfo {rootPaths = [ctl];};
 in
@@ -43,6 +50,10 @@ in
       ${service}/bin/scufris-service --help | grep -F 'SCUFRIS_SERVICE_AGENT'
       ${service}/bin/scufris-service --help | grep -F 'SCUFRIS_SERVICE_SESSION_DIR'
       ! ${service}/bin/scufris-service --nonsense
+      ${service}/bin/scufris-surface-gateway --help | grep -F 'Usage: scufris-surface-gateway'
+      ${service}/bin/scufris-surface-gateway --help | grep -F 'SCUFRIS_GATEWAY_TOKEN_FILE'
+      ${service}/bin/scufris-surface-gateway --help | grep -F 'SCUFRIS_GATEWAY_LISTEN'
+      ! ${service}/bin/scufris-surface-gateway --nonsense
 
       # Protocol v4 control is intentionally diagnostic-only.
       ${ctl}/bin/scufris-ctl --help | grep -F 'Usage: scufris-ctl [COMMAND]'
@@ -67,6 +78,11 @@ in
     assert serviceUnit.Service.ExecStart == [(lib.getExe service)];
     assert serviceUnit.Service.Restart == "on-failure";
     assert serviceUnit.Service.RuntimeDirectory == "scufris-service";
+    assert gatewayConfig.serviceName == "scufris-surface-gateway";
+    assert gatewayUnit.Unit.After == ["scufris-service.service"];
+    assert gatewayUnit.Unit.Requires == ["scufris-service.service"];
+    assert gatewayUnit.Service.ExecStart == ["${lib.getExe' service "scufris-surface-gateway"} --listen 127.0.0.1:10441 --token-file /run/secrets/scufris-surface-token"];
+    assert gatewayUnit.Service.Restart == "on-failure";
     assert lib.elem "SCUFRIS_SERVICE_AGENT=${lib.getExe testAgent}" serviceUnit.Service.Environment;
     assert lib.elem "SCUFRIS_SERVICE_SESSION_DIR=/home/scufris-test/.local/share/scufris/sessions" serviceUnit.Service.Environment;
     # The client belongs to whoever enabled a half of Scufris, and it is one

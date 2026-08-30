@@ -27,7 +27,41 @@ final class ConversationStore: ObservableObject {
     @Published private(set) var connectionState: ConnectionState = .unconfigured
     @Published private(set) var conversation: [ConversationEntry] = []
     @Published private(set) var serviceDetail = ""
+    @Published private(set) var serviceState = "idle"
     @Published private(set) var settings = ConnectionSettings(backendURL: "", token: "")
+
+    var visualState: SurfaceVisualState {
+        switch connectionState {
+        case .unconfigured:
+            .setup
+        case .connecting:
+            .connecting
+        case .connected:
+            .connected(serviceState: serviceState)
+        case .disconnected:
+            .offline
+        }
+    }
+
+    var routeLabel: String {
+        guard let url = URL(string: settings.backendURL), let host = url.host else {
+            return "private WSS / not configured"
+        }
+        let path = url.path == "/" || url.path.isEmpty ? "" : " \(url.path)"
+        return "\(host)\(path) / private surface"
+    }
+
+    var showsStatusNotice: Bool {
+        guard !serviceDetail.isEmpty, serviceDetail != "Ready" else { return false }
+        switch connectionState {
+        case .connected:
+            return serviceState != "idle"
+        case .unconfigured:
+            return false
+        case .connecting, .disconnected:
+            return true
+        }
+    }
 
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -103,6 +137,7 @@ final class ConversationStore: ObservableObject {
         socket = nil
         conversation = []
         serviceDetail = ""
+        serviceState = "starting"
         connectionTask = Task {
             while !Task.isCancelled, currentGeneration == generation {
                 do {
@@ -112,6 +147,7 @@ final class ConversationStore: ObservableObject {
                 } catch {
                     guard currentGeneration == generation else { return }
                     connectionState = .disconnected(error.localizedDescription)
+                    serviceState = "failed"
                     serviceDetail = error.localizedDescription
                 }
                 do {
@@ -128,6 +164,7 @@ final class ConversationStore: ObservableObject {
             throw ConfigurationFailure.invalid
         }
         connectionState = .connecting
+        serviceState = "starting"
         conversation = []
         serviceDetail = "Connecting to \(url.host ?? "backend")"
         var request = URLRequest(url: url)
@@ -199,12 +236,15 @@ final class ConversationStore: ObservableObject {
         case "surface.ready":
             _ = try decoder.decode(IncomingReady.self, from: data)
             connectionState = .connected
+            serviceState = "idle"
             serviceDetail = "Ready"
         case "surface.state":
             let state = try decoder.decode(IncomingState.self, from: data)
+            serviceState = state.state
             serviceDetail = state.detail.isEmpty ? state.state.capitalized : state.detail
         case "surface.rejected":
             let rejected = try decoder.decode(IncomingRejected.self, from: data)
+            serviceState = "failed"
             serviceDetail = "\(rejected.code): \(rejected.detail)"
         case "surface.message_ack", "surface.aborted":
             break
@@ -216,6 +256,7 @@ final class ConversationStore: ObservableObject {
     private func failCurrentConnection(_ error: Error) {
         socket?.cancel(with: .goingAway, reason: nil)
         connectionState = .disconnected(error.localizedDescription)
+        serviceState = "failed"
         serviceDetail = error.localizedDescription
     }
 }

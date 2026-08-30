@@ -47,6 +47,16 @@ struct ProtocolTests {
     }
 
     @Test
+    func backendStateMapsToTheTextSurfaceGrammar() {
+        #expect(SurfaceVisualState.connected(serviceState: "idle") == .idle)
+        #expect(SurfaceVisualState.connected(serviceState: "working") == .working)
+        #expect(SurfaceVisualState.connected(serviceState: "blocked") == .attention)
+        #expect(SurfaceVisualState.connected(serviceState: "failed") == .error)
+        #expect(SurfaceVisualState.connected(serviceState: "starting") == .connecting)
+        #expect(SurfaceVisualState.connected(serviceState: "unknown") == .idle)
+    }
+
+    @Test
     func conversationResponsesDecodeWithoutWidgetPresentation() throws {
         let data = Data(
             #"{"v":4,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","details":"Passed."}"#.utf8

@@ -33,6 +33,9 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - `staging up` and `staging backend` now start an isolated external-surface
   gateway. They can own an exact temporary Tailscale Serve path and remove only
   that path during teardown.
+- The text-only iOS surface now follows the dark terminal interaction study:
+  route and state header, speaker-column transcript, inline details, and a
+  compact bottom composer. Its next TestFlight marketing version is 1.1.0.
 
 ### Removed
 

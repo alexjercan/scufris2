@@ -6,8 +6,10 @@ committed.
 
 The application connects to the authenticated protocol-v4 surface gateway over
 `wss://`, stores its URL, bearer token, and stable surface identity in the iOS
-Keychain, replays the canonical conversation, and submits text messages. Voice
-and widgets follow after the text transport is proven on a physical device.
+Keychain, replays the canonical conversation, and submits text messages. Its
+text-only interface follows the terminal-style interaction study in
+`tasks/20260828-232631/ios-app-design.html`. Voice and widgets remain outside
+this milestone.
 
 ## Build
 
@@ -30,8 +32,10 @@ Signing credentials are not required for this build and must not be committed.
 ## TestFlight
 
 The manually dispatched `TestFlight` workflow uses Xcode 26.3 and the protected
-`testflight` GitHub environment. It imports the distribution identity and App
-Store profile into an ephemeral keychain, archives the app, uploads it through
+`testflight` GitHub environment. `MARKETING_VERSION` is the semantic product
+version shown first in TestFlight; `GITHUB_RUN_NUMBER` supplies Apple's required
+unique, monotonic build number in parentheses. It imports the distribution
+identity and App Store profile into an ephemeral keychain, archives the app, uploads it through
 the App Store Connect API, and removes the imported material.
 
 The environment supplies `APPLE_DISTRIBUTION_CERTIFICATE_P12`,

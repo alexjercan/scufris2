@@ -160,7 +160,11 @@ Python tests through the Nix helper check, focused Prettier checks, and
 `nix flake check -L`. Focused tests cover content-socket resolution,
 conservative media types, the exact private import request, relative and `@`
 path normalization, opaque-ID results, typed service failures, and strict
-response descriptor validation.
+response descriptor validation. Repository run
+[33329932150](https://github.com/alexjercan/scufris2/actions/runs/33329932150)
+and documentation run
+[33329932024](https://github.com/alexjercan/scufris2/actions/runs/33329932024)
+passed for agent-tool commit `1e4be6e`.
 
 ## Acceptance
 

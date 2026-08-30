@@ -96,8 +96,8 @@ lifecycle events: listener startup, surface names connecting and disconnecting,
 the Pi agent connection, desktop identity, service readiness, and shutdown.
 DEBUG adds connection IDs, full protocol payloads, replay and recipient counts,
 message IDs, widget registrations, retry details, and speech HTTP
-request/response metadata. Transcription audio, transcription text, and speech
-input text are not logged.
+request/response metadata. Transcription audio, transcription text, attachment
+bytes, bearer tokens, and speech input text are not logged.
 DEBUG protocol payloads can contain conversation text and widget arguments, so
 enable them only while diagnosing a trusted local run.
 

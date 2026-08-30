@@ -76,7 +76,7 @@ the channel's existing strict behavior.
 
 ## Transfer boundary
 
-The existing bearer-authenticated gateway will expose:
+The existing bearer-authenticated gateway exposes:
 
 ```text
 POST /attachments
@@ -86,7 +86,9 @@ HEAD /attachments/{id}
 
 The gateway forwards these operations to the service-owned private content API.
 It does not own metadata or bytes. Upload and download bodies are bounded and
-never logged. Range support is required before video limits are introduced.
+never logged. GET accepts one closed, open-ended, or suffix byte range and
+returns standard `206`, `416`, `Accept-Ranges`, and `Content-Range` metadata.
+The import operation remains local-only.
 
 ## Incremental safety
 

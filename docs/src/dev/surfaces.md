@@ -21,11 +21,18 @@ LF-terminated JSON object per frame. WebSocket transport uses one JSON object
 per text frame. The remote gateway is also a bounded HTTP API on the same
 loopback listener and bearer-token boundary:
 
-| Method | Path                   | Purpose                                          |
-| ------ | ---------------------- | ------------------------------------------------ |
-| `GET`  | `/` or `/surface`      | Upgrade to a protocol-v5 surface WebSocket       |
-| `GET`  | `/health`              | Read the authenticated gateway identity          |
-| `POST` | `/audio/transcription` | Forward a bounded mono PCM WAV to host inference |
+| Method       | Path                    | Purpose                                          |
+| ------------ | ----------------------- | ------------------------------------------------ |
+| `GET`        | `/` or `/surface`       | Upgrade to a protocol-v5 surface WebSocket       |
+| `GET`        | `/health`               | Read the authenticated gateway identity          |
+| `POST`       | `/audio/transcription`  | Forward a bounded mono PCM WAV to host inference |
+| `POST`       | `/attachments?name=...` | Upload one bounded object                        |
+| `GET`/`HEAD` | `/attachments/{id}`     | Download or inspect one managed object           |
+
+Attachment uploads use the object media type as `Content-Type` and return the
+canonical descriptor. Downloads support one standard byte range and return
+`Accept-Ranges`, `Content-Range`, and `206 Partial Content` as applicable. Every
+route requires the same bearer token; opaque IDs are not authorization.
 
 The transcription route accepts at most 2 MiB and 60 seconds of audio. It sends
 multipart `file`, `model=whisper-1`, and `response_format=json` to the loopback

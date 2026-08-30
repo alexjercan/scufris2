@@ -78,7 +78,7 @@ transcription bodies never enter INFO or DEBUG logs.
 2. [x] Add the service-owned durable attachment store and private local content API.
        Prove atomic writes, opaque IDs, direct regular-file import, quotas, expiry,
        traversal rejection, and symlink rejection.
-3. [ ] Proxy authenticated upload, lookup, download, HEAD, and Range through the
+3. [x] Proxy authenticated upload, lookup, download, HEAD, and Range through the
        existing gateway. Keep its listener loopback-only.
 4. [ ] Add the agent `store_attachment` tool and resolve attachment IDs at the
        service boundary in both message directions.
@@ -105,6 +105,10 @@ transcription bodies never enter INFO or DEBUG logs.
 - Surface and agent IDs now resolve to immutable descriptors before entering
   agent messages, canonical broadcast, or replay. Missing and invented IDs are
   rejected with `attachments_unavailable`.
+- Extended the existing authenticated loopback gateway with bounded raw upload,
+  GET, HEAD, and single-range transfer. It proxies only to `content.sock`,
+  preserves safe response metadata and typed errors, and does not expose the
+  trusted local import operation.
 
 ## Verification
 
@@ -135,6 +139,13 @@ rejection, byte bounds, and canonical descriptor resolution. Repository run
 and documentation run
 [33327728066](https://github.com/alexjercan/scufris2/actions/runs/33327728066)
 passed for store commit `3473592`.
+
+The gateway-transfer slice passes 367 Rust tests, 69 TypeScript tests, 95
+Python tests, Clippy with warnings denied, focused formatting checks, and
+`nix flake check -L`. Focused integration tests cover bearer authentication,
+raw upload and descriptor forwarding, the 16 MiB gateway bound, local-import
+exclusion, GET, HEAD, closed and suffix ranges, standard range headers, and
+bounded typed failures.
 
 ## Acceptance
 

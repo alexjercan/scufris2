@@ -16,9 +16,13 @@ use std::{
 
 use axum::{
     Json, Router,
-    body::Bytes,
-    extract::{DefaultBodyLimit, State, WebSocketUpgrade, ws},
-    http::{HeaderMap, StatusCode},
+    body::{Body, Bytes},
+    extract::{
+        DefaultBodyLimit, Path as AxumPath, Query, State, WebSocketUpgrade,
+        rejection::{BytesRejection, QueryRejection},
+        ws,
+    },
+    http::{HeaderMap, HeaderName, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -26,8 +30,11 @@ use clap::Parser;
 use futures_util::StreamExt;
 use reqwest::{Client, Url, multipart};
 use scufris_control::{
-    MAX_MESSAGE_BYTES, MessageError,
-    service::{SurfaceRequest, read_surface_request, read_surface_response, surface_socket_path},
+    MAX_MESSAGE_BYTES, MessageError, is_identifier,
+    service::{
+        MAX_ATTACHMENT_BYTES, SurfaceRequest, content_socket_path, read_surface_request,
+        read_surface_response, surface_socket_path,
+    },
 };
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -46,6 +53,7 @@ const MAX_AUDIO_BYTES: usize = 2 * 1024 * 1024;
 const MAX_AUDIO_MILLISECONDS: u64 = 60_000;
 const MAX_TRANSCRIPT_BYTES: usize = 8 * 1024;
 const MAX_UPSTREAM_RESPONSE_BYTES: usize = 16 * 1024;
+const ATTACHMENT_TIMEOUT: Duration = Duration::from_secs(60);
 const TRANSCRIPTION_TIMEOUT: Duration = Duration::from_secs(130);
 const TOKEN_VARIABLE: &str = "SCUFRIS_GATEWAY_TOKEN_FILE";
 const LISTEN_VARIABLE: &str = "SCUFRIS_GATEWAY_LISTEN";
@@ -56,7 +64,7 @@ static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
 #[command(
     name = "scufris-surface-gateway",
     version,
-    about = "Serve authenticated remote Scufris surface and audio APIs"
+    about = "Serve authenticated remote Scufris surface, attachment, and audio APIs"
 )]
 struct Options {
     /// Loopback address to accept from a local TLS or tailnet proxy.
@@ -83,6 +91,7 @@ struct GatewayState {
     surface_socket: Arc<Path>,
     ai_tools_api: Url,
     client: Client,
+    content_client: Client,
 }
 
 #[derive(Debug, Serialize)]
@@ -95,6 +104,12 @@ struct HealthResponse {
 #[serde(deny_unknown_fields)]
 struct TranscriptResponse {
     text: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct AttachmentUploadQuery {
+    name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -165,12 +180,19 @@ async fn run() -> Result<(), GatewayError> {
     let token = read_token(&options.token_file)?;
     let surface_socket =
         surface_socket_path().map_err(|error| GatewayError::Configuration(error.to_string()))?;
+    let content_socket =
+        content_socket_path().map_err(|error| GatewayError::Configuration(error.to_string()))?;
     let client = Client::builder().timeout(TRANSCRIPTION_TIMEOUT).build()?;
+    let content_client = Client::builder()
+        .timeout(ATTACHMENT_TIMEOUT)
+        .unix_socket(content_socket)
+        .build()?;
     let state = GatewayState {
         authorization: format!("Bearer {token}").into(),
         surface_socket: surface_socket.into(),
         ai_tools_api: options.ai_tools_api,
         client,
+        content_client,
     };
     let listener = TcpListener::bind(options.listen).await?;
     info!(listen = %options.listen, "the remote surface API is listening");
@@ -183,8 +205,18 @@ fn router(state: GatewayState) -> Router {
         .route("/", get(surface_websocket))
         .route("/surface", get(surface_websocket))
         .route("/health", get(health))
-        .route("/audio/transcription", post(transcribe))
-        .layer(DefaultBodyLimit::max(MAX_AUDIO_BYTES))
+        .route(
+            "/audio/transcription",
+            post(transcribe).layer(DefaultBodyLimit::max(MAX_AUDIO_BYTES)),
+        )
+        .route(
+            "/attachments",
+            post(upload_attachment).layer(DefaultBodyLimit::max(MAX_ATTACHMENT_BYTES as usize)),
+        )
+        .route(
+            "/attachments/{id}",
+            get(download_attachment).head(head_attachment),
+        )
         .with_state(state)
 }
 
@@ -283,6 +315,131 @@ async fn close(websocket: &mut ws::WebSocket, code: u16, reason: &'static str) {
         .await;
 }
 
+async fn upload_attachment(
+    State(state): State<GatewayState>,
+    headers: HeaderMap,
+    query: Result<Query<AttachmentUploadQuery>, QueryRejection>,
+    body: Result<Bytes, BytesRejection>,
+) -> Result<Response, ApiError> {
+    authorize(&headers, &state)?;
+    let Query(query) = query.map_err(|_| invalid_attachment())?;
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(invalid_attachment)?;
+    let body = body.map_err(|_| {
+        ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "attachment_too_large",
+            "The attachment is too large.",
+        )
+    })?;
+    let upstream = state
+        .content_client
+        .post("http://localhost/attachments")
+        .query(&query)
+        .header(header::CONTENT_TYPE, content_type)
+        .body(body)
+        .send()
+        .await
+        .map_err(|_| attachment_unavailable())?;
+    proxy_attachment_response(upstream, false).await
+}
+
+async fn download_attachment(
+    State(state): State<GatewayState>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    authorize(&headers, &state)?;
+    validate_attachment_id(&id)?;
+    let mut ranges = HeaderMap::new();
+    for range in headers.get_all(header::RANGE) {
+        ranges.append(header::RANGE, range.clone());
+    }
+    let upstream = state
+        .content_client
+        .get(format!("http://localhost/attachments/{id}"))
+        .headers(ranges)
+        .send()
+        .await
+        .map_err(|_| attachment_unavailable())?;
+    proxy_attachment_response(upstream, false).await
+}
+
+async fn head_attachment(
+    State(state): State<GatewayState>,
+    AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    authorize(&headers, &state)?;
+    validate_attachment_id(&id)?;
+    let upstream = state
+        .content_client
+        .head(format!("http://localhost/attachments/{id}"))
+        .send()
+        .await
+        .map_err(|_| attachment_unavailable())?;
+    proxy_attachment_response(upstream, true).await
+}
+
+async fn proxy_attachment_response(
+    upstream: reqwest::Response,
+    head: bool,
+) -> Result<Response, ApiError> {
+    let status = upstream.status();
+    let headers = upstream.headers().clone();
+    let maximum = if status.is_success() {
+        MAX_ATTACHMENT_BYTES as usize
+    } else {
+        MAX_UPSTREAM_RESPONSE_BYTES
+    };
+    let body = if head {
+        Bytes::new()
+    } else {
+        bounded_bytes(upstream, maximum, attachment_unavailable).await?
+    };
+    let mut response = Response::builder().status(status);
+    for name in [
+        header::CONTENT_TYPE,
+        header::CONTENT_LENGTH,
+        header::CONTENT_RANGE,
+        header::ACCEPT_RANGES,
+        HeaderName::from_static("x-content-type-options"),
+    ] {
+        if let Some(value) = headers.get(&name) {
+            response = response.header(name, value);
+        }
+    }
+    response
+        .body(Body::from(body))
+        .map_err(|_| attachment_unavailable())
+}
+
+fn validate_attachment_id(id: &str) -> Result<(), ApiError> {
+    if is_identifier(id) {
+        Ok(())
+    } else {
+        Err(invalid_attachment())
+    }
+}
+
+fn invalid_attachment() -> ApiError {
+    ApiError::new(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "invalid_attachment",
+        "The attachment is invalid.",
+    )
+}
+
+fn attachment_unavailable() -> ApiError {
+    ApiError::new(
+        StatusCode::BAD_GATEWAY,
+        "attachment_unavailable",
+        "Attachment storage is unavailable.",
+    )
+}
+
 async fn transcribe(
     State(state): State<GatewayState>,
     headers: HeaderMap,
@@ -355,22 +512,34 @@ async fn transcribe(
 }
 
 async fn bounded_response(response: reqwest::Response) -> Result<Vec<u8>, ApiError> {
+    Ok(
+        bounded_bytes(response, MAX_UPSTREAM_RESPONSE_BYTES, upstream_failure)
+            .await?
+            .to_vec(),
+    )
+}
+
+async fn bounded_bytes(
+    response: reqwest::Response,
+    maximum: usize,
+    failure: fn() -> ApiError,
+) -> Result<Bytes, ApiError> {
     if response
         .content_length()
-        .is_some_and(|length| length > MAX_UPSTREAM_RESPONSE_BYTES as u64)
+        .is_some_and(|length| length > maximum as u64)
     {
-        return Err(upstream_failure());
+        return Err(failure());
     }
     let mut stream = response.bytes_stream();
     let mut output = Vec::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| upstream_failure())?;
-        if output.len() + chunk.len() > MAX_UPSTREAM_RESPONSE_BYTES {
-            return Err(upstream_failure());
+        let chunk = chunk.map_err(|_| failure())?;
+        if output.len() + chunk.len() > maximum {
+            return Err(failure());
         }
         output.extend_from_slice(&chunk);
     }
-    Ok(output)
+    Ok(Bytes::from(output))
 }
 
 fn validate_wav(audio: &[u8]) -> Result<(), ApiError> {
@@ -612,7 +781,7 @@ mod tests {
     use super::*;
     use axum::{
         body::{Body, to_bytes},
-        http::Request,
+        http::{Method, Request},
         routing::post,
     };
     use scufris_control::{
@@ -677,6 +846,7 @@ mod tests {
             surface_socket: socket_path.into(),
             ai_tools_api: Url::parse(DEFAULT_AI_TOOLS_API).unwrap(),
             client: Client::new(),
+            content_client: Client::new(),
         };
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -739,6 +909,7 @@ mod tests {
                 .timeout(TRANSCRIPTION_TIMEOUT)
                 .build()
                 .unwrap(),
+            content_client: Client::new(),
         };
 
         let unauthorized = router(state.clone())
@@ -763,12 +934,168 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn attachment_routes_authenticate_and_proxy_upload_head_and_range() {
+        let root = std::env::temp_dir().join(format!(
+            "scufris-gateway-content-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let socket = root.join("content.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let upstream = Router::new()
+            .route(
+                "/attachments",
+                post(
+                    |Query(query): Query<AttachmentUploadQuery>, headers: HeaderMap, body: Bytes| async move {
+                        assert_eq!(query.name, "notes.txt");
+                        assert_eq!(headers[header::CONTENT_TYPE], "text/plain");
+                        assert_eq!(body, "abc");
+                        (
+                            [(header::CONTENT_TYPE, "application/json")],
+                            r#"{"id":"att_test","name":"notes.txt","media_type":"text/plain","size":3}"#,
+                        )
+                    },
+                ),
+            )
+            .route(
+                "/attachments/{id}",
+                get(
+                    |AxumPath(id): AxumPath<String>, method: Method, headers: HeaderMap| async move {
+                        assert_eq!(id, "att_test");
+                        let builder = Response::builder()
+                            .header(header::CONTENT_TYPE, "text/plain")
+                            .header(header::ACCEPT_RANGES, "bytes")
+                            .header("x-content-type-options", "nosniff");
+                        if method == Method::HEAD {
+                            return builder
+                                .header(header::CONTENT_LENGTH, 6)
+                                .body(Body::empty())
+                                .unwrap();
+                        }
+                        if headers.get(header::RANGE).is_some_and(|value| value == "bytes=1-3") {
+                            return builder
+                                .status(StatusCode::PARTIAL_CONTENT)
+                                .header(header::CONTENT_LENGTH, 3)
+                                .header(header::CONTENT_RANGE, "bytes 1-3/6")
+                                .body(Body::from("bcd"))
+                                .unwrap();
+                        }
+                        builder
+                            .header(header::CONTENT_LENGTH, 6)
+                            .body(Body::from("abcdef"))
+                            .unwrap()
+                    },
+                )
+                .head(
+                    |AxumPath(id): AxumPath<String>, method: Method, headers: HeaderMap| async move {
+                        assert_eq!(id, "att_test");
+                        assert_eq!(method, Method::HEAD);
+                        assert!(headers.get(header::RANGE).is_none());
+                        Response::builder()
+                            .header(header::CONTENT_TYPE, "text/plain")
+                            .header(header::CONTENT_LENGTH, 6)
+                            .header(header::ACCEPT_RANGES, "bytes")
+                            .body(Body::empty())
+                            .unwrap()
+                    },
+                ),
+            );
+        let server = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+        let state = GatewayState {
+            authorization: "Bearer test-token".into(),
+            surface_socket: PathBuf::from("/unused/surface.sock").into(),
+            ai_tools_api: Url::parse(DEFAULT_AI_TOOLS_API).unwrap(),
+            client: Client::new(),
+            content_client: Client::builder().unix_socket(socket).build().unwrap(),
+        };
+
+        let unauthorized = router(state.clone())
+            .oneshot(
+                Request::get("/attachments/att_test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let upload = router(state.clone())
+            .oneshot(
+                Request::post("/attachments?name=notes.txt")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .header(header::CONTENT_TYPE, "text/plain")
+                    .body(Body::from("abc"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(upload.status(), StatusCode::OK);
+        let upload = to_bytes(upload.into_body(), 4096).await.unwrap();
+        assert!(upload.starts_with(br#"{"id":"att_test""#));
+
+        let oversized = router(state.clone())
+            .oneshot(
+                Request::post("/attachments?name=large.bin")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .header(header::CONTENT_TYPE, "application/octet-stream")
+                    .body(Body::from(vec![0; MAX_ATTACHMENT_BYTES as usize + 1]))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(oversized.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        let local_import = router(state.clone())
+            .oneshot(
+                Request::post("/attachments/import")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(local_import.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+        let partial = router(state.clone())
+            .oneshot(
+                Request::get("/attachments/att_test")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .header(header::RANGE, "bytes=1-3")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(partial.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(partial.headers()[header::CONTENT_RANGE], "bytes 1-3/6");
+        assert_eq!(to_bytes(partial.into_body(), 16).await.unwrap(), "bcd");
+
+        let head = router(state)
+            .oneshot(
+                Request::head("/attachments/att_test")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(head.status(), StatusCode::OK);
+        assert_eq!(head.headers()[header::CONTENT_LENGTH], "6");
+        assert!(to_bytes(head.into_body(), 16).await.unwrap().is_empty());
+
+        server.abort();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn transcription_rejects_wrong_media_before_contacting_inference() {
         let state = GatewayState {
             authorization: "Bearer test-token".into(),
             surface_socket: PathBuf::from("/unused/surface.sock").into(),
             ai_tools_api: Url::parse(DEFAULT_AI_TOOLS_API).unwrap(),
             client: Client::new(),
+            content_client: Client::new(),
         };
         let request = Request::post("/audio/transcription")
             .header("authorization", "Bearer test-token")

@@ -461,9 +461,32 @@ async fn import_attachment(
 async fn download(
     State(store): State<Arc<AttachmentStore>>,
     AxumPath(id): AxumPath<String>,
+    headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let (descriptor, bytes) = store.read(&id).map_err(ApiError)?;
-    response(&descriptor, Body::from(bytes))
+    let range = match requested_range(&headers, descriptor.size) {
+        Ok(range) => range,
+        Err(()) => return range_not_satisfiable(descriptor.size),
+    };
+    match range {
+        Some((start, end)) => {
+            let selected = bytes[start as usize..=end as usize].to_vec();
+            response(
+                &descriptor,
+                StatusCode::PARTIAL_CONTENT,
+                selected.len() as u64,
+                Some((start, end)),
+                Body::from(selected),
+            )
+        }
+        None => response(
+            &descriptor,
+            StatusCode::OK,
+            descriptor.size,
+            None,
+            Body::from(bytes),
+        ),
+    }
 }
 
 async fn head(
@@ -472,17 +495,96 @@ async fn head(
 ) -> Result<Response, ApiError> {
     let mut descriptors = store.resolve(&[id], false).map_err(ApiError)?;
     let descriptor = descriptors.remove(0);
-    response(&descriptor, Body::empty())
+    response(
+        &descriptor,
+        StatusCode::OK,
+        descriptor.size,
+        None,
+        Body::empty(),
+    )
 }
 
-fn response(descriptor: &AttachmentDescriptor, body: Body) -> Result<Response, ApiError> {
+fn requested_range(headers: &HeaderMap, size: u64) -> Result<Option<(u64, u64)>, ()> {
+    let values = headers.get_all(header::RANGE);
+    let mut values = values.iter();
+    let Some(value) = values.next() else {
+        return Ok(None);
+    };
+    if values.next().is_some() {
+        return Err(());
+    }
+    let value = value.to_str().map_err(|_| ())?;
+    let range = value.strip_prefix("bytes=").ok_or(())?;
+    if range.is_empty() || range.contains(',') {
+        return Err(());
+    }
+    let (start, end) = range.split_once('-').ok_or(())?;
+    if start.is_empty() {
+        let suffix = end.parse::<u64>().map_err(|_| ())?;
+        if suffix == 0 {
+            return Err(());
+        }
+        return Ok(Some((size.saturating_sub(suffix), size - 1)));
+    }
+    let start = start.parse::<u64>().map_err(|_| ())?;
+    if start >= size {
+        return Err(());
+    }
+    let end = if end.is_empty() {
+        size - 1
+    } else {
+        end.parse::<u64>().map_err(|_| ())?.min(size - 1)
+    };
+    if end < start {
+        return Err(());
+    }
+    Ok(Some((start, end)))
+}
+
+fn range_not_satisfiable(size: u64) -> Result<Response, ApiError> {
+    let mut response = (
+        StatusCode::RANGE_NOT_SATISFIABLE,
+        Json(ErrorEnvelope {
+            error: ErrorBody {
+                code: "invalid_range",
+                message: "The requested attachment range is unavailable.",
+            },
+        }),
+    )
+        .into_response();
+    response.headers_mut().insert(
+        header::CONTENT_RANGE,
+        HeaderValue::from_str(&format!("bytes */{size}"))
+            .map_err(|_| ApiError(StoreError::Corrupt))?,
+    );
+    response
+        .headers_mut()
+        .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    Ok(response)
+}
+
+fn response(
+    descriptor: &AttachmentDescriptor,
+    status: StatusCode,
+    content_length: u64,
+    range: Option<(u64, u64)>,
+    body: Body,
+) -> Result<Response, ApiError> {
     let media_type =
         HeaderValue::from_str(&descriptor.media_type).map_err(|_| ApiError(StoreError::Corrupt))?;
-    Response::builder()
-        .status(StatusCode::OK)
+    let mut response = Response::builder()
+        .status(status)
         .header(header::CONTENT_TYPE, media_type)
-        .header(header::CONTENT_LENGTH, descriptor.size)
-        .header("x-content-type-options", "nosniff")
+        .header(header::CONTENT_LENGTH, content_length)
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header("x-content-type-options", "nosniff");
+    if let Some((start, end)) = range {
+        response = response.header(
+            header::CONTENT_RANGE,
+            format!("bytes {start}-{end}/{}", descriptor.size),
+        );
+    }
+    response
         .body(body)
         .map_err(|_| ApiError(StoreError::Corrupt))
 }
@@ -661,10 +763,59 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(download.status(), StatusCode::OK);
+        assert_eq!(download.headers()[header::ACCEPT_RANGES], "bytes");
         assert_eq!(
             to_bytes(download.into_body(), 1024).await.unwrap(),
             "png bytes"
         );
+
+        let partial = router(Arc::clone(&store))
+            .oneshot(
+                Request::get(format!("/attachments/{}", descriptor.id))
+                    .header(header::RANGE, "bytes=4-7")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(partial.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(partial.headers()[header::CONTENT_RANGE], "bytes 4-7/9");
+        assert_eq!(to_bytes(partial.into_body(), 1024).await.unwrap(), "byte");
+
+        let suffix = router(Arc::clone(&store))
+            .oneshot(
+                Request::get(format!("/attachments/{}", descriptor.id))
+                    .header(header::RANGE, "bytes=-3")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(to_bytes(suffix.into_body(), 1024).await.unwrap(), "tes");
+
+        let invalid_range = router(Arc::clone(&store))
+            .oneshot(
+                Request::get(format!("/attachments/{}", descriptor.id))
+                    .header(header::RANGE, "bytes=99-")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalid_range.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(invalid_range.headers()[header::CONTENT_RANGE], "bytes */9");
+
+        let head = router(Arc::clone(&store))
+            .oneshot(
+                Request::head(format!("/attachments/{}", descriptor.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(head.status(), StatusCode::OK);
+        assert_eq!(head.headers()[header::CONTENT_LENGTH], "9");
+        assert!(to_bytes(head.into_body(), 1024).await.unwrap().is_empty());
 
         let missing = router(store)
             .oneshot(

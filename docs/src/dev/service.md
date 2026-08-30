@@ -95,8 +95,9 @@ a path.
 
 The private HTTP API accepts bounded raw uploads at `POST /attachments`, local
 regular-file imports at `POST /attachments/import`, and reads at
-`GET|HEAD /attachments/{id}`. It is available only through `content.sock`.
-Import rejects relative paths, final-component symlinks, directories, devices,
+`GET|HEAD /attachments/{id}`. Reads advertise byte ranges and GET accepts one
+bounded byte range, including open-ended and suffix forms. It is available only
+through `content.sock`. Import rejects relative paths, final-component symlinks, directories, devices,
 FIFOs, empty files, and files over 16 MiB. The remote gateway never forwards
 the import operation.
 

@@ -97,12 +97,15 @@ flowchart LR
     Remote[remote surface] -->|WSS or HTTPS + bearer token| Tailscale[owned Tailscale Serve route]
     Tailscale -->|loopback HTTP| Gateway[scufris-surface-gateway]
     Gateway -->|surface frames| Socket[surface.sock]
+    Gateway -->|bounded attachment transfer| Content[content.sock]
     Socket --> Service[scufris-service]
+    Content --> Service
     Gateway -->|bounded transcription request| Inference[ai-tools-api]
 ```
 
 Only surface traffic and bounded media API requests cross the gateway.
-`agent.sock`, `control.sock`, and the inference listener stay local.
+`agent.sock`, `control.sock`, `content.sock`, and the inference listener stay
+local.
 
 ## Trust boundaries
 

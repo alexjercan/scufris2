@@ -4,14 +4,22 @@ This directory contains the native SwiftUI companion. XcodeGen creates the
 Xcode project from `project.yml`; the generated project and Info.plist are not
 committed.
 
-The application connects to the authenticated protocol-v4 surface gateway over
+The application connects to the authenticated protocol-v5 surface gateway over
 `wss://`, stores its URL, bearer token, and stable surface identity in the iOS
-Keychain, replays the canonical conversation, and submits text messages. Hold
-the microphone control to record a bounded local WAV take. On release, the app
-sends it through the authenticated HTTPS gateway for private host transcription
-and puts the returned text in the editable composer. It never submits a
-transcript without an explicit send action. Speech playback and widgets remain
-outside this milestone.
+Keychain, replays the canonical conversation, and submits text with optional
+managed attachment IDs.
+
+The document and photo controls upload one selected object through the
+authenticated HTTPS gateway. The composer holds up to eight canonical
+descriptors and sends only opaque IDs. Canonical message attachments expose
+explicit Quick Look preview and iOS share-sheet actions; downloaded copies use
+temporary protected files. Attachment bytes and bearer tokens are never logged.
+
+Hold the microphone control to record a bounded local WAV take. On release, the
+app sends it through the authenticated HTTPS gateway for private host
+transcription and puts the returned text in the editable composer. It never
+submits a transcript without an explicit send action. Speech playback and
+widgets remain outside this milestone.
 
 ## Build
 

@@ -36,6 +36,9 @@ final class ConversationStore: NSObject, ObservableObject {
     @Published private(set) var settings = ConnectionSettings(backendURL: "", token: "")
     @Published var draft = ""
     @Published private(set) var dictationState: DictationState = .idle
+    @Published private(set) var selectedAttachments: [AttachmentDescriptor] = []
+    @Published private(set) var isUploadingAttachment = false
+    @Published private(set) var attachmentNotice: String?
 
     var visualState: SurfaceVisualState {
         switch connectionState {
@@ -81,6 +84,7 @@ final class ConversationStore: NSObject, ObservableObject {
     private var connectionTask: Task<Void, Never>?
     private var generation = 0
     private var dictationGeneration = 0
+    private var attachmentGeneration = 0
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
     private var transcriptionTask: Task<Void, Never>?
@@ -111,6 +115,8 @@ final class ConversationStore: NSObject, ObservableObject {
         try SecureStore.write(newSettings.backendURL, account: "backend-url")
         try SecureStore.write(newSettings.token, account: "backend-token")
         settings = newSettings
+        selectedAttachments = []
+        attachmentNotice = nil
         startConnection()
     }
 
@@ -207,22 +213,26 @@ final class ConversationStore: NSObject, ObservableObject {
         cancelDictation()
     }
 
-    func send(_ submitted: String) {
+    @discardableResult
+    func send(_ submitted: String) -> Bool {
         let text = submitted.trimmingCharacters(in: .whitespacesAndNewlines)
         guard
             !text.isEmpty,
             text.utf8.count <= scufrisMaximumTextBytes,
+            selectedAttachments.count <= scufrisMaximumAttachments,
             case .connected = connectionState,
             let socket
         else {
-            return
+            return false
         }
         dictationState = .idle
         let request = SurfaceMessageRequest(
             id: "ios-\(UUID().uuidString.lowercased())",
             text: text,
-            attachments: []
+            attachments: selectedAttachments.map(\.id)
         )
+        selectedAttachments = []
+        attachmentNotice = nil
         Task {
             do {
                 try await send(request, through: socket)
@@ -230,6 +240,168 @@ final class ConversationStore: NSObject, ObservableObject {
                 failCurrentConnection(error)
             }
         }
+        return true
+    }
+
+    func addDocument(_ url: URL) {
+        guard canAddAttachment else {
+            attachmentNotice = AttachmentFailure.tooMany.localizedDescription
+            return
+        }
+        let access = url.startAccessingSecurityScopedResource()
+        attachmentGeneration += 1
+        let currentAttachmentGeneration = attachmentGeneration
+        isUploadingAttachment = true
+        attachmentNotice = "UPLOADING \(url.lastPathComponent)"
+        Task {
+            defer {
+                if access { url.stopAccessingSecurityScopedResource() }
+                if currentAttachmentGeneration == attachmentGeneration {
+                    isUploadingAttachment = false
+                }
+            }
+            do {
+                let values = try url.resourceValues(forKeys: [
+                    .isRegularFileKey, .fileSizeKey, .nameKey,
+                ])
+                guard values.isRegularFile == true,
+                      let byteCount = values.fileSize,
+                      byteCount > 0
+                else {
+                    throw AttachmentFailure.invalidSelection
+                }
+                guard byteCount <= scufrisMaximumAttachmentBytes else {
+                    throw AttachmentFailure.tooLarge
+                }
+                let descriptor = try await upload(
+                    file: url,
+                    name: values.name ?? url.lastPathComponent,
+                    mediaType: AttachmentTransfer.mediaType(for: url)
+                )
+                guard currentAttachmentGeneration == attachmentGeneration,
+                      connectionState == .connected
+                else { return }
+                acceptAttachment(descriptor)
+            } catch {
+                guard currentAttachmentGeneration == attachmentGeneration else { return }
+                attachmentNotice = error.localizedDescription
+            }
+        }
+    }
+
+    func addPhoto(_ data: Data, name: String, mediaType: String) {
+        guard canAddAttachment else {
+            attachmentNotice = AttachmentFailure.tooMany.localizedDescription
+            return
+        }
+        guard !data.isEmpty else {
+            attachmentNotice = AttachmentFailure.invalidSelection.localizedDescription
+            return
+        }
+        guard data.count <= scufrisMaximumAttachmentBytes else {
+            attachmentNotice = AttachmentFailure.tooLarge.localizedDescription
+            return
+        }
+        attachmentGeneration += 1
+        let currentAttachmentGeneration = attachmentGeneration
+        isUploadingAttachment = true
+        attachmentNotice = "UPLOADING \(name)"
+        Task {
+            defer {
+                if currentAttachmentGeneration == attachmentGeneration {
+                    isUploadingAttachment = false
+                }
+            }
+            do {
+                let descriptor = try await upload(data: data, name: name, mediaType: mediaType)
+                guard currentAttachmentGeneration == attachmentGeneration,
+                      connectionState == .connected
+                else { return }
+                acceptAttachment(descriptor)
+            } catch {
+                guard currentAttachmentGeneration == attachmentGeneration else { return }
+                attachmentNotice = error.localizedDescription
+            }
+        }
+    }
+
+    func removeAttachment(id: String) {
+        selectedAttachments.removeAll { $0.id == id }
+        attachmentNotice = nil
+    }
+
+    func localCopy(of descriptor: AttachmentDescriptor) async throws -> URL {
+        guard let surfaceURL = URL(string: settings.backendURL) else {
+            throw AttachmentFailure.invalidEndpoint
+        }
+        let request = try AttachmentTransfer.downloadRequest(
+            surfaceURL: surfaceURL,
+            token: settings.token,
+            descriptor: descriptor
+        )
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let bytes = try AttachmentTransfer.downloadedData(
+            data,
+            response: response,
+            descriptor: descriptor
+        )
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scufris-attachment-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+            let destination = directory.appendingPathComponent(descriptor.name, isDirectory: false)
+            try bytes.write(to: destination, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw AttachmentFailure.saveFailed
+        }
+    }
+
+    func attachmentFailed(_ error: Error) {
+        attachmentNotice = error.localizedDescription
+    }
+
+    private var canAddAttachment: Bool {
+        !isUploadingAttachment
+            && selectedAttachments.count < scufrisMaximumAttachments
+            && connectionState == .connected
+    }
+
+    private func acceptAttachment(_ descriptor: AttachmentDescriptor) {
+        guard descriptor.isProtocolValid,
+              !selectedAttachments.contains(where: { $0.id == descriptor.id }),
+              selectedAttachments.count < scufrisMaximumAttachments
+        else {
+            attachmentNotice = AttachmentFailure.invalidResponse.localizedDescription
+            return
+        }
+        selectedAttachments.append(descriptor)
+        attachmentNotice = nil
+    }
+
+    private func upload(file: URL, name: String, mediaType: String) async throws -> AttachmentDescriptor {
+        let request = try attachmentUploadRequest(name: name, mediaType: mediaType)
+        let (data, response) = try await URLSession.shared.upload(for: request, fromFile: file)
+        return try AttachmentTransfer.descriptor(from: data, response: response)
+    }
+
+    private func upload(data: Data, name: String, mediaType: String) async throws -> AttachmentDescriptor {
+        let request = try attachmentUploadRequest(name: name, mediaType: mediaType)
+        let (responseData, response) = try await URLSession.shared.upload(for: request, from: data)
+        return try AttachmentTransfer.descriptor(from: responseData, response: response)
+    }
+
+    private func attachmentUploadRequest(name: String, mediaType: String) throws -> URLRequest {
+        guard let surfaceURL = URL(string: settings.backendURL) else {
+            throw AttachmentFailure.invalidEndpoint
+        }
+        return try AttachmentTransfer.uploadRequest(
+            surfaceURL: surfaceURL,
+            token: settings.token,
+            name: name,
+            mediaType: mediaType
+        )
     }
 
     private func startRecording(generation currentGeneration: Int) {
@@ -324,6 +496,9 @@ final class ConversationStore: NSObject, ObservableObject {
 
     private func startConnection() {
         generation += 1
+        attachmentGeneration += 1
+        isUploadingAttachment = false
+        attachmentNotice = nil
         let currentGeneration = generation
         connectionTask?.cancel()
         socket?.cancel(with: .goingAway, reason: nil)
@@ -459,6 +634,8 @@ final class ConversationStore: NSObject, ObservableObject {
     }
 
     private func failCurrentConnection(_ error: Error) {
+        attachmentGeneration += 1
+        isUploadingAttachment = false
         socket?.cancel(with: .goingAway, reason: nil)
         connectionState = .disconnected(error.localizedDescription)
         serviceState = "failed"

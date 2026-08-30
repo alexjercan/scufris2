@@ -79,7 +79,13 @@ scufris-ctl hide    # hide the workspace
 scufris-ctl state   # read service state
 ```
 
-A window manager can bind them:
+On iOS, the paperclip selects a document and the photo control selects an
+image. The app uploads each selection to the private host before adding it to
+the composer. Canonical attachments provide explicit preview and share actions.
+The same limits apply on both surfaces: eight attachments per message and 16
+MiB per object.
+
+A window manager can bind the desktop commands:
 
 ```text
 bindsym $mod+d exec --no-startup-id "scufris-ctl open"

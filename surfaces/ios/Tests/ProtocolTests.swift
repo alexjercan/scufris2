@@ -59,6 +59,55 @@ struct ProtocolTests {
     }
 
     @Test
+    func attachmentsUseTheAuthenticatedHTTPSSiblingOfTheSurface() throws {
+        let production = URL(string: "wss://nixos.example.ts.net/")!
+        #expect(
+            AttachmentEndpoint.collection(for: production, name: "diagram 1.png")?.absoluteString
+                == "https://nixos.example.ts.net/attachments?name=diagram%201.png"
+        )
+        #expect(
+            AttachmentEndpoint.object(for: production, id: "att_one")?.absoluteString
+                == "https://nixos.example.ts.net/attachments/att_one"
+        )
+
+        let staging = URL(string: "wss://nixos.example.ts.net/scufris-staging")!
+        #expect(
+            AttachmentEndpoint.collection(for: staging, name: "diagram.png")?.absoluteString
+                == "https://nixos.example.ts.net/scufris-staging/attachments?name=diagram.png"
+        )
+        #expect(
+            AttachmentEndpoint.object(for: staging, id: "att_one")?.absoluteString
+                == "https://nixos.example.ts.net/scufris-staging/attachments/att_one"
+        )
+
+        let request = try AttachmentTransfer.uploadRequest(
+            surfaceURL: staging,
+            token: String(repeating: "a", count: 32),
+            name: "diagram.png",
+            mediaType: "image/png"
+        )
+        #expect(request.httpMethod == "POST")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(String(repeating: "a", count: 32))")
+        #expect(request.value(forHTTPHeaderField: "Content-Type") == "image/png")
+    }
+
+    @Test
+    func attachmentIDsArePresentInSurfaceSubmissions() throws {
+        let request = SurfaceMessageRequest(
+            id: "ios-message",
+            text: "Inspect these.",
+            attachments: ["att_one", "att_two"]
+        )
+        let object = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
+                as? [String: Any]
+        )
+        #expect(object["v"] as? Int == 5)
+        #expect(object["type"] as? String == "surface.message")
+        #expect(object["attachments"] as? [String] == ["att_one", "att_two"])
+    }
+
+    @Test
     func dictationUsesTheAuthenticatedHTTPSSiblingOfTheSurface() throws {
         let production = try #require(
             TranscriptionEndpoint.url(
@@ -140,5 +189,11 @@ struct ProtocolTests {
         #expect(message.text == "Done.")
         #expect(message.details == "Passed.")
         #expect(message.attachments?.isEmpty == true)
+
+        let omitted = Data(
+            #"{"v":5,"type":"surface.message","role":"user","surface":"ios","text":"Hello."}"#.utf8
+        )
+        let textOnly = try JSONDecoder().decode(IncomingConversationMessage.self, from: omitted)
+        #expect(textOnly.attachments == nil)
     }
 }

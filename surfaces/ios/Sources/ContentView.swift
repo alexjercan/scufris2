@@ -1,9 +1,18 @@
+import PhotosUI
+import QuickLook
 import SwiftUI
+import UniformTypeIdentifiers
+import UIKit
 
 struct ContentView: View {
     @StateObject private var store = ConversationStore()
     @State private var isShowingSetup = false
     @State private var isHoldingMicrophone = false
+    @State private var isShowingDocumentPicker = false
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var isLoadingPhoto = false
+    @State private var previewAttachment: LocalAttachment?
+    @State private var sharedAttachment: LocalAttachment?
 
     var body: some View {
         ZStack {
@@ -24,6 +33,30 @@ struct ContentView: View {
                 try store.configure(settings)
             }
             .preferredColorScheme(.dark)
+        }
+        .sheet(item: $previewAttachment) { attachment in
+            QuickLookSheet(url: attachment.url)
+                .ignoresSafeArea()
+        }
+        .sheet(item: $sharedAttachment) { attachment in
+            ActivitySheet(items: [attachment.url])
+        }
+        .fileImporter(
+            isPresented: $isShowingDocumentPicker,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case let .success(urls):
+                if let url = urls.first { store.addDocument(url) }
+            case let .failure(error):
+                store.attachmentFailed(error)
+            }
+        }
+        .onChange(of: selectedPhoto) {
+            guard let item = selectedPhoto else { return }
+            selectedPhoto = nil
+            loadPhoto(item)
         }
     }
 
@@ -74,8 +107,12 @@ struct ContentView: View {
                         emptyConversation
                     } else {
                         ForEach(store.conversation) { entry in
-                            ConversationRow(entry: entry)
-                                .id(entry.id)
+                            ConversationRow(
+                                entry: entry,
+                                onPreview: preview,
+                                onShare: share
+                            )
+                            .id(entry.id)
                         }
                         if store.isThinking {
                             ThinkingRow()
@@ -168,6 +205,42 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Divider().overlay(ScufrisPalette.line)
 
+            if let notice = store.attachmentNotice {
+                HStack(spacing: 8) {
+                    Rectangle()
+                        .fill(attachmentAccent)
+                        .frame(width: 2, height: 12)
+                    Text(notice.uppercased())
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .tracking(0.7)
+                        .foregroundStyle(attachmentAccent)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                    if store.isUploadingAttachment {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(ScufrisPalette.niagara)
+                    }
+                }
+                .padding(.horizontal, 15)
+                .padding(.top, 9)
+            }
+
+            if !store.selectedAttachments.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 7) {
+                        ForEach(store.selectedAttachments) { attachment in
+                            SelectedAttachmentChip(attachment: attachment) {
+                                store.removeAttachment(id: attachment.id)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 15)
+                }
+                .scrollIndicators(.hidden)
+                .padding(.top, 9)
+            }
+
             if let notice = store.dictationState.notice {
                 HStack(spacing: 8) {
                     Rectangle()
@@ -198,6 +271,28 @@ struct ContentView: View {
             }
 
             HStack(alignment: .bottom, spacing: 10) {
+                Button {
+                    isShowingDocumentPicker = true
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(ScufrisPalette.quartz)
+                        .frame(width: 28, height: 30)
+                }
+                .disabled(!canAttach)
+                .opacity(canAttach ? 1 : 0.3)
+                .accessibilityLabel("Attach a document")
+
+                PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                    Image(systemName: "photo")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(ScufrisPalette.quartz)
+                        .frame(width: 28, height: 30)
+                }
+                .disabled(!canAttach)
+                .opacity(canAttach ? 1 : 0.3)
+                .accessibilityLabel("Attach a photo")
+
                 Text(">")
                     .font(.system(size: 15, design: .monospaced))
                     .foregroundStyle(ScufrisPalette.quartz)
@@ -252,8 +347,70 @@ struct ContentView: View {
     private func submit() {
         guard canSubmit else { return }
         let text = store.draft
-        store.draft = ""
-        store.send(text)
+        if store.send(text) {
+            store.draft = ""
+        }
+    }
+
+    private var canAttach: Bool {
+        guard case .connected = store.connectionState else { return false }
+        return !store.isUploadingAttachment
+            && !isLoadingPhoto
+            && store.selectedAttachments.count < scufrisMaximumAttachments
+            && !store.dictationState.isActive
+    }
+
+    private var attachmentAccent: Color {
+        store.isUploadingAttachment ? ScufrisPalette.niagara : ScufrisPalette.red
+    }
+
+    private func loadPhoto(_ item: PhotosPickerItem) {
+        isLoadingPhoto = true
+        Task {
+            defer { isLoadingPhoto = false }
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    throw AttachmentFailure.invalidSelection
+                }
+                let contentType = item.supportedContentTypes.first(where: { $0.conforms(to: .image) })
+                    ?? .jpeg
+                let suffix = contentType.preferredFilenameExtension ?? "jpg"
+                let mediaType = contentType.preferredMIMEType ?? "image/jpeg"
+                store.addPhoto(
+                    data,
+                    name: "photo-\(UUID().uuidString.lowercased()).\(suffix)",
+                    mediaType: mediaType
+                )
+            } catch {
+                store.attachmentFailed(error)
+            }
+        }
+    }
+
+    private func preview(_ descriptor: AttachmentDescriptor) {
+        Task {
+            do {
+                previewAttachment = LocalAttachment(
+                    id: descriptor.id,
+                    url: try await store.localCopy(of: descriptor)
+                )
+            } catch {
+                store.attachmentFailed(error)
+            }
+        }
+    }
+
+    private func share(_ descriptor: AttachmentDescriptor) {
+        Task {
+            do {
+                sharedAttachment = LocalAttachment(
+                    id: descriptor.id,
+                    url: try await store.localCopy(of: descriptor)
+                )
+            } catch {
+                store.attachmentFailed(error)
+            }
+        }
     }
 
     private var canDictate: Bool {
@@ -348,6 +505,8 @@ private struct ThinkingRow: View {
 
 private struct ConversationRow: View {
     let entry: ConversationEntry
+    let onPreview: (AttachmentDescriptor) -> Void
+    let onShare: (AttachmentDescriptor) -> Void
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -373,6 +532,18 @@ private struct ConversationRow: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
+                if !entry.attachments.isEmpty {
+                    VStack(alignment: .leading, spacing: 7) {
+                        ForEach(entry.attachments) { attachment in
+                            AttachmentCard(
+                                attachment: attachment,
+                                onPreview: { onPreview(attachment) },
+                                onShare: { onShare(attachment) }
+                            )
+                        }
+                    }
+                }
+
                 if let details = entry.details, !details.isEmpty {
                     DisclosureGroup {
                         Text(details)
@@ -391,6 +562,124 @@ private struct ConversationRow: View {
                 }
             }
         }
+    }
+}
+
+private struct SelectedAttachmentChip: View {
+    let attachment: AttachmentDescriptor
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("\(attachment.name) - \(attachment.displaySize)")
+                .lineLimit(1)
+            Button(action: onRemove) {
+                Image(systemName: "xmark")
+            }
+            .accessibilityLabel("Remove \(attachment.name)")
+        }
+        .font(.system(size: 9, weight: .medium, design: .monospaced))
+        .foregroundStyle(ScufrisPalette.foreground)
+        .padding(.leading, 7)
+        .padding(.trailing, 5)
+        .padding(.vertical, 5)
+        .overlay(Rectangle().stroke(ScufrisPalette.lineStrong, lineWidth: 1))
+    }
+}
+
+private struct AttachmentCard: View {
+    let attachment: AttachmentDescriptor
+    let onPreview: () -> Void
+    let onShare: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(attachment.name)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(ScufrisPalette.foregroundStrong)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text("\(attachment.mediaType) - \(attachment.displaySize)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(ScufrisPalette.muted)
+                }
+                Spacer(minLength: 8)
+            }
+            HStack(spacing: 12) {
+                Button("PREVIEW", action: onPreview)
+                Button("SHARE", action: onShare)
+            }
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .foregroundStyle(ScufrisPalette.quartz)
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ScufrisPalette.line.opacity(0.14))
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(ScufrisPalette.lineStrong)
+                .frame(width: 2)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Attachment \(attachment.name), \(attachment.displaySize)")
+    }
+}
+
+private struct LocalAttachment: Identifiable {
+    let id: String
+    let url: URL
+}
+
+private struct QuickLookSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(url: url)
+    }
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let controller = QLPreviewController()
+        controller.dataSource = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: QLPreviewController, context: Context) {}
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let url: URL
+
+        init(url: URL) {
+            self.url = url
+        }
+
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+
+        func previewController(
+            _ controller: QLPreviewController,
+            previewItemAt index: Int
+        ) -> QLPreviewItem {
+            url as NSURL
+        }
+    }
+}
+
+private struct ActivitySheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+private extension AttachmentDescriptor {
+    var displaySize: String {
+        if size < 1024 { return "\(size) B" }
+        if size < 1024 * 1024 { return "\((size + 1023) / 1024) KiB" }
+        return String(format: "%.1f MiB", Double(size) / Double(1024 * 1024))
     }
 }
 

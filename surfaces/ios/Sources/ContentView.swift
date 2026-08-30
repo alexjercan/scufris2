@@ -673,7 +673,7 @@ private struct AttachmentCard: View {
 }
 
 private struct InlineAttachmentImage: View {
-    enum State {
+    enum Phase {
         case loading
         case loaded(UIImage)
         case unavailable
@@ -681,11 +681,11 @@ private struct InlineAttachmentImage: View {
 
     let attachment: AttachmentDescriptor
     let load: () async throws -> URL
-    @State private var state: State = .loading
+    @State private var phase: Phase = .loading
 
     var body: some View {
         Group {
-            switch state {
+            switch phase {
             case .loading:
                 ProgressView()
                     .tint(ScufrisPalette.quartz)
@@ -706,12 +706,12 @@ private struct InlineAttachmentImage: View {
             do {
                 let url = try await load()
                 guard let image = UIImage(contentsOfFile: url.path) else {
-                    state = .unavailable
+                    phase = .unavailable
                     return
                 }
-                state = .loaded(image)
+                phase = .loaded(image)
             } catch {
-                state = .unavailable
+                phase = .unavailable
             }
         }
         .accessibilityLabel("Image attachment \(attachment.name)")

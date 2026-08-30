@@ -9,14 +9,47 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-30
+
+### Added
+
+- Strict protocol v4 with separate surface, agent, and control sockets. Several
+  desktop surfaces can share one canonical 200-message conversation, reconnect
+  with stable identities, and receive replay without repeating speech or widget
+  effects.
+- Named split staging commands: `nix run .#staging -- backend` and
+  `nix run .#staging -- frontend NAME`. Each frontend has private state,
+  identity, data, command socket, lock, and teardown.
+- Structured backend and desktop logs. INFO records major lifecycle events;
+  DEBUG adds typed payload and routing detail for local diagnosis.
+- A pinned `ai-tools-api` v0.1.1 package and app. The Home Manager module reuses
+  an enabled shared provider, can consume an explicit external endpoint, or can
+  run one hardened fallback service.
+
 ### Changed
 
+- Protocol v4 replaces protocol v3 outright. The service owns canonical
+  conversation history, the agent emits atomic final responses, and only the
+  live originating frontend performs speech and widget presentation.
+- Speech inference now uses the bounded OpenAI-compatible transcription and
+  speech routes on `ai-tools-api` port 10300. Scufris retains recording,
+  validated WAV playback, mute, and cancellation.
 - Home Manager now groups the supervised agent under `service.agent`, desktop
   speech under `desktop.speech`, and speech-to-text under
   `desktop.transcription`. The former option paths remain deprecated aliases
   for one release.
-- The README Quickstart now runs the complete isolated staging stack with one
-  command.
+- Source and package layout now follows agent, host, shared protocol, and
+  surface ownership boundaries.
+- The isolated staging stack still runs with `nix run .#staging -- up`; it uses
+  a deployed shared API by default and supports explicit managed API mode.
+
+### Removed
+
+- Direct Scufris ownership of Whisper, Piper, their models, patches, packages,
+  and user services. One `ai-tools-api` deployment now owns inference per
+  machine.
+- Protocol v3, RPC prompt ingress, dynamic model-defined widgets, spoken-event
+  routing, response detail artifacts, and their compatibility paths.
 
 ## [0.5.0] - 2026-08-29
 
@@ -316,7 +349,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/alexjercan/scufris2/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/alexjercan/scufris2/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/alexjercan/scufris2/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/alexjercan/scufris2/compare/v0.2.0...v0.3.0

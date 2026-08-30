@@ -6,22 +6,18 @@
 
 ## Goal
 
-Make the top-level description and Quickstart accurately explain conversation
-ownership, desktop responsibilities, shared inference, staging modes, and Home
-Manager provider selection.
+Keep the existing description and staging Quickstart. Make only the Home
+Manager example directly usable with the machine's existing shared
+`ai-tools-api` deployment.
 
 ## Decisions
 
-- Keep the README limited to the product description and Quickstart.
-- Show external staging as the default and managed staging as an explicit
-  alternative.
-- Show multi-surface staging because it is a core protocol-v4 capability.
-- Explain upstream provider reuse, pinned fallback management, and explicit
-  external Home Manager configuration without duplicating the option manual.
+- Revert the expanded product and staging text from the first revision.
+- Set `desktop.aiToolsApi.manage = false` in the main Home Manager example.
+- Rely on the default loopback base URL so the example consumes port 10300
+  without starting a competing inference service.
 
 ## Verification
 
 - `npx prettier --check README.md tasks/20260830-110434/TASK.md`
-- `nix build .#checks.x86_64-linux.docs --no-link`
-- Link targets and all documented commands were checked against the current
-  staging script and Home Manager module.
+- The example was checked against the current Home Manager option defaults.

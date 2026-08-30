@@ -45,7 +45,7 @@ for split backends, several frontends, and remote surfaces.
 Release:
 
 ```bash
-nix run github:alexjercan/scufris2/v0.6.0#scufris
+nix run github:alexjercan/scufris2/v1.1.0#scufris
 ```
 
 Checkout:
@@ -62,7 +62,7 @@ Scufris extensions. It does not start the service, desktop, or speech.
 ```nix
 {
   inputs.scufris = {
-    url = "github:alexjercan/scufris2/v0.6.0";
+    url = "github:alexjercan/scufris2/v1.1.0";
     inputs.nixpkgs.follows = "nixpkgs";
   };
 }

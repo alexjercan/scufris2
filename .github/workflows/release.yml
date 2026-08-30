@@ -31,12 +31,7 @@ jobs:
             exit 1
           fi
 
-          package_version="$(node -p "require('./package.json').version")"
-          expected_tag="v${package_version}"
-          if [[ "$GITHUB_REF_NAME" != "$expected_tag" ]]; then
-            echo "Tag $GITHUB_REF_NAME does not match package version $package_version" >&2
-            exit 1
-          fi
+          python3 tools/release/check_versions.py --tag "$GITHUB_REF_NAME"
 
       - name: Create source release
         env:

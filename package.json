@@ -1,18 +1,19 @@
 {
   "name": "scufris2",
-  "version": "0.6.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "keywords": [
     "pi-package"
   ],
   "scripts": {
-    "check": "npm run typecheck && npm test && npm run format:check",
+    "check": "npm run version:check && npm run typecheck && npm test && npm run format:check",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "dev": "./scripts/scufris-dev",
     "test": "node --experimental-strip-types --test --test-concurrency=1 tests/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "version:check": "python3 tools/release/check_versions.py"
   },
   "pi": {
     "extensions": [

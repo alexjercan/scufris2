@@ -1,5 +1,5 @@
-# `nix run .#staging`: the whole stack from this source tree, beside whatever
-# is deployed.
+# `nix run .#staging`: one combined stack or a split backend and named
+# frontends from this source tree, beside whatever is deployed.
 #
 # Everything here is the flake's own source, which for a dirty tree is the
 # working tree as Nix snapshots it. The two binaries are built rather than
@@ -31,7 +31,7 @@ pkgs.writeShellApplication {
     exec ${self}/scripts/scufris-staging "$@"
   '';
   meta = {
-    description = "Run the working tree's Scufris beside the deployed one";
+    description = "Run a combined or multi-frontend staging Scufris";
     mainProgram = "scufris-staging";
   };
 }

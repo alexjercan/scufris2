@@ -1,8 +1,8 @@
-"""What `scufris-staging up` arranges, and what it leaves alone.
+"""What the combined and split staging commands arrange and leave alone.
 
 The two binaries are stubs. What is under test is the script: the environment
-it hands the stack, the staging root it seeds, the lock that refuses a second
-one, and a Ctrl+C that stops exactly the processes it started. Running the real
+it hands each process, the staging root it seeds, backend and frontend locks,
+and a Ctrl+C that stops exactly the processes that command started. Running the real
 service and companion needs a display and a Pi login, so that run is recorded
 by hand under the task rather than here.
 
@@ -35,15 +35,20 @@ from pathlib import Path
 role = sys.argv[0].rsplit("/", 1)[-1]
 if "--print-config" in sys.argv:
     print("socket=" + os.environ["SCUFRIS_RUNTIME_DIR"] + "/surface.sock")
+    print("command_socket=" + os.environ.get("SCUFRIS_DESKTOP_COMMAND_SOCKET", "default"))
     raise SystemExit(0)
 
 report = Path(os.environ["SCUFRIS_STAGING_REPORT"])
 report.mkdir(parents=True, exist_ok=True)
-(report / (role + ".json")).write_text(
+profile = os.environ.get("SCUFRIS_STAGING_FRONTEND")
+suffix = "-" + profile if role == "desktop" and profile else ""
+(report / (role + suffix + ".json")).write_text(
     json.dumps({"pid": os.getpid(), "env": dict(os.environ)})
 )
 if role == "service":
     Path(os.environ["SCUFRIS_RUNTIME_DIR"], "surface.sock").touch()
+if role == "desktop":
+    Path(os.environ["SCUFRIS_DESKTOP_COMMAND_SOCKET"]).touch()
 
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 while True:
@@ -119,10 +124,10 @@ class StagingTests(unittest.TestCase):
         env.update(named)
         return env
 
-    def up(self, **named: str) -> subprocess.Popen[str]:
-        """Starts one stack and stops it when the test ends."""
+    def start(self, *arguments: str, **named: str) -> subprocess.Popen[str]:
+        """Starts one staging command and stops it when the test ends."""
         started = subprocess.Popen(
-            [str(SCRIPT), "up"],
+            [str(SCRIPT), *arguments],
             env=self.environment(**named),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -133,6 +138,9 @@ class StagingTests(unittest.TestCase):
         )
         self.addCleanup(self.stop, started)
         return started
+
+    def up(self, **named: str) -> subprocess.Popen[str]:
+        return self.start("up", **named)
 
     def stop(self, started: subprocess.Popen[str]) -> None:
         if started.poll() is None:
@@ -145,8 +153,9 @@ class StagingTests(unittest.TestCase):
         if started.stdout is not None and not started.stdout.closed:
             started.stdout.close()
 
-    def reported(self, role: str) -> dict:
-        return json.loads((self.report / f"{role}.json").read_text())
+    def reported(self, role: str, profile: str | None = None) -> dict:
+        suffix = f"-{profile}" if role == "desktop" and profile else ""
+        return json.loads((self.report / f"{role}{suffix}.json").read_text())
 
     def started_or_fail(self, running: subprocess.Popen[str], *roles: str) -> None:
         """Waits for every `role` to report in, or fails with what the run said.
@@ -325,10 +334,92 @@ class StagingTests(unittest.TestCase):
         self.assertEqual(started.returncode, 0, output)
         for pid in pids:
             self.assertFalse(alive(pid), f"{pid} outlived the run:\n{output}")
+        self.assertFalse(
+            (self.runtime / "scufris-staging" / "desktop.sock").exists()
+        )
         # The lock is released with the process, so the next run is not
         # refused by a file the last one left behind.
         shutil.rmtree(self.report)
         self.started_or_fail(self.up(), "service")
+
+    def test_backend_and_named_frontends_can_run_independently(self) -> None:
+        backend = self.start("backend")
+        self.started_or_fail(backend, "service")
+        self.assertFalse((self.report / "desktop.json").exists())
+
+        one = self.start("frontend", "one")
+        two = self.start(
+            "frontend",
+            "two",
+            SCUFRIS_DESKTOP_HOTKEY="Super+H",
+        )
+        self.started_or_fail(one, "desktop-one")
+        self.started_or_fail(two, "desktop-two")
+
+        one_env = self.reported("desktop", "one")["env"]
+        two_env = self.reported("desktop", "two")["env"]
+        self.assertEqual(one_env["SCUFRIS_RUNTIME_DIR"], two_env["SCUFRIS_RUNTIME_DIR"])
+        self.assertEqual(
+            one_env["XDG_STATE_HOME"],
+            str(self.staging / "frontends" / "one" / "state"),
+        )
+        self.assertEqual(
+            two_env["XDG_STATE_HOME"],
+            str(self.staging / "frontends" / "two" / "state"),
+        )
+        self.assertNotEqual(one_env["XDG_STATE_HOME"], two_env["XDG_STATE_HOME"])
+        self.assertEqual(
+            one_env["SCUFRIS_DESKTOP_COMMAND_SOCKET"],
+            str(self.runtime / "scufris-staging" / "desktop-one.sock"),
+        )
+        self.assertEqual(
+            two_env["SCUFRIS_DESKTOP_COMMAND_SOCKET"],
+            str(self.runtime / "scufris-staging" / "desktop-two.sock"),
+        )
+        self.assertEqual(two_env["SCUFRIS_DESKTOP_HOTKEY"], "Super+H")
+
+        refused = subprocess.run(
+            [str(SCRIPT), "frontend", "one"],
+            env=self.environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(refused.returncode, 3, refused.stderr)
+        self.assertIn("frontend one is already running", refused.stderr)
+        self.assertIsNone(one.poll())
+        self.assertIsNone(two.poll())
+
+        self.stop(one)
+        self.assertFalse(
+            (self.runtime / "scufris-staging" / "desktop-one.sock").exists()
+        )
+        self.assertTrue(
+            (self.runtime / "scufris-staging" / "desktop-two.sock").exists()
+        )
+        self.assertIsNone(backend.poll())
+        self.assertIsNone(two.poll())
+
+    def test_a_frontend_requires_a_backend_and_a_safe_name(self) -> None:
+        absent = subprocess.run(
+            [str(SCRIPT), "frontend", "one"],
+            env=self.environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(absent.returncode, 3, absent.stderr)
+        self.assertIn("no staging backend is running", absent.stderr)
+
+        unsafe = subprocess.run(
+            [str(SCRIPT), "frontend", "../one"],
+            env=self.environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(unsafe.returncode, 2, unsafe.stderr)
+        self.assertIn("frontend NAME must match", unsafe.stderr)
 
 
 def alive(pid: int) -> bool:

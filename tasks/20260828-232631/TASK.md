@@ -265,6 +265,30 @@ Verification evidence:
   The owned staging service, desktop, and wrapper PIDs were stopped explicitly
   after the proof.
 
+## Split staging follow-up
+
+Added separate foreground staging commands for local multi-surface testing:
+
+- `nix run .#staging -- backend` owns the isolated service and Pi agent.
+- `nix run .#staging -- frontend NAME` owns one desktop and requires a running
+  staging backend.
+- Each validated name has an independent durable surface identity, state/data
+  roots, command socket, and lock. Different names can run concurrently; the
+  same name is refused.
+- `up` remains the one-terminal service-plus-desktop convenience and also
+  accepts additional named frontends.
+- Each command stops only its recorded children. Frontends do not own or stop
+  the backend or their peers.
+
+Focused verification: all 8 staging helper integration tests pass, including
+simultaneous `one` and `two` frontends, isolated identities and command sockets,
+backend independence, same-name refusal, absent-backend refusal, exact teardown,
+and command-socket cleanup. ShellCheck and the packaged `scufris-staging` Nix
+build pass. A live packaged run launched one backend and two local desktop
+frontends with distinct mode-0600 persisted surface IDs and separate
+`desktop-one.sock` and `desktop-two.sock` command sockets. Both commands reached
+the backend in `idle`; all recorded processes were then stopped.
+
 ## Implementation sequence
 
 Implement the v4 core in this task, then create separate product work for later

@@ -1,27 +1,45 @@
 # Staging
 
-One command runs the working tree's Scufris beside the deployed one. The
-deployed stack keeps its sockets, its jobs, its sessions, and `Super+D`;
-staging gets its own of each and answers `Super+G`.
+The working tree can run beside the deployed Scufris as one stack or as one
+backend with several local frontends. The deployed stack keeps its sockets,
+jobs, sessions, and `Super+D`.
+
+The one-terminal form remains:
 
 ```bash
 nix run .#staging -- up
 ```
 
-The flake app builds the service and the companion from this source tree, so
-it needs no dev shell and no warm `cargo` target directory. From inside a dev
-shell the script runs directly and compiles what it needs:
+For multi-surface testing, keep these commands in separate terminals:
 
 ```bash
-scripts/scufris-staging up
+nix run .#staging -- backend
+nix run .#staging -- frontend left
+SCUFRIS_DESKTOP_HOTKEY=Super+H nix run .#staging -- frontend right
 ```
 
-Both stay in the foreground and stream the two processes. Ctrl+C is the
-teardown, the way `docker compose up` works, and it stops exactly the two
-processes the run started. There is no `down`: a staging stack that outlives
-its terminal is one nobody remembers to stop.
+`backend` runs the service and Pi agent. Each `frontend NAME` runs only one
+companion against that backend. The name is stable: it selects a private state
+directory, persistent surface identity, data directory, command socket, and
+frontend lock. Different names therefore register as different surfaces even
+on one machine. Give simultaneously active frontends different hotkeys as in
+the example.
 
-A second `up` while one runs exits 3 without starting anything.
+The flake app builds the service and companion from this source tree, so it
+needs no dev shell and no warm Cargo target. Inside a dev shell, the script can
+run directly and builds only the binary that command needs:
+
+```bash
+scripts/scufris-staging backend
+scripts/scufris-staging frontend left
+```
+
+Every command stays in the foreground. Ctrl+C stops only the processes that
+command started. There is no `down`: a staging process that outlives its
+terminal is one nobody remembers to stop.
+
+A second backend or a second frontend with the same name exits 3. A frontend
+also exits 3 when no staging backend is running.
 
 ## The staging environment
 
@@ -39,8 +57,11 @@ A second `up` while one runs exits 3 without starting anything.
 | `SCUFRIS_DESKTOP_HOTKEY` | `Super+G`                            |
 | `SCUFRIS_STT_ENDPOINT`   | `http://127.0.0.1:10301/inference`   |
 
-`SCUFRIS_DESKTOP_SPEAK_COMMAND` is in the block too; see
-[speech](#speech) below for where its value comes from.
+A named frontend instead uses
+`$SCUFRIS_STAGING_ROOT/frontends/NAME/{state,data}` and
+`$SCUFRIS_RUNTIME_DIR/desktop-NAME.sock`. `SCUFRIS_DESKTOP_SPEAK_COMMAND` is
+in frontend output too; see [speech](#speech) below for where its value comes
+from.
 
 The root is disposable and a reboot wipes it. `SCUFRIS_STAGING_ROOT`,
 `SCUFRIS_DESKTOP_HOTKEY`, and `SCUFRIS_STT_ENDPOINT` are taste, so a value
@@ -95,9 +116,9 @@ is named but cannot be run is refused with exit 2, for the same reason: a
 synthesiser the companion logs once and gives up on is indistinguishable from
 no synthesiser at all.
 
-Both stacks run their own synthesiser process. Nothing is shared here but the
-pinned voice, and two Scufrises talking at once is the ordinary cost of running
-two. "Mute Scufris" in the staging companion's tray silences one of them.
+Every frontend runs its own synthesiser process. Nothing is shared here but
+the pinned voice, and two Scufrises talking at once is the ordinary cost of
+running two. "Mute Scufris" in a staging companion's tray silences that one.
 
 ## Reaching the staging stack
 
@@ -111,8 +132,15 @@ scufris-ctl state
 journalctl --user -u scufris-service.service -f
 ```
 
-Without that variable the same commands reach the deployed service. That is
-the one thing to keep straight while both are running.
+Without that variable the same commands reach the deployed service. Local
+window commands can target one named frontend through its command socket:
+
+```bash
+SCUFRIS_DESKTOP_COMMAND_SOCKET="$XDG_RUNTIME_DIR/scufris-staging/desktop-left.sock" \
+  scufris-ctl show
+```
+
+These are the variables to keep explicit while several stacks are running.
 
 ## What it does not touch
 

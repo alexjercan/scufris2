@@ -1,43 +1,52 @@
 #!/usr/bin/env bash
-# One command that runs the working tree's Scufris beside the deployed one.
+# Run the working tree's Scufris beside the deployed one.
 #
 #   scufris-staging up
+#   scufris-staging backend
+#   scufris-staging frontend NAME
 #
-# The stack stays in the foreground streaming both processes' output, and
-# Ctrl+C is the teardown, the way `docker compose up` works. There is no
-# `down`: a staging stack that outlives its terminal is one nobody remembers
-# to stop.
-#
-# Nothing here touches the deployed Scufris. Its sockets, jobs, sessions and
-# hotkey are where they were; staging gets a runtime directory of its own
-# through SCUFRIS_RUNTIME_DIR, XDG homes under a disposable root, and its own
-# activation key. What is shared is shared deliberately: the transcription
-# server, the tmux server (sessions are namespaced), and the Pi login.
+# `up` keeps the one-terminal convenience. `backend` and named `frontend`
+# processes let several companions share one service. Every foreground command
+# owns and stops only the child processes whose PIDs it recorded.
 
 set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
 usage: scufris-staging up
+       scufris-staging backend
+       scufris-staging frontend NAME
 
-Runs the working tree's scufris-service and scufris-desktop against a
-disposable staging root. Ctrl+C stops both.
+up runs one service and one desktop. backend runs only the service. Each
+frontend NAME runs one desktop against that backend with a stable, independent
+identity and state directory. Ctrl+C stops only that command's processes.
 
 Environment:
   SCUFRIS_STAGING_ROOT     staging root (default: /tmp/scufris-staging)
   SCUFRIS_STAGING_SERVICE  scufris-service binary to run
   SCUFRIS_STAGING_DESKTOP  scufris-desktop binary to run
-  SCUFRIS_STAGING_SPEAK    synthesiser to give the companion
+  SCUFRIS_STAGING_SPEAK    synthesiser to give each companion
   SCUFRIS_DESKTOP_HOTKEY   activation key (default: Super+G)
 EOF
 }
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-
-if [[ $# -ne 1 || "$1" != "up" ]]; then
-  usage
-  exit 2
-fi
+action="${1:-}"
+profile=""
+case "$action:$#" in
+  up:1 | backend:1) ;;
+  frontend:2)
+    profile="$2"
+    if [[ ! "$profile" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$ ]]; then
+      printf 'scufris-staging: frontend NAME must match [A-Za-z0-9][A-Za-z0-9._-]{0,31}\n' >&2
+      exit 2
+    fi
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
 
 if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
   printf 'scufris-staging: XDG_RUNTIME_DIR is required for the sockets\n' >&2
@@ -45,36 +54,51 @@ if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
 fi
 
 staging="${SCUFRIS_STAGING_ROOT:-/tmp/scufris-staging}"
-# Below XDG_RUNTIME_DIR rather than below the staging root, and not a
-# replacement for it: PipeWire and the session bus live in that directory, and
-# a socket path is capped at 108 bytes, which /tmp/scufris-staging/run would
-# start eating into.
 runtime_dir="$XDG_RUNTIME_DIR/scufris-staging"
 projects="$staging/projects"
 pi_agent="$staging/pi-agent"
-# Read before the staging value is exported over it.
 deployed_pi_agent="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 
-mkdir -p -- "$staging" "$projects" "$pi_agent" "$staging/state" "$staging/data"
-mkdir -p -- "$runtime_dir"
+mkdir -p -- "$staging" "$projects" "$pi_agent" "$staging/state" \
+  "$staging/data" "$runtime_dir"
 chmod 0700 "$staging" "$pi_agent" "$runtime_dir"
 
-# One stack at a time. The lock is held by this process and released when it
-# dies, so a crashed run leaves nothing to clean up by hand - which a PID file
-# would.
-exec {lock_fd}>"$staging/staging.lock"
-if ! flock -n "$lock_fd"; then
-  printf 'scufris-staging: a staging stack is already running (%s)\n' \
-    "$staging/staging.lock" >&2
-  exit 3
+# The backend lock is the backend's lifetime, not the lifetime of every
+# frontend. `up` owns it too, so named frontends can attach to either form.
+if [[ "$action" == "up" || "$action" == "backend" ]]; then
+  exec {backend_lock_fd}>"$staging/backend.lock"
+  if ! flock -n "$backend_lock_fd"; then
+    printf 'scufris-staging: a staging backend is already running (%s)\n' \
+      "$staging/backend.lock" >&2
+    exit 3
+  fi
+else
+  exec {backend_probe_fd}>"$staging/backend.lock"
+  if flock -n "$backend_probe_fd"; then
+    printf 'scufris-staging: no staging backend is running; start nix run .#staging -- backend first\n' >&2
+    exit 3
+  fi
+  exec {backend_probe_fd}>&-
+
+  frontend_root="$staging/frontends/$profile"
+  mkdir -p -- "$frontend_root/state" "$frontend_root/data"
+  chmod 0700 "$staging/frontends" "$frontend_root" \
+    "$frontend_root/state" "$frontend_root/data"
+  exec {frontend_lock_fd}>"$frontend_root/frontend.lock"
+  if ! flock -n "$frontend_lock_fd"; then
+    printf 'scufris-staging: frontend %s is already running (%s)\n' \
+      "$profile" "$frontend_root/frontend.lock" >&2
+    exit 3
+  fi
 fi
 
-# A project to delegate to, so a fresh staging root is not an empty menu.
+# A fresh backend root gets a harmless project and an isolated Pi settings
+# directory. Frontends can also perform this idempotent setup after a backend
+# starts, which keeps command ordering deterministic without shared mutation.
 if [[ -z "$(ls -A -- "$projects")" ]]; then
   seed="$projects/hello"
   mkdir -p -- "$seed"
-  printf '# hello\n\nA staging project. Nothing here is real work.\n' \
-    > "$seed/README.md"
+  printf '# hello\n\nA staging project. Nothing here is real work.\n' >"$seed/README.md"
   git -C "$seed" init -q -b master
   git -C "$seed" config user.email "staging@scufris.invalid"
   git -C "$seed" config user.name "Scufris Staging"
@@ -83,10 +107,6 @@ if [[ -z "$(ls -A -- "$projects")" ]]; then
   printf 'scufris-staging: seeded %s\n' "$seed"
 fi
 
-# The login is shared and the settings are copied. A symlink means a token
-# refreshed on either side is refreshed for both, which is what a person with
-# one account wants; a copy of the settings means staging can be pointed at a
-# different model without editing the deployed file.
 if [[ ! -e "$pi_agent/settings.json" ]]; then
   if [[ -e "$deployed_pi_agent/auth.json" ]]; then
     ln -sfn -- "$deployed_pi_agent/auth.json" "$pi_agent/auth.json"
@@ -94,10 +114,8 @@ if [[ ! -e "$pi_agent/settings.json" ]]; then
   if [[ -e "$deployed_pi_agent/settings.json" ]]; then
     cp -- "$deployed_pi_agent/settings.json" "$pi_agent/settings.json"
   else
-    printf '{}\n' > "$pi_agent/settings.json"
+    printf '{}\n' >"$pi_agent/settings.json"
   fi
-  # The model catalog is a cache. Copied so a staging run does not refetch it,
-  # and copied rather than linked so it cannot rewrite the deployed one.
   if [[ -e "$deployed_pi_agent/models-store.json" ]]; then
     cp -- "$deployed_pi_agent/models-store.json" "$pi_agent/models-store.json"
   fi
@@ -107,63 +125,72 @@ fi
 
 service="${SCUFRIS_STAGING_SERVICE:-}"
 desktop="${SCUFRIS_STAGING_DESKTOP:-}"
-if [[ -z "$service" || -z "$desktop" ]]; then
+need_service=0
+need_desktop=0
+[[ "$action" == "up" || "$action" == "backend" ]] && need_service=1
+[[ "$action" == "up" || "$action" == "frontend" ]] && need_desktop=1
+
+build_args=()
+if ((need_service)) && [[ -z "$service" ]]; then
+  service="$root/target/debug/scufris-service"
+  build_args+=(--bin scufris-service)
+fi
+if ((need_desktop)) && [[ -z "$desktop" ]]; then
+  desktop="$root/target/debug/scufris-desktop"
+  build_args+=(--bin scufris-desktop)
+fi
+if ((${#build_args[@]})); then
   printf 'scufris-staging: building the working tree\n'
-  cargo build --manifest-path "$root/Cargo.toml" \
-    --bin scufris-service --bin scufris-desktop
-  : "${service:=$root/target/debug/scufris-service}"
-  : "${desktop:=$root/target/debug/scufris-desktop}"
+  cargo build --manifest-path "$root/Cargo.toml" "${build_args[@]}"
 fi
-for binary in "$service" "$desktop"; do
-  if [[ ! -x "$binary" ]]; then
-    printf 'scufris-staging: %s is not executable\n' "$binary" >&2
-    exit 2
-  fi
-done
-
-# The synthesiser, which is the companion's and nothing else's. Three sources,
-# in the order of who knows most about the machine:
-#
-#   1. a command already in the environment, which is the person saying so;
-#   2. the packaged `scufris-speak`, which `nix run .#staging` names and which
-#      binds Piper, the model, and the configuration itself;
-#   3. the working tree's helper, which reads those paths from the environment
-#      and so only works where a dev shell has bound them.
-#
-# With none of the three the companion says so once and stays silent, which is
-# not a fault. Staging is not the place to make a voice appear that a deployment
-# would not have.
-speak="${SCUFRIS_DESKTOP_SPEAK_COMMAND:-${SCUFRIS_STAGING_SPEAK:-}}"
-if [[ -z "$speak" && -n "${SCUFRIS_PIPER_MODEL:-}" && -n "${SCUFRIS_PIPER_CONFIG:-}" ]]; then
-  if [[ -x "$root/tools/voice/scufris-speak" ]]; then
-    speak="$root/tools/voice/scufris-speak"
-  fi
+if ((need_service)) && [[ ! -x "$service" ]]; then
+  printf 'scufris-staging: %s is not executable\n' "$service" >&2
+  exit 2
 fi
-if [[ -n "$speak" ]]; then
-  if [[ ! -x "$speak" ]]; then
-    printf 'scufris-staging: %s is not executable\n' "$speak" >&2
-    exit 2
-  fi
-  export SCUFRIS_DESKTOP_SPEAK_COMMAND="$speak"
-else
-  printf 'scufris-staging: no synthesiser, so staging stays silent\n'
+if ((need_desktop)) && [[ ! -x "$desktop" ]]; then
+  printf 'scufris-staging: %s is not executable\n' "$desktop" >&2
+  exit 2
 fi
 
-# Isolation is this script's to decide. The three below it are taste, so a
-# value already in the environment wins.
-export XDG_STATE_HOME="$staging/state"
-export XDG_DATA_HOME="$staging/data"
 export SCUFRIS_RUNTIME_DIR="$runtime_dir"
 export PI_CODING_AGENT_DIR="$pi_agent"
 export SCUFRIS_PROJECT_ROOTS="[\"$projects\"]"
 export SCUFRIS_SERVICE_AGENT="$root/scripts/scufris-agent"
-export SCUFRIS_DESKTOP_HOTKEY="${SCUFRIS_DESKTOP_HOTKEY:-Super+G}"
-# Shared with the deployed Scufris on purpose: one whisper server, one model in
-# memory, and transcription carries no session state.
 export SCUFRIS_STT_ENDPOINT="${SCUFRIS_STT_ENDPOINT:-http://127.0.0.1:10301/inference}"
+
+if [[ "$action" == "frontend" ]]; then
+  export XDG_STATE_HOME="$frontend_root/state"
+  export XDG_DATA_HOME="$frontend_root/data"
+  export SCUFRIS_STAGING_FRONTEND="$profile"
+  export SCUFRIS_DESKTOP_COMMAND_SOCKET="$runtime_dir/desktop-$profile.sock"
+else
+  export XDG_STATE_HOME="$staging/state"
+  export XDG_DATA_HOME="$staging/data"
+fi
+
+if ((need_desktop)); then
+  export SCUFRIS_DESKTOP_COMMAND_SOCKET="${SCUFRIS_DESKTOP_COMMAND_SOCKET:-$runtime_dir/desktop.sock}"
+  export SCUFRIS_DESKTOP_HOTKEY="${SCUFRIS_DESKTOP_HOTKEY:-Super+G}"
+  speak="${SCUFRIS_DESKTOP_SPEAK_COMMAND:-${SCUFRIS_STAGING_SPEAK:-}}"
+  if [[ -z "$speak" && -n "${SCUFRIS_PIPER_MODEL:-}" && -n "${SCUFRIS_PIPER_CONFIG:-}" ]]; then
+    if [[ -x "$root/tools/voice/scufris-speak" ]]; then
+      speak="$root/tools/voice/scufris-speak"
+    fi
+  fi
+  if [[ -n "$speak" ]]; then
+    if [[ ! -x "$speak" ]]; then
+      printf 'scufris-staging: %s is not executable\n' "$speak" >&2
+      exit 2
+    fi
+    export SCUFRIS_DESKTOP_SPEAK_COMMAND="$speak"
+  else
+    printf 'scufris-staging: no synthesiser, so staging stays silent\n'
+  fi
+fi
 
 cat <<EOF
 scufris-staging: the staging environment
+  mode=$action${profile:+:$profile}
   SCUFRIS_STAGING_ROOT=$staging
   XDG_STATE_HOME=$XDG_STATE_HOME
   XDG_DATA_HOME=$XDG_DATA_HOME
@@ -171,71 +198,75 @@ scufris-staging: the staging environment
   PI_CODING_AGENT_DIR=$PI_CODING_AGENT_DIR
   SCUFRIS_PROJECT_ROOTS=$SCUFRIS_PROJECT_ROOTS
   SCUFRIS_SERVICE_AGENT=$SCUFRIS_SERVICE_AGENT
-  SCUFRIS_DESKTOP_HOTKEY=$SCUFRIS_DESKTOP_HOTKEY
   SCUFRIS_STT_ENDPOINT=$SCUFRIS_STT_ENDPOINT
+EOF
+if ((need_desktop)); then
+  cat <<EOF
+  SCUFRIS_DESKTOP_HOTKEY=$SCUFRIS_DESKTOP_HOTKEY
+  SCUFRIS_DESKTOP_COMMAND_SOCKET=$SCUFRIS_DESKTOP_COMMAND_SOCKET
   SCUFRIS_DESKTOP_SPEAK_COMMAND=${SCUFRIS_DESKTOP_SPEAK_COMMAND:-none}
-  service=$service
   desktop=$desktop
 
-scufris-staging: reach it with
-  SCUFRIS_RUNTIME_DIR=$SCUFRIS_RUNTIME_DIR scufris-ctl state
+scufris-staging: the companion resolves
 EOF
-
-# The companion resolves everything it needs before it opens a window, so this
-# reports a wrong environment now rather than as a window that never appears.
-printf 'scufris-staging: the companion resolves\n'
-"$desktop" --print-config | sed 's/^/  /'
+  "$desktop" --print-config | sed 's/^/  /'
+fi
+if ((need_service)); then
+  printf '  service=%s\n' "$service"
+  printf '\nscufris-staging: reach the backend with\n  SCUFRIS_RUNTIME_DIR=%s scufris-ctl state\n' "$runtime_dir"
+fi
 
 service_pid=""
 desktop_pid=""
 signalled=0
-
 stop_children() {
   local pid
   for pid in "$desktop_pid" "$service_pid"; do
-    # By recorded PID, and only ones this run started.
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       kill -TERM "$pid" 2>/dev/null || true
     fi
   done
 }
-
-# shellcheck disable=SC2329  # the trap below is what calls this
+# shellcheck disable=SC2329
 teardown() {
   signalled=1
   printf '\nscufris-staging: stopping\n'
   stop_children
 }
-
 trap teardown INT TERM
 
-"$service" &
-service_pid=$!
-"$desktop" &
-desktop_pid=$!
-printf 'scufris-staging: service pid %d, desktop pid %d\n' \
-  "$service_pid" "$desktop_pid"
+if ((need_service)); then
+  "$service" &
+  service_pid=$!
+  printf 'scufris-staging: service pid %d\n' "$service_pid"
+fi
+if ((need_desktop)); then
+  "$desktop" &
+  desktop_pid=$!
+  printf 'scufris-staging: desktop%s pid %d\n' "${profile:+ $profile}" "$desktop_pid"
+fi
 
-# Either one leaving ends the stack: half a Scufris is not one.
 wait -n || true
 stop_children
-
 status=0
 for named in "service:$service_pid" "desktop:$desktop_pid"; do
   name="${named%%:*}"
   pid="${named#*:}"
+  [[ -z "$pid" ]] && continue
   child=0
   wait "$pid" || child=$?
-  # 143 is the SIGTERM this script sent, and 130 the SIGINT the terminal sent
-  # to the whole group. Neither is news when the teardown was asked for.
   if ((signalled)) && ((child == 143 || child == 130)); then
     continue
   fi
   if ((child != 0)); then
     printf 'scufris-staging: %s exited %d\n' "$name" "$child" >&2
-    if ((status == 0)); then
-      status=$child
-    fi
+    ((status == 0)) && status=$child
   fi
 done
+if ((need_desktop)); then
+  # The command server normally removes this on a graceful application exit.
+  # A terminal teardown stops the process directly, so remove only the exact
+  # socket this command assigned to its owned desktop.
+  rm -f -- "$SCUFRIS_DESKTOP_COMMAND_SOCKET"
+fi
 exit "$status"

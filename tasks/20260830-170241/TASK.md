@@ -145,7 +145,11 @@ Python tests, Clippy with warnings denied, focused formatting checks, and
 `nix flake check -L`. Focused integration tests cover bearer authentication,
 raw upload and descriptor forwarding, the 16 MiB gateway bound, local-import
 exclusion, GET, HEAD, closed and suffix ranges, standard range headers, and
-bounded typed failures.
+bounded typed failures. Repository run
+[33329028473](https://github.com/alexjercan/scufris2/actions/runs/33329028473)
+and documentation run
+[33329028456](https://github.com/alexjercan/scufris2/actions/runs/33329028456)
+passed for gateway commit `90bbffb`.
 
 ## Acceptance
 

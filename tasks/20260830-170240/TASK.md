@@ -1,6 +1,6 @@
 # Add remote iOS voice transcription
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 90
 - TAGS: ios, audio, api
 
@@ -39,3 +39,23 @@ host's private `ai-tools-api`, review on the phone, then submit ordinary text.
 - Protocol v4 remains byte-for-byte unchanged.
 - Gateway and Swift simulator tests pass. Physical-device review is part of the
   combined 1.1.0 release candidate.
+
+## Verification
+
+- Seven focused Rust gateway tests pass. They prove strict protocol-v4 WSS
+  bridging, bearer authentication, loopback-only inference, raw upload media
+  rejection, strict WAV format and duration bounds, multipart forwarding, and
+  bounded transcript JSON.
+- The service package and focused Home Manager interface and activation checks
+  build with the new API dependencies and shared `aiToolsApi.baseUrl`.
+- All 68 Node tests and 93 Python helper tests pass. Gateway Clippy passes with
+  warnings denied.
+- iOS workflow run
+  [33319815589](https://github.com/alexjercan/scufris2/actions/runs/33319815589)
+  builds with Xcode 26.3 and passes simulator tests for endpoint derivation and
+  dictation presentation state.
+- Documentation workflow run
+  [33319815579](https://github.com/alexjercan/scufris2/actions/runs/33319815579)
+  passes.
+- No Home Manager activation or TestFlight upload was performed. Those remain
+  coordinated release-candidate work.

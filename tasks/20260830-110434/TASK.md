@@ -13,9 +13,15 @@ Manager example directly usable with the machine's existing shared
 ## Decisions
 
 - Revert the expanded product and staging text from the first revision.
-- Set `desktop.aiToolsApi.manage = false` in the main Home Manager example.
-- Rely on the default loopback base URL so the example consumes port 10300
-  without starting a competing inference service.
+- Show every writable behavior option in one copy-pasteable Home Manager
+  example for the current machine.
+- Set `desktop.aiToolsApi.manage = false` and show the loopback base URL so the
+  example consumes port 10300 without starting a competing inference service.
+- Show package override options as comments because pinned defaults are correct
+  and the agent launcher must remain module-rendered for the selected Pi and
+  project roots.
+- Name the generated read-only options below the example rather than pretending
+  users can configure them.
 
 ## Verification
 

@@ -884,6 +884,14 @@ mod tests {
                 &Value::Null,
             ),
         );
+        assert_eq!(
+            hear(&backends),
+            vec![News::Data {
+                surface: "widget-1".into(),
+                data: Value::Null,
+            }],
+            "the spawn payload is separate from the later action"
+        );
         backends.send("widget-1", &serde_json::json!({ "add": "milk" }));
         assert_eq!(
             hear(&backends),

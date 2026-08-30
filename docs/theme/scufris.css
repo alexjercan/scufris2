@@ -1,0 +1,49 @@
+:root {
+  --scufris-accent: #4f7cff;
+  --scufris-line: color-mix(in srgb, var(--fg) 18%, transparent);
+}
+
+.content main {
+  max-width: 860px;
+}
+
+.content h1 {
+  border-bottom: 2px solid var(--scufris-accent);
+  padding-bottom: 0.3em;
+}
+
+.content h2 {
+  margin-top: 2.2em;
+}
+
+.content pre {
+  border: 1px solid var(--scufris-line);
+  border-left: 4px solid var(--scufris-accent);
+  border-radius: 6px;
+  padding: 1em 1.2em;
+}
+
+.content .mermaid {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  margin: 1.5em 0;
+}
+
+.content .mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.content table {
+  display: table;
+  width: 100%;
+}
+
+.content th {
+  text-align: left;
+}
+
+.content hr {
+  margin-top: 3em;
+}

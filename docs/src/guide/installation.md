@@ -1,32 +1,63 @@
-# Installation
+# Install it
 
-## Prerequisite
+[Previous: See the stack](../dev/architecture.md)
 
-Install Nix with flakes enabled.
+## Choose a shape
 
-## Run a release
+```mermaid
+flowchart TD
+    Need{What do you need?}
+    Need -->|Pi workflow only| Launcher[run or install scufris]
+    Need -->|durable conversation + terminal| Service[add scufris-service + scufris-ctl]
+    Need -->|voice + windows + widgets| Desktop[add scufris-desktop on Linux/X11]
+    Need -->|phone or remote machine| Remote[enable gateway + private Tailscale Serve route]
+```
 
-Run the normal package from the current release tag:
+| Host                 | Agent        | Service      | Desktop             | Recommended test                              |
+| -------------------- | ------------ | ------------ | ------------------- | --------------------------------------------- |
+| NixOS Linux          | yes          | yes          | yes, on X11         | Home Manager or staging                       |
+| Other Linux with Nix | yes          | yes          | yes, on X11         | `nix run .#staging -- up`                     |
+| macOS with Nix       | yes          | no           | no                  | `nix run .#scufris`                           |
+| Linux without Nix    | source build | source build | source build on X11 | [No-Nix tests](../dev/testing.md#without-nix) |
+| iOS                  | surface only | no           | native iOS app      | simulator, then staging gateway               |
+
+## Fastest full-stack test
+
+From a checkout on Linux with Nix:
+
+```bash
+git clone https://github.com/alexjercan/scufris2.git
+cd scufris2
+nix run .#staging -- up
+```
+
+```mermaid
+flowchart LR
+    Tree[working tree] --> Isolation[isolated sockets + state] --> Service[service] --> Desktop[desktop]
+    Isolation -. never changes .-> Deployed[deployed Scufris]
+```
+
+Press `Ctrl+C` to stop only that staging stack. See [Run staging](../dev/staging.md)
+for split backends, several frontends, and remote surfaces.
+
+## Run the agent only
+
+Release:
 
 ```bash
 nix run github:alexjercan/scufris2/v0.6.0#scufris
 ```
 
-There is one launcher and no voice variant of it. Nothing in the agent's
-process tree makes sound; hearing Scufris means running the desktop companion,
-which owns the speaker.
-
-## Run a checkout
+Checkout:
 
 ```bash
-git clone https://github.com/alexjercan/scufris2.git
-cd scufris2
 nix run .#scufris
 ```
 
-## Flake interface
+This works on the flake's Linux and macOS systems. It starts Pi with the four
+Scufris extensions. It does not start the service, desktop, or speech.
 
-Pin a release tag and share `nixpkgs` with the parent flake:
+## Pin the flake
 
 ```nix
 {
@@ -37,112 +68,59 @@ Pin a release tag and share `nixpkgs` with the parent flake:
 }
 ```
 
-Release tags are immutable inputs. Update the tag deliberately.
+Available outputs:
 
-Packages:
+```text
+all flake systems                    Linux only
+-----------------                    ----------
+scufris / default                    scufris-service
+resources                            scufris-ctl
+docs                                 scufris-desktop
+                                     scufris-speak
+                                     scufris-staging
+                                     ai-tools-api
+```
 
-- `default` and `scufris`: the launcher.
-- `scufris-service`: the background service that owns the conversation. It
-  builds with no graphical dependency, so a machine with no display can run it.
-- `scufris-ctl`: the terminal client of that service.
-- `scufris-desktop`: the Linux-only companion - the voice pill, the
-  conversation window, the widget runtime, and the tray. It is a separate
-  output, so nothing else pulls Tauri into its closure.
-- `scufris-speak`: the Linux-only synthesiser the companion runs, with the
-  voice pinned by the package.
-- `resources`: extensions, skills, and deterministic tools. No synthesiser is
-  among them, because the agent runs none.
-- `docs`: this manual, including the generated option reference.
+## Home Manager: agent only
 
-Resource packages are composition inputs. Most users need only a launcher or
-the Home Manager module.
-
-## Home Manager
-
-Import the module from the pinned flake input:
+Import the module on NixOS or on any Home Manager host:
 
 ```nix
 {inputs, ...}: {
   imports = [inputs.scufris.homeModules.default];
-
   programs.scufris.enable = true;
 }
 ```
 
-This installs the rendered interactive `scufris` agent launcher in
-`home.packages`. The same configured launcher is what the optional background
-service starts in RPC mode.
+This installs the `scufris` launcher.
 
-The default Pi package comes from the pinned `llm-agents.nix` input. A
-configuration that manages Pi itself can pass its own package:
+## Home Manager: headless service
 
 ```nix
 programs.scufris = {
   enable = true;
-  agent.piPackage = inputs.llm-agents.packages.${pkgs.system}.pi;
-};
-```
-
-Set `programs.scufris.agent.projectRoots` to control which directories
-Scufris searches for workflow projects. The default is `~/personal`, `~/work`,
-and `~/third-party`.
-
-The former top-level `piPackage`, `projectRoots`, `finalPackage`, and `voice`
-options remain deprecated aliases for one release. The v0.6 `service.agent`,
-`desktop.aiToolsApi.manage`, key, terminal, and widget source paths also map to
-their new ownership paths for one release. The transcription endpoint override
-and the older `desktop.stt` alias are removed.
-
-## The background service
-
-```nix
-programs.scufris = {
-  enable = true;
-
   service.enable = true;
 };
 ```
 
-The service owns the conversation and always supervises one agent. There is no
-separate agent service to enable. Configure its Pi package, project roots, or
-complete launcher under `agent`. Enabling the service defines the
-`scufris-service.service` user service, wants it from `default.target` rather
-than from a graphical session, and installs `scufris-ctl` beside it. A machine
-with no display keeps the conversation, and a terminal over ssh reaches it.
-See [Background service](../dev/service.md).
+```text
+default.target
+     |
+     v
+scufris-service.service -> one Pi RPC agent -> session directory
+     |
+     +-> scufris-ctl over control.sock
+```
 
-`service.sessionDirectory` says where the conversation lives; the default is
+The service does not need a display. Its default session directory is
 `$XDG_DATA_HOME/scufris/sessions`.
 
-## Desktop speech
+## Complete Linux stack
 
 ```nix
 programs.scufris = {
   enable = true;
-
-  desktop.speech.enable = true;
-};
-```
-
-Desktop speech requires Linux. The companion sends bounded text, the configured
-`speech.model`, and `speech.voice` to the shared `ai-tools-api` speech route and
-plays its validated WAV response through PipeWire. The defaults are `piper-1`
-and `en_US-lessac-medium`. WAV is fixed because Scufris owns validated playback.
-
-Speech means one thing: the companion gets a synthesiser. Nothing about it
-reaches the service or the agent, which shape the same prose answer whatever is
-listening. Speech configured for a disabled companion has nowhere for the
-paragraph to go, which is not a fault, and silencing Scufris is the tray's
-"Mute Scufris" rather than anything in the conversation.
-
-## The desktop companion
-
-```nix
-programs.scufris = {
-  enable = true;
-
   service.enable = true;
-
   desktop = {
     enable = true;
     speech.enable = true;
@@ -150,16 +128,20 @@ programs.scufris = {
 };
 ```
 
-The companion requires the service, because the service owns the conversation
-it talks to. Enabling it defines the `scufris-desktop.service` user service,
-wants it from `graphical-session.target`, and restarts it on failure so a
-backend crash never takes the tray down.
+The desktop requires the service. Speech gives only the desktop a synthesizer.
+The agent and service stay silent.
 
-API process ownership is top-level and explicit. Leave
-`programs.scufris.aiToolsApi.enable = false` to consume the enabled
-`services.ai-tools-api` provider or another external service. Set it true only
-when Scufris should manage the pinned complete API service itself. The desktop
-is a consumer and names its base URL separately:
+Choose who owns the shared inference API:
+
+```text
+An existing `services.ai-tools-api` or external API
+  -> programs.scufris.aiToolsApi.enable = false;
+
+Scufris should run its pinned API
+  -> programs.scufris.aiToolsApi.enable = true;
+```
+
+For an external endpoint:
 
 ```nix
 programs.scufris = {
@@ -168,149 +150,62 @@ programs.scufris = {
 };
 ```
 
-The transcription and speech routes are always derived as
-`BASE/v1/audio/transcriptions` and `BASE/v1/audio/speech`. Configure the
-transcription request rather than replacing its route:
+Scufris derives `/v1/audio/transcriptions` and `/v1/audio/speech` from this
+base URL.
 
-```nix
-programs.scufris.desktop.transcription = {
-  model = "whisper-1";
-  language = "auto";
-};
-```
+## Remote surfaces
 
-An iOS surface reaches the same conversation through the optional authenticated
-WebSocket gateway. It binds only to loopback; a private TLS proxy such as
-Tailscale Serve is responsible for the `wss://` endpoint. Generate the bearer
-token into a private file or a SOPS-managed secret and enable the gateway:
+Create a private token:
 
 ```bash
-install -d -m 700 ~/.local/share/scufris/credentials/ios
-openssl rand -hex 32 >~/.local/share/scufris/credentials/ios/surface-token
-chmod 600 ~/.local/share/scufris/credentials/ios/surface-token
+install -d -m 700 ~/.local/share/scufris/credentials/remote
+openssl rand -hex 32 >~/.local/share/scufris/credentials/remote/surface-token
+chmod 600 ~/.local/share/scufris/credentials/remote/surface-token
 ```
+
+Enable the complete private WSS endpoint:
 
 ```nix
 programs.scufris.service.remoteSurface = {
   enable = true;
   port = 10440;
-  tokenFile = "${config.xdg.dataHome}/scufris/credentials/ios/surface-token";
+  tokenFile = "${config.xdg.dataHome}/scufris/credentials/remote/surface-token";
 };
 ```
 
-After activation, expose that loopback HTTP endpoint only inside the tailnet:
+Home Manager starts both the loopback gateway and a declaratively reconciled
+Tailscale Serve route at `/`. The login user must already belong to the tailnet and be allowed
+to run `tailscale serve`; no Tailscale credential enters the Nix store. Inspect
+the two owned units with:
 
 ```bash
-tailscale serve --bg --yes http://127.0.0.1:10440
+systemctl --user status scufris-surface-gateway.service
+systemctl --user status scufris-tailscale-serve.service
 tailscale serve status
 ```
 
-Enter the resulting `wss://HOSTNAME` URL and the token in the iOS application.
-The gateway accepts only strict protocol-v4 surface traffic. Agent and control
-sockets remain local and are never routed through it.
-
-The conversation window ships with the desktop companion and needs no
-configuration; bind `scufris-ctl hud` in your window manager to reach it.
-Protocol v4 does not
-provide terminal session handoff. `desktop.terminalCommand` remains available for
-a deployment-specific terminal view that does not take over Pi.
-
-The backend restart hook is generated by the module and restarts only
-`scufris-service.service`. Change the activation accelerator with
-`programs.scufris.desktop.popupKey`; the default is `Super+D`.
-
-Two more keys answer the pill while it is on screen: one that puts it away and
-one that aborts Scufris. Both are derived from the popup key's own modifiers, so
-`Super+D` gives `Super+Escape` and `Super+Delete`, and both are yours to name:
-
-```nix
-programs.scufris.desktop = {
-  popupKey = "Super+D";
-  backgroundKey = "Super+Escape";
-  abortKey = "none";
-};
+```mermaid
+flowchart LR
+    Remote[remote surface] -->|WSS| Tailscale[Tailscale Serve TLS]
+    Tailscale -->|loopback HTTP| Gateway[authenticated gateway]
+    Gateway --> Socket[surface.sock]
 ```
 
-`"none"` takes a key off the companion, which is the answer where your desktop
-already means something by it. The tray can put the pill in the background
-without the background key.
+Never expose the plain loopback HTTP listener directly. Continue with
+[Add a surface](../dev/surfaces.md) before implementing a client.
 
-The agenda, macros, and notes panels read the-den journal, and Scufris does not
-depend on the repository that holds it. Name the command that reads it, the
-journal directory when it is not where that command looks by default, and the
-food database if you log food from the macros panel:
-
-```nix
-programs.scufris.desktop.widgets = {
-  todayCommand = inputs.today.packages.${pkgs.system}.default;
-  denPath = "/home/you/personal/the-den";
-  macrosDatabase = "/home/you/.local/share/nvim/macros.csv";
-};
-```
-
-A user service does not inherit your login shell, so a `DEN_PATH` you export
-there is not one the companion has. None of the three is required: without the
-command those three panels open and say what is missing, and without the
-database a food is logged only if `today` finds one where it looks by default.
-
-See the [option reference](../reference/options.md) for evaluated types,
-defaults, and descriptions.
-
-### Try it without Home Manager
-
-Run the companion package directly to see it before you adopt the module:
+## Direct package smoke tests
 
 ```bash
+nix run .#scufris-service -- --help
 nix run .#scufris-desktop -- --print-config
 nix run .#scufris-desktop -- --foreground
 ```
 
-`--print-config` prints the resolved configuration and exits without opening a
-window. `--foreground` runs the companion with pretty logs on stderr instead
-of journald, which is the view for watching it work; without the flag, read
-the logs with `journalctl --user -t scufris-desktop`. Every value comes from
-the environment:
+`--print-config` opens no window. `--foreground` logs to stderr. The desktop is
+Linux/X11 only and reports the backend as unavailable until the service is on
+the same socket.
 
-| Variable                          | Default                                          |
-| --------------------------------- | ------------------------------------------------ |
-| `SCUFRIS_RUNTIME_DIR`             | `$XDG_RUNTIME_DIR/scufris`                       |
-| `SCUFRIS_DESKTOP_SOCKET`          | `$SCUFRIS_RUNTIME_DIR/surface.sock`              |
-| `SCUFRIS_DESKTOP_COMMAND_SOCKET`  | `$SCUFRIS_RUNTIME_DIR/desktop.sock`              |
-| `SCUFRIS_DESKTOP_STATE_FILE`      | `$XDG_STATE_HOME/scufris-desktop/pending.json`   |
-| `SCUFRIS_STT_ENDPOINT`            | `http://127.0.0.1:10300/v1/audio/transcriptions` |
-| `SCUFRIS_STT_MODEL`               | `whisper-1`                                      |
-| `SCUFRIS_STT_LANGUAGE`            | `auto`                                           |
-| `SCUFRIS_TTS_ENDPOINT`            | `http://127.0.0.1:10300/v1/audio/speech`         |
-| `SCUFRIS_TTS_MODEL`               | `piper-1`                                        |
-| `SCUFRIS_TTS_VOICE`               | `en_US-lessac-medium`                            |
-| `SCUFRIS_DESKTOP_HOTKEY`          | `Super+D`, the popup key                         |
-| `SCUFRIS_DESKTOP_CANCEL_KEY`      | derived background key                           |
-| `SCUFRIS_DESKTOP_STOP_KEY`        | derived abort key                                |
-| `SCUFRIS_DESKTOP_CHAT_COMMAND`    | none                                             |
-| `SCUFRIS_DESKTOP_RESTART_COMMAND` | none                                             |
-| `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | none, and the companion stays silent             |
+---
 
-`SCUFRIS_RUNTIME_DIR` is the socket directory, used as named with no `scufris`
-below it. The service and `scufris-ctl` read the same variable, so one export
-moves the whole stack together; a socket named outright still outranks it.
-Nothing sets it in an ordinary session. It is what runs a second Scufris
-beside this one, which is [staging](../dev/staging.md).
-
-The companion starts without a backend and reports it as unavailable in the
-tray. It answers the pill only when `scufris-service` is on the same socket;
-see [maintenance](../dev/maintenance.md) to run one from a working tree.
-
-Transcription and speech need `ai-tools-api` on port 10300. Home Manager leaves
-API ownership external unless `programs.scufris.aiToolsApi.enable` is true. For
-a manual package run, start the pinned API in another terminal:
-
-```bash
-nix run .#ai-tools-api
-```
-
-Then start the desktop. The Home Manager module always derives both routes from
-`desktop.aiToolsApi.baseUrl`. Direct package runs may still use the endpoint
-environment variables. The model, language, and voice variables configure the
-request fields.
-
-The companion is Linux and X11 only.
+Next: [Configure it](configuration.md)

@@ -6,3 +6,10 @@ title = "Scufris Manual"
 
 [output.html]
 git-repository-url = "https://github.com/alexjercan/scufris2"
+additional-css = ["theme/scufris.css"]
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
+
+[preprocessor]
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"

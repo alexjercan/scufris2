@@ -83,8 +83,11 @@ programs.scufris = {
 };
 ```
 
-The module supplies the `scufris-ctl`, service, remote surface gateway, agent
-launcher, and desktop packages from the pinned flake. Their package options
-remain available for advanced overrides. The service and remote gateway each
-have a read-only `serviceName`; the desktop also has a generated read-only
-`serviceName` and `restartCommand`.
+The module supplies the `scufris-ctl`, service, remote surface gateway,
+Tailscale client, agent launcher, and desktop packages from the pinned flake.
+Enabling `remoteSurface` starts both the loopback gateway and a declaratively
+reconciled Tailscale Serve route at `/`; the user must be allowed to run
+`tailscale serve`.
+Their package options remain available for advanced overrides. The service,
+remote gateway, and Tailscale route have read-only service names; the desktop
+also has a generated read-only `serviceName` and `restartCommand`.

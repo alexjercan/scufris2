@@ -1,4 +1,12 @@
-# Service
+# Background service
+
+[Previous: Test a change](testing.md)
+
+```text
+surfaces -> surface.sock -> SERVICE -> agent.sock -> Pi
+                              |
+terminal -> control.sock ------+
+```
 
 `scufris-service` owns the Pi RPC process, canonical user-facing state, and the
 latest 200 conversation messages. It exposes protocol v4 on three private Unix
@@ -92,3 +100,7 @@ The service starts Pi in RPC mode, reads lifecycle events, cancels extension
 dialogs that have no interactive RPC client, and restarts quick failures with a
 bound. It does not use Pi RPC to inject prompts or abort work. Those operations
 travel only over the typed agent channel.
+
+---
+
+Next: [Desktop companion](desktop.md)

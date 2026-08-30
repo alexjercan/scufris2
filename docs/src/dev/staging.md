@@ -1,4 +1,12 @@
-# Staging
+# Run staging
+
+[Previous: Operate it](operation.md)
+
+```text
+deployed stack: $XDG_RUNTIME_DIR/scufris
+staging stack:  $XDG_RUNTIME_DIR/scufris-staging
+                 + disposable state, data, sessions, and project
+```
 
 The working tree can run beside the deployed Scufris as one stack or as one
 backend with several local frontends. The deployed stack keeps its sockets,
@@ -176,3 +184,7 @@ a staging run. The optional Tailscale integration owns only
 asserts process and route cleanup: it runs `up` with
 `HOME` and `XDG_RUNTIME_DIR` inside a temporary directory and fails if any of
 those appear.
+
+---
+
+Next: [Maintain and release](maintenance.md)

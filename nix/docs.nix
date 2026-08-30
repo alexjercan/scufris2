@@ -35,7 +35,7 @@ in
       pname = "scufris-docs";
       inherit (package) version;
       src = ../docs;
-      nativeBuildInputs = [pkgs.mdbook];
+      nativeBuildInputs = [pkgs.mdbook pkgs.mdbook-mermaid];
 
       buildPhase = ''
         runHook preBuild
@@ -43,9 +43,16 @@ in
         chmod -R u+w source
         mkdir -p source/src/reference
         cat > source/src/reference/options.md <<'EOF'
-        # Scufris options
+        # Home Manager options
 
-        This page is generated from the evaluated Home Manager module.
+        [Previous: Environment variables](environment.md)
+
+        This page is generated from the evaluated `programs.scufris` module.
+        Use [Configure it](../guide/configuration.md) for the guided option map.
+
+        ```text
+        option -> evaluated type + default + description -> generated systemd/package configuration
+        ```
         EOF
         cat ${optionDocs.optionsCommonMark} >> source/src/reference/options.md
         mdbook build source

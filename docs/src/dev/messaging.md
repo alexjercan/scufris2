@@ -1,4 +1,11 @@
-# Messaging
+# Messages
+
+[Previous: Jobs](jobs.md)
+
+```text
+worker event -> wake gate -> Pi turn -> final response -> service -> surfaces
+quiet working event -> transient notification only
+```
 
 Foreground Scufris coordinates three message flows: worker events into the
 conversation, workflow acknowledgments out of it, and the shaped final
@@ -79,3 +86,7 @@ The private adapter relays only `ready` and the validated
 bounded summary. Requested changes are first sent to the implementation job in
 a new generation, then wake Scufris. Workflow stop and session shutdown signal
 only the exact recorded adapter process, which in turn stops its exact Pi child.
+
+---
+
+Next: [Tmux](tmux.md)

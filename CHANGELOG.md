@@ -15,8 +15,9 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   stable identity, WSS URL, and bearer token in Keychain, reconnects with
   canonical replay, and submits text to the shared conversation.
 - An optional loopback-only `scufris-surface-gateway` bridges authenticated
-  WebSockets to the strict protocol-v4 surface socket. Tailscale Serve can
-  provide the private TLS endpoint without exposing agent or control traffic.
+  WebSockets to the strict protocol-v4 surface socket. Its Home Manager option
+  also owns a declarative Tailscale Serve route that provides private TLS
+  without exposing agent or control traffic.
 
 ### Changed
 

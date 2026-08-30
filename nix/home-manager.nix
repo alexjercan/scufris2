@@ -150,7 +150,7 @@ in {
         port = lib.mkOption {
           type = lib.types.port;
           default = 10440;
-          description = "Loopback port consumed by the private TLS proxy.";
+          description = "Loopback gateway port consumed by the owned Tailscale Serve route.";
         };
 
         tokenFile = lib.mkOption {
@@ -169,6 +169,13 @@ in {
           default = "scufris-surface-gateway";
           readOnly = true;
           description = "Stable systemd user service identity for the remote surface gateway.";
+        };
+
+        tailscaleServiceName = lib.mkOption {
+          type = lib.types.str;
+          default = "scufris-tailscale-serve";
+          readOnly = true;
+          description = "Stable systemd user service identity for the private WSS endpoint.";
         };
       };
     };
@@ -371,23 +378,44 @@ in {
         }
       ];
 
-      systemd.user.services.${remoteSurfaceCfg.serviceName} = {
-        Unit = {
-          Description = "Scufris authenticated remote surface gateway";
-          After = ["${serviceCfg.serviceName}.service"];
-          Requires = ["${serviceCfg.serviceName}.service"];
+      home.packages = [pkgs.tailscale];
+
+      systemd.user.services = {
+        ${remoteSurfaceCfg.serviceName} = {
+          Unit = {
+            Description = "Scufris authenticated remote surface gateway";
+            After = ["${serviceCfg.serviceName}.service"];
+            Requires = ["${serviceCfg.serviceName}.service"];
+          };
+          Service = {
+            Type = "simple";
+            ExecStart = "${lib.getExe' serviceCfg.package "scufris-surface-gateway"} --listen 127.0.0.1:${toString remoteSurfaceCfg.port} --token-file ${lib.escapeShellArg (
+              if remoteSurfaceCfg.tokenFile == null
+              then "/missing-scufris-surface-token"
+              else remoteSurfaceCfg.tokenFile
+            )}";
+            Restart = "on-failure";
+            RestartSec = 3;
+          };
+          Install.WantedBy = ["default.target"];
         };
-        Service = {
-          Type = "simple";
-          ExecStart = "${lib.getExe' serviceCfg.package "scufris-surface-gateway"} --listen 127.0.0.1:${toString remoteSurfaceCfg.port} --token-file ${lib.escapeShellArg (
-            if remoteSurfaceCfg.tokenFile == null
-            then "/missing-scufris-surface-token"
-            else remoteSurfaceCfg.tokenFile
-          )}";
-          Restart = "on-failure";
-          RestartSec = 3;
+
+        ${remoteSurfaceCfg.tailscaleServiceName} = {
+          Unit = {
+            Description = "Scufris private WSS endpoint";
+            After = ["${remoteSurfaceCfg.serviceName}.service"];
+            Wants = ["${remoteSurfaceCfg.serviceName}.service"];
+          };
+          Service = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            ExecStart = "${lib.getExe pkgs.tailscale} serve --bg --yes --set-path / http://127.0.0.1:${toString remoteSurfaceCfg.port}";
+            ExecStop = "-${lib.getExe pkgs.tailscale} serve --https=443 --set-path / off";
+            Restart = "on-failure";
+            RestartSec = 3;
+          };
+          Install.WantedBy = ["default.target"];
         };
-        Install.WantedBy = ["default.target"];
       };
     })
     (lib.mkIf (cfg.enable && desktopCfg.enable) {

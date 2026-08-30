@@ -1,5 +1,12 @@
 # Tmux
 
+[Previous: Messages](messaging.md)
+
+```text
+job record -> exact session/window/pane IDs -> owned tmux execution
+stop       -> one server-side identity check -> kill that session only
+```
+
 Every worker execution runs in an owned tmux session. Workers share the
 default tmux server with the foreground session; there is no private server
 and no ambient socket selection. The helper's tmux wrapper rejects
@@ -71,3 +78,7 @@ Humans may attach to a worker session read-only to watch. Do not type into
 worker panes and never kill the shared server; use `scufris_job_stop` or
 steering instead. Foreground Scufris itself is barred from `sleep` and `wait`
 commands, so it never blocks on tmux state.
+
+---
+
+Next: [Operate it](operation.md)

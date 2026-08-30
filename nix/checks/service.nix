@@ -31,6 +31,7 @@
   serviceUnit = serviceHome.config.systemd.user.services.${serviceConfig.serviceName};
   gatewayConfig = serviceConfig.remoteSurface;
   gatewayUnit = serviceHome.config.systemd.user.services.${gatewayConfig.serviceName};
+  tailscaleUnit = serviceHome.config.systemd.user.services.${gatewayConfig.tailscaleServiceName};
   serviceClosure = pkgs.closureInfo {rootPaths = [service];};
   ctlClosure = pkgs.closureInfo {rootPaths = [ctl];};
 in
@@ -79,10 +80,20 @@ in
     assert serviceUnit.Service.Restart == "on-failure";
     assert serviceUnit.Service.RuntimeDirectory == "scufris-service";
     assert gatewayConfig.serviceName == "scufris-surface-gateway";
+    assert gatewayConfig.tailscaleServiceName == "scufris-tailscale-serve";
     assert gatewayUnit.Unit.After == ["scufris-service.service"];
     assert gatewayUnit.Unit.Requires == ["scufris-service.service"];
     assert gatewayUnit.Service.ExecStart == ["${lib.getExe' service "scufris-surface-gateway"} --listen 127.0.0.1:10441 --token-file /run/secrets/scufris-surface-token"];
     assert gatewayUnit.Service.Restart == "on-failure";
+    assert tailscaleUnit.Unit.After == ["scufris-surface-gateway.service"];
+    assert tailscaleUnit.Unit.Wants == ["scufris-surface-gateway.service"];
+    assert tailscaleUnit.Service.Type == "oneshot";
+    assert tailscaleUnit.Service.RemainAfterExit;
+    assert tailscaleUnit.Service.ExecStart == ["${lib.getExe pkgs.tailscale} serve --bg --yes --set-path / http://127.0.0.1:10441"];
+    assert tailscaleUnit.Service.ExecStop == "-${lib.getExe pkgs.tailscale} serve --https=443 --set-path / off";
+    assert tailscaleUnit.Service.Restart == "on-failure";
+    assert tailscaleUnit.Install.WantedBy == ["default.target"];
+    assert lib.elem pkgs.tailscale serviceHome.config.home.packages;
     assert lib.elem "SCUFRIS_SERVICE_AGENT=${lib.getExe testAgent}" serviceUnit.Service.Environment;
     assert lib.elem "SCUFRIS_SERVICE_SESSION_DIR=/home/scufris-test/.local/share/scufris/sessions" serviceUnit.Service.Environment;
     # The client belongs to whoever enabled a half of Scufris, and it is one

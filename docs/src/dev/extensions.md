@@ -1,5 +1,14 @@
 # Pi extensions
 
+[Previous: Desktop companion](desktop.md)
+
+```text
+workflow -> decide and delegate
+response -> emit one atomic answer
+calm     -> reduce Pi transcript noise
+service  -> connect Pi to the conversation owner
+```
+
 Scufris loads four foreground extensions from `agent/extensions/scufris/`:
 
 - `workflow/` owns distributed worker orchestration;
@@ -48,3 +57,7 @@ Long-lived links start from `session_start`, not from extension factories. They
 stop during `session_shutdown`. UI notifications are guarded by `ctx.hasUI`.
 Pi packages remain peer dependencies and runtime dependencies remain ordinary
 package dependencies.
+
+---
+
+Next: [Jobs](jobs.md)

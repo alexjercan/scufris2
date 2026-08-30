@@ -1,4 +1,12 @@
-# Operation
+# Operate it
+
+[Previous: Tmux](tmux.md)
+
+```text
+observe -> scufris-ctl state + journals + scufris-jobs
+isolate -> SCUFRIS_RUNTIME_DIR + XDG state/data roots
+recover -> service restart + durable sessions/jobs
+```
 
 ## Environment
 
@@ -67,6 +75,20 @@ systemctl --user start scufris-service.service
 journalctl --user -u scufris-service.service
 ```
 
+When remote surfaces are enabled, Home Manager owns the complete private WSS
+path as two user services. The Serve unit reconciles the background Tailscale
+state on start and removes exactly the production `/` route on stop:
+
+```bash
+systemctl --user status scufris-surface-gateway.service
+systemctl --user status scufris-tailscale-serve.service
+journalctl --user -u scufris-tailscale-serve.service
+tailscale serve status
+```
+
+The production service owns `/`. Staging owns only `/scufris-staging`, so either
+stack can stop without resetting the other's route.
+
 ### Logs
 
 Service and desktop logs use structured `tracing` fields. INFO records major
@@ -113,6 +135,9 @@ all structured fields such as `F_NAME`, `F_SURFACE`, `F_CONNECTION`, and
   for API or PipeWire errors. Speech failures never fail the assistant turn.
 - Voice input does not work: check the ai-tools-api transcription route and the
   companion log.
+- The remote gateway is active but WSS is unavailable: inspect
+  `scufris-tailscale-serve.service`. The login user must be connected to the
+  tailnet and allowed to run `tailscale serve`.
 - A job shows `failed: worker execution was lost`: startup reconciliation
   found no live pane for a running record, for example after a reboot. The
   report and conversation survive; steer the job to continue it in a new
@@ -120,3 +145,10 @@ all structured fields such as `F_NAME`, `F_SURFACE`, `F_CONNECTION`, and
 - A workflow refuses steering with an active cleanup error: a stop or land
   intent is durable. Retry the same cleanup operation; a different one is
   refused until it completes.
+
+For the complete list, including staging and internal handoff values, see
+[Environment variables](../reference/environment.md).
+
+---
+
+Next: [Run staging](staging.md)

@@ -1,5 +1,15 @@
 # Jobs
 
+[Previous: Pi extensions](extensions.md)
+
+```text
+logical job
+├── durable record and artifacts
+├── generation 1 -> owned tmux execution
+├── generation 2 -> restored harness session
+└── stop/land -> archive the workflow graph
+```
+
 `tools/jobs/scufris-jobs` owns the delegated job lifecycle. The orchestration
 extension calls it with single-command JSON requests; a global file lock
 serializes every mutating command. All state lives under
@@ -211,3 +221,7 @@ stops leftover panes, rotates the trusted capability, and returns the owned
 jobs for watching. `session_shutdown` calls `suspend-owner`, which stops
 executions exactly and marks nonterminal jobs `suspended`. `orphans` lists
 live panes owned by other sessions without touching them.
+
+---
+
+Next: [Messages](messaging.md)

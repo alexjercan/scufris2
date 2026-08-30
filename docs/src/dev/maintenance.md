@@ -1,4 +1,10 @@
-# Maintenance
+# Maintain and release
+
+[Previous: Run staging](staging.md)
+
+```text
+change -> focused check -> broad check if needed -> docs/change log -> release
+```
 
 ## Development environment
 
@@ -248,3 +254,7 @@ Follow the repository
 for preparation, versioning, verification, tagging, and publication. Release
 tags are immutable; consumers build from the tagged source flake, and no
 binary assets are published.
+
+---
+
+Next: [Environment variables](../reference/environment.md)

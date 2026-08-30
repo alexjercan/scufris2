@@ -1,26 +1,30 @@
 # Summary
 
-[Overview](overview.md)
+- [Start here](overview.md)
 
-# User guide
+# The Scufris book
 
-- [Installation](guide/installation.md)
-- [Using Scufris](guide/using.md)
+1. [See the stack](dev/architecture.md)
+2. [Install it](guide/installation.md)
+3. [Configure it](guide/configuration.md)
+4. [Use it](guide/using.md)
+5. [Add a surface](dev/surfaces.md)
+6. [Add a widget](dev/widgets.md)
+7. [Test a change](dev/testing.md)
 
-# Developer guide
+# Inside the stack
 
-- [Architecture](dev/architecture.md)
-- [Extensions](dev/extensions.md)
 - [Background service](dev/service.md)
 - [Desktop companion](dev/desktop.md)
-- [Widgets](dev/widgets.md)
+- [Pi extensions](dev/extensions.md)
 - [Jobs](dev/jobs.md)
-- [Messaging](dev/messaging.md)
+- [Messages](dev/messaging.md)
 - [Tmux](dev/tmux.md)
-- [Operation](dev/operation.md)
-- [Staging](dev/staging.md)
-- [Maintenance](dev/maintenance.md)
+- [Operate it](dev/operation.md)
+- [Run staging](dev/staging.md)
+- [Maintain and release](dev/maintenance.md)
 
 # Reference
 
-- [Scufris options](reference/options.md)
+- [Environment variables](reference/environment.md)
+- [Home Manager options](reference/options.md)

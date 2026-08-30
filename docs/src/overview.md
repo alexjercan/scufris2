@@ -1,56 +1,60 @@
-# Overview
+# Start here
 
-Scufris is a personal assistant that runs in the Pi conversation harness. It
-adds a focused foreground identity, a project workflow engine with delegated
-worker jobs, Calm transcript presentation, a background service that owns the
-conversation, and an optional desktop companion with a voice pill and a
-conversation window.
+Scufris is one conversation with many ways to reach it.
 
-Scufris ships as a Nix flake package and a Home Manager module. There is one
-launcher; the speech module and the voice build variants that existed to ship
-it are gone. Whether Scufris makes a sound is the tray's, and Home Manager
-decides whether the companion is handed a speech command at all.
+```mermaid
+flowchart TB
+    Desktop["Linux desktop<br/>voice + windows"] --> Conversation["one conversation"]
+    IOS["iPhone / iPad<br/>text UI"] --> Conversation
+    Terminal["terminal / SSH<br/>scufris-ctl"] --> Conversation
+    Conversation --> Service[scufris-service]
+    Service --> Pi[Pi + Scufris]
+    Pi --> Jobs[delegated jobs in tmux]
+```
 
-## Components
+## Read this book in order
 
-Scufris packages four capability-owned Pi extensions:
+Each chapter adds one layer:
 
-- `workflow` is the core engine. It owns the Scufris identity, the project
-  agent menu, delegated job spawn and control, worker events, review, and
-  landing.
-- `response` emits one atomic plain response with optional Markdown details and
-  widget presentation calls.
-- `calm` reduces transcript and working-state clutter.
-- `service` connects the foreground agent to `agent.sock`, injects
-  self-contained registered-surface messages through `pi.sendUserMessage()`,
-  and carries atomic responses and attention state.
+```mermaid
+flowchart LR
+    Stack[stack] --> Install[install] --> Configure[configure] --> Use[use]
+    Use --> Surfaces[surfaces] --> Widgets[widgets] --> Tests[tests] --> Internals[internals]
+```
 
-`scufris-service` is the half that owns the conversation. Its crate lives under
-`host/service/` in the root cargo workspace and ships as its own package with no
-graphical dependency at all. It supervises one `pi --mode rpc` agent, owns the session
-directory, and serves separate surface, agent, and control sockets. `scufris-ctl` talks
-to it from a terminal. See [Background service](dev/service.md).
+The short path is:
 
-`scufris-desktop` is the desktop companion: a voice pill, a conversation
-window, a widget runtime, and a tray icon, built from the same workspace and
-shipped as a separate Linux package. It is a client of the service. It records,
-transcribes locally, submits the words as an ordinary user message, draws the
-bounded canonical conversation, and speaks only its associated live response. The conversation
-is the service's, so a companion crash never stops it and a machine with no
-screen still has one. See [Desktop companion](dev/desktop.md).
+1. [See the stack](dev/architecture.md).
+2. [Install it](guide/installation.md).
+3. [Configure it](guide/configuration.md).
+4. [Use it](guide/using.md).
 
-Deterministic executables called by extensions live under `tools/`. Commands
-for people live under `scripts/`. Model-facing workflow policy lives in small
-skills under `agent/skills/`.
+Continue through surfaces and tests before the internal chapters. Each page
+links back to the idea it builds on.
 
-## Responsibilities
+## Pick the result you want
 
-- Pi runs the foreground conversation and supplies global configuration,
-  including optional speech-to-text input.
-- Scufris delegates work expected to take minutes to independent worker jobs
-  in tmux sessions. The foreground conversation never blocks on them.
-- The desktop configuration owns keybindings and window placement. Scufris
-  ships no window manager.
+| Goal                                                | Start with                                                                       |
+| --------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Try the full stack without changing your system     | [Staging](dev/staging.md)                                                        |
+| Install the agent only                              | [Installation: choose a shape](guide/installation.md#choose-a-shape)             |
+| Run the desktop and voice UI                        | [Installation: complete Linux stack](guide/installation.md#complete-linux-stack) |
+| Connect a phone or another machine                  | [Add a surface](dev/surfaces.md)                                                 |
+| Add a visual panel                                  | [Add a widget](dev/widgets.md)                                                   |
+| Find one setting                                    | [Configuration](guide/configuration.md)                                          |
+| Find one environment variable                       | [Environment reference](reference/environment.md)                                |
+| Test on NixOS, another Linux, macOS, or without Nix | [Testing](dev/testing.md)                                                        |
 
-Read the [user guide](guide/installation.md) to install and use Scufris. Read
-the [developer guide](dev/architecture.md) for the complete design.
+## Three rules
+
+```mermaid
+flowchart LR
+    Pi["Pi<br/>owns the turn"] --> Service["Service<br/>owns the conversation"]
+    Service --> Surface["Surface<br/>owns local input and presentation"]
+```
+
+This split is the key to every later chapter.
+
+---
+
+Next: [See the stack](dev/architecture.md)

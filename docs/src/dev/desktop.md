@@ -1,5 +1,13 @@
 # Desktop companion
 
+[Previous: Background service](service.md)
+
+```text
+microphone -> STT -> pending textbox -> surface.message
+surface.message -> HUD
+assistant message -> text + optional speech + optional widgets
+```
+
 `scufris-desktop` is a registered protocol v4 surface. It owns local windows,
 keyboard controls, recording, transcription, speech playback, and widget
 presentation. It does not own Pi or the canonical conversation.
@@ -118,3 +126,7 @@ process matching.
 - widget definitions or calls: 32 per message;
 - local speech paragraph: 1000 UTF-8 bytes; and
 - reconnect backoff: 250 ms to 5 seconds.
+
+---
+
+Next: [Pi extensions](extensions.md)

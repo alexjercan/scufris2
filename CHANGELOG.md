@@ -9,6 +9,15 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Added
+
+- A native SwiftUI iOS surface delivered through TestFlight. It stores its
+  stable identity, WSS URL, and bearer token in Keychain, reconnects with
+  canonical replay, and submits text to the shared conversation.
+- An optional loopback-only `scufris-surface-gateway` bridges authenticated
+  WebSockets to the strict protocol-v4 surface socket. Tailscale Serve can
+  provide the private TLS endpoint without exposing agent or control traffic.
+
 ### Changed
 
 - Home Manager now treats `programs.scufris.agent` as the core interactive
@@ -20,6 +29,9 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - Desktop controls are named `popupKey`, `backgroundKey`, and `abortKey`.
   Terminal integration is `terminalCommand`, and journal-backed settings are
   grouped under `desktop.widgets`.
+- `staging up` and `staging backend` now start an isolated external-surface
+  gateway. They can own an exact temporary Tailscale Serve path and remove only
+  that path during teardown.
 
 ### Removed
 

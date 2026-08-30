@@ -128,6 +128,7 @@ final class ConversationStore: ObservableObject {
             throw ConfigurationFailure.invalid
         }
         connectionState = .connecting
+        conversation = []
         serviceDetail = "Connecting to \(url.host ?? "backend")"
         var request = URLRequest(url: url)
         request.setValue("Bearer \(settings.token)", forHTTPHeaderField: "Authorization")

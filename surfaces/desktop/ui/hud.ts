@@ -67,11 +67,9 @@
     return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
   };
 
-  const canOpen = (descriptor: AttachmentDescriptor): boolean =>
-    descriptor.media_type.startsWith("image/") ||
-    descriptor.media_type.startsWith("text/") ||
-    descriptor.media_type === "application/pdf" ||
-    descriptor.media_type === "application/json";
+  const hasInlineImage = (descriptor: AttachmentDescriptor): boolean =>
+    descriptor.media_type.startsWith("image/") &&
+    descriptor.media_type !== "image/svg+xml";
 
   const action = (
     label: string,
@@ -118,6 +116,14 @@
       for (const descriptor of entry.attachments) {
         const item = document.createElement("span");
         item.className = "message-attachment";
+        if (hasInlineImage(descriptor)) {
+          const image = document.createElement("img");
+          image.className = "attachment-preview";
+          image.src = `scufris-attachment://content/${descriptor.id}`;
+          image.alt = descriptor.name;
+          image.loading = "lazy";
+          item.append(image);
+        }
         const identity = document.createElement("span");
         identity.className = "attachment-identity";
         const name = document.createElement("strong");
@@ -126,13 +132,6 @@
         metadata.textContent = `${descriptor.media_type} - ${size(descriptor.size)}`;
         identity.append(name, metadata);
         item.append(identity);
-        if (canOpen(descriptor)) {
-          item.append(
-            action("open", `Open ${descriptor.name}`, () =>
-              invoke("hud_open_attachment", { descriptor }),
-            ),
-          );
-        }
         item.append(
           action("save", `Save ${descriptor.name}`, () =>
             invoke("hud_save_attachment", { descriptor }),
@@ -200,6 +199,7 @@
           })) as Notice;
           say(state);
         });
+        remove.classList.add("attachment-remove");
         chip.append(name, remove);
         return chip;
       }),

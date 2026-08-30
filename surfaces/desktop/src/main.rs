@@ -394,6 +394,31 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                 })
                 .build(),
         )
+        // Canonical raster attachments are served only to the conversation
+        // webview. The page receives an opaque URL; this boundary resolves the
+        // ID from canonical replay and downloads bounded bytes from content.sock.
+        .register_uri_scheme_protocol("scufris-attachment", |ctx, request| {
+            if ctx.webview_label() != hud::LABEL {
+                return refused();
+            }
+            let id = request.uri().path().trim_start_matches('/');
+            let descriptor = ctx
+                .app_handle()
+                .try_state::<Arc<Hud>>()
+                .and_then(|conversation| conversation.attachment(id));
+            let client = ctx.app_handle().try_state::<Arc<AttachmentClient>>();
+            match (descriptor, client) {
+                (Some(descriptor), Some(client)) => match client.image(&descriptor) {
+                    Ok(bytes) => http::Response::builder()
+                        .header(http::header::CONTENT_TYPE, descriptor.media_type)
+                        .header("x-content-type-options", "nosniff")
+                        .body(bytes)
+                        .unwrap_or_else(|_| refused()),
+                    Err(_) => refused(),
+                },
+                _ => refused(),
+            }
+        })
         // The widget modules, served to the window that is holding them and to
         // nothing else. `webview_label` is what makes that true: the page asks
         // for one address, and what comes back depends on who asked.
@@ -436,7 +461,6 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             hud_submit,
             hud_attach,
             hud_detach,
-            hud_open_attachment,
             hud_save_attachment,
             hud_close,
             hud_toggle
@@ -950,22 +974,6 @@ async fn hud_attach(
 #[tauri::command]
 fn hud_detach(conversation: tauri::State<'_, Arc<Hud>>, id: String) -> conversation::Notice {
     conversation.detach(&id)
-}
-
-/// Opens one safe canonical attachment with its desktop handler.
-#[tauri::command]
-async fn hud_open_attachment(
-    conversation: tauri::State<'_, Arc<Hud>>,
-    attachments: tauri::State<'_, Arc<AttachmentClient>>,
-    descriptor: AttachmentDescriptor,
-) -> Result<(), String> {
-    match attachments.open(&descriptor) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            conversation.attachment_failed(error.clone());
-            Err(error)
-        }
-    }
 }
 
 /// Saves one canonical attachment to a destination chosen by the person.

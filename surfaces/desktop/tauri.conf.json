@@ -10,7 +10,7 @@
     "withGlobalTauri": true,
     "windows": [],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self' scufris-widget:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'"
+      "csp": "default-src 'self'; img-src 'self' data: scufris-attachment:; style-src 'self'; script-src 'self' scufris-widget:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'"
     }
   },
   "bundle": {

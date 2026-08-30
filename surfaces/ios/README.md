@@ -12,8 +12,8 @@ managed attachment IDs.
 The document and photo controls upload one selected object through the
 authenticated HTTPS gateway. The composer holds up to eight canonical
 descriptors and sends only opaque IDs. Canonical message attachments expose
-explicit Quick Look preview and iOS share-sheet actions; downloaded copies use
-temporary protected files. Attachment bytes and bearer tokens are never logged.
+inline bounded image presentation and an explicit Save action backed by the iOS
+share sheet; downloaded copies use temporary protected files. Attachment bytes and bearer tokens are never logged.
 
 Hold the microphone control to record a bounded local WAV take. On release, the
 app sends it through the authenticated HTTPS gateway for private host

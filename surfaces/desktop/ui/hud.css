@@ -176,12 +176,20 @@ body {
 
 .message-attachment {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
   min-width: 0;
-  padding: 7px 9px;
-  border-left: 2px solid var(--line);
+  padding: 9px;
+  border-left: 2px solid var(--quartz);
   background: #161616;
+}
+
+.attachment-preview {
+  width: 100%;
+  max-height: 280px;
+  object-fit: contain;
+  background: var(--bg);
 }
 
 .attachment-identity {
@@ -206,11 +214,13 @@ body {
 
 .attachment-action,
 .attach {
-  border: 1px solid var(--line);
-  padding: 2px 6px;
-  background: transparent;
-  color: var(--quartz);
+  min-height: 32px;
+  border: 1px solid var(--quartz);
+  padding: 5px 10px;
+  background: var(--quartz);
+  color: var(--bg);
   font: inherit;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -218,8 +228,23 @@ body {
 .attachment-action:focus,
 .attach:hover,
 .attach:focus {
-  border-color: var(--quartz);
+  border-color: var(--yellow);
+  background: var(--yellow);
   outline: none;
+}
+
+.attachment-remove {
+  min-width: 32px;
+  border-color: var(--red);
+  padding: 4px;
+  background: rgba(244, 56, 65, 0.12);
+  color: var(--red);
+}
+
+.attachment-remove:hover,
+.attachment-remove:focus {
+  border-color: var(--red);
+  background: rgba(244, 56, 65, 0.24);
 }
 
 .details {
@@ -289,9 +314,10 @@ body {
 .selected-attachment {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   max-width: 320px;
-  padding: 2px 4px 2px 7px;
+  min-height: 36px;
+  padding: 2px 3px 2px 9px;
   border: 1px solid var(--line);
   color: var(--fg);
   font-size: 11px;
@@ -305,9 +331,9 @@ body {
 
 .attach {
   flex: 0 0 auto;
-  width: 24px;
+  width: 36px;
   padding: 0;
-  color: var(--yellow);
+  color: var(--bg);
 }
 
 .attach:disabled {

@@ -192,6 +192,15 @@ impl Hud {
         }
     }
 
+    /// Resolves one canonical descriptor already present in the local replay.
+    pub fn attachment(&self, id: &str) -> Option<AttachmentDescriptor> {
+        self.lock()
+            .lines()
+            .into_iter()
+            .flat_map(|entry| entry.attachments)
+            .find(|attachment| attachment.id == id)
+    }
+
     /// Everything the page has missed, asked for once when it loads.
     pub fn backlog(&self) -> Backlog {
         let state = self.lock();

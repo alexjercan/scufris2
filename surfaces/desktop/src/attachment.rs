@@ -7,9 +7,8 @@
 use std::{
     fs::{self, OpenOptions},
     io::{Read, Write},
-    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
-    process::Command,
     time::Duration,
 };
 
@@ -18,6 +17,8 @@ use scufris_control::service::{
     AttachmentDescriptor, MAX_ATTACHMENT_BYTES, validate_attachment_descriptor,
 };
 use serde::Serialize;
+#[cfg(test)]
+use std::os::unix::fs::PermissionsExt;
 
 const RESPONSE_BYTES: u64 = 16 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -31,21 +32,16 @@ struct ImportRequest<'a> {
 /// Client for the service-owned private attachment API.
 pub struct AttachmentClient {
     client: Client,
-    cache: PathBuf,
 }
 
 impl AttachmentClient {
     pub fn new(content_socket: PathBuf) -> Result<Self, String> {
-        let cache = content_socket
-            .parent()
-            .ok_or_else(unavailable)?
-            .join("desktop-open");
         let client = Client::builder()
             .unix_socket(content_socket)
             .timeout(TIMEOUT)
             .build()
             .map_err(|_| unavailable())?;
-        Ok(Self { client, cache })
+        Ok(Self { client })
     }
 
     /// Imports one selected host file without reading its bytes into the UI.
@@ -71,6 +67,14 @@ impl AttachmentClient {
         Ok(descriptor)
     }
 
+    /// Returns one bounded raster image for inline conversation presentation.
+    pub fn image(&self, descriptor: &AttachmentDescriptor) -> Result<Vec<u8>, String> {
+        if !inline_image(&descriptor.media_type) {
+            return Err(unavailable());
+        }
+        self.download(descriptor)
+    }
+
     /// Downloads canonical bytes and writes them to the selected destination.
     pub fn save(
         &self,
@@ -79,28 +83,6 @@ impl AttachmentClient {
     ) -> Result<(), String> {
         let bytes = self.download(descriptor)?;
         atomic_write(destination, &bytes).map_err(|_| "The attachment could not be saved.".into())
-    }
-
-    /// Downloads canonical bytes to a private cache file and opens its handler.
-    pub fn open(&self, descriptor: &AttachmentDescriptor) -> Result<(), String> {
-        if !safe_to_open(&descriptor.media_type) {
-            return Err("Save this attachment before inspecting it.".into());
-        }
-        let bytes = self.download(descriptor)?;
-        fs::create_dir_all(&self.cache).map_err(|_| open_failure())?;
-        fs::set_permissions(&self.cache, fs::Permissions::from_mode(0o700))
-            .map_err(|_| open_failure())?;
-        let directory = self.cache.join(random_component()?);
-        fs::create_dir(&directory).map_err(|_| open_failure())?;
-        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
-            .map_err(|_| open_failure())?;
-        let path = directory.join(&descriptor.name);
-        write_new(&path, &bytes).map_err(|_| open_failure())?;
-        Command::new("xdg-open")
-            .arg(&path)
-            .spawn()
-            .map_err(|_| open_failure())?;
-        Ok(())
     }
 
     fn download(&self, descriptor: &AttachmentDescriptor) -> Result<Vec<u8>, String> {
@@ -159,11 +141,8 @@ fn import_failure(status: StatusCode, body: &[u8]) -> String {
     }
 }
 
-fn safe_to_open(media_type: &str) -> bool {
-    media_type.starts_with("image/")
-        || media_type.starts_with("text/")
-        || media_type == "application/pdf"
-        || media_type == "application/json"
+fn inline_image(media_type: &str) -> bool {
+    media_type.starts_with("image/") && media_type != "image/svg+xml"
 }
 
 fn media_type(path: &Path) -> &'static str {
@@ -226,10 +205,6 @@ fn unavailable() -> String {
     "Attachment storage is unavailable.".into()
 }
 
-fn open_failure() -> String {
-    "The attachment could not be opened.".into()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,10 +220,8 @@ mod tests {
             media_type(Path::new("no-extension")),
             "application/octet-stream"
         );
-        assert!(safe_to_open("image/png"));
-        assert!(safe_to_open("application/pdf"));
-        assert!(!safe_to_open("application/x-executable"));
-        assert!(!safe_to_open("application/octet-stream"));
+        assert!(inline_image("image/png"));
+        assert!(!inline_image("image/svg+xml"));
     }
 
     #[test]

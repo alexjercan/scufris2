@@ -88,6 +88,7 @@ final class ConversationStore: NSObject, ObservableObject {
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
     private var transcriptionTask: Task<Void, Never>?
+    private var attachmentCopies: [String: URL] = [:]
 
     override init() {
         if let stored = try? SecureStore.read("surface-id") {
@@ -117,6 +118,7 @@ final class ConversationStore: NSObject, ObservableObject {
         settings = newSettings
         selectedAttachments = []
         attachmentNotice = nil
+        attachmentCopies = [:]
         startConnection()
     }
 
@@ -331,6 +333,11 @@ final class ConversationStore: NSObject, ObservableObject {
     }
 
     func localCopy(of descriptor: AttachmentDescriptor) async throws -> URL {
+        if let existing = attachmentCopies[descriptor.id],
+           FileManager.default.fileExists(atPath: existing.path)
+        {
+            return existing
+        }
         guard let surfaceURL = URL(string: settings.backendURL) else {
             throw AttachmentFailure.invalidEndpoint
         }
@@ -351,6 +358,7 @@ final class ConversationStore: NSObject, ObservableObject {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
             let destination = directory.appendingPathComponent(descriptor.name, isDirectory: false)
             try bytes.write(to: destination, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            attachmentCopies[descriptor.id] = destination
             return destination
         } catch {
             try? FileManager.default.removeItem(at: directory)

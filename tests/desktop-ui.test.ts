@@ -88,6 +88,9 @@ class Stub {
   hidden = false;
   readOnly = false;
   value = "";
+  src = "";
+  alt = "";
+  loading = "";
   width = 0;
   height = 0;
   offsetWidth = 0;
@@ -863,7 +866,7 @@ test("the conversation window draws every line it is handed, and who said it", a
   );
 });
 
-test("managed attachments are selected, rendered, opened, saved, and removed by id", async () => {
+test("managed attachments are selected, rendered inline, saved, and removed by id", async () => {
   const descriptor = {
     id: "att_one",
     name: "diagram.png",
@@ -903,14 +906,12 @@ test("managed attachments are selected, rendered, opened, saved, and removed by 
   assert.ok(rendered !== undefined);
   const card = rendered.children[0];
   assert.ok(card !== undefined);
-  assert.equal(card.children[0]?.children[0]?.textContent, "diagram.png");
-  card.children[1]?.dispatch("click", { stopPropagation: () => {} });
+  assert.equal(card.children[0]?.className, "attachment-preview");
+  assert.equal(card.children[0]?.src, "scufris-attachment://content/att_one");
+  assert.equal(card.children[1]?.children[0]?.textContent, "diagram.png");
   card.children[2]?.dispatch("click", { stopPropagation: () => {} });
   await settle();
-  assert.deepEqual(
-    page.lastCall("hud_open_attachment")["descriptor"],
-    descriptor,
-  );
+  assert.ok(!page.commands().includes("hud_open_attachment"));
   assert.deepEqual(
     page.lastCall("hud_save_attachment")["descriptor"],
     descriptor,

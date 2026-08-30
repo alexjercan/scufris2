@@ -41,11 +41,11 @@ composer state, and submits only its opaque ID. A message can contain at most
 eight different files, each at most 16 MiB.
 
 Canonical attachment descriptors render below their message with name, media
-type, size, and explicit actions. Images, text, JSON, and PDFs can be opened
-through `xdg-open` from a private mode-0600 cache copy. Executable and opaque
-media types are save-only. Save uses a native destination picker and an atomic
-mode-0600 write. Neither action invokes a shell, and attachment bytes or host
-paths never enter logs or protocol messages.
+type, and size. Bounded raster images render inline through a private custom
+webview scheme backed directly by `content.sock`; SVG and general files remain
+metadata cards. The only explicit file action is Save, which uses a native
+destination picker and an atomic mode-0600 write. Attachment bytes or host paths
+never enter logs or protocol messages.
 
 The composer clears only after the local host accepts the IPC request.
 `surface.message_ack` settles that exact submission. A rejection or disconnect

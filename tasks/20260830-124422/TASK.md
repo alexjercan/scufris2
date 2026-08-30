@@ -1,6 +1,6 @@
 # Connect the iOS surface over Tailscale
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: ios, protocol
 
@@ -34,4 +34,24 @@ a private Tailscale path without exposing agent or control access.
 
 ## Verification
 
-Pending design review, implementation, CI, deployment, and TestFlight testing.
+- Rust gateway unit tests prove loopback-only binding, bearer comparison,
+  strict protocol-v4 decoding, and authenticated WebSocket-to-Unix bridging.
+- The Home Manager checks prove the optional persistent gateway unit, private
+  token argument, service dependency, package closure, and interface.
+- Xcode 26.3 simulator CI run
+  [33306114900](https://github.com/alexjercan/scufris2/actions/runs/33306114900)
+  built the Swift 6 client and passed its protocol tests.
+- TestFlight run
+  [33306287733](https://github.com/alexjercan/scufris2/actions/runs/33306287733)
+  uploaded version 1.0 build 5 without errors.
+- A live authenticated WSS proof reached `surface.ready` through Tailscale
+  Serve while an unauthenticated loopback upgrade returned HTTP 401.
+- The physical iPhone connected, replayed the canonical conversation, sent a
+  text message, and displayed the assistant response.
+- `staging up` and `backend` now own an isolated gateway, private token, and
+  optional exact `/scufris-staging` Tailscale Serve route. The 93 Python tests,
+  ShellCheck, 67 Node tests, focused Nix builds, documentation build, Rust
+  tests, Clippy, and final `nix flake check` across all compatible checks
+  passed.
+- The deployed Home Manager generation replaced the transient process with a
+  persistent non-transient unit and retained the working tailnet URL.

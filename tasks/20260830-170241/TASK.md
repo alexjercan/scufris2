@@ -130,7 +130,11 @@ The durable-store slice passes 366 Rust tests, Clippy with warnings denied, the
 69 TypeScript tests, 95 Python tests, formatting, and `nix flake check -L`.
 Focused tests cover private durable files, restart loading, expiry, orphan
 cleanup, upload, import, download, typed missing-ID errors, path and symlink
-rejection, byte bounds, and canonical descriptor resolution.
+rejection, byte bounds, and canonical descriptor resolution. Repository run
+[33327728103](https://github.com/alexjercan/scufris2/actions/runs/33327728103)
+and documentation run
+[33327728066](https://github.com/alexjercan/scufris2/actions/runs/33327728066)
+passed for store commit `3473592`.
 
 ## Acceptance
 

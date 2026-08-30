@@ -37,7 +37,7 @@ final class ConversationStore: ObservableObject {
     private var generation = 0
 
     init() {
-        if let stored = try? SecureStore.read("surface-id"), let stored {
+        if let stored = try? SecureStore.read("surface-id") {
             surfaceID = stored
         } else {
             let generated = "ios-\(UUID().uuidString.lowercased())"

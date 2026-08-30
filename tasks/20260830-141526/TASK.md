@@ -1,6 +1,6 @@
 # Apply the iOS conversation design
 
-- STATUS: CLOSED
+- STATUS: OPEN
 - PRIORITY: 100
 - TAGS: ios, surface, design
 

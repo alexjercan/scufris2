@@ -643,7 +643,7 @@ impl App {
             if connected {
                 info!("service connected");
             } else {
-                warn!("service disconnected");
+                info!("service disconnected");
             }
         }
         // The phase is untouched, so the window has nothing to catch up to.

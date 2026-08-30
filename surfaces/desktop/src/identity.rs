@@ -43,9 +43,14 @@ pub fn load_or_create(state_file: &Path) -> Result<String, String> {
 }
 
 pub fn diagnostic_name() -> String {
-    std::env::var("HOSTNAME")
+    std::env::var("SCUFRIS_DESKTOP_SURFACE_NAME")
         .ok()
         .filter(|name| !name.trim().is_empty())
+        .or_else(|| {
+            std::env::var("HOSTNAME")
+                .ok()
+                .filter(|name| !name.trim().is_empty())
+        })
         .unwrap_or_else(|| "Scufris desktop".into())
 }
 

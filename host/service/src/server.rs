@@ -69,6 +69,7 @@ pub fn serve(service: Arc<Service>, listener: UnixListener, channel: Channel) {
             Ok(stream) => {
                 next += 1;
                 let connection = next;
+                debug!(channel = channel.name(), connection, "connection accepted");
                 let held = Arc::clone(&service);
                 thread::spawn(move || match channel {
                     Channel::Surface => surface(held, stream, connection),
@@ -84,7 +85,7 @@ pub fn serve(service: Arc<Service>, listener: UnixListener, channel: Channel) {
     }
 }
 
-fn writer<T: serde::Serialize + Send + 'static>(
+fn writer<T: serde::Serialize + std::fmt::Debug + Send + 'static>(
     stream: &UnixStream,
     connection: u64,
 ) -> io::Result<(SyncSender<T>, thread::JoinHandle<()>)> {
@@ -92,6 +93,7 @@ fn writer<T: serde::Serialize + Send + 'static>(
     let (outbox, inbox) = sync_channel::<T>(OUTBOX);
     let handle = thread::spawn(move || {
         while let Ok(message) = inbox.recv() {
+            debug!(connection, payload = ?message, "writing channel message");
             if let Err(error) = write_message(&mut writing, &message) {
                 if matches!(error, MessageError::TooLarge) {
                     error!(connection, "the service built an oversized message");
@@ -154,6 +156,7 @@ fn surface(service: Arc<Service>, stream: UnixStream, connection: u64) {
         }
     }
     service.unregister_surface(connection, generation);
+    debug!(connection, "surface connection closed");
     let _ = stream.shutdown(std::net::Shutdown::Both);
     let _ = writing.join();
 }
@@ -195,6 +198,7 @@ fn agent(service: Arc<Service>, stream: UnixStream, connection: u64) {
         }
     }
     service.unregister_agent(connection);
+    debug!(connection, "agent connection closed");
     let _ = stream.shutdown(std::net::Shutdown::Both);
     let _ = writing.join();
 }
@@ -206,6 +210,7 @@ fn control(service: Arc<Service>, stream: UnixStream, connection: u64) {
     let mut reader = BufReader::new(&stream);
     match read_control_request(&mut reader) {
         Ok(request) if request.body == ControlRequestBody::Hello => {
+            debug!(connection, "control connected");
             let _ = outbox.try_send(ControlResponse::new(ControlResponseBody::Ready));
         }
         Ok(_) => {
@@ -219,23 +224,27 @@ fn control(service: Arc<Service>, stream: UnixStream, connection: u64) {
     }
     loop {
         match read_control_request(&mut reader) {
-            Ok(request) => match request.body {
-                ControlRequestBody::Hello => {
-                    let _ = outbox.try_send(ControlResponse::new(ControlResponseBody::Rejected {
-                        id: "hello".into(),
-                        code: "duplicate_hello".into(),
-                        detail: "Control already completed its handshake.".into(),
-                    }));
+            Ok(request) => {
+                debug!(connection, payload = ?request.body, "control request received");
+                match request.body {
+                    ControlRequestBody::Hello => {
+                        let _ =
+                            outbox.try_send(ControlResponse::new(ControlResponseBody::Rejected {
+                                id: "hello".into(),
+                                code: "duplicate_hello".into(),
+                                detail: "Control already completed its handshake.".into(),
+                            }));
+                    }
+                    ControlRequestBody::State { id } => {
+                        let (state, detail) = service.control_state();
+                        let _ = outbox.try_send(ControlResponse::new(ControlResponseBody::State {
+                            id,
+                            state,
+                            detail,
+                        }));
+                    }
                 }
-                ControlRequestBody::State { id } => {
-                    let (state, detail) = service.control_state();
-                    let _ = outbox.try_send(ControlResponse::new(ControlResponseBody::State {
-                        id,
-                        state,
-                        detail,
-                    }));
-                }
-            },
+            }
             Err(MessageError::Empty) => break,
             Err(error) => {
                 protocol_error(Channel::Control, connection, &error);
@@ -243,6 +252,7 @@ fn control(service: Arc<Service>, stream: UnixStream, connection: u64) {
             }
         }
     }
+    debug!(connection, "control disconnected");
     drop(outbox);
     let _ = stream.shutdown(std::net::Shutdown::Both);
     let _ = writing.join();

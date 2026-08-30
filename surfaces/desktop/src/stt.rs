@@ -104,6 +104,13 @@ pub fn transcribe(endpoint: &str, wav: &[u8]) -> Result<String, TranscriptionErr
 }
 
 fn request(endpoint: &str, wav: &[u8]) -> Result<String, TranscriptionError> {
+    tracing::debug!(
+        method = "POST",
+        url = endpoint,
+        content_type = content_type(),
+        wav_bytes = wav.len(),
+        "sending transcription request"
+    );
     let client = reqwest::blocking::Client::builder()
         .timeout(TRANSCRIPTION_TIMEOUT)
         .build()
@@ -115,10 +122,20 @@ fn request(endpoint: &str, wav: &[u8]) -> Result<String, TranscriptionError> {
         .send()
         .map_err(|_| TranscriptionError::Unreachable)?;
     let status = response.status();
+    tracing::debug!(
+        url = endpoint,
+        status = status.as_u16(),
+        "transcription response received"
+    );
     if !status.is_success() {
         return Err(TranscriptionError::Status(status.as_u16()));
     }
     let body = response.text().map_err(|_| TranscriptionError::Unusable)?;
+    tracing::debug!(
+        url = endpoint,
+        body_bytes = body.len(),
+        "transcription response read"
+    );
     parse_transcript(&body)
 }
 

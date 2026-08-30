@@ -289,6 +289,33 @@ frontends with distinct mode-0600 persisted surface IDs and separate
 `desktop-one.sock` and `desktop-two.sock` command sockets. Both commands reached
 the backend in `idle`; all recorded processes were then stopped.
 
+## Structured logging follow-up
+
+Added INFO/DEBUG observability to both protocol v4 sides:
+
+- Service INFO records named surface and agent connect/disconnect events,
+  replacements, listener lifecycle, and shutdown.
+- Service DEBUG records accepted channel connections, connection and generation
+  IDs, registration/replay/widget details, received surface and agent messages,
+  control requests, full typed protocol payloads, broadcasts, recipients, wire
+  writes, drops, and clean closes.
+- Desktop INFO records its stable identity/name and service connect/close
+  lifecycle. DEBUG records resolved paths, connection attempts and failures,
+  typed requests and responses, live/replay status, and HTTP transcription
+  request/response metadata.
+- Named staging frontends export their profile as the protocol diagnostic name,
+  so `frontend one` appears as `name=one` in both logs.
+- DEBUG protocol records intentionally include conversation/widget payloads;
+  audio and transcription response text remain excluded. The operation guide
+  documents this privacy boundary and `RUST_LOG` filters.
+
+Verification: 312 desktop and 24 service tests pass; all 8 split-staging tests
+pass; ShellCheck passes. A packaged `RUST_LOG=debug` backend plus `frontend one`
+produced structured journald entries for agent and named surface connection,
+registration, payload send/receive, and control traffic. The registration entry
+contained `F_NAME=one`, the stable `F_SURFACE`, connection/generation IDs,
+widget count, and replay count. All recorded proof processes were stopped.
+
 ## Implementation sequence
 
 Implement the v4 core in this task, then create separate product work for later

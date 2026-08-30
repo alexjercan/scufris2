@@ -162,6 +162,7 @@ if [[ "$action" == "frontend" ]]; then
   export XDG_STATE_HOME="$frontend_root/state"
   export XDG_DATA_HOME="$frontend_root/data"
   export SCUFRIS_STAGING_FRONTEND="$profile"
+  export SCUFRIS_DESKTOP_SURFACE_NAME="$profile"
   export SCUFRIS_DESKTOP_COMMAND_SOCKET="$runtime_dir/desktop-$profile.sock"
 else
   export XDG_STATE_HOME="$staging/state"

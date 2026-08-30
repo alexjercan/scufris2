@@ -68,6 +68,38 @@ systemctl --user start scufris-service.service
 journalctl --user -u scufris-service.service
 ```
 
+### Logs
+
+Service and desktop logs use structured `tracing` fields. INFO records major
+lifecycle events: listener startup, surface names connecting and disconnecting,
+the Pi agent connection, desktop identity, service readiness, and shutdown.
+DEBUG adds connection IDs, full protocol payloads, replay and recipient counts,
+message IDs, widget registrations, retry details, and transcription HTTP
+request/response metadata. Transcription audio and returned text are not logged.
+DEBUG protocol payloads can contain conversation text and widget arguments, so
+enable them only while diagnosing a trusted local run.
+
+For split staging, set the filter on each command whose side is needed:
+
+```bash
+RUST_LOG=debug nix run .#staging -- backend
+RUST_LOG=debug nix run .#staging -- frontend one
+```
+
+The deployed units default to INFO. Read their journals with:
+
+```bash
+journalctl --user -u scufris-service.service -f
+journalctl --user -t scufris-desktop -f
+```
+
+The normal journal view prints the human message. Use `-o verbose` to include
+all structured fields such as `F_NAME`, `F_SURFACE`, `F_CONNECTION`, and
+`F_PAYLOAD`.
+
+`RUST_LOG=scufris_service=debug` limits verbose output to the backend crate;
+`RUST_LOG=scufris_desktop=debug` does the same for the frontend crate.
+
 ## Troubleshooting
 
 - Desktop evaluation fails: `desktop.enable` requires `service.enable`,

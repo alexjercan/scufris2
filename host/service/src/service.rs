@@ -100,6 +100,7 @@ impl Inner {
     }
 
     fn send_surface(&mut self, surface: &str, body: SurfaceResponseBody) {
+        debug!(surface, payload = ?body, "sending message to surface");
         let message = SurfaceResponse::new(body);
         let result = self
             .surfaces
@@ -111,6 +112,7 @@ impl Inner {
     }
 
     fn broadcast(&mut self, body: SurfaceResponseBody) {
+        debug!(recipients = self.surfaces.len(), payload = ?body, "broadcasting message to surfaces");
         let message = SurfaceResponse::new(body);
         let mut failed = Vec::new();
         for (id, held) in &self.surfaces {
@@ -130,14 +132,22 @@ impl Inner {
         };
         debug!(surface = id, reason, "a surface was dropped");
         if let Some(old) = self.surfaces.remove(id) {
+            info!(
+                surface = id,
+                name = old.registration.name,
+                "surface {} disconnected",
+                old.registration.name
+            );
             self.surface_by_connection.remove(&old.sender.connection);
         }
     }
 
     fn send_agent(&mut self, body: AgentResponseBody) -> bool {
         let Some(agent) = &self.agent else {
+            debug!(payload = ?body, "message had no connected agent");
             return false;
         };
+        debug!(connection = agent.connection, payload = ?body, "sending message to agent");
         if agent.outbox.try_send(AgentResponse::new(body)).is_err() {
             self.agent = None;
             return false;
@@ -201,6 +211,12 @@ impl Service {
         outbox: SyncSender<SurfaceResponse>,
     ) -> u64 {
         let mut inner = self.lock();
+        info!(
+            surface = registration.id,
+            name = registration.name,
+            "surface {} connected",
+            registration.name
+        );
         inner.next_surface_generation += 1;
         let generation = inner.next_surface_generation;
         if let Some(old) = inner.surfaces.remove(&registration.id) {
@@ -212,6 +228,16 @@ impl Service {
                 "a surface registration was replaced"
             );
         }
+        debug!(
+            connection,
+            surface = registration.id,
+            name = registration.name,
+            generation,
+            widgets = registration.widgets.len(),
+            replay = inner.conversation.len(),
+            registration = ?registration,
+            "surface registration accepted"
+        );
         // Replay, state, and ready are queued while the same lock excludes broadcasts.
         for message in inner.conversation.clone() {
             let _ = outbox.try_send(SurfaceResponse::new(message.into()));
@@ -253,7 +279,20 @@ impl Service {
             held.sender.connection == connection && held.sender.generation == generation
         });
         if matches {
-            inner.surfaces.remove(&id);
+            if let Some(removed) = inner.surfaces.remove(&id) {
+                info!(
+                    surface = id,
+                    name = removed.registration.name,
+                    "surface {} disconnected",
+                    removed.registration.name
+                );
+            }
+            debug!(
+                connection,
+                surface = id,
+                generation,
+                "surface registration removed"
+            );
         }
         inner.surface_by_connection.remove(&connection);
     }
@@ -271,6 +310,15 @@ impl Service {
             return;
         }
         let definitions = held.registration.widgets.clone();
+        debug!(
+            connection,
+            surface,
+            message_id = id,
+            text,
+            text_bytes = text.len(),
+            widgets = definitions.len(),
+            "surface message received"
+        );
         if !inner.send_agent(AgentResponseBody::Message {
             id: id.clone(),
             text: text.clone(),
@@ -311,6 +359,12 @@ impl Service {
         {
             return;
         }
+        debug!(
+            connection,
+            surface,
+            message_id = id,
+            "surface abort received"
+        );
         if inner.send_agent(AgentResponseBody::Abort { id: id.clone() }) {
             inner.send_surface(&surface, SurfaceResponseBody::Aborted { id });
         } else {
@@ -329,6 +383,7 @@ impl Service {
     pub fn register_agent(&self, connection: u64, outbox: SyncSender<AgentResponse>) -> bool {
         let mut inner = self.lock();
         if inner.agent.is_some() {
+            info!(connection, "second agent connection rejected");
             let _ = outbox.try_send(AgentResponse::new(AgentResponseBody::Rejected {
                 code: "agent_exists".into(),
                 detail: "One agent is already connected.".into(),
@@ -338,6 +393,8 @@ impl Service {
         let _ = outbox.try_send(AgentResponse::new(AgentResponseBody::Ready));
         inner.agent = Some(AgentConnection { connection, outbox });
         inner.agent_joined = true;
+        info!("agent connected");
+        debug!(connection, "agent registration accepted");
         true
     }
 
@@ -349,6 +406,8 @@ impl Service {
             .is_some_and(|agent| agent.connection == connection)
         {
             inner.agent = None;
+            info!("agent disconnected");
+            debug!(connection, "agent registration removed");
         }
     }
 
@@ -361,6 +420,7 @@ impl Service {
         {
             return;
         }
+        debug!(connection, payload = ?body, "agent message received");
         match body {
             AgentRequestBody::Hello => {}
             AgentRequestBody::State { state, detail } => {

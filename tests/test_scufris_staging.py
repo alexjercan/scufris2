@@ -368,6 +368,8 @@ class StagingTests(unittest.TestCase):
             str(self.staging / "frontends" / "two" / "state"),
         )
         self.assertNotEqual(one_env["XDG_STATE_HOME"], two_env["XDG_STATE_HOME"])
+        self.assertEqual(one_env["SCUFRIS_DESKTOP_SURFACE_NAME"], "one")
+        self.assertEqual(two_env["SCUFRIS_DESKTOP_SURFACE_NAME"], "two")
         self.assertEqual(
             one_env["SCUFRIS_DESKTOP_COMMAND_SOCKET"],
             str(self.runtime / "scufris-staging" / "desktop-one.sock"),

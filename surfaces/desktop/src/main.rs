@@ -315,6 +315,19 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
     let restart_available = config.restart_command.is_some();
     let surface_id = identity::load_or_create(&config.state_file)?;
     let surface_name = identity::diagnostic_name();
+    info!(
+        surface = surface_id,
+        name = surface_name,
+        "surface {} identity loaded",
+        surface_name
+    );
+    debug!(
+        surface = surface_id,
+        name = surface_name,
+        state_file = %config.state_file.display(),
+        command_socket = ?config.command_socket,
+        "surface configuration resolved"
+    );
 
     let tauri_app = tauri::Builder::default()
         .plugin(

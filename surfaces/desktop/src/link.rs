@@ -71,9 +71,27 @@ impl ServiceLink {
             move || {
                 let mut backoff = MIN_BACKOFF;
                 while !stopped.load(Ordering::Relaxed) {
-                    match serve(&socket, &registration, &writer, &ready, observe.as_ref()) {
-                        Outcome::Ready => backoff = MIN_BACKOFF,
-                        Outcome::HandshakeFailed => observe(LinkEvent::HandshakeFailed),
+                    tracing::debug!(
+                        socket = %socket.display(),
+                        surface = registration.id,
+                        name = registration.name,
+                        "connecting surface to service"
+                    );
+                    let outcome = serve(&socket, &registration, &writer, &ready, observe.as_ref());
+                    match outcome {
+                        Outcome::Ready => {
+                            tracing::info!(
+                                surface = registration.id,
+                                name = registration.name,
+                                "surface {} connection closed",
+                                registration.name
+                            );
+                            backoff = MIN_BACKOFF;
+                        }
+                        Outcome::HandshakeFailed => {
+                            tracing::warn!(surface = registration.id, "surface handshake failed");
+                            observe(LinkEvent::HandshakeFailed)
+                        }
                         Outcome::Unavailable => {}
                     }
                     ready.store(false, Ordering::Release);
@@ -123,6 +141,7 @@ fn set_writer(writer: &Arc<Mutex<Option<UnixStream>>>, stream: Option<UnixStream
 }
 
 fn send(writer: &Arc<Mutex<Option<UnixStream>>>, body: SurfaceRequestBody) -> Result<(), String> {
+    tracing::debug!(payload = ?body, "sending request to service");
     let mut held = writer.lock().unwrap_or_else(|error| error.into_inner());
     let Some(stream) = held.as_mut() else {
         return Err(UNAVAILABLE.into());
@@ -146,8 +165,12 @@ fn serve(
 ) -> Outcome {
     let stream = match UnixStream::connect(socket) {
         Ok(stream) => stream,
-        Err(_) => return Outcome::Unavailable,
+        Err(error) => {
+            tracing::debug!(socket = %socket.display(), %error, "service connection unavailable");
+            return Outcome::Unavailable;
+        }
     };
+    tracing::debug!(socket = %socket.display(), "service socket connected");
     let reading = match stream.try_clone() {
         Ok(stream) => stream,
         Err(_) => return Outcome::Unavailable,
@@ -181,6 +204,7 @@ fn serve(
                 };
             }
         };
+        tracing::debug!(payload = ?response.body, live = ready, "service response received");
         match response.body {
             SurfaceResponseBody::Message {
                 role,
@@ -204,6 +228,13 @@ fn serve(
                 observe(LinkEvent::State(state, detail))
             }
             SurfaceResponseBody::Ready { surface } if surface == registration.id => {
+                tracing::info!(
+                    surface = registration.id,
+                    name = registration.name,
+                    widgets = registration.widgets.len(),
+                    "surface {} connected",
+                    registration.name
+                );
                 ready = true;
                 connection_ready.store(true, Ordering::Release);
                 observe(LinkEvent::Ready);

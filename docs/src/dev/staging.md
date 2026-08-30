@@ -22,8 +22,10 @@ SCUFRIS_DESKTOP_HOTKEY=Super+H nix run .#staging -- frontend right
 companion against that backend. The name is stable: it selects a private state
 directory, persistent surface identity, data directory, command socket, and
 frontend lock. Different names therefore register as different surfaces even
-on one machine. Give simultaneously active frontends different hotkeys as in
-the example.
+on one machine, and the name appears in backend INFO logs. Give simultaneously
+active frontends different hotkeys as in the example. Prefix any command with
+`RUST_LOG=debug` to include protocol payloads and connection details; see
+[operation](operation.md#logs) for the logging policy.
 
 The flake app builds the service and companion from this source tree, so it
 needs no dev shell and no warm Cargo target. Inside a dev shell, the script can

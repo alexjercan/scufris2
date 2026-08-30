@@ -1,8 +1,7 @@
 //! The Scufris service.
 //!
-//! It owns three things nothing else may own: the `pi --mode rpc` agent, the
-//! session directory that agent writes, and the socket every surface connects
-//! to. Everything else - the pill, the tray, a terminal, `scufris-ctl` - is a
+//! It owns the `pi --mode rpc` agent, that agent's session directory, managed
+//! attachment content, and the private sockets used by local clients. Everything else - the pill, the tray, a terminal, `scufris-ctl` - is a
 //! client of this process.
 //!
 //! What to run and where the sessions live come from the environment, because
@@ -17,6 +16,7 @@
 //! the session, and the next start finds a conversation with two writers.
 
 mod agent;
+mod attachment;
 mod config;
 mod logging;
 mod rpc;
@@ -29,7 +29,7 @@ use clap::Parser;
 use nix::sys::signal::{SigSet, Signal};
 use tracing::{error, info};
 
-use crate::{config::Config, service::Service};
+use crate::{attachment::AttachmentStore, config::Config, service::Service};
 
 /// What a failing exit means.
 const FAILED: u8 = 1;
@@ -40,8 +40,8 @@ const FAILED: u8 = 1;
     name = "scufris-service",
     version,
     about = "The Scufris background service",
-    long_about = "Owns one `pi --mode rpc` agent, its session directory, and the socket \
-                  every Scufris surface connects to. Talk to it with scufris-ctl.\n\n\
+    long_about = "Owns one `pi --mode rpc` agent, its session directory, managed attachments, \
+                  and the sockets used by Scufris clients. Talk to it with scufris-ctl.\n\n\
                   The socket goes under XDG_RUNTIME_DIR, and RUST_LOG sets the log \
                   directives."
 )]
@@ -85,6 +85,24 @@ fn main() -> ExitCode {
             return ExitCode::from(FAILED);
         }
     };
+    let attachments = match AttachmentStore::open(config.attachment_dir.clone()) {
+        Ok(store) => store,
+        Err(error) => {
+            error!(%error, "the attachment store would not open");
+            return ExitCode::from(FAILED);
+        }
+    };
+    let content_listener = match server::bind(&config.content_socket) {
+        Ok(listener) => listener,
+        Err(error) => {
+            error!(%error, socket = %config.content_socket.display(), "the content socket would not bind");
+            return ExitCode::from(FAILED);
+        }
+    };
+    if let Err(error) = attachment::serve(content_listener, Arc::clone(&attachments)) {
+        error!(%error, "the content API thread would not start");
+        return ExitCode::from(FAILED);
+    }
     let paths = [
         (config.surface_socket.clone(), server::Channel::Surface),
         (config.agent_socket.clone(), server::Channel::Agent),
@@ -104,11 +122,14 @@ fn main() -> ExitCode {
         surface = %config.surface_socket.display(),
         agent = %config.agent_socket.display(),
         control = %config.control_socket.display(),
+        content = %config.content_socket.display(),
         sessions = %config.session_dir.display(),
+        attachments = %config.attachment_dir.display(),
         "the service is listening"
     );
 
-    let service = Service::new(config);
+    let content_socket = config.content_socket.clone();
+    let service = Service::new(config, attachments);
     service.start_agent();
 
     for (listener, channel) in listeners {
@@ -128,7 +149,11 @@ fn main() -> ExitCode {
     }
     service.shutdown();
     // Last, so nothing connects to sockets whose service has let go of Pi.
-    for (socket, _) in paths {
+    for socket in paths
+        .into_iter()
+        .map(|(socket, _)| socket)
+        .chain(std::iter::once(content_socket))
+    {
         if let Err(error) = std::fs::remove_file(&socket) {
             error!(%error, socket = %socket.display(), "a socket could not be removed");
         }

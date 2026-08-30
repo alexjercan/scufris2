@@ -197,6 +197,8 @@ mod tests {
             surface_socket: PathBuf::from("/run/user/1000/scufris/surface.sock"),
             agent_socket: PathBuf::from("/run/user/1000/scufris/agent.sock"),
             control_socket: PathBuf::from("/run/user/1000/scufris/control.sock"),
+            content_socket: PathBuf::from("/run/user/1000/scufris/content.sock"),
+            attachment_dir: PathBuf::from("/home/test/.local/share/scufris/attachments"),
             working_dir: std::env::temp_dir(),
         }
     }

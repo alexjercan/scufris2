@@ -22,6 +22,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     agent::{Agent, described},
+    attachment::AttachmentStore,
     config::Config,
     rpc::{self, Command, DialogAnswer, Event, SessionState},
 };
@@ -172,13 +173,15 @@ impl Inner {
 
 pub struct Service {
     config: Config,
+    attachments: Arc<AttachmentStore>,
     inner: Mutex<Inner>,
 }
 
 impl Service {
-    pub fn new(config: Config) -> Arc<Self> {
+    pub fn new(config: Config, attachments: Arc<AttachmentStore>) -> Arc<Self> {
         Arc::new(Self {
             config,
+            attachments,
             inner: Mutex::new(Inner {
                 process: None,
                 process_generation: 0,
@@ -317,18 +320,21 @@ impl Service {
             return;
         }
         let definitions = held.registration.widgets.clone();
-        if !attachments.is_empty() {
-            inner.send_surface(
-                &surface,
-                SurfaceResponseBody::Rejected {
-                    id: Some(id),
-                    operation: "message".into(),
-                    code: "attachments_unavailable".into(),
-                    detail: "Attachment storage is not ready.".into(),
-                },
-            );
-            return;
-        }
+        let descriptors = match self.attachments.resolve(&attachments, true) {
+            Ok(descriptors) => descriptors,
+            Err(_) => {
+                inner.send_surface(
+                    &surface,
+                    SurfaceResponseBody::Rejected {
+                        id: Some(id),
+                        operation: "message".into(),
+                        code: "attachments_unavailable".into(),
+                        detail: "One or more attachments are unavailable.".into(),
+                    },
+                );
+                return;
+            }
+        };
         debug!(
             connection,
             surface,
@@ -342,7 +348,7 @@ impl Service {
             id: id.clone(),
             text: text.clone(),
             widgets: definitions,
-            attachments: vec![],
+            attachments: descriptors.clone(),
         }) {
             inner.send_surface(
                 &surface,
@@ -362,7 +368,7 @@ impl Service {
             text,
             details: None,
             widgets: None,
-            attachments: vec![],
+            attachments: descriptors,
         });
         inner.send_surface(&surface, SurfaceResponseBody::MessageAck { id });
     }
@@ -482,20 +488,23 @@ impl Service {
                     });
                     return;
                 }
-                if !attachments.is_empty() {
-                    inner.send_agent(AgentResponseBody::Rejected {
-                        code: "attachments_unavailable".into(),
-                        detail: "Attachment storage is not ready.".into(),
-                    });
-                    return;
-                }
+                let descriptors = match self.attachments.resolve(&attachments, true) {
+                    Ok(descriptors) => descriptors,
+                    Err(_) => {
+                        inner.send_agent(AgentResponseBody::Rejected {
+                            code: "attachments_unavailable".into(),
+                            detail: "One or more attachments are unavailable.".into(),
+                        });
+                        return;
+                    }
+                };
                 inner.record(ConversationMessage {
                     role: ConversationRole::Assistant,
                     surface,
                     text,
                     details,
                     widgets,
-                    attachments: vec![],
+                    attachments: descriptors,
                 });
             }
         }
@@ -778,10 +787,22 @@ fn drain_stderr(stderr: impl std::io::Read) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::mpsc::{Receiver, sync_channel};
+    use std::sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc::{Receiver, sync_channel},
+    };
+
+    static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
 
     fn service() -> Arc<Service> {
-        Service::new(Config::test(PathBuf::from("/tmp/scufris-v4")))
+        let runtime = std::env::temp_dir().join(format!(
+            "scufris-v5-service-{}-{}",
+            std::process::id(),
+            NEXT_TEST.fetch_add(1, Ordering::Relaxed)
+        ));
+        let config = Config::test(runtime);
+        let attachments = AttachmentStore::open(config.attachment_dir.clone()).unwrap();
+        Service::new(config, attachments)
     }
     fn surface(
         service: &Arc<Service>,
@@ -921,6 +942,46 @@ mod tests {
         let held = service.lock().conversation.clone();
         assert_eq!(held.len(), CONVERSATION_ENTRIES);
         assert_eq!(held.front().unwrap().text, "line 5");
+    }
+
+    #[test]
+    fn only_service_owned_attachments_enter_canonical_messages() {
+        let service = service();
+        let descriptor = service
+            .attachments
+            .put("diagram.png".into(), "image/png".into(), b"image")
+            .unwrap();
+        let (_, surface_in) = surface(&service, 1, "one");
+        while surface_in.try_recv().is_ok() {}
+        let (agent_out, agent_in) = sync_channel(8);
+        service.register_agent(10, agent_out);
+        agent_in.recv().unwrap();
+
+        service.surface_message(
+            1,
+            "m-1".into(),
+            "What is this?".into(),
+            vec![descriptor.id.clone()],
+        );
+        assert!(matches!(
+            agent_in.recv().unwrap().body,
+            AgentResponseBody::Message { attachments, .. } if attachments == [descriptor.clone()]
+        ));
+        assert!(drain(&surface_in).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Message { attachments, .. } if attachments == std::slice::from_ref(&descriptor)
+        )));
+
+        service.surface_message(
+            1,
+            "m-2".into(),
+            "Invented.".into(),
+            vec!["att_missing".into()],
+        );
+        assert!(drain(&surface_in).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Rejected { code, .. } if code == "attachments_unavailable"
+        )));
     }
 
     #[test]

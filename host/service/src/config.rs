@@ -1,7 +1,6 @@
-//! Where the service gets the three things it needs to run.
+//! Where the service gets the paths it needs to run.
 //!
-//! The agent to spawn, the directory its sessions live in, and the socket to
-//! bind. The first two are named by an option or by the environment behind it,
+//! The agent to spawn, the durable data directories, and the sockets to bind. The first two are named by an option or by the environment behind it,
 //! and the socket is fixed by the session runtime directory. Nothing is read
 //! from a configuration file: a second place to say which `pi` this is would
 //! be a second place for it to be wrong.
@@ -11,7 +10,9 @@
 
 use std::{env, ffi::OsString, path::PathBuf};
 
-use scufris_control::service::{agent_socket_path, control_socket_path, surface_socket_path};
+use scufris_control::service::{
+    agent_socket_path, content_socket_path, control_socket_path, surface_socket_path,
+};
 
 /// Environment variable naming the agent program to supervise.
 pub const AGENT_VARIABLE: &str = "SCUFRIS_SERVICE_AGENT";
@@ -40,6 +41,10 @@ pub struct Config {
     pub agent_socket: PathBuf,
     /// Control socket the service binds.
     pub control_socket: PathBuf,
+    /// Private HTTP content socket the service binds.
+    pub content_socket: PathBuf,
+    /// Durable attachment store owned by the service.
+    pub attachment_dir: PathBuf,
     /// Directory the agent runs in.
     pub working_dir: PathBuf,
 }
@@ -71,6 +76,9 @@ impl Config {
                 control_socket: control_socket_path().map_err(|error| {
                     ConfigError::Missing(format!("the control socket has no path: {error}"))
                 })?,
+                content_socket: content_socket_path().map_err(|error| {
+                    ConfigError::Missing(format!("the content socket has no path: {error}"))
+                })?,
                 ..partial
             })
         })
@@ -99,6 +107,10 @@ impl Config {
             }
             None => on_path(DEFAULT_AGENT, path).ok_or(ConfigError::NoAgent)?,
         };
+        let data_home = present(data_home)
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .unwrap_or_else(|| home.join(".local/share"));
         let session_dir = match present(session_dir) {
             Some(named) => {
                 let named = PathBuf::from(named);
@@ -107,10 +119,7 @@ impl Config {
                 }
                 named
             }
-            None => match present(data_home).map(PathBuf::from) {
-                Some(data) if data.is_absolute() => data.join(DEFAULT_SESSION_SUBDIR),
-                _ => home.join(".local/share").join(DEFAULT_SESSION_SUBDIR),
-            },
+            None => data_home.join(DEFAULT_SESSION_SUBDIR),
         };
         Ok(Self {
             agent,
@@ -118,6 +127,8 @@ impl Config {
             surface_socket: PathBuf::new(),
             agent_socket: PathBuf::new(),
             control_socket: PathBuf::new(),
+            content_socket: PathBuf::new(),
+            attachment_dir: data_home.join("scufris/attachments"),
             working_dir: home,
         })
     }
@@ -145,6 +156,8 @@ impl Config {
             surface_socket: runtime.join("surface.sock"),
             agent_socket: runtime.join("agent.sock"),
             control_socket: runtime.join("control.sock"),
+            content_socket: runtime.join("content.sock"),
+            attachment_dir: runtime.join("attachments"),
             working_dir: std::env::temp_dir(),
         }
     }
@@ -209,6 +222,10 @@ mod tests {
         assert_eq!(
             config.session_dir,
             PathBuf::from("/home/a/.data/scufris/sessions")
+        );
+        assert_eq!(
+            config.attachment_dir,
+            PathBuf::from("/home/a/.data/scufris/attachments")
         );
         // An unset or relative data home is no data home. The specification
         // says absolute, and a relative one would put the conversation

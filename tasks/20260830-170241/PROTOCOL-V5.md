@@ -90,8 +90,7 @@ never logged. Range support is required before video limits are introduced.
 
 ## Incremental safety
 
-The first source slice defines and tests the v5 envelope while storage is under
-construction. The service rejects every non-empty reference with
-`attachments_unavailable` until it can resolve IDs against its own store. No v5
-source build is deployed to production before the complete coordinated staging
-rollout.
+The service accepts a non-empty reference only when it resolves against its own
+durable store. Missing, expired, and invented IDs return
+`attachments_unavailable`. No v5 source build is deployed to production before
+the complete coordinated staging rollout.

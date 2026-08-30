@@ -16,6 +16,7 @@ pub const SERVICE_VERSION: u32 = 5;
 pub const SURFACE_FILE_NAME: &str = "surface.sock";
 pub const AGENT_FILE_NAME: &str = "agent.sock";
 pub const CONTROL_FILE_NAME: &str = "control.sock";
+pub const CONTENT_FILE_NAME: &str = "content.sock";
 pub const CONVERSATION_ENTRIES: usize = 200;
 pub const MAX_SURFACE_NAME_BYTES: usize = 256;
 pub const MAX_TEXT_BYTES: usize = 8 * 1024;
@@ -40,6 +41,10 @@ pub fn agent_socket_path() -> Result<PathBuf, ControlPathError> {
 
 pub fn control_socket_path() -> Result<PathBuf, ControlPathError> {
     socket_path(CONTROL_FILE_NAME)
+}
+
+pub fn content_socket_path() -> Result<PathBuf, ControlPathError> {
+    socket_path(CONTENT_FILE_NAME)
 }
 
 fn socket_path(name: &str) -> Result<PathBuf, ControlPathError> {
@@ -429,7 +434,7 @@ fn widgets(definitions: &[WidgetDefinition]) -> Result<(), MessageError> {
     }
     Ok(())
 }
-fn attachment(value: &AttachmentDescriptor) -> Result<(), MessageError> {
+pub fn validate_attachment_descriptor(value: &AttachmentDescriptor) -> Result<(), MessageError> {
     id(&value.id, "attachment id")?;
     text(
         &value.name,
@@ -468,7 +473,7 @@ fn attachment_descriptors(value: &[AttachmentDescriptor]) -> Result<(), MessageE
         return Err(MessageError::InvalidSubmission("attachments"));
     }
     for (index, descriptor) in value.iter().enumerate() {
-        attachment(descriptor)?;
+        validate_attachment_descriptor(descriptor)?;
         if value[..index]
             .iter()
             .any(|previous| previous.id == descriptor.id)
@@ -676,6 +681,9 @@ mod tests {
         assert_ne!(SURFACE_FILE_NAME, AGENT_FILE_NAME);
         assert_ne!(SURFACE_FILE_NAME, CONTROL_FILE_NAME);
         assert_ne!(AGENT_FILE_NAME, CONTROL_FILE_NAME);
+        assert_ne!(CONTENT_FILE_NAME, SURFACE_FILE_NAME);
+        assert_ne!(CONTENT_FILE_NAME, AGENT_FILE_NAME);
+        assert_ne!(CONTENT_FILE_NAME, CONTROL_FILE_NAME);
     }
 
     #[test]

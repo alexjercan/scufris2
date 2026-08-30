@@ -73,20 +73,20 @@ transcription bodies never enter INFO or DEBUG logs.
 
 ## Delivery plan
 
-1. Define the strict protocol-v5 attachment descriptor and reference bounds
-   across Rust, TypeScript, desktop, and iOS. Keep production pinned to v1.1.1.
-2. Add the service-owned durable attachment store and private local content API.
-   Prove atomic writes, opaque IDs, direct regular-file import, quotas, expiry,
-   traversal rejection, and symlink rejection.
-3. Proxy authenticated upload, lookup, download, HEAD, and Range through the
-   existing gateway. Keep its listener loopback-only.
-4. Add the agent `store_attachment` tool and resolve attachment IDs at the
-   service boundary in both message directions.
-5. Add desktop file selection, upload, rendering, open, and save behavior.
-6. Add iOS document and photo selection, upload, rendering, download, and share
-   behavior.
-7. Deploy a complete protocol-v5 stack to staging, run end-to-end and physical
-   tests, then prepare the coordinated v2.0.0 replacement.
+1. [x] Define the strict protocol-v5 attachment descriptor and reference bounds
+       across Rust, TypeScript, desktop, and iOS. Keep production pinned to v1.1.1.
+2. [x] Add the service-owned durable attachment store and private local content API.
+       Prove atomic writes, opaque IDs, direct regular-file import, quotas, expiry,
+       traversal rejection, and symlink rejection.
+3. [ ] Proxy authenticated upload, lookup, download, HEAD, and Range through the
+       existing gateway. Keep its listener loopback-only.
+4. [ ] Add the agent `store_attachment` tool and resolve attachment IDs at the
+       service boundary in both message directions.
+5. [ ] Add desktop file selection, upload, rendering, open, and save behavior.
+6. [ ] Add iOS document and photo selection, upload, rendering, download, and share
+       behavior.
+7. [ ] Deploy a complete protocol-v5 stack to staging, run end-to-end and physical
+       tests, then prepare the coordinated v2.0.0 replacement.
 
 ## Progress
 
@@ -95,9 +95,16 @@ transcription bodies never enter INFO or DEBUG logs.
   bounded unique ID references, strict Rust and TypeScript decoding, canonical
   message fields, agent prompt carriage, final-response attachment IDs, and
   matching desktop and iOS wire types.
-- Until the service-owned store lands, non-empty attachment references are
-  rejected with `attachments_unavailable`. This prevents accepting dangling or
-  model-invented IDs during the incremental implementation.
+- Added the service-owned durable store and mode-0600 `content.sock` HTTP API.
+  It supports bounded upload, trusted local regular-file import, lookup,
+  download, and HEAD. Metadata and bytes use atomic private files under the
+  service data directory.
+- Added 512-object and 256 MiB quotas, 24-hour unreferenced and 30-day referenced
+  retention, startup expiry and orphan cleanup, 192-bit opaque IDs, and path,
+  symlink, type, media, and byte validation.
+- Surface and agent IDs now resolve to immutable descriptors before entering
+  agent messages, canonical broadcast, or replay. Missing and invented IDs are
+  rejected with `attachments_unavailable`.
 
 ## Verification
 
@@ -118,6 +125,12 @@ passed on Xcode 26.3. Repository run
 and documentation run
 [33325495888](https://github.com/alexjercan/scufris2/actions/runs/33325495888)
 also passed for commit `af6643c`.
+
+The durable-store slice passes 366 Rust tests, Clippy with warnings denied, the
+69 TypeScript tests, 95 Python tests, formatting, and `nix flake check -L`.
+Focused tests cover private durable files, restart loading, expiry, orphan
+cleanup, upload, import, download, typed missing-ID errors, path and symlink
+rejection, byte bounds, and canonical descriptor resolution.
 
 ## Acceptance
 

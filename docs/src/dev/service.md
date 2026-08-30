@@ -6,25 +6,29 @@
 surfaces -> surface.sock -> SERVICE -> agent.sock -> Pi
                               |
 terminal -> control.sock ------+
+                              |
+local HTTP -> content.sock ----+
 ```
 
 `scufris-service` owns the Pi RPC process, canonical user-facing state, and the
-latest 200 conversation messages. It exposes protocol v5 on three private Unix
-sockets:
+latest 200 conversation messages, and managed attachment content. It exposes
+three protocol-v5 sockets and one private HTTP socket:
 
 - `$XDG_RUNTIME_DIR/scufris/surface.sock`: registered desktop and synthetic
   surfaces;
 - `$XDG_RUNTIME_DIR/scufris/agent.sock`: exactly one local Pi extension; and
-- `$XDG_RUNTIME_DIR/scufris/control.sock`: local state diagnostics.
+- `$XDG_RUNTIME_DIR/scufris/control.sock`: local state diagnostics; and
+- `$XDG_RUNTIME_DIR/scufris/content.sock`: private attachment upload, import,
+  lookup, download, and HEAD operations.
 
 The runtime directory is mode 0700. Each socket is mode 0600. Set
-`SCUFRIS_RUNTIME_DIR` to place all three sockets in another directory for a
+`SCUFRIS_RUNTIME_DIR` to place all four sockets in another directory for a
 coordinated staging stack.
 
 ## Typed channels
 
 Each socket has its own inbound and outbound message enum. Every line is one
-bounded LF-terminated JSON object with `"v":4`. A wrong version is logged and
+bounded LF-terminated JSON object with `"v":5`. A wrong version is logged and
 the connection closes without a response. Clients show a local message that
 asks the user to update the host and surface together.
 
@@ -81,6 +85,29 @@ Speech is also surface-local. A ready surface may speak only a live assistant
 message whose `surface` equals its own ID. Details are displayed but never
 spoken. The service has no speech message, capability, route, audio state, or
 mute state.
+
+## Attachment ownership
+
+Attachment bytes and metadata live under
+`$XDG_DATA_HOME/scufris/attachments`. Objects and metadata files are mode 0600;
+their directories are mode 0700. IDs contain 192 random bits and do not encode
+a path.
+
+The private HTTP API accepts bounded raw uploads at `POST /attachments`, local
+regular-file imports at `POST /attachments/import`, and reads at
+`GET|HEAD /attachments/{id}`. It is available only through `content.sock`.
+Import rejects relative paths, final-component symlinks, directories, devices,
+FIFOs, empty files, and files over 16 MiB. The remote gateway never forwards
+the import operation.
+
+The store holds at most 512 objects and 256 MiB. Unreferenced uploads expire
+after 24 hours. Referenced objects survive for 30 days and canonical replay.
+Startup removes expired data, incomplete temporary files, and orphaned objects.
+
+A surface or agent sends IDs only. Before accepting a message, the service
+resolves each ID to its immutable descriptor and marks it referenced. Missing,
+expired, or invented IDs receive `attachments_unavailable`; they never enter
+the canonical conversation.
 
 ## State
 

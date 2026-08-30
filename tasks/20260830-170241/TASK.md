@@ -71,6 +71,48 @@ Example upload response and protocol descriptor:
 Errors use bounded typed JSON with a stable code and safe detail. Upload and
 transcription bodies never enter INFO or DEBUG logs.
 
+## Delivery plan
+
+1. Define the strict protocol-v5 attachment descriptor and reference bounds
+   across Rust, TypeScript, desktop, and iOS. Keep production pinned to v1.1.1.
+2. Add the service-owned durable attachment store and private local content API.
+   Prove atomic writes, opaque IDs, direct regular-file import, quotas, expiry,
+   traversal rejection, and symlink rejection.
+3. Proxy authenticated upload, lookup, download, HEAD, and Range through the
+   existing gateway. Keep its listener loopback-only.
+4. Add the agent `store_attachment` tool and resolve attachment IDs at the
+   service boundary in both message directions.
+5. Add desktop file selection, upload, rendering, open, and save behavior.
+6. Add iOS document and photo selection, upload, rendering, download, and share
+   behavior.
+7. Deploy a complete protocol-v5 stack to staging, run end-to-end and physical
+   tests, then prepare the coordinated v2.0.0 replacement.
+
+## Progress
+
+- Closed the accepted v1.1.0/v1.1.1 release task before starting v5.
+- Added the first protocol-v5 contract slice: bounded immutable descriptors,
+  bounded unique ID references, strict Rust and TypeScript decoding, canonical
+  message fields, agent prompt carriage, final-response attachment IDs, and
+  matching desktop and iOS wire types.
+- Until the service-owned store lands, non-empty attachment references are
+  rejected with `attachments_unavailable`. This prevents accepting dangling or
+  model-invented IDs during the incremental implementation.
+
+## Verification
+
+The initial contract slice passes:
+
+- `env -u PI_PACKAGE_DIR npm run check` with 69 TypeScript tests.
+- `cargo test --workspace` with 361 Rust tests.
+- `cargo clippy --workspace --all-targets -- -D warnings`.
+- 95 Python tests.
+- `nix flake check -L`.
+- Product/protocol consistency at product 1.1.1 and protocol 5.
+
+Swift protocol types and tests are updated. This Linux host has no `swiftc` or
+Xcode, so the iOS workflow must provide their compile evidence after push.
+
 ## Acceptance
 
 - Protocol v5 is strict, typed, bounded, and replaces v4 without hidden markup

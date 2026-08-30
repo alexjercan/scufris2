@@ -187,13 +187,13 @@ is not installed.
 Test ownership:
 
 - `tests/*.test.ts`: extension behavior in Node with the Pi APIs stubbed:
-  orchestration, response shaping, Calm, identity, and repository structure. `tests/service.test.ts` covers the agent side of protocol v4
+  orchestration, response shaping, Calm, identity, and repository structure. `tests/service.test.ts` covers the agent side of protocol v5
   protocol: the hello, what the agent reports, and what it does with a widget
   report.
 - `Cargo.toml`: the root Rust workspace. `shared/control/` owns the protocol encoding,
   `scufris-desktop` owns the state machine, the pending transcript store, audio
   conversion, the speaker, and the tray, and `scufris-service` owns the agent,
-  the session, and the three protocol v4 sockets. Every port is faked and the service's stand-in
+  the session, and the three protocol v5 sockets. Every port is faked and the service's stand-in
   agent is a `/bin/sh` script, so `cargo test` needs no display, no microphone,
   and no Pi.
 - `tests/test_scufris_jobs.py`: the jobs helper and inspection CLI. Lifecycle

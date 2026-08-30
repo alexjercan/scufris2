@@ -143,9 +143,11 @@ fn surface(service: Arc<Service>, stream: UnixStream, connection: u64) {
                     warn!(connection, "surface said hello twice");
                     break;
                 }
-                SurfaceRequestBody::Message { id, text } => {
-                    service.surface_message(connection, id, text)
-                }
+                SurfaceRequestBody::Message {
+                    id,
+                    text,
+                    attachments,
+                } => service.surface_message(connection, id, text, attachments),
                 SurfaceRequestBody::Abort { id } => service.surface_abort(connection, id),
             },
             Err(MessageError::Empty) => break,

@@ -26,7 +26,7 @@ struct ProtocolTests {
     }
 
     @Test
-    func helloUsesTheStrictProtocolV4SurfaceShape() throws {
+    func helloUsesTheStrictProtocolV5SurfaceShape() throws {
         let hello = SurfaceHello(
             surface: SurfaceRegistration(
                 id: "ios-test",
@@ -38,7 +38,7 @@ struct ProtocolTests {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(hello))
                 as? [String: Any]
         )
-        #expect(object["v"] as? Int == 4)
+        #expect(object["v"] as? Int == 5)
         #expect(object["type"] as? String == "surface.hello")
         let surface = try #require(object["surface"] as? [String: Any])
         #expect(surface["id"] as? String == "ios-test")
@@ -100,17 +100,45 @@ struct ProtocolTests {
     }
 
     @Test
+    func attachmentDescriptorsHaveTheCrossLanguageBounds() {
+        let descriptor = AttachmentDescriptor(
+            id: "att_0123456789",
+            name: "diagram.png",
+            mediaType: "image/png",
+            size: 184_223
+        )
+        #expect(descriptor.isProtocolValid)
+        #expect(
+            !AttachmentDescriptor(
+                id: descriptor.id,
+                name: "../secret",
+                mediaType: descriptor.mediaType,
+                size: descriptor.size
+            ).isProtocolValid
+        )
+        #expect(
+            !AttachmentDescriptor(
+                id: descriptor.id,
+                name: descriptor.name,
+                mediaType: "image png",
+                size: descriptor.size
+            ).isProtocolValid
+        )
+    }
+
+    @Test
     func conversationResponsesDecodeWithoutWidgetPresentation() throws {
         let data = Data(
-            #"{"v":4,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","details":"Passed."}"#.utf8
+            #"{"v":5,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","details":"Passed.","attachments":[]}"#.utf8
         )
         let message = try JSONDecoder().decode(
             IncomingConversationMessage.self,
             from: data
         )
-        #expect(message.v == 4)
+        #expect(message.v == 5)
         #expect(message.role == .assistant)
         #expect(message.text == "Done.")
         #expect(message.details == "Passed.")
+        #expect(message.attachments?.isEmpty == true)
     }
 }

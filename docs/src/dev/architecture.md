@@ -23,9 +23,9 @@ flowchart TB
         Helper[jobs helper] --> Tmux[owned tmux session] --> Harness[Pi or Claude]
         Durable["prompt | report | events | workspace | transcript"]
     end
-    Desktop -->|protocol v4| Service
-    IOS -->|protocol v4| Service
-    Future -->|protocol v4| Service
+    Desktop -->|protocol v5| Service
+    IOS -->|protocol v5| Service
+    Future -->|protocol v5| Service
     Service --> Pi
     Pi --> Helper
 ```
@@ -39,11 +39,11 @@ sequenceDiagram
     participant Service as scufris-service
     participant Pi as Pi + Scufris
     User->>Surface: type or speak
-    Surface->>Service: surface.message {id, text}
+    Surface->>Service: surface.message {id, text, attachments?}
     Service-->>Surface: broadcast canonical user message
-    Service->>Pi: agent.message {text, widgets}
+    Service->>Pi: agent.message {text, widgets, attachments}
     Pi->>Pi: answer now or start a durable worker
-    Pi->>Service: agent.response {text, details?, widgets?}
+    Pi->>Service: agent.response {text, details?, widgets?, attachments?}
     Service-->>Surface: validated canonical response
     Note over Surface: Associated surface may speak and run widget calls
 ```
@@ -77,7 +77,7 @@ Landing and cleanup are explicit.
 agent/extensions/scufris/   Pi lifecycle, tools, state, routing
 agent/skills/               model-facing workflow policy
 host/service/               headless conversation owner and scufris-ctl
-shared/control/             protocol v4 types, bounds, and socket paths
+shared/control/             protocol v5 types, bounds, and socket paths
 surfaces/desktop/           Linux/X11 surface, voice, windows, widgets
 surfaces/ios/               SwiftUI remote surface
 scripts/                    commands for people

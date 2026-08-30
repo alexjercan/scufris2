@@ -8,7 +8,7 @@ surface.message -> HUD
 assistant message -> text + optional speech + optional widgets
 ```
 
-`scufris-desktop` is a registered protocol v4 surface. It owns local windows,
+`scufris-desktop` is a registered protocol v5 surface. It owns local windows,
 keyboard controls, recording, transcription, speech playback, and widget
 presentation. It does not own Pi or the canonical conversation.
 
@@ -54,7 +54,7 @@ presentation only when the message's `surface` equals its persisted ID:
 
 A widget call opens the named installed widget as an exhibit and passes its
 arguments as initial data. Runtime outcomes stay local. No widget result,
-acknowledgement, asynchronous update, or close message crosses protocol v4.
+acknowledgement, asynchronous update, or close message crosses protocol v5.
 
 ## Pill and voice interaction
 

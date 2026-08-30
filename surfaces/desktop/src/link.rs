@@ -1,4 +1,4 @@
-//! Registered protocol v4 surface link.
+//! Registered protocol v5 surface link.
 
 use std::{
     io::BufReader,
@@ -115,7 +115,14 @@ impl ServiceLink {
         if !scufris_control::is_submission_text(&text) {
             return Err("That message is too long to submit.".into());
         }
-        send(&self.writer, SurfaceRequestBody::Message { id, text })
+        send(
+            &self.writer,
+            SurfaceRequestBody::Message {
+                id,
+                text,
+                attachments: vec![],
+            },
+        )
     }
 
     pub fn abort(&self, id: String) -> Result<(), String> {
@@ -212,6 +219,7 @@ fn serve(
                 text,
                 details,
                 widgets,
+                attachments,
             } => observe(LinkEvent::Message {
                 message: ConversationMessage {
                     role,
@@ -219,6 +227,7 @@ fn serve(
                     text,
                     details,
                     widgets,
+                    attachments,
                 },
                 live: ready,
             }),

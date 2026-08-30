@@ -1,6 +1,6 @@
 # Release and deploy Scufris v1.1.0
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: release, deployment
 
@@ -67,8 +67,7 @@ also passed. `nix.dotfiles` commit `7d5b0fb` pins and activates v1.1.1. An
 explicit `scufris-service` restart restarted the gateway, left both units
 active, and preserved authenticated production health.
 
-## Remaining
+## Completion
 
-- Install the current TestFlight build on the physical iPhone.
-- Confirm transient thinking feedback, hold/release recording, host
-  transcription, editable review, discard, and explicit send.
+The product owner accepted the deployed v1.1.1-compatible release on 2026-08-30.
+Any later physical review is product follow-up, not a release blocker.

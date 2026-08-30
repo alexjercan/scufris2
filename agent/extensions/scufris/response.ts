@@ -5,14 +5,14 @@ import { Text } from "@earendil-works/pi-tui";
 import { AGENT_RESPONSE_EVENT, type AtomicResponse } from "./service/client.ts";
 
 export const FINAL_TOOL = "scufris_final_response";
-export const RESPONSE_ENTRY = "scufris-response-v4";
+export const RESPONSE_ENTRY = "scufris-response-v5";
 export const maxDetailBytes = 32 * 1024;
 export const maxResponseBytes = 8 * 1024;
 export const finalResponsePolicy =
-  "Use scufris_final_response for every final answer. Put mandatory short plain prose in text, optional Markdown in details, and optional best-effort presentation calls in widgets. Call it as the only tool in the final tool batch. Do not write assistant text before or after it.";
+  "Use scufris_final_response for every final answer. Put mandatory short plain prose in text, optional Markdown in details, optional stored attachment IDs in attachments, and optional best-effort presentation calls in widgets. Call it as the only tool in the final tool batch. Do not write assistant text before or after it.";
 
 export interface ResponseEntry extends AtomicResponse {
-  version: 4;
+  version: 5;
 }
 
 export function plainProse(value: string): string | undefined {
@@ -36,7 +36,7 @@ function assistantText(message: AssistantMessage): string {
 }
 
 function emit(pi: ExtensionAPI, response: AtomicResponse): ResponseEntry {
-  const entry: ResponseEntry = { version: 4, ...response };
+  const entry: ResponseEntry = { version: 5, ...response };
   pi.appendEntry(RESPONSE_ENTRY, entry);
   pi.events.emit(AGENT_RESPONSE_EVENT, response);
   return entry;
@@ -62,7 +62,7 @@ export default function response(pi: ExtensionAPI): void {
   pi.registerEntryRenderer<ResponseEntry>(
     RESPONSE_ENTRY,
     (entry, options, theme) => {
-      if (entry.data?.version !== 4) return undefined;
+      if (entry.data?.version !== 5) return undefined;
       let rendered = entry.data.text;
       if (options.expanded && entry.data.details)
         rendered += `\n\n${entry.data.details}`;
@@ -94,6 +94,9 @@ export default function response(pi: ExtensionAPI): void {
           ? { details: input.details }
           : {}),
         ...(Array.isArray(input.widgets) ? { widgets: input.widgets } : {}),
+        ...(Array.isArray(input.attachments)
+          ? { attachments: input.attachments }
+          : {}),
       });
       return {
         message: {
@@ -135,6 +138,12 @@ export default function response(pi: ExtensionAPI): void {
           details: Type.Optional(
             Type.String({ minLength: 1, maxLength: maxDetailBytes }),
           ),
+          attachments: Type.Optional(
+            Type.Array(Type.String({ minLength: 1, maxLength: 64 }), {
+              maxItems: 8,
+              uniqueItems: true,
+            }),
+          ),
           widgets: Type.Optional(
             Type.Array(
               Type.Object(
@@ -156,6 +165,7 @@ export default function response(pi: ExtensionAPI): void {
           text: plainProse(params.text) ?? params.text,
           ...(params.details ? { details: params.details } : {}),
           ...(params.widgets ? { widgets: params.widgets } : {}),
+          ...(params.attachments ? { attachments: params.attachments } : {}),
         };
         prepared.delete(toolCallId);
         const entry = emit(pi, response);

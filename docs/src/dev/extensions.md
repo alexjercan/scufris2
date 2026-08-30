@@ -14,7 +14,7 @@ Scufris loads four foreground extensions from `agent/extensions/scufris/`:
 - `workflow/` owns distributed worker orchestration;
 - `response.ts` owns one atomic final response;
 - `calm.ts` owns the reduced foreground Pi presentation; and
-- `service/` owns the protocol v4 agent connection.
+- `service/` owns the protocol v5 agent connection.
 
 Only an orchestrator process loads foreground behavior. Worker Pi processes do
 not connect as another agent or offer desktop presentation.

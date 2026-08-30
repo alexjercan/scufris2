@@ -9,7 +9,7 @@ terminal -> control.sock ------+
 ```
 
 `scufris-service` owns the Pi RPC process, canonical user-facing state, and the
-latest 200 conversation messages. It exposes protocol v4 on three private Unix
+latest 200 conversation messages. It exposes protocol v5 on three private Unix
 sockets:
 
 - `$XDG_RUNTIME_DIR/scufris/surface.sock`: registered desktop and synthetic

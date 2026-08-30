@@ -210,6 +210,7 @@ mod tests {
             text: text.into(),
             details: None,
             widgets: None,
+            attachments: vec![],
         }
     }
 
@@ -222,6 +223,7 @@ mod tests {
             text: "what time is it".into(),
             details: None,
             widgets: None,
+            attachments: vec![],
         });
         conversation.said(said("half past four"));
         let lines = conversation.lines();

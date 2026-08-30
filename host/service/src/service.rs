@@ -1,4 +1,4 @@
-//! Canonical protocol v4 service state.
+//! Canonical protocol v5 service state.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -102,12 +102,15 @@ impl Inner {
     fn send_surface(&mut self, surface: &str, body: SurfaceResponseBody) {
         debug!(surface, payload = ?body, "sending message to surface");
         let message = SurfaceResponse::new(body);
-        let result = self
-            .surfaces
-            .get(surface)
-            .map(|held| held.sender.outbox.try_send(message));
-        if let Some(Err(error)) = result {
-            self.drop_surface(surface, &error);
+        let failure = self.surfaces.get(surface).and_then(|held| {
+            match held.sender.outbox.try_send(message) {
+                Ok(()) => None,
+                Err(TrySendError::Full(_)) => Some("it stopped reading"),
+                Err(TrySendError::Disconnected(_)) => Some("it is gone"),
+            }
+        });
+        if let Some(reason) = failure {
+            self.drop_surface(surface, reason);
         }
     }
 
@@ -116,20 +119,18 @@ impl Inner {
         let message = SurfaceResponse::new(body);
         let mut failed = Vec::new();
         for (id, held) in &self.surfaces {
-            if let Err(error) = held.sender.outbox.try_send(message.clone()) {
-                failed.push((id.clone(), error));
+            match held.sender.outbox.try_send(message.clone()) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) => failed.push((id.clone(), "it stopped reading")),
+                Err(TrySendError::Disconnected(_)) => failed.push((id.clone(), "it is gone")),
             }
         }
-        for (id, error) in failed {
-            self.drop_surface(&id, &error);
+        for (id, reason) in failed {
+            self.drop_surface(&id, reason);
         }
     }
 
-    fn drop_surface(&mut self, id: &str, error: &TrySendError<SurfaceResponse>) {
-        let reason = match error {
-            TrySendError::Full(_) => "it stopped reading",
-            TrySendError::Disconnected(_) => "it is gone",
-        };
+    fn drop_surface(&mut self, id: &str, reason: &str) {
         debug!(surface = id, reason, "a surface was dropped");
         if let Some(old) = self.surfaces.remove(id) {
             info!(
@@ -297,7 +298,13 @@ impl Service {
         inner.surface_by_connection.remove(&connection);
     }
 
-    pub fn surface_message(&self, connection: u64, id: String, text: String) {
+    pub fn surface_message(
+        &self,
+        connection: u64,
+        id: String,
+        text: String,
+        attachments: Vec<String>,
+    ) {
         let mut inner = self.lock();
         let Some((surface, generation)) = inner.surface_by_connection.get(&connection).cloned()
         else {
@@ -310,6 +317,18 @@ impl Service {
             return;
         }
         let definitions = held.registration.widgets.clone();
+        if !attachments.is_empty() {
+            inner.send_surface(
+                &surface,
+                SurfaceResponseBody::Rejected {
+                    id: Some(id),
+                    operation: "message".into(),
+                    code: "attachments_unavailable".into(),
+                    detail: "Attachment storage is not ready.".into(),
+                },
+            );
+            return;
+        }
         debug!(
             connection,
             surface,
@@ -323,6 +342,7 @@ impl Service {
             id: id.clone(),
             text: text.clone(),
             widgets: definitions,
+            attachments: vec![],
         }) {
             inner.send_surface(
                 &surface,
@@ -342,6 +362,7 @@ impl Service {
             text,
             details: None,
             widgets: None,
+            attachments: vec![],
         });
         inner.send_surface(&surface, SurfaceResponseBody::MessageAck { id });
     }
@@ -432,6 +453,7 @@ impl Service {
                 text,
                 details,
                 widgets,
+                attachments,
             } => {
                 let Some(surface) = inner.associated_surface.clone() else {
                     inner.send_agent(AgentResponseBody::Rejected {
@@ -460,12 +482,20 @@ impl Service {
                     });
                     return;
                 }
+                if !attachments.is_empty() {
+                    inner.send_agent(AgentResponseBody::Rejected {
+                        code: "attachments_unavailable".into(),
+                        detail: "Attachment storage is not ready.".into(),
+                    });
+                    return;
+                }
                 inner.record(ConversationMessage {
                     role: ConversationRole::Assistant,
                     surface,
                     text,
                     details,
                     widgets,
+                    attachments: vec![],
                 });
             }
         }
@@ -785,7 +815,7 @@ mod tests {
         let (agent, agent_in) = sync_channel(8);
         service.register_agent(10, agent);
         agent_in.recv().unwrap();
-        service.surface_message(1, "m-1".into(), "hello".into());
+        service.surface_message(1, "m-1".into(), "hello".into(), vec![]);
         let first: Vec<_> = drain(&one)
             .into_iter()
             .filter(|b| matches!(b, SurfaceResponseBody::Message { .. }))
@@ -821,7 +851,7 @@ mod tests {
         let (agent, agent_in) = sync_channel(8);
         service.register_agent(10, agent);
         agent_in.recv().unwrap();
-        service.surface_message(2, "m-1".into(), "still here".into());
+        service.surface_message(2, "m-1".into(), "still here".into(), vec![]);
         assert!(
             drain(&current)
                 .iter()
@@ -864,9 +894,9 @@ mod tests {
         let (agent, agent_in) = sync_channel(16);
         service.register_agent(10, agent);
         agent_in.recv().unwrap();
-        service.surface_message(2, "m-1".into(), "one".into());
+        service.surface_message(2, "m-1".into(), "one".into(), vec![]);
         agent_in.recv().unwrap();
-        service.surface_message(2, "m-2".into(), "two".into());
+        service.surface_message(2, "m-2".into(), "two".into(), vec![]);
         assert!(!service.lock().surfaces.contains_key("slow"));
         assert!(service.lock().surfaces.contains_key("fast"));
         assert!(
@@ -884,7 +914,7 @@ mod tests {
         service.register_agent(10, agent);
         agent_in.recv().unwrap();
         for index in 0..CONVERSATION_ENTRIES + 5 {
-            service.surface_message(1, format!("m-{index}"), format!("line {index}"));
+            service.surface_message(1, format!("m-{index}"), format!("line {index}"), vec![]);
             agent_in.recv().unwrap();
             while inbox.try_recv().is_ok() {}
         }
@@ -902,7 +932,7 @@ mod tests {
         let (agent_out, agent_in) = sync_channel(8);
         service.register_agent(10, agent_out);
         agent_in.recv().unwrap();
-        service.surface_message(1, "m-1".into(), "test".into());
+        service.surface_message(1, "m-1".into(), "test".into(), vec![]);
         assert!(matches!(
             agent_in.recv().unwrap().body,
             AgentResponseBody::Message { .. }
@@ -917,6 +947,7 @@ mod tests {
                     name: "summary".into(),
                     arguments: serde_json::json!({"passed": 4}),
                 }]),
+                attachments: vec![],
             },
         );
         assert!(drain(&inbox).iter().any(|body| matches!(body, SurfaceResponseBody::Message { role: ConversationRole::Assistant, surface, details: Some(_), widgets: Some(_), .. } if surface == "one")));
@@ -930,9 +961,9 @@ mod tests {
         let (agent, agent_in) = sync_channel(8);
         service.register_agent(10, agent);
         agent_in.recv().unwrap();
-        service.surface_message(1, "m-1".into(), "start".into());
+        service.surface_message(1, "m-1".into(), "start".into(), vec![]);
         agent_in.recv().unwrap();
-        service.surface_message(2, "m-2".into(), "steer".into());
+        service.surface_message(2, "m-2".into(), "steer".into(), vec![]);
         agent_in.recv().unwrap();
         service.agent_request(
             10,
@@ -940,6 +971,7 @@ mod tests {
                 text: "Done.".into(),
                 details: None,
                 widgets: None,
+                attachments: vec![],
             },
         );
         for inbox in [&one, &two] {

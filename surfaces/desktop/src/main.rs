@@ -1067,6 +1067,7 @@ mod tests {
                 name: "cpu".into(),
                 arguments: serde_json::json!({}),
             }]),
+            attachments: vec![],
         }
     }
 

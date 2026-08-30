@@ -34,7 +34,7 @@ interface Tick {
   level: number;
 }
 
-// Canonical protocol v4 conversation entry, relayed without reshaping.
+// Canonical protocol v5 conversation entry, relayed without reshaping.
 interface ConversationEntry {
   role: "user" | "assistant";
   surface: string;

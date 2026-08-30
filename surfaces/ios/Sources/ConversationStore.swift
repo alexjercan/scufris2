@@ -220,7 +220,8 @@ final class ConversationStore: NSObject, ObservableObject {
         dictationState = .idle
         let request = SurfaceMessageRequest(
             id: "ios-\(UUID().uuidString.lowercased())",
-            text: text
+            text: text,
+            attachments: []
         )
         Task {
             do {
@@ -418,12 +419,20 @@ final class ConversationStore: NSObject, ObservableObject {
             else {
                 throw ProtocolFailure.invalidMessage("conversation text is outside its bounds")
             }
+            let attachments = message.attachments ?? []
+            guard attachments.count <= 8,
+                  attachments.allSatisfy(\.isProtocolValid),
+                  Set(attachments.map(\.id)).count == attachments.count
+            else {
+                throw ProtocolFailure.invalidMessage("attachments are outside their bounds")
+            }
             conversation.append(
                 ConversationEntry(
                     role: message.role,
                     surface: message.surface,
                     text: message.text,
-                    details: message.details
+                    details: message.details,
+                    attachments: attachments
                 )
             )
             if message.role == .assistant {

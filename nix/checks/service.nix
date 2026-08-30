@@ -57,7 +57,7 @@ in
       ${service}/bin/scufris-surface-gateway --help | grep -F 'SCUFRIS_GATEWAY_AI_TOOLS_API'
       ! ${service}/bin/scufris-surface-gateway --nonsense
 
-      # Protocol v4 control is intentionally diagnostic-only.
+      # Protocol v5 control is intentionally diagnostic-only.
       ${ctl}/bin/scufris-ctl --help | grep -F 'Usage: scufris-ctl [COMMAND]'
       for verb in state open hud show hide; do
         ${ctl}/bin/scufris-ctl --help | grep -qE "^  $verb "

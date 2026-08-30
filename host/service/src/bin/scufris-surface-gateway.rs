@@ -642,16 +642,17 @@ mod tests {
 
     #[test]
     fn websocket_payloads_use_the_strict_surface_decoder() {
-        let request =
-            decode_request(r#"{"v":4,"type":"surface.message","id":"ios-1","text":"hello"}"#)
-                .unwrap();
+        let request = decode_request(
+            r#"{"v":5,"type":"surface.message","id":"ios-1","text":"hello","attachments":[]}"#,
+        )
+        .unwrap();
         assert!(matches!(request.body, SurfaceRequestBody::Message { .. }));
-        assert!(decode_request(r#"{"v":3,"type":"surface.hello"}"#).is_err());
+        assert!(decode_request(r#"{"v":4,"type":"surface.hello"}"#).is_err());
         assert!(decode_request("{}\n{}").is_err());
     }
 
     #[tokio::test]
-    async fn authenticated_websocket_still_bridges_strict_surface_v4() {
+    async fn authenticated_websocket_still_bridges_strict_surface_v5() {
         let root =
             std::env::temp_dir().join(format!("scufris-async-gateway-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);

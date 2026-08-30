@@ -20,6 +20,7 @@ export interface AtomicResponse {
   text: string;
   details?: string;
   widgets?: WidgetCall[];
+  attachments?: string[];
 }
 
 export function nextBackoff(current: number): number {
@@ -119,7 +120,7 @@ export class AgentClient {
           this.backoff = MIN_BACKOFF_MS;
         } else if (message.type === "agent.message") {
           this.options.sendUserMessage(
-            surfacePrompt(message.text, message.widgets),
+            surfacePrompt(message.text, message.widgets, message.attachments),
             this.options.busy(),
           );
         } else if (message.type === "agent.abort") {

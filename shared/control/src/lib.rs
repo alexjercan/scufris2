@@ -1,7 +1,7 @@
 //! Framing and paths shared by every Scufris socket.
 //!
 //! Two protocols are built on this. [`service`] defines the three typed
-//! version 4 service channels. [`command`] is the tiny local protocol the
+//! version 5 service channels. [`command`] is the tiny local protocol the
 //! companion serves for the person's own window manager.
 //!
 //! What is here is what they share: one LF-terminated JSON line per message,

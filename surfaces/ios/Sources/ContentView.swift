@@ -292,14 +292,14 @@ struct ContentView: View {
                 Button {
                     isShowingDocumentPicker = true
                 } label: {
-                    composerIcon("paperclip")
+                    ComposerIcon(name: "paperclip")
                 }
                 .disabled(!canAttach)
                 .opacity(canAttach ? 1 : 0.35)
                 .accessibilityLabel("Attach a document")
 
                 PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                    composerIcon("photo")
+                    ComposerIcon(name: "photo")
                 }
                 .disabled(!canAttach)
                 .opacity(canAttach ? 1 : 0.35)
@@ -485,15 +485,6 @@ struct ContentView: View {
         .accessibilityValue(store.dictationState.notice ?? "Ready")
     }
 
-    private func composerIcon(_ name: String) -> some View {
-        Image(systemName: name)
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(ScufrisPalette.quartz)
-            .frame(width: 44, height: 44)
-            .background(ScufrisPalette.quartz.opacity(0.08))
-            .overlay(Rectangle().stroke(ScufrisPalette.lineStrong, lineWidth: 1))
-    }
-
     private func terminalButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
@@ -505,6 +496,19 @@ struct ContentView: View {
                 .overlay(Rectangle().stroke(ScufrisPalette.lineStrong, lineWidth: 1))
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct ComposerIcon: View {
+    let name: String
+
+    var body: some View {
+        Image(systemName: name)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(ScufrisPalette.quartz)
+            .frame(width: 44, height: 44)
+            .background(ScufrisPalette.quartz.opacity(0.08))
+            .overlay(Rectangle().stroke(ScufrisPalette.lineStrong, lineWidth: 1))
     }
 }
 

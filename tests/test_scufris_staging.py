@@ -43,7 +43,7 @@ report.mkdir(parents=True, exist_ok=True)
 profile = os.environ.get("SCUFRIS_STAGING_FRONTEND")
 suffix = "-" + profile if role == "desktop" and profile else ""
 (report / (role + suffix + ".json")).write_text(
-    json.dumps({"pid": os.getpid(), "env": dict(os.environ)})
+    json.dumps({"pid": os.getpid(), "env": dict(os.environ), "argv": sys.argv[1:]})
 )
 if role == "service":
     Path(os.environ["SCUFRIS_RUNTIME_DIR"], "surface.sock").touch()
@@ -88,7 +88,7 @@ class StagingTests(unittest.TestCase):
 
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        for role in ("service", "desktop", "ai-tools-api"):
+        for role in ("service", "desktop", "gateway", "ai-tools-api"):
             stub = self.bin / role
             stub.write_text(STUB)
             stub.chmod(0o755)
@@ -105,6 +105,8 @@ class StagingTests(unittest.TestCase):
                 "SCUFRIS_STAGING_ROOT": str(self.staging),
                 "SCUFRIS_STAGING_SERVICE": str(self.bin / "service"),
                 "SCUFRIS_STAGING_DESKTOP": str(self.bin / "desktop"),
+                "SCUFRIS_STAGING_GATEWAY": str(self.bin / "gateway"),
+                "SCUFRIS_STAGING_EXTERNAL_SURFACES": "local",
                 "SCUFRIS_STAGING_AI_TOOLS_API_PACKAGE": str(self.bin / "ai-tools-api"),
                 "SCUFRIS_STAGING_REPORT": str(self.report),
             }
@@ -175,7 +177,7 @@ class StagingTests(unittest.TestCase):
         self,
     ) -> None:
         started = self.up()
-        self.started_or_fail(started, "service", "desktop")
+        self.started_or_fail(started, "service", "desktop", "gateway")
 
         for role in ("service", "desktop"):
             env = self.reported(role)["env"]
@@ -205,6 +207,19 @@ class StagingTests(unittest.TestCase):
             # With no synthesiser anywhere staging is silent, and says so
             # rather than assembling a voice a deployment would not have.
             self.assertNotIn("SCUFRIS_DESKTOP_SPEAK_COMMAND", env)
+
+        gateway = self.reported("gateway")
+        self.assertEqual(
+            gateway["argv"],
+            [
+                "--listen",
+                "127.0.0.1:10441",
+                "--token-file",
+                str(self.staging / "surface-token"),
+            ],
+        )
+        self.assertEqual((self.staging / "surface-token").stat().st_mode & 0o777, 0o600)
+        self.assertEqual(len((self.staging / "surface-token").read_text().strip()), 64)
 
         # The one directory the deployed Scufris looks in was never made.
         self.assertFalse((self.runtime / "scufris").exists())
@@ -246,6 +261,35 @@ class StagingTests(unittest.TestCase):
         self.assertEqual(
             self.reported("desktop")["env"]["SCUFRIS_DESKTOP_SPEAK_COMMAND"],
             str(self.speaker),
+        )
+
+    def test_tailscale_route_is_added_and_removed_with_the_backend(self) -> None:
+        calls = self.root / "tailscale-calls"
+        tailscale = self.bin / "tailscale"
+        tailscale.write_text(
+            "#!/bin/sh\n"
+            f"printf '%s\\n' \"$*\" >>{calls}\n"
+            "printf 'https://staging.example.ts.net/scufris-staging\\n'\n"
+        )
+        tailscale.chmod(0o755)
+
+        started = self.up(
+            SCUFRIS_STAGING_EXTERNAL_SURFACES="tailscale",
+            PATH=f"{self.bin}:{os.environ['PATH']}",
+        )
+        self.started_or_fail(started, "service", "desktop", "gateway")
+        self.assertTrue(
+            wait_for(lambda: calls.exists() and "/scufris-staging" in calls.read_text())
+        )
+        self.stop(started)
+        recorded = calls.read_text().splitlines()
+        self.assertIn(
+            "serve --bg --yes --set-path /scufris-staging http://127.0.0.1:10441",
+            recorded,
+        )
+        self.assertIn(
+            "serve --https=443 --set-path /scufris-staging off",
+            recorded,
         )
 
     def test_a_synthesiser_that_cannot_be_run_is_refused_rather_than_ignored(
@@ -316,8 +360,10 @@ class StagingTests(unittest.TestCase):
 
     def test_an_interrupt_stops_both_processes_and_ends_the_run(self) -> None:
         started = self.up()
-        self.started_or_fail(started, "service", "desktop")
-        pids = [self.reported(role)["pid"] for role in ("service", "desktop")]
+        self.started_or_fail(started, "service", "desktop", "gateway")
+        pids = [
+            self.reported(role)["pid"] for role in ("service", "desktop", "gateway")
+        ]
 
         started.send_signal(signal.SIGINT)
         output = started.communicate(timeout=20)[0]
@@ -333,7 +379,7 @@ class StagingTests(unittest.TestCase):
 
     def test_backend_and_named_frontends_can_run_independently(self) -> None:
         backend = self.start("backend")
-        self.started_or_fail(backend, "service")
+        self.started_or_fail(backend, "service", "gateway")
         self.assertFalse((self.report / "desktop.json").exists())
 
         one = self.start("frontend", "one")
@@ -396,14 +442,17 @@ class StagingTests(unittest.TestCase):
             "backend",
             SCUFRIS_STAGING_AI_TOOLS_API="managed",
         )
-        self.started_or_fail(backend, "service", "ai-tools-api")
+        self.started_or_fail(backend, "service", "gateway", "ai-tools-api")
         self.assertFalse((self.report / "desktop.json").exists())
         self.assertEqual(
             self.reported("ai-tools-api")["env"]["SCUFRIS_STAGING_AI_TOOLS_API"],
             "managed",
         )
 
-        pids = [self.reported(role)["pid"] for role in ("service", "ai-tools-api")]
+        pids = [
+            self.reported(role)["pid"]
+            for role in ("service", "gateway", "ai-tools-api")
+        ]
         self.stop(backend)
         for pid in pids:
             self.assertFalse(alive(pid), f"managed child {pid} outlived backend")

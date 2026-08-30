@@ -20,10 +20,11 @@ pkgs.writeShellApplication {
   # `flock` for the one-stack-at-a-time lock and `git` for the seeded project.
   # `pi` is not among them: the agent finds the managed one on PATH, the same
   # way `scufris-dev` does.
-  runtimeInputs = [pkgs.util-linux pkgs.git];
+  runtimeInputs = [pkgs.util-linux pkgs.git pkgs.tailscale];
   text = ''
     export SCUFRIS_STAGING_SERVICE=${pkgs.lib.getExe' service "scufris-service"}
     export SCUFRIS_STAGING_DESKTOP=${pkgs.lib.getExe' desktop "scufris-desktop"}
+    export SCUFRIS_STAGING_GATEWAY=${pkgs.lib.getExe' service "scufris-surface-gateway"}
     # The packaged frontend helper calls the shared API and plays its WAV.
     # Staging may consume a deployed API or own this pinned complete package.
     export SCUFRIS_STAGING_SPEAK=${pkgs.lib.getExe' speak "scufris-speak"}

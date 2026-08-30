@@ -25,6 +25,11 @@ Environment:
   SCUFRIS_STAGING_ROOT     staging root (default: /tmp/scufris-staging)
   SCUFRIS_STAGING_SERVICE  scufris-service binary to run
   SCUFRIS_STAGING_DESKTOP  scufris-desktop binary to run
+  SCUFRIS_STAGING_GATEWAY  scufris-surface-gateway binary to run
+  SCUFRIS_STAGING_GATEWAY_PORT
+                            loopback gateway port (default: 10441)
+  SCUFRIS_STAGING_EXTERNAL_SURFACES
+                            auto (default), tailscale, or local
   SCUFRIS_STAGING_SPEAK    HTTP speech/playback helper for each companion
   SCUFRIS_STAGING_AI_TOOLS_API
                             external (default) or managed by backend/up
@@ -36,8 +41,13 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 action="${1:-}"
 profile=""
 ai_tools_mode="${SCUFRIS_STAGING_AI_TOOLS_API:-external}"
+external_surfaces="${SCUFRIS_STAGING_EXTERNAL_SURFACES:-auto}"
 if [[ "$ai_tools_mode" != "external" && "$ai_tools_mode" != "managed" ]]; then
   printf 'scufris-staging: SCUFRIS_STAGING_AI_TOOLS_API must be external or managed\n' >&2
+  exit 2
+fi
+if [[ "$external_surfaces" != "auto" && "$external_surfaces" != "tailscale" && "$external_surfaces" != "local" ]]; then
+  printf 'scufris-staging: SCUFRIS_STAGING_EXTERNAL_SURFACES must be auto, tailscale, or local\n' >&2
   exit 2
 fi
 case "$action:$#" in
@@ -132,10 +142,13 @@ fi
 
 service="${SCUFRIS_STAGING_SERVICE:-}"
 desktop="${SCUFRIS_STAGING_DESKTOP:-}"
+gateway="${SCUFRIS_STAGING_GATEWAY:-}"
 need_service=0
 need_desktop=0
+need_gateway=0
 [[ "$action" == "up" || "$action" == "backend" ]] && need_service=1
 [[ "$action" == "up" || "$action" == "frontend" ]] && need_desktop=1
+((need_service)) && need_gateway=1
 
 build_args=()
 if ((need_service)) && [[ -z "$service" ]]; then
@@ -145,6 +158,10 @@ fi
 if ((need_desktop)) && [[ -z "$desktop" ]]; then
   desktop="$root/target/debug/scufris-desktop"
   build_args+=(--bin scufris-desktop)
+fi
+if ((need_gateway)) && [[ -z "$gateway" ]]; then
+  gateway="$root/target/debug/scufris-surface-gateway"
+  build_args+=(--bin scufris-surface-gateway)
 fi
 if ((${#build_args[@]})); then
   printf 'scufris-staging: building the working tree\n'
@@ -157,6 +174,28 @@ fi
 if ((need_desktop)) && [[ ! -x "$desktop" ]]; then
   printf 'scufris-staging: %s is not executable\n' "$desktop" >&2
   exit 2
+fi
+if ((need_gateway)) && [[ ! -x "$gateway" ]]; then
+  printf 'scufris-staging: %s is not executable\n' "$gateway" >&2
+  exit 2
+fi
+
+gateway_port="${SCUFRIS_STAGING_GATEWAY_PORT:-10441}"
+if [[ ! "$gateway_port" =~ ^[0-9]+$ ]] || ((gateway_port < 1 || gateway_port > 65535)); then
+  printf 'scufris-staging: SCUFRIS_STAGING_GATEWAY_PORT must be a TCP port\n' >&2
+  exit 2
+fi
+gateway_token="$staging/surface-token"
+if ((need_gateway)) && [[ ! -e "$gateway_token" ]]; then
+  umask 077
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32 >"$gateway_token"
+  else
+    head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$gateway_token"
+  fi
+fi
+if ((need_gateway)); then
+  chmod 0600 "$gateway_token"
 fi
 
 export SCUFRIS_RUNTIME_DIR="$runtime_dir"
@@ -205,6 +244,7 @@ scufris-staging: the staging environment
   SCUFRIS_STT_ENDPOINT=$SCUFRIS_STT_ENDPOINT
   SCUFRIS_TTS_ENDPOINT=$SCUFRIS_TTS_ENDPOINT
   ai_tools_api=$ai_tools_mode
+  external_surfaces=$external_surfaces
 EOF
 if ((need_desktop)); then
   cat <<EOF
@@ -219,25 +259,37 @@ EOF
 fi
 if ((need_service)); then
   printf '  service=%s\n' "$service"
+  printf '  gateway=%s\n' "$gateway"
+  printf '  gateway_token=%s\n' "$gateway_token"
+  printf '  gateway_loopback=ws://127.0.0.1:%s/\n' "$gateway_port"
   printf '\nscufris-staging: reach the backend with\n  SCUFRIS_RUNTIME_DIR=%s scufris-ctl state\n' "$runtime_dir"
 fi
 
 service_pid=""
 desktop_pid=""
+gateway_pid=""
 ai_tools_pid=""
+tailscale_route=0
 signalled=0
 stop_children() {
   local pid
-  for pid in "$desktop_pid" "$service_pid" "$ai_tools_pid"; do
+  for pid in "$desktop_pid" "$gateway_pid" "$service_pid" "$ai_tools_pid"; do
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       kill -TERM "$pid" 2>/dev/null || true
     fi
   done
 }
+remove_external_route() {
+  if ((tailscale_route)); then
+    tailscale serve --https=443 --set-path /scufris-staging off >/dev/null 2>&1 || true
+    tailscale_route=0
+  fi
+}
 # shellcheck disable=SC2329
 teardown() {
   signalled=1
   printf '\nscufris-staging: stopping\n'
+  remove_external_route
   stop_children
 }
 trap teardown INT TERM
@@ -257,6 +309,24 @@ if ((need_service)); then
   service_pid=$!
   printf 'scufris-staging: service pid %d\n' "$service_pid"
 fi
+if ((need_gateway)); then
+  "$gateway" --listen "127.0.0.1:$gateway_port" --token-file "$gateway_token" &
+  gateway_pid=$!
+  printf 'scufris-staging: gateway pid %d\n' "$gateway_pid"
+  if [[ "$external_surfaces" != "local" ]]; then
+    if command -v tailscale >/dev/null 2>&1 && \
+      tailscale serve --bg --yes --set-path /scufris-staging "http://127.0.0.1:$gateway_port"; then
+      tailscale_route=1
+      printf 'scufris-staging: external surfaces use the displayed URL with /scufris-staging\n'
+    elif [[ "$external_surfaces" == "tailscale" ]]; then
+      printf 'scufris-staging: Tailscale Serve could not publish the staging gateway\n' >&2
+      stop_children
+      exit 2
+    else
+      printf 'scufris-staging: Tailscale Serve unavailable; the gateway stays loopback-only\n'
+    fi
+  fi
+fi
 if ((need_desktop)); then
   "$desktop" &
   desktop_pid=$!
@@ -264,9 +334,10 @@ if ((need_desktop)); then
 fi
 
 wait -n || true
+remove_external_route
 stop_children
 status=0
-for named in "service:$service_pid" "desktop:$desktop_pid" "ai-tools-api:$ai_tools_pid"; do
+for named in "service:$service_pid" "gateway:$gateway_pid" "desktop:$desktop_pid" "ai-tools-api:$ai_tools_pid"; do
   name="${named%%:*}"
   pid="${named#*:}"
   [[ -z "$pid" ]] && continue

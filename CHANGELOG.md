@@ -9,6 +9,15 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Changed
+
+- An answer nobody asked for is displayed instead of refused. A morning
+  briefing or a finished job that speaks before the owner has used any surface
+  is shown on every surface, against a reserved name that none of them holds,
+  so it is never spoken aloud and never runs a live widget call. It used to be
+  rejected, which meant the first briefing after a restart reached nothing and
+  was not kept in the conversation either.
+
 ### Added
 
 - An unprompted morning briefing. A project declares `[briefings.morning]` in

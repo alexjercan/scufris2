@@ -18,6 +18,14 @@ pub const AGENT_FILE_NAME: &str = "agent.sock";
 pub const CONTROL_FILE_NAME: &str = "control.sock";
 pub const CONTENT_FILE_NAME: &str = "content.sock";
 pub const CONVERSATION_ENTRIES: usize = 200;
+/// The surface an unprompted answer carries when no surface has spoken yet.
+///
+/// A briefing or a finished job can answer a service nobody has used since it
+/// started, and that answer still belongs on every screen. It is recorded
+/// against this name instead of a surface, so every surface displays it and
+/// none of them matches it: nothing is spoken, and no live widget call runs.
+/// No surface may register it, which is what keeps that true.
+pub const UNPROMPTED_SURFACE: &str = "unprompted";
 pub const MAX_SURFACE_NAME_BYTES: usize = 256;
 pub const MAX_TEXT_BYTES: usize = 8 * 1024;
 pub const MAX_DETAILS_BYTES: usize = 32 * 1024;
@@ -513,6 +521,9 @@ fn calls(value: &Option<Vec<WidgetCall>>) -> Result<(), MessageError> {
 }
 fn validate_registration(surface: &SurfaceRegistration) -> Result<(), MessageError> {
     id(&surface.id, "surface id")?;
+    if surface.id == UNPROMPTED_SURFACE {
+        return Err(MessageError::InvalidSubmission("surface id"));
+    }
     text(&surface.name, MAX_SURFACE_NAME_BYTES, "surface name", false)?;
     widgets(&surface.widgets)
 }
@@ -664,6 +675,23 @@ mod tests {
         let outbound = b"{\"v\":5,\"type\":\"surface.ready\",\"surface\":\"desk\"}\n";
         assert!(read_surface_response(&mut Cursor::new(outbound)).is_ok());
         assert!(read_surface_request(&mut Cursor::new(outbound)).is_err());
+    }
+
+    #[test]
+    fn no_surface_may_register_the_name_an_unprompted_answer_carries() {
+        // An unprompted answer is displayed against a name no surface holds,
+        // which is what keeps it unspoken. A surface allowed to take that name
+        // would speak every briefing the owner never asked for.
+        let hello = |id: &str| {
+            format!(
+                "{{\"v\":5,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{id}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
+            )
+        };
+        assert!(read_surface_request(&mut Cursor::new(hello("desk"))).is_ok());
+        assert!(matches!(
+            read_surface_request(&mut Cursor::new(hello(UNPROMPTED_SURFACE))),
+            Err(MessageError::InvalidSubmission("surface id"))
+        ));
     }
 
     #[test]

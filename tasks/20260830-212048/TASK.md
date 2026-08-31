@@ -137,12 +137,16 @@ Completed on 2026-08-31:
 - The page is a deterministic render of a completed run. Chat and the page read
   the same manifest and the same contributions.
 - Association after a fresh service restart: an answer sent before any surface
-  message is rejected with `no_surface` and reaches no surface at all. There is
-  no display-only period. `scufris_briefing_publish` writes the prose and the
-  page before Scufris speaks, so the run holds the briefing whether or not chat
-  accepted it, and the run is already `delivered`, so no later session collects
-  the morning twice. `a_proactive_response_waits_for_the_first_surface_message`
-  in `host/service/src/service.rs` holds the behavior, and
+  message was rejected with `no_surface` and reached no surface at all. A live
+  staging run on 2026-08-31 showed what that costs - the briefing was written
+  and rendered, and the conversation stayed empty. The service now records such
+  an answer against the reserved surface name `unprompted`, so every surface
+  displays it and none speaks it. That is the display-only period this
+  acceptance asked about.
+  `an_unprompted_response_is_shown_by_every_surface_and_spoken_by_none` in
+  `host/service/src/service.rs` holds it,
+  `no_surface_may_register_the_name_an_unprompted_answer_carries` in
+  `shared/control/src/service.rs` keeps the name unclaimable, and
   `docs/src/dev/briefings.md` and `docs/src/dev/surfaces.md` document it.
 - Seedzero declares no briefing yet, so it is not part of this run. Its entry is
   three fields in its own `.scufris.toml` and needs no change here.

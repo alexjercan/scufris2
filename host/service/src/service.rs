@@ -15,7 +15,7 @@ use std::{
 use scufris_control::service::{
     AgentRequestBody, AgentResponse, AgentResponseBody, AgentState, CONVERSATION_ENTRIES,
     ConversationMessage, ConversationRole, MAX_DETAIL_BYTES, ScufrisState, SurfaceRegistration,
-    SurfaceResponse, SurfaceResponseBody, WidgetCall, WidgetDefinition,
+    SurfaceResponse, SurfaceResponseBody, UNPROMPTED_SURFACE, WidgetCall, WidgetDefinition,
 };
 use serde_json::Value;
 use tracing::{debug, error, info, warn};
@@ -461,32 +461,39 @@ impl Service {
                 widgets,
                 attachments,
             } => {
-                let Some(surface) = inner.associated_surface.clone() else {
-                    inner.send_agent(AgentResponseBody::Rejected {
-                        code: "no_surface".into(),
-                        detail: "No surface message is associated with this response.".into(),
-                    });
-                    return;
-                };
-                let Some(registration) = inner
-                    .surfaces
-                    .get(&surface)
-                    .map(|held| held.registration.clone())
-                else {
-                    inner.send_agent(AgentResponseBody::Rejected {
-                        code: "surface_unavailable".into(),
-                        detail: "The associated surface is not connected.".into(),
-                    });
-                    return;
-                };
-                if let Some(calls) = &widgets
-                    && let Err(detail) = validate_calls(calls, &registration.widgets)
-                {
-                    inner.send_agent(AgentResponseBody::Rejected {
-                        code: "invalid_widgets".into(),
-                        detail,
-                    });
-                    return;
+                // An answer nobody asked for - a morning briefing, a finished
+                // job - can reach a service no surface has spoken to yet. It
+                // is displayed rather than refused, against a surface name no
+                // surface may hold, so every screen shows it and none speaks
+                // it. Presentation belongs to the surface that asked; being
+                // told what happened belongs to all of them.
+                let unprompted = inner.associated_surface.is_none();
+                let surface = inner
+                    .associated_surface
+                    .clone()
+                    .unwrap_or_else(|| UNPROMPTED_SURFACE.to_string());
+                let widgets = if unprompted { None } else { widgets };
+                if !unprompted {
+                    let Some(registration) = inner
+                        .surfaces
+                        .get(&surface)
+                        .map(|held| held.registration.clone())
+                    else {
+                        inner.send_agent(AgentResponseBody::Rejected {
+                            code: "surface_unavailable".into(),
+                            detail: "The associated surface is not connected.".into(),
+                        });
+                        return;
+                    };
+                    if let Some(calls) = &widgets
+                        && let Err(detail) = validate_calls(calls, &registration.widgets)
+                    {
+                        inner.send_agent(AgentResponseBody::Rejected {
+                            code: "invalid_widgets".into(),
+                            detail,
+                        });
+                        return;
+                    }
                 }
                 let descriptors = match self.attachments.resolve(&attachments, true) {
                     Ok(descriptors) => descriptors,
@@ -1041,9 +1048,10 @@ mod tests {
     }
 
     #[test]
-    fn a_proactive_response_waits_for_the_first_surface_message() {
+    fn an_unprompted_response_is_shown_by_every_surface_and_spoken_by_none() {
         let service = service();
         let (_, one) = surface(&service, 1, "one");
+        let (_, two) = surface(&service, 2, "two");
         let (agent, agent_in) = sync_channel(8);
         service.register_agent(10, agent);
         agent_in.recv().unwrap();
@@ -1053,26 +1061,36 @@ mod tests {
             AgentRequestBody::Response {
                 text: "Good morning.".into(),
                 details: None,
-                widgets: None,
+                widgets: Some(vec![WidgetCall {
+                    id: "w-1".into(),
+                    name: "summary".into(),
+                    arguments: serde_json::json!({}),
+                }]),
                 attachments: vec![],
             },
         );
-        assert!(
-            matches!(agent_in.recv().unwrap().body, AgentResponseBody::Rejected { code, .. } if code == "no_surface")
-        );
-        assert!(
-            !drain(&one)
-                .iter()
-                .any(|body| matches!(body, SurfaceResponseBody::Message { .. }))
-        );
-        // The owner's first message associates the surface, and the same
-        // response then lands on it.
+        for inbox in [&one, &two] {
+            assert!(drain(inbox).iter().any(|body| matches!(
+                body,
+                SurfaceResponseBody::Message {
+                    role: ConversationRole::Assistant,
+                    surface,
+                    widgets: None,
+                    ..
+                } if surface == UNPROMPTED_SURFACE
+            )));
+        }
+        // Nothing was refused, and no surface was named, so nothing is spoken.
+        assert!(agent_in.try_recv().is_err());
+
+        // The owner's first message associates a surface, and the answer after
+        // it is that surface's to speak.
         service.surface_message(1, "m-1".into(), "hello".into(), vec![]);
         agent_in.recv().unwrap();
         service.agent_request(
             10,
             AgentRequestBody::Response {
-                text: "Good morning.".into(),
+                text: "Good morning again.".into(),
                 details: None,
                 widgets: None,
                 attachments: vec![],
@@ -1082,8 +1100,9 @@ mod tests {
             body,
             SurfaceResponseBody::Message {
                 role: ConversationRole::Assistant,
+                surface,
                 ..
-            }
+            } if surface == "one"
         )));
     }
 }

@@ -156,23 +156,22 @@ home. Chat reaches every surface; the page opens when it is asked for.
 
 ### Before the owner speaks
 
-The service associates an answer with the surface that sent the last message. A
-service that has just started holds no association at all, so a briefing
-delivered before anyone has spoken is rejected with `no_surface` and reported as
-an error notice. There is no display-only period: the answer is not shown on a
-surface and then left unspoken, it never reaches a surface. Once the owner
-speaks once, the ordinary rule applies again, and every surface displays the
-answer while only the associated ready surface speaks it.
+The service associates an answer with the surface that sent the last message,
+and a service that has just started holds no association at all. The morning
+briefing is the ordinary case of that: it is the first thing said after a
+restart, before anyone has typed anything.
 
-Nothing is lost when that happens. `scufris_briefing_publish` writes the prose
-and the page before Scufris says anything, so the run holds the briefing whether
-or not chat accepted it, and the run is already `delivered`, so no later session
-collects the morning twice. The owner reads it with `scufris_briefing_show` or
-opens the page.
+Such an answer is displayed rather than refused. It is recorded against the
+reserved surface name `unprompted`, so every surface shows it and none of them
+matches it: nothing is spoken aloud, and no live widget call runs. That is the
+display-only period. Once the owner speaks once, the association is set for the
+life of the service and the ordinary rule applies, so a briefing is spoken by
+the surface the owner last used.
 
 This is not particular to briefings. Every proactive wake shares it, a finished
-job included. `a_proactive_response_waits_for_the_first_surface_message` in
-`host/service/src/service.rs` holds the behavior.
+job included. `an_unprompted_response_is_shown_by_every_surface_and_spoken_by_none`
+in `host/service/src/service.rs` holds the behavior, and no surface may register
+that name.
 
 ## Tools
 

@@ -60,6 +60,9 @@ test("content socket resolution is isolated from the agent channel", () => {
 test("attachment media types are deterministic and bounded to known suffixes", () => {
   assert.equal(attachmentMediaType("REPORT.PDF"), "application/pdf");
   assert.equal(attachmentMediaType("photo.jpeg"), "image/jpeg");
+  assert.equal(attachmentMediaType("clip.mp4"), "video/mp4");
+  assert.equal(attachmentMediaType("clip.MOV"), "video/quicktime");
+  assert.equal(attachmentMediaType("clip.webm"), "video/webm");
   assert.equal(
     attachmentMediaType("archive.unknown"),
     "application/octet-stream",

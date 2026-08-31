@@ -67,9 +67,29 @@
     return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
   };
 
-  const hasInlineImage = (descriptor: AttachmentDescriptor): boolean =>
-    descriptor.media_type.startsWith("image/") &&
-    descriptor.media_type !== "image/svg+xml";
+  const presentationMediaType = (descriptor: AttachmentDescriptor): string => {
+    if (descriptor.media_type !== "application/octet-stream")
+      return descriptor.media_type;
+    const extension = descriptor.name.split(".").pop()?.toLowerCase();
+    const videoTypes: Record<string, string> = {
+      m4v: "video/x-m4v",
+      mkv: "video/x-matroska",
+      mov: "video/quicktime",
+      mp4: "video/mp4",
+      webm: "video/webm",
+    };
+    return extension === undefined
+      ? descriptor.media_type
+      : (videoTypes[extension] ?? descriptor.media_type);
+  };
+
+  const hasInlineImage = (descriptor: AttachmentDescriptor): boolean => {
+    const mediaType = presentationMediaType(descriptor);
+    return mediaType.startsWith("image/") && mediaType !== "image/svg+xml";
+  };
+
+  const hasInlineVideo = (descriptor: AttachmentDescriptor): boolean =>
+    presentationMediaType(descriptor).startsWith("video/");
 
   const action = (
     label: string,
@@ -123,13 +143,21 @@
           image.alt = descriptor.name;
           image.loading = "lazy";
           item.append(image);
+        } else if (hasInlineVideo(descriptor)) {
+          const video = document.createElement("video");
+          video.className = "attachment-preview attachment-video";
+          video.src = `scufris-attachment://content/${descriptor.id}`;
+          video.controls = true;
+          video.preload = "metadata";
+          video.title = descriptor.name;
+          item.append(video);
         }
         const identity = document.createElement("span");
         identity.className = "attachment-identity";
         const name = document.createElement("strong");
         name.textContent = descriptor.name;
         const metadata = document.createElement("small");
-        metadata.textContent = `${descriptor.media_type} - ${size(descriptor.size)}`;
+        metadata.textContent = `${presentationMediaType(descriptor)} - ${size(descriptor.size)}`;
         identity.append(name, metadata);
         item.append(identity);
         item.append(

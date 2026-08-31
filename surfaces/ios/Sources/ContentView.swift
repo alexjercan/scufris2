@@ -697,7 +697,7 @@ private struct AttachmentCard: View {
                 .foregroundStyle(ScufrisPalette.foregroundStrong)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Text("\(attachment.mediaType) - \(attachment.displaySize)")
+            Text("\(attachment.presentationMediaType) - \(attachment.displaySize)")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(ScufrisPalette.muted)
         }
@@ -818,11 +818,24 @@ private extension AttachmentDescriptor {
     }
 
     var hasRasterImageThumbnail: Bool {
-        mediaType.hasPrefix("image/") && mediaType != "image/svg+xml"
+        presentationMediaType.hasPrefix("image/")
+            && presentationMediaType != "image/svg+xml"
     }
 
     var hasVideoThumbnail: Bool {
-        mediaType.hasPrefix("video/")
+        presentationMediaType.hasPrefix("video/")
+    }
+
+    var presentationMediaType: String {
+        guard mediaType == "application/octet-stream" else { return mediaType }
+        switch (name as NSString).pathExtension.lowercased() {
+        case "m4v": return "video/x-m4v"
+        case "mkv": return "video/x-matroska"
+        case "mov": return "video/quicktime"
+        case "mp4": return "video/mp4"
+        case "webm": return "video/webm"
+        default: return mediaType
+        }
     }
 
     var displaySize: String {

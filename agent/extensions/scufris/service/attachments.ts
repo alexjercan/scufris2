@@ -26,11 +26,16 @@ const MEDIA_TYPES: Readonly<Record<string, string>> = {
   ".jpeg": "image/jpeg",
   ".jpg": "image/jpeg",
   ".json": "application/json",
+  ".m4v": "video/x-m4v",
   ".md": "text/markdown",
+  ".mkv": "video/x-matroska",
+  ".mov": "video/quicktime",
+  ".mp4": "video/mp4",
   ".pdf": "application/pdf",
   ".png": "image/png",
   ".svg": "image/svg+xml",
   ".txt": "text/plain",
+  ".webm": "video/webm",
   ".webp": "image/webp",
 };
 

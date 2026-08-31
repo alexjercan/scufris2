@@ -91,6 +91,8 @@ class Stub {
   src = "";
   alt = "";
   loading = "";
+  controls = false;
+  preload = "";
   width = 0;
   height = 0;
   offsetWidth = 0;
@@ -923,6 +925,30 @@ test("managed attachments are selected, rendered inline, saved, and removed by i
   await settle();
   assert.equal(page.lastCall("hud_detach")["id"], "att_one");
   assert.equal(selected.children.length, 0);
+});
+
+test("octet-stream videos use their filename for inline playback", async () => {
+  const descriptor = {
+    id: "att_video",
+    name: "answer.mp4",
+    media_type: "application/octet-stream",
+    size: 4096,
+  };
+  const page = hud();
+  await settle();
+
+  page.publish("scufris://said", {
+    ...line("assistant", "Here is the video."),
+    attachments: [descriptor],
+  });
+  const card = page.element("lines").children[0]?.children[2]?.children[0];
+  assert.ok(card !== undefined);
+  const video = card.children[0];
+  assert.equal(video?.className, "attachment-preview attachment-video");
+  assert.equal(video?.src, "scufris-attachment://content/att_video");
+  assert.equal(video?.controls, true);
+  assert.equal(video?.preload, "metadata");
+  assert.equal(card.children[1]?.children[1]?.textContent, "video/mp4 - 4 KiB");
 });
 
 test("a person who has scrolled up to read is not dragged back down", async () => {

@@ -67,12 +67,13 @@ impl AttachmentClient {
         Ok(descriptor)
     }
 
-    /// Returns one bounded raster image for inline conversation presentation.
-    pub fn image(&self, descriptor: &AttachmentDescriptor) -> Result<Vec<u8>, String> {
-        if !inline_image(&descriptor.media_type) {
-            return Err(unavailable());
-        }
-        self.download(descriptor)
+    /// Returns one bounded image or video for inline conversation presentation.
+    pub fn presentation<'a>(
+        &self,
+        descriptor: &'a AttachmentDescriptor,
+    ) -> Result<(&'a str, Vec<u8>), String> {
+        let media_type = presentation_media_type(descriptor).ok_or_else(unavailable)?;
+        Ok((media_type, self.download(descriptor)?))
     }
 
     /// Downloads canonical bytes and writes them to the selected destination.
@@ -141,8 +142,20 @@ fn import_failure(status: StatusCode, body: &[u8]) -> String {
     }
 }
 
-fn inline_image(media_type: &str) -> bool {
-    media_type.starts_with("image/") && media_type != "image/svg+xml"
+fn inline_media(media_type: &str) -> bool {
+    (media_type.starts_with("image/") && media_type != "image/svg+xml")
+        || media_type.starts_with("video/")
+}
+
+fn presentation_media_type(descriptor: &AttachmentDescriptor) -> Option<&str> {
+    if inline_media(&descriptor.media_type) {
+        return Some(&descriptor.media_type);
+    }
+    if descriptor.media_type != "application/octet-stream" {
+        return None;
+    }
+    let inferred = media_type(Path::new(&descriptor.name));
+    inline_media(inferred).then_some(inferred)
 }
 
 fn media_type(path: &Path) -> &'static str {
@@ -160,11 +173,16 @@ fn media_type(path: &Path) -> &'static str {
         Some("html") => "text/html",
         Some("jpeg" | "jpg") => "image/jpeg",
         Some("json") => "application/json",
+        Some("m4v") => "video/x-m4v",
         Some("md") => "text/markdown",
+        Some("mkv") => "video/x-matroska",
+        Some("mov") => "video/quicktime",
+        Some("mp4") => "video/mp4",
         Some("pdf") => "application/pdf",
         Some("png") => "image/png",
         Some("svg") => "image/svg+xml",
         Some("txt") => "text/plain",
+        Some("webm") => "video/webm",
         Some("webp") => "image/webp",
         _ => "application/octet-stream",
     }
@@ -212,6 +230,8 @@ mod tests {
     #[test]
     fn known_file_extensions_have_conservative_media_types() {
         assert_eq!(media_type(Path::new("IMAGE.JPEG")), "image/jpeg");
+        assert_eq!(media_type(Path::new("clip.MP4")), "video/mp4");
+        assert_eq!(media_type(Path::new("clip.mov")), "video/quicktime");
         assert_eq!(
             media_type(Path::new("archive.unknown")),
             "application/octet-stream"
@@ -220,8 +240,18 @@ mod tests {
             media_type(Path::new("no-extension")),
             "application/octet-stream"
         );
-        assert!(inline_image("image/png"));
-        assert!(!inline_image("image/svg+xml"));
+        assert!(inline_media("image/png"));
+        assert!(inline_media("video/mp4"));
+        assert!(!inline_media("image/svg+xml"));
+        let mut descriptor = AttachmentDescriptor {
+            id: "a".repeat(48),
+            name: "answer.mp4".into(),
+            media_type: "application/octet-stream".into(),
+            size: 10,
+        };
+        assert_eq!(presentation_media_type(&descriptor), Some("video/mp4"));
+        descriptor.name = "answer.bin".into();
+        assert_eq!(presentation_media_type(&descriptor), None);
     }
 
     #[test]

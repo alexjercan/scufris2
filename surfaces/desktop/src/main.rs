@@ -394,9 +394,10 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                 })
                 .build(),
         )
-        // Canonical raster attachments are served only to the conversation
-        // webview. The page receives an opaque URL; this boundary resolves the
-        // ID from canonical replay and downloads bounded bytes from content.sock.
+        // Canonical image and video attachments are served only to the
+        // conversation webview. The page receives an opaque URL; this boundary
+        // resolves the ID from canonical replay and downloads bounded bytes
+        // from content.sock.
         .register_uri_scheme_protocol("scufris-attachment", |ctx, request| {
             if ctx.webview_label() != hud::LABEL {
                 return refused();
@@ -408,9 +409,9 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                 .and_then(|conversation| conversation.attachment(id));
             let client = ctx.app_handle().try_state::<Arc<AttachmentClient>>();
             match (descriptor, client) {
-                (Some(descriptor), Some(client)) => match client.image(&descriptor) {
-                    Ok(bytes) => http::Response::builder()
-                        .header(http::header::CONTENT_TYPE, descriptor.media_type)
+                (Some(descriptor), Some(client)) => match client.presentation(&descriptor) {
+                    Ok((media_type, bytes)) => http::Response::builder()
+                        .header(http::header::CONTENT_TYPE, media_type)
                         .header("x-content-type-options", "nosniff")
                         .body(bytes)
                         .unwrap_or_else(|_| refused()),

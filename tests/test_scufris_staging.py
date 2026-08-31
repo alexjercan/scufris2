@@ -313,6 +313,30 @@ class StagingTests(unittest.TestCase):
         self.assertEqual(refused.returncode, 2, refused.stderr)
         self.assertIn("not executable", refused.stderr)
 
+    def test_a_root_seeded_before_the_briefing_gains_its_declaration(self) -> None:
+        seeded = self.staging / "projects" / "hello"
+        seeded.mkdir(parents=True)
+        (seeded / "README.md").write_text("# hello\n")
+        for command in (
+            ["git", "-C", str(seeded), "init", "-q", "-b", "master"],
+            ["git", "-C", str(seeded), "config", "user.email", "old@scufris.invalid"],
+            ["git", "-C", str(seeded), "config", "user.name", "Old Staging"],
+            ["git", "-C", str(seeded), "add", "README.md"],
+            ["git", "-C", str(seeded), "commit", "-q", "-m", "Seed the staging project"],
+        ):
+            subprocess.run(command, check=True, capture_output=True)
+
+        started = self.up()
+        self.started_or_fail(started, "service")
+        self.assertIn("[briefings.morning]", (seeded / ".scufris.toml").read_text())
+        log = subprocess.run(
+            ["git", "-C", str(seeded), "log", "--oneline"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(len(log.stdout.splitlines()), 2, log.stdout)
+
     def test_a_fresh_root_is_seeded_with_a_project_and_a_pi_directory(self) -> None:
         started = self.up()
         self.started_or_fail(started, "service")

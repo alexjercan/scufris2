@@ -112,13 +112,10 @@ fi
 # A fresh backend root gets a harmless project and an isolated Pi settings
 # directory. Frontends can also perform this idempotent setup after a backend
 # starts, which keeps command ordering deterministic without shared mutation.
-if [[ -z "$(ls -A -- "$projects")" ]]; then
-  seed="$projects/hello"
-  mkdir -p -- "$seed"
-  printf '# hello\n\nA staging project. Nothing here is real work.\n' >"$seed/README.md"
-  # A briefing source, so a staging stack exercises the morning end to end
-  # against this project instead of finding nothing to ask.
-  cat >"$seed/.scufris.toml" <<'CONFIGURATION'
+seed="$projects/hello"
+# The seeded project declares a briefing, so a staging stack exercises the
+# morning end to end against this project instead of finding nothing to ask.
+read -r -d '' seed_briefing <<'CONFIGURATION' || true
 [briefings.morning]
 description = "Report this staging project."
 keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "low" }
@@ -128,12 +125,24 @@ many commits it holds. Nothing here is real work, so the status is `ok` and the
 body is one line. This source exists so a staging stack has a morning to run.
 """
 CONFIGURATION
+
+if [[ -z "$(ls -A -- "$projects")" ]]; then
+  mkdir -p -- "$seed"
+  printf '# hello\n\nA staging project. Nothing here is real work.\n' >"$seed/README.md"
+  printf '%s\n' "$seed_briefing" >"$seed/.scufris.toml"
   git -C "$seed" init -q -b master
   git -C "$seed" config user.email "staging@scufris.invalid"
   git -C "$seed" config user.name "Scufris Staging"
   git -C "$seed" add README.md .scufris.toml
   git -C "$seed" commit -q -m "Seed the staging project"
   printf 'scufris-staging: seeded %s\n' "$seed"
+elif [[ -d "$seed/.git" && ! -e "$seed/.scufris.toml" ]]; then
+  # A root seeded before the briefing existed keeps its project and never
+  # enters the block above, so the declaration is added on its own.
+  printf '%s\n' "$seed_briefing" >"$seed/.scufris.toml"
+  git -C "$seed" add .scufris.toml
+  git -C "$seed" commit -q -m "Declare the staging briefing source"
+  printf 'scufris-staging: declared the briefing in %s\n' "$seed"
 fi
 
 if [[ ! -e "$pi_agent/settings.json" ]]; then

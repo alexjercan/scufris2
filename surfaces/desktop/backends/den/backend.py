@@ -31,8 +31,9 @@ Every line after it is an action:
     {"action": "promote", "index": 1}
     {"action": "weight", "value": "81.4"}
     {"action": "food", "name": "chicken breast:g", "amount": "150"}
-    {"action": "lift", "split": "Push", "exercise": "bench press",
-     "weight": "60", "reps": "8"}
+    {"action": "lift", "exercise": "bench press", "sets": "60x8 60x8 60x6"}
+    {"action": "relift", "was": "bench press", "exercise": "bench press", "sets": "60x8"}
+    {"action": "split", "split": "push"}
     {"action": "note", "heading": "Standup", "body": "..."}
     {"action": "edit", "index": 2, "heading": "Standup", "body": "..."}
     {"action": "search", "name": "chick"}
@@ -125,6 +126,21 @@ def words(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def _merge(first: list[str], second: list[str]) -> list[str]:
+    """One list after another, without repeating what is already in the first.
+
+    Order is the whole point: what was trained recently comes before what the
+    database merely knows about.
+    """
+    found = list(first)
+    seen = {value.lower() for value in found}
+    for value in second:
+        if value.lower() not in seen:
+            seen.add(value.lower())
+            found.append(value)
+    return found
+
+
 def counted(value: object) -> int | None:
     """Reads a positive whole number out of an action, typed or clicked."""
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -137,7 +153,8 @@ class Panel:
 
     def __init__(self, spawn: dict[str, object]) -> None:
         self.den = resolve_den(None)
-        self.database = resolve_database(None)
+        self.database = resolve_database(None, self.den)
+        self.exercises = resolve_exercises(None, self.den)
         self.ahead = whole(spawn.get("ahead"), AHEAD, 1, 50)
         self.behind = whole(spawn.get("horizon"), BEHIND, 1, 365)
         self.days = whole(spawn.get("days"), DAYS, 2, 365)
@@ -270,6 +287,10 @@ class Panel:
             self.eat(selected, action)
         elif name == "lift":
             self.train(selected, action)
+        elif name == "split":
+            self.name_split(selected, action)
+        elif name == "relift":
+            self.retrain(selected, action)
         elif name == "unlift":
             index = counted(action.get("index"))
             if index is not None:
@@ -383,9 +404,10 @@ class Panel:
         the next reading carry them - the same road every other answer takes.
 
         A food comes from the database, because that is what knows the numbers.
-        A split and a movement come from the journal itself: the exercises
-        worth offering are the ones already done, and there is no database to
-        fill in first.
+        A split and a movement come from the journal first and the exercise
+        database second: what was trained recently is what is most likely
+        wanted, and the database is what can answer before anything has been
+        trained at all.
         """
         self.choices = []
         if name == "search":
@@ -394,21 +416,35 @@ class Panel:
             return
         history = lift_history(self.den, date.fromisoformat(self.chosen()), TRAINED)
         # Each field is typed into on its own, and the form box lays only that
-        # field's own text into the action. A movement is therefore narrowed by
-        # what is typed into it, and by a split only when a caller says which -
-        # which the panel cannot, and the command line can.
+        # field's own text into the action, so a movement is narrowed by what
+        # was typed into its own field and by nothing else on the form.
+        known = Exercises.load(self.exercises)
         if name == "splits":
             typed = words(action.get("split"))
-            found = splits_used(history)
+            found = _merge(splits_used(history), known.splits())
         else:
             typed = words(action.get("exercise"))
-            found = exercises_used(history, words(action.get("split")) or None)
+            # The split comes from the day on screen rather than from the
+            # form, so a pull day offers pulling movements first. A caller that
+            # knows better may name one instead.
+            under = words(action.get("split")) or self.showing_split()
+            found = _merge(exercises_used(history, under or None), known.names(under))
         wanted = typed.lower()
         self.choices = [
             {"id": value, "label": value}
             for value in found
             if not wanted or wanted in value.lower()
         ][:CHOICES]
+
+    def showing_split(self) -> str:
+        """The split the day on screen is, out of the reading it was drawn from.
+
+        Read off the last frame rather than off the file: it is what the person
+        is looking at, and a suggestion costs no read of its own.
+        """
+        said = self.frame or {}
+        written = said.get("split") if said.get("date") == self.chosen() else None
+        return written if isinstance(written, str) else ""
 
     def foods(self, typed: str) -> list[object]:
         """The database rows one query matched, in the order it ranked them."""
@@ -457,19 +493,71 @@ class Panel:
         self.on_day(selected, lambda text: add_row(text, "macros", normalize_food(row)))
 
     def train(self, selected: str, action: dict[str, object]) -> None:
-        """Logs one set: the split, the movement, the load, and the reps."""
+        """Logs every set of one movement, in one edit.
+
+        `60x8 60x8 60x7` is three sets of the same movement, which is how a
+        workout is done and how the panel prints it back. A split named beside
+        them is the day's, and is written only when the day has none: a day is
+        one split, and the box asks for it only on the first set of the day.
+        """
         self.choices = []
-        split = words(action.get("split"))
         exercise = words(action.get("exercise"))
-        if not split or not exercise:
+        if not exercise:
             return
         try:
-            row = normalize_lift(
-                split, exercise, words(action.get("weight")), words(action.get("reps"))
-            )
+            sets = parse_sets(words(action.get("sets")))
+            rows = [normalize_lift(exercise, load, reps) for load, reps in sets]
+            named = words(action.get("split"))
+            split = normalize_split(named) if named else ""
         except ValueError as trouble:
             raise Refused(str(trouble)) from None
-        self.on_day(selected, lambda text: add_row(text, "workout", row))
+
+        def rewrite(text: str) -> str:
+            # Named or left alone. A split written over one the day already had
+            # is a day that changed under the box, which the revision the write
+            # carries is what refuses.
+            written = set_split(text, split) if split else text
+            for row in rows:
+                written = add_row(written, "workout", row)
+            return written
+
+        self.on_day(selected, rewrite)
+
+    def retrain(self, selected: str, action: dict[str, object]) -> None:
+        """Writes over every set of one movement, in one edit.
+
+        The panel prints a movement as one line and the box asks for it back
+        the same way, so a set added, a weight corrected and a set dropped are
+        the same answer. An empty one removes the movement: the sets were in
+        the field to be cleared, which no accident does. `was` is the movement
+        as it was drawn, so renaming it in the box is a rename rather than a
+        second movement.
+        """
+        self.choices = []
+        was = words(action.get("was"))
+        if not was:
+            return
+        typed = words(action.get("sets"))
+        named = words(action.get("exercise")) or was
+        try:
+            rows = [
+                normalize_lift(named, load, reps) for load, reps in parse_sets(typed)
+            ] if typed else []
+        except ValueError as trouble:
+            raise Refused(str(trouble)) from None
+        self.on_day(selected, lambda text: set_rows(text, "workout", was, rows))
+
+    def name_split(self, selected: str, action: dict[str, object]) -> None:
+        """Names the split the day is, which every set of it belongs to."""
+        self.choices = []
+        named = words(action.get("split"))
+        if not named:
+            return
+        try:
+            split = normalize_split(named)
+        except ValueError as trouble:
+            raise Refused(str(trouble)) from None
+        self.on_day(selected, lambda text: set_split(text, split))
 
     def read(self, view: str) -> dict[str, object]:
         """The reading for this beat, built again only when it has to be."""
@@ -565,7 +653,7 @@ class Panel:
             "change": round(trend[-1][1] - trend[0][1], 1) if len(trend) > 1 else None,
             "recent": [{"date": when, "weight": value} for when, value in trend],
             "lifts": [lift.to_dict() for lift in day.lifts],
-            "splits": day.splits,
+            "split": day.split,
             "volume": round(sum(lift.volume for lift in day.lifts), 1),
         }
 

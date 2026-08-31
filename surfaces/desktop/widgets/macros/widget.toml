@@ -1,6 +1,6 @@
 id = "macros"
 name = "Macros"
-description = "Show what one day of the-den journal was eaten, weighed and lifted: calories with the protein, carbohydrate and fat behind them, the day's food rows, the weight with a trend over the last month, and the sets done, grouped by movement with the day's total volume. A weight is logged by clicking it, a food by name and amount with the food database offered as it is typed, and a set by split, movement, load and reps with what was done before offered as it is typed. The spawn payload is { days: number }, how far back the weight trend reaches, and 30 is the usual answer."
+description = "Show what one day of the-den journal was eaten, weighed and lifted: calories with the protein, carbohydrate and fat behind them, the day's food rows, the weight with a trend over the last month, and the day's split with the sets under it, grouped by movement and totalled by volume. A weight is logged by clicking it, a food by name and amount with the food database offered as it is typed, a split by clicking the heading, and an exercise by name and its sets written 60x8 60x8 60x6. Clicking a movement asks for its sets back, so one answer adds a set, corrects a weight or removes the movement. Movements are offered out of what was trained recently and then out of the den's exercise database. The spawn payload is { days: number }, how far back the weight trend reaches, and 30 is the usual answer."
 width = 348
 height = 500
 backend = "den"

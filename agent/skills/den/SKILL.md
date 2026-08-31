@@ -20,6 +20,7 @@ scufris-den upcoming --json      # what is dated after the day
 scufris-den backlog list --json  # ideas with no day yet
 scufris-den weight --json        # the day's weight and a month of trend
 scufris-den gym history --json   # what was trained, newest first
+scufris-den gym known --json     # the movements the database knows
 ```
 
 A read never creates an entry. Prefer one `show` over four narrow reads.
@@ -33,16 +34,28 @@ scufris-den habit toggle Gym
 scufris-den note add "what was decided" --title standup
 scufris-den weight 81.4
 scufris-den macros log "chicken breast:g" 150
-scufris-den gym add Push "bench press" 60 8
+scufris-den gym split push
+scufris-den gym add "bench press" 60x8 60x8 60x6
+scufris-den gym edit "bench press" 60x8 60x8 60x7
+scufris-den gym learn push "bench press"
 scufris-den backlog add "learn to weld"
 scufris-den backlog promote 1
 ```
 
 - A task with no day goes in the backlog. `promote` moves it onto a day.
 - Log food by database id. `scufris-den macros query WORDS --json` finds the id;
-  words matching exactly one food are taken as that food.
-- One set is one `gym add`. Three sets of the same movement are three calls.
+  words matching exactly one food are taken as that food. Both databases live in
+  the den: `Foods.csv` and `Exercises.csv`.
+- A day is one split. Name it once with `gym split`; every set of that day
+  belongs to it. `gym add` is one movement and all of its sets, written
+  `weight x reps`.
+- `gym edit` writes over every set of one movement at once, so a set added and
+  a set dropped are the same call. No sets removes the movement, and `--rename`
+  keeps them under another name. `gym rm` removes one set by its number.
 - A weight is kilograms. Reps are whole numbers. A load of `0` is bodyweight.
+- `gym learn` adds a movement to the den's exercise database, which is what
+  the panel offers before a movement has ever been trained. Adding one is worth
+  doing; it is not required to log a set.
 
 ## Rules
 

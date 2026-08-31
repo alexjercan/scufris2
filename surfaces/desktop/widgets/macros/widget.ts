@@ -41,7 +41,6 @@ interface Food {
 
 interface Lift {
   index: number;
-  split: string;
   exercise: string;
   weight: number;
   reps: number;
@@ -58,11 +57,16 @@ function figure(): HTMLSpanElement {
   return span;
 }
 
-/** One heading row over a list, with the tick that adds to it. */
+/** One heading row over a list, with the tick that adds to it.
+ *
+ * The heading comes back as a button. The workout's heading is the day's
+ * split, and the way to name a split is to correct the word standing where the
+ * split is read - the same rule the weight follows.
+ */
 function header(
   name: string,
   hint: string,
-): [HTMLElement, HTMLSpanElement, HTMLButtonElement] {
+): [HTMLElement, HTMLSpanElement, HTMLButtonElement, HTMLButtonElement] {
   const bar = document.createElement("div");
   bar.style.display = "flex";
   bar.style.alignItems = "center";
@@ -70,9 +74,18 @@ function header(
   bar.style.gap = "6px";
   bar.style.flex = "0 0 auto";
 
-  const heading = figure();
-  heading.textContent = name;
+  const heading = document.createElement("button");
+  heading.type = "button";
+  heading.style.font = "inherit";
+  heading.style.fontSize = "var(--sw-size-small)";
+  heading.style.letterSpacing = "var(--sw-track)";
+  heading.style.textTransform = "uppercase";
+  heading.style.background = "transparent";
+  heading.style.border = "none";
+  heading.style.padding = "0";
+  heading.style.cursor = "default";
   heading.style.color = "var(--sw-line)";
+  heading.textContent = name;
 
   // Between the name and the tick, because it is the one figure that says
   // what the list below adds up to.
@@ -88,7 +101,7 @@ function header(
   tick.title = hint;
 
   bar.append(heading, total, tick);
-  return [bar, total, tick];
+  return [bar, total, tick, heading];
 }
 
 /** A list that scrolls on its own, so one long day does not push out another. */
@@ -155,15 +168,15 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
 
   head.append(calories, weight);
 
-  const split = document.createElement("div");
-  split.style.display = "flex";
-  split.style.justifyContent = "space-between";
-  split.style.gap = "8px";
+  const three = document.createElement("div");
+  three.style.display = "flex";
+  three.style.justifyContent = "space-between";
+  three.style.gap = "8px";
 
   const protein = figure();
   const carbs = figure();
   const fat = figure();
-  split.append(protein, carbs, fat);
+  three.append(protein, carbs, fat);
 
   const trend = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   trend.setAttribute("viewBox", `0 0 ${WIDE} ${TALL}`);
@@ -197,10 +210,15 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
   const [bar, eaten, eat] = header("food", "Log a food for this day");
   const list = column();
 
-  const [board, lifted, train] = header("workout", "Log a set for this day");
+  const [board, lifted, train, named] = header(
+    "workout",
+    "Log an exercise for this day",
+  );
+  named.style.borderBottom = "1px dashed var(--sw-line)";
+  named.title = "Name the split for this day";
   const sets = column();
 
-  frame.append(head, split, trend, bar, list, board, sets);
+  frame.append(head, three, trend, bar, list, board, sets);
   root.append(frame);
 
   /** The day on screen, and the weight it carries. Both go into the box the
@@ -208,9 +226,12 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
    * it starts from what is already logged. */
   let showing = "";
   let logged: number | undefined;
-  /** The last set written today, so the next one starts from it: a second set
-   * of the same movement is a number of reps away, not four fields away. */
-  let last3: Lift | undefined;
+  /** The split the day is, which every set of it belongs to. Empty until the
+   * day has been named, which is when the set box asks for it. */
+  let split = "";
+  /** The movement last written today, so a second exercise of the same name
+   * is one field away rather than two. */
+  let lastMove = "";
 
   weight.addEventListener("click", () => {
     ctx.ask({
@@ -245,38 +266,79 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     });
   });
 
-  train.addEventListener("click", () => {
+  named.addEventListener("click", () => {
     ctx.ask({
-      title: showing === "" ? "Set" : `Set for ${showing}`,
+      title: showing === "" ? "Split" : `Split for ${showing}`,
       fields: [
         {
           name: "split",
           label: "Split",
-          value: last3?.split ?? "",
+          value: split,
           hint: "push, pull, legs",
-          // Offered out of the journal rather than a list somebody has to fill
-          // in first: the splits worth naming are the ones already trained.
+          // Out of the journal and the database behind it: the splits worth
+          // offering are the ones trained, then the ones written down.
           suggest: { action: "splits" },
         },
+      ],
+      action: { action: "split" },
+    });
+  });
+
+  /** Asks for one movement's sets back, to write over the ones it has.
+   *
+   * A movement reads as one line, so it is edited as one line: a set added, a
+   * weight corrected and a set dropped are all the same answer. Clearing the
+   * field removes the movement, which is said in the hint because nothing else
+   * on the panel deletes. */
+  const edit = (exercise: string, written: string): void => {
+    ctx.ask({
+      title: exercise,
+      fields: [
         {
           name: "exercise",
           label: "Exercise",
-          value: last3?.exercise ?? "",
-          hint: "start typing a name",
+          value: exercise,
+          hint: "the name to keep it under",
           suggest: { action: "moves" },
         },
         {
-          name: "weight",
-          label: "Kilograms",
-          value: last3 === undefined ? "" : grams(last3.weight),
-          hint: "0 for bodyweight",
-        },
-        {
-          name: "reps",
-          label: "Reps",
-          value: last3 === undefined ? "" : String(last3.reps),
+          name: "sets",
+          label: "Sets",
+          value: written,
+          hint: "empty removes it",
         },
       ],
+      action: { action: "relift", was: exercise },
+    });
+  };
+
+  train.addEventListener("click", () => {
+    // One exercise is one question. The sets go in the notation they are read
+    // back in, so three sets of the same movement are one answer rather than
+    // three trips through the box - and the split is asked for only on the
+    // first exercise of the day, because a day is one split.
+    const fields: WidgetField[] = [];
+    if (split === "") {
+      fields.push({
+        name: "split",
+        label: "Split",
+        hint: "push, pull, legs",
+        suggest: { action: "splits" },
+      });
+    }
+    fields.push(
+      {
+        name: "exercise",
+        label: "Exercise",
+        value: lastMove,
+        hint: "start typing a name",
+        suggest: { action: "moves" },
+      },
+      { name: "sets", label: "Sets", hint: "60x8 60x8 60x6" },
+    );
+    ctx.ask({
+      title: showing === "" ? "Sets" : `Sets for ${showing}`,
+      fields,
       action: { action: "lift" },
     });
   });
@@ -346,7 +408,6 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
       if (typeof item !== "object" || item === null) return [];
       const row = item as {
         index?: unknown;
-        split?: unknown;
         exercise?: unknown;
         weight?: unknown;
         reps?: unknown;
@@ -355,7 +416,6 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
       return [
         {
           index: number(row.index) ?? 0,
-          split: typeof row.split === "string" ? row.split : "",
           exercise: row.exercise,
           weight: number(row.weight) ?? 0,
           reps: number(row.reps) ?? 0,
@@ -364,9 +424,29 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     });
   };
 
+  /** A row that only reads, or one that can be clicked and reads the same. */
+  const shell = (act: (() => void) | undefined): HTMLElement => {
+    if (act === undefined) return document.createElement("div");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.style.font = "inherit";
+    button.style.width = "100%";
+    button.style.textAlign = "left";
+    button.style.background = "transparent";
+    button.style.border = "none";
+    button.style.padding = "0";
+    button.style.cursor = "default";
+    button.addEventListener("click", act);
+    return button;
+  };
+
   /** One row: what was on the left, the numbers on the right. */
-  const pair = (what: string, behind: string): HTMLElement => {
-    const item = document.createElement("div");
+  const pair = (
+    what: string,
+    behind: string,
+    act?: () => void,
+  ): HTMLElement => {
+    const item = shell(act);
     item.style.display = "flex";
     item.style.justifyContent = "space-between";
     item.style.gap = "10px";
@@ -408,13 +488,13 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
       const group = held.get(key) ?? [];
       const first = group[0];
       if (first === undefined) continue;
+      const parts = group.map(
+        (row) => `${grams(row.weight)}x${String(row.reps)}`,
+      );
       sets.append(
-        pair(
-          first.exercise,
-          group
-            .map((row) => `${grams(row.weight)}x${String(row.reps)}`)
-            .join("  "),
-        ),
+        pair(first.exercise, parts.join("  "), () => {
+          edit(first.exercise, parts.join(" "));
+        }),
       );
     }
   };
@@ -498,20 +578,15 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
 
       draw(weighings(data));
 
-      // The split leads the workout total, because a day is judged on which
-      // one it was before it is judged on how much was moved.
+      // The split is the heading, because it is what the day was. The figure
+      // beside it is what was moved, which only means anything under a name.
       const done = lifts(data);
-      last3 = done[done.length - 1];
+      lastMove = done[done.length - 1]?.exercise ?? "";
+      const called = (data as { split?: unknown }).split;
+      split = typeof called === "string" ? called : "";
+      named.textContent = split === "" ? "workout" : split;
       const volume = number((data as { volume?: unknown }).volume) ?? 0;
-      const splits = Array.isArray((data as { splits?: unknown }).splits)
-        ? ((data as { splits: unknown[] }).splits.filter(
-            (name): name is string => typeof name === "string",
-          ) as string[])
-        : [];
-      lifted.textContent =
-        done.length === 0
-          ? ""
-          : `${splits.join(", ")}  ${grams(volume)} kg`.trim();
+      lifted.textContent = done.length === 0 ? "" : `${grams(volume)} kg`;
       rack(done);
       if (done.length === 0) {
         const empty = figure();

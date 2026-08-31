@@ -113,19 +113,64 @@ class Writes(Command):
         self.assertEqual(done.returncode, 1)
         self.assertIn("kilograms", done.stderr)
 
-    def test_a_set_is_logged_into_a_section_that_did_not_exist(self) -> None:
-        self.ok("gym", "add", "Push", "bench press", "60", "8")
-        self.ok("gym", "add", "Push", "bench press", "60", "7")
+    def test_sets_are_logged_into_a_section_that_did_not_exist(self) -> None:
+        self.ok("gym", "split", "Push")
+        self.ok("gym", "add", "bench press", "60x8", "60x7")
         found = self.answered("gym", "list", "--json")
         assert isinstance(found, dict)
-        self.assertEqual(found["splits"], ["Push"])
+        self.assertEqual(found["split"], "Push")
         self.assertEqual(found["volume"], 900.0)
+        self.assertEqual(len(found["lifts"]), 2)
         self.assertIn("### Workout", self.entry().read_text(encoding="utf-8"))
 
     def test_half_a_repetition_is_refused(self) -> None:
-        done = self.run_den("gym", "add", "Push", "bench press", "60", "8.5")
+        done = self.run_den("gym", "add", "bench press", "60x8.5")
         self.assertEqual(done.returncode, 1)
-        self.assertIn("whole number", done.stderr)
+        self.assertIn("60x8", done.stderr)
+
+    def test_the_split_is_read_back_and_corrected_in_place(self) -> None:
+        self.ok("gym", "split", "push")
+        self.ok("gym", "add", "bench press", "60x8")
+        self.ok("gym", "split", "pull")
+        found = self.answered("gym", "split", "--json")
+        assert isinstance(found, dict)
+        self.assertEqual(found["split"], "pull")
+        self.assertEqual(len(self.answered("gym", "list", "--json")["lifts"]), 1)
+
+    def test_a_movement_is_written_over_and_then_removed(self) -> None:
+        self.ok("gym", "add", "bench press", "60x8", "60x7")
+        self.ok("gym", "add", "dips", "0x12")
+        self.ok("gym", "edit", "bench press", "60x8", "60x8", "--rename", "incline")
+        found = self.answered("gym", "list", "--json")
+        assert isinstance(found, dict)
+        self.assertEqual(
+            [(lift["exercise"], lift["reps"]) for lift in found["lifts"]],
+            [("incline", 8), ("incline", 8), ("dips", 12)],
+        )
+        self.ok("gym", "edit", "incline")
+        found = self.answered("gym", "list", "--json")
+        assert isinstance(found, dict)
+        self.assertEqual([lift["exercise"] for lift in found["lifts"]], ["dips"])
+
+    def test_writing_over_a_movement_that_is_not_there_is_refused(self) -> None:
+        self.ok("gym", "add", "bench press", "60x8")
+        done = self.run_den("gym", "edit", "squat", "80x5")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("squat", done.stderr)
+
+    def test_the_exercise_database_is_learned_and_forgotten(self) -> None:
+        self.ok("gym", "learn", "pull", "tbar")
+        self.ok("gym", "learn", "push", "dips")
+        found = self.answered("gym", "known", "--json")
+        assert isinstance(found, list)
+        self.assertEqual([move["name"] for move in found], ["tbar", "dips"])
+        self.assertEqual(self.ok("gym", "database").strip(), str(self.den / "Exercises.csv"))
+        self.ok("gym", "forget", "tbar")
+        self.assertEqual(
+            [move["name"] for move in self.answered("gym", "known", "--json")], ["dips"]
+        )
+        done = self.run_den("gym", "forget", "tbar")
+        self.assertEqual(done.returncode, 1)
 
     def test_a_food_is_scaled_out_of_the_database(self) -> None:
         self.ok("macros", "log", "chicken breast:g", "150")
@@ -190,13 +235,15 @@ class Windows(Command):
 
     def test_workout_history_is_newest_first(self) -> None:
         (self.den / "Daily" / "2026-08-29-Saturday.md").write_text(
-            "# F\n\n### Workout\n\nsplit,exercise,weight,reps\nPull,barbell row,50,10\n",
+            "# F\n\n### Workout\n\nPull\n\nexercise,weight,reps\nbarbell row,50,10\n",
             encoding="utf-8",
         )
-        self.ok("gym", "add", "Push", "bench press", "60", "8")
+        self.ok("gym", "split", "Push")
+        self.ok("gym", "add", "bench press", "60x8")
         found = self.answered("gym", "history", "--days", "7", "--json")
         assert isinstance(found, list)
         self.assertEqual([day["date"] for day in found], ["2026-08-31", "2026-08-29"])
+        self.assertEqual([day["split"] for day in found], ["Push", "Pull"])
 
 
 if __name__ == "__main__":

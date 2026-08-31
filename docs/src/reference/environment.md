@@ -55,7 +55,8 @@ exact socket variable -> SCUFRIS_RUNTIME_DIR/NAME -> XDG_RUNTIME_DIR/scufris/NAM
 | `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | unset                                                                         | Absolute executable that reads one paragraph on stdin and owns synthesis/playback. Unset means silent. |
 | `SCUFRIS_WIDGET_PATH`             | unset                                                                         | Colon-separated roots of external compiled desktop widgets.                                            |
 | `DEN_PATH`                        | `~/personal/the-den`                                                          | Journal directory read by the den backend and by `scufris-den`.                                        |
-| `MACROS_DATABASE`                 | `~/.local/share/nvim/macros.csv`                                              | Food database used by the macros widget and by `scufris-den`.                                          |
+| `MACROS_DATABASE`                 | `$DEN_PATH/Foods.csv`, else `~/.local/share/nvim/macros.csv`                  | Food database used by the macros widget and by `scufris-den`.                                          |
+| `EXERCISES_DATABASE`              | `$DEN_PATH/Exercises.csv`                                                     | `split,exercise` rows the macros widget offers under the exercise field.                               |
 
 All three desktop hook variables must name absolute executables. They are not
 shell snippets.

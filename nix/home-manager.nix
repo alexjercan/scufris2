@@ -295,7 +295,10 @@ in {
           type = lib.types.nullOr lib.types.str;
           default = null;
           example = "/home/you/.local/share/nvim/macros.csv";
-          description = "Food database used by the macros widget.";
+          description = ''
+            Food database when it is not the den's own Foods.csv. Unset, the
+            journal answers first and Neovim's file only if the den has none.
+          '';
         };
       };
 

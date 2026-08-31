@@ -21,10 +21,20 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   The agenda panel keeps one and pulls one onto the day that is showing.
 - Restant on the agenda: what was left undone on earlier days, bounded by a
   horizon of 60 days by default and marked on the month with everything else.
-- A workout log. A `### Workout` section holds `split,exercise,weight,reps`
-  rows, the macros panel logs and shows the day's sets with its total volume,
-  and splits and movements are offered out of what was trained before. An entry
-  written before the section existed gains it on the first write.
+- A workout log. A `### Workout` section names the day's split on one line and
+  holds `exercise,weight,reps` rows under it. The macros panel shows the split
+  as its heading and the sets grouped by movement with the day's volume. One
+  exercise is one question: the sets go in as `60x8 60x8 60x6` and the split is
+  asked for once a day. A movement is edited the way it is drawn - clicking one
+  asks for its sets back, and what is typed replaces them, an empty answer
+  removing the movement. An entry written before the section existed gains it on
+  the first write.
+- Two databases in the den itself. `Exercises.csv` holds `split,exercise` rows
+  and is what the panel offers under the exercise field before a movement has
+  ever been trained - what was trained recently comes first, then what the
+  database knows, and the day's split puts its own movements at the top.
+  `Foods.csv` is the food database, which the den now answers for before
+  Neovim's copy.
 - A widget backend may name libraries in a `prelude` file, which `build.rs`
   compiles in ahead of it.
 
@@ -36,6 +46,9 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The macros panel shows one whole day - eaten, weighed, and lifted - and is
   taller for it. The agenda holds its two new lists in the frame it already
   had, which is the tallest a pair of panels on one edge can be.
+- `MACROS_DATABASE` and `desktop.widgets.macrosDatabase` are unchanged, but the
+  default moved: the den's own `Foods.csv` answers first, and Neovim's file is
+  read only when the den holds none.
 
 ### Removed
 

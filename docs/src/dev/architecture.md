@@ -141,6 +141,11 @@ socket. `tools/den/den.py` is compiled into the desktop's `den` backend by
 same file is what `scufris-den` runs for the agent. Neither reaches the other:
 they share a format and a lock, not a process.
 
+The den holds the reference data the days are written against: `Foods.csv`,
+which keeps macros.nvim's row format, and `Exercises.csv`, which is
+`split,exercise`. Both are plain files the person can edit, both travel with
+the journal, and either can be pointed elsewhere with a variable.
+
 ## State map
 
 ```text

@@ -298,22 +298,42 @@ class Macros(Panel):
 class Workout(Panel):
     view = "macros"
 
-    def test_a_set_is_logged_and_read_back(self) -> None:
+    def test_every_set_of_one_movement_is_logged_in_one_answer(self) -> None:
         reading = self.do(
             {
                 "action": "lift",
                 "split": "Push",
                 "exercise": "bench press",
-                "weight": "60",
-                "reps": "8",
+                "sets": "60x8 60x8 60x7",
             }
         )
         self.assertEqual(
             [(lift["exercise"], lift["weight"], lift["reps"]) for lift in reading["lifts"]],
-            [("bench press", 60.0, 8)],
+            [("bench press", 60.0, 8), ("bench press", 60.0, 8), ("bench press", 60.0, 7)],
         )
-        self.assertEqual(reading["splits"], ["Push"])
-        self.assertEqual(reading["volume"], 480.0)
+        self.assertEqual(reading["split"], "Push")
+        self.assertEqual(reading["volume"], 60 * 8 + 60 * 8 + 60 * 7)
+
+    def test_the_split_is_the_day_s_and_is_not_asked_for_twice(self) -> None:
+        self.do({"action": "lift", "split": "Push", "exercise": "bench press", "sets": "60x8"})
+        # The second exercise carries no split, the way the box asks for it
+        # once the day has one.
+        reading = self.do({"action": "lift", "exercise": "dips", "sets": "0x12"})
+        self.assertEqual(reading["split"], "Push")
+        self.assertEqual(len(reading["lifts"]), 2)
+        self.assertEqual(self.entry().count("Push"), 1)
+
+    def test_the_split_is_named_on_its_own(self) -> None:
+        reading = self.do({"action": "split", "split": "legs"})
+        self.assertEqual(reading["split"], "legs")
+        reading = self.do({"action": "split", "split": "pull"})
+        self.assertEqual(reading["split"], "pull")
+        self.assertEqual(self.read()["lifts"], [])
+
+    def test_a_split_with_a_comma_is_refused(self) -> None:
+        reading = self.do({"action": "split", "split": "push,pull"})
+        self.assertIsNotNone(reading["trouble"])
+        self.assertEqual(self.read()["split"], "")
 
     def test_a_set_lands_in_a_day_that_never_had_a_workout_section(self) -> None:
         self.assertNotIn("### Workout", self.entry())
@@ -322,8 +342,7 @@ class Workout(Panel):
                 "action": "lift",
                 "split": "Push",
                 "exercise": "bench press",
-                "weight": "60",
-                "reps": "8",
+                "sets": "60x8",
             }
         )
         written = self.entry()
@@ -331,32 +350,84 @@ class Workout(Panel):
         self.assertLess(written.index("### Workout"), written.index("### Notes"))
 
     def test_reps_are_whole_and_a_load_is_not_negative(self) -> None:
-        for bad in ({"reps": "8.5", "weight": "60"}, {"reps": "8", "weight": "-1"}):
+        for bad in ("60x8.5", "-1x8", "60"):
             reading = self.do(
-                {"action": "lift", "split": "Push", "exercise": "row", **bad}
+                {"action": "lift", "split": "Push", "exercise": "row", "sets": bad}
             )
             self.assertIsNotNone(reading["trouble"])
         self.assertEqual(self.read()["lifts"], [])
 
+    def test_one_bad_set_writes_none_of_them(self) -> None:
+        reading = self.do(
+            {"action": "lift", "exercise": "row", "sets": "60x8 60x8 60xhalf"}
+        )
+        self.assertIsNotNone(reading["trouble"])
+        self.assertEqual(self.read()["lifts"], [])
+
     def test_a_set_is_removed_by_its_number(self) -> None:
-        for reps in ("8", "7"):
-            self.do(
-                {
-                    "action": "lift",
-                    "split": "Push",
-                    "exercise": "bench press",
-                    "weight": "60",
-                    "reps": reps,
-                }
-            )
+        self.do({"action": "lift", "exercise": "bench press", "sets": "60x8 60x7"})
         reading = self.do({"action": "unlift", "index": 1})
         self.assertEqual([lift["reps"] for lift in reading["lifts"]], [7])
+
+    def test_a_movement_is_written_over_by_the_sets_it_is_asked_for(self) -> None:
+        self.do({"action": "lift", "exercise": "bench press", "sets": "60x8 60x7"})
+        self.do({"action": "lift", "exercise": "dips", "sets": "0x12"})
+        # A set added and a weight corrected are the same answer as the sets
+        # the panel drew, typed back changed.
+        reading = self.do(
+            {"action": "relift", "was": "bench press", "sets": "60x8 62.5x7 62.5x5"}
+        )
+        self.assertEqual(
+            [(lift["exercise"], lift["weight"]) for lift in reading["lifts"]],
+            [
+                ("bench press", 60.0),
+                ("bench press", 62.5),
+                ("bench press", 62.5),
+                ("dips", 0.0),
+            ],
+        )
+
+    def test_a_movement_asked_for_with_no_sets_is_removed(self) -> None:
+        self.do({"action": "lift", "exercise": "bench press", "sets": "60x8 60x7"})
+        self.do({"action": "lift", "exercise": "dips", "sets": "0x12"})
+        reading = self.do({"action": "relift", "was": "bench press", "sets": ""})
+        self.assertEqual([lift["exercise"] for lift in reading["lifts"]], ["dips"])
+        self.assertNotIn("bench press", self.entry())
+
+    def test_a_movement_is_renamed_without_moving(self) -> None:
+        self.do({"action": "lift", "exercise": "bench pres", "sets": "60x8"})
+        self.do({"action": "lift", "exercise": "dips", "sets": "0x12"})
+        reading = self.do(
+            {
+                "action": "relift",
+                "was": "bench pres",
+                "exercise": "bench press",
+                "sets": "60x8",
+            }
+        )
+        self.assertEqual(
+            [lift["exercise"] for lift in reading["lifts"]], ["bench press", "dips"]
+        )
+
+    def test_one_bad_set_writes_over_nothing(self) -> None:
+        self.do({"action": "lift", "exercise": "bench press", "sets": "60x8 60x7"})
+        reading = self.do(
+            {"action": "relift", "was": "bench press", "sets": "60x8 60xhalf"}
+        )
+        self.assertIsNotNone(reading["trouble"])
+        self.assertEqual([lift["reps"] for lift in self.read()["lifts"]], [8, 7])
+
+    def test_writing_over_a_movement_that_is_not_there_is_said_out_loud(self) -> None:
+        self.do({"action": "lift", "exercise": "bench press", "sets": "60x8"})
+        reading = self.do({"action": "relift", "was": "squat", "sets": "80x5"})
+        self.assertIsNotNone(reading["trouble"])
+        self.assertEqual(len(self.read()["lifts"]), 1)
 
     def test_splits_and_movements_are_offered_out_of_what_was_done_before(self) -> None:
         self.write(
             YESTERDAY,
-            "# Sunday\n\n### Workout\n\nsplit,exercise,weight,reps\n"
-            "Pull,barbell row,50,10\nPull,lat pulldown,40,12\n",
+            "# Sunday\n\n### Workout\n\nPull\n\nexercise,weight,reps\n"
+            "barbell row,50,10\nlat pulldown,40,12\n",
         )
         self.assertEqual(
             self.do({"action": "splits"})["choices"],
@@ -370,11 +441,48 @@ class Workout(Panel):
     def test_a_movement_list_narrows_to_what_was_typed(self) -> None:
         self.write(
             YESTERDAY,
-            "# Sunday\n\n### Workout\n\nsplit,exercise,weight,reps\n"
-            "Pull,barbell row,50,10\nPull,lat pulldown,40,12\n",
+            "# Sunday\n\n### Workout\n\nPull\n\nexercise,weight,reps\n"
+            "barbell row,50,10\nlat pulldown,40,12\n",
         )
         reading = self.do({"action": "moves", "exercise": "pull"})
         self.assertEqual([choice["id"] for choice in reading["choices"]], ["lat pulldown"])
+
+    def test_the_database_offers_movements_never_trained(self) -> None:
+        (self.den / "Exercises.csv").write_text(
+            "split,exercise\npush,bench press\npull,tbar\nlegs,squat\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            [choice["id"] for choice in self.do({"action": "moves"})["choices"]],
+            ["bench press", "tbar", "squat"],
+        )
+        self.assertEqual(
+            [choice["id"] for choice in self.do({"action": "splits"})["choices"]],
+            ["push", "pull", "legs"],
+        )
+
+    def test_what_was_trained_comes_before_what_is_merely_known(self) -> None:
+        self.write(
+            YESTERDAY,
+            "# Sunday\n\n### Workout\n\nPull\n\nexercise,weight,reps\ntbar,50,10\n",
+        )
+        (self.den / "Exercises.csv").write_text(
+            "split,exercise\npull,barbell row\npull,tbar\n", encoding="utf-8"
+        )
+        self.assertEqual(
+            [choice["id"] for choice in self.do({"action": "moves"})["choices"]],
+            ["tbar", "barbell row"],
+        )
+
+    def test_the_day_s_split_puts_its_own_movements_first(self) -> None:
+        (self.den / "Exercises.csv").write_text(
+            "split,exercise\npush,bench press\npull,tbar\n", encoding="utf-8"
+        )
+        self.do({"action": "split", "split": "pull"})
+        self.assertEqual(
+            [choice["id"] for choice in self.do({"action": "moves"})["choices"]],
+            ["tbar", "bench press"],
+        )
 
 
 class Notes(Panel):

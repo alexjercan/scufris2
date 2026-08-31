@@ -10,7 +10,9 @@ a half-written entry fails.
     scufris-den --date 2026-09-01 task add "call the dentist"
     scufris-den restant --json
     scufris-den backlog add "learn to weld"
-    scufris-den gym add Push "bench press" 60 8
+    scufris-den gym split push
+    scufris-den gym add "bench press" 60x8 60x8 60x6
+    scufris-den gym edit "bench press" 60x8 60x8 60x7
     scufris-den weight 81.4
 
 Reads answer in plain lines, or in JSON with `--json`. Nothing here opens an
@@ -134,14 +136,24 @@ def parse(argv: list[str]) -> argparse.Namespace:
 
     gym = nested(top("gym", help="the day's sets"), common)
     gym.add_parser("list")
-    adding = gym.add_parser("add")
-    adding.add_argument("split")
+    naming = gym.add_parser("split", help="the day's split, read or named")
+    naming.add_argument("value", nargs="?")
+    adding = gym.add_parser("add", help="every set of one movement")
     adding.add_argument("exercise")
-    adding.add_argument("weight")
-    adding.add_argument("reps")
+    adding.add_argument("sets", nargs="+", help="60x8 60x8 60x6")
+    editing = gym.add_parser("edit", help="write over every set of one movement")
+    editing.add_argument("exercise")
+    editing.add_argument("sets", nargs="*", help="60x8 60x8, or none to remove it")
+    editing.add_argument("--rename", help="the name to keep the sets under")
     gym.add_parser("rm").add_argument("index", type=int)
     history = gym.add_parser("history", help="what was trained, newest first")
     history.add_argument("--days", type=int, default=90)
+    gym.add_parser("known", help="the movements the database knows")
+    learning = gym.add_parser("learn", help="add a movement to the database")
+    learning.add_argument("split")
+    learning.add_argument("exercise")
+    gym.add_parser("forget").add_argument("exercise")
+    gym.add_parser("database", help="print where the exercise database is")
 
     return parser.parse_args(argv)
 
@@ -328,11 +340,11 @@ def weight(args: argparse.Namespace, here: Path, when: date) -> None:
 
 def macros(args: argparse.Namespace, here: Path, when: date) -> None:
     if args.what == "database":
-        print(den.resolve_database(None))
+        print(den.resolve_database(None, here))
         return
     if args.what == "query":
         try:
-            found = den.Database.load(den.resolve_database(None)).query(args.words)
+            found = den.Database.load(den.resolve_database(None, here)).query(args.words)
         except ValueError as trouble:
             raise Stop(str(trouble)) from None
         lines(
@@ -343,7 +355,7 @@ def macros(args: argparse.Namespace, here: Path, when: date) -> None:
         return
     if args.what == "insert":
         try:
-            item = den.insert_item(den.resolve_database(None), args.row)
+            item = den.insert_item(den.resolve_database(None, here), args.row)
         except ValueError as trouble:
             raise Stop(str(trouble)) from None
         emit(args, item.to_dict(), item.to_row())
@@ -358,7 +370,7 @@ def macros(args: argparse.Namespace, here: Path, when: date) -> None:
         )
         return
     if args.what == "log":
-        database = den.Database.load(den.resolve_database(None))
+        database = den.Database.load(den.resolve_database(None, here))
         found = database.query(args.name)
         wanted = args.name.strip().lower()
         exact = [item for item in found if item.id == wanted]
@@ -390,43 +402,104 @@ def macros(args: argparse.Namespace, here: Path, when: date) -> None:
 
 
 def gym(args: argparse.Namespace, here: Path, when: date) -> None:
+    book = den.resolve_exercises(None, here)
+    if args.what == "database":
+        print(book)
+        return
+    if args.what == "known":
+        known = den.Exercises.load(book)
+        lines(
+            args,
+            [move.to_dict() for move in known.moves],
+            [f"{move.split}\t{move.name}" for move in known.moves],
+        )
+        return
+    if args.what == "learn":
+        try:
+            move = den.learn_move(book, args.split, args.exercise)
+        except (OSError, ValueError) as trouble:
+            raise Stop(str(trouble)) from None
+        emit(args, move.to_dict(), f"{move.split},{move.name}")
+        return
+    if args.what == "forget":
+        try:
+            move = den.forget_move(book, args.exercise)
+        except (OSError, ValueError) as trouble:
+            raise Stop(str(trouble)) from None
+        emit(args, move.to_dict(), f"{move.split},{move.name}")
+        return
     if args.what == "history":
         found = den.lift_history(here, when, args.days)
         lines(
             args,
+            [session.to_dict() for session in found],
             [
-                {"date": at, "lifts": [lift.to_dict() for lift in held]}
-                for at, held in found
-            ],
-            [
-                f"{at}  {', '.join(sorted({lift.split for lift in held}))}"
-                for at, held in found
+                f"{session.date}  {session.split}  "
+                f"{len(session.lifts)} sets  {session.volume:g} kg"
+                for session in found
             ],
         )
+        return
+    if args.what == "split":
+        if args.value is None:
+            day, _current = read(here, when)
+            lines(args, {"split": day.split}, [day.split] if day.split else [])
+            return
+        try:
+            named = den.normalize_split(args.value)
+        except ValueError as trouble:
+            raise Stop(str(trouble)) from None
+        day = apply(here, when, lambda text: den.set_split(text, named))
+        emit(args, day.to_dict(), f"{day.date}: {named}")
         return
     if args.what == "list":
         day, _current = read(here, when)
         lines(
             args,
             {
+                "split": day.split,
                 "lifts": [lift.to_dict() for lift in day.lifts],
-                "splits": day.splits,
                 "volume": round(sum(lift.volume for lift in day.lifts), 1),
             },
             [
-                f"{lift.index}. {lift.split}  {lift.exercise}  "
-                f"{lift.weight} x {lift.reps}"
+                f"{lift.index}. {lift.exercise}  {lift.weight:g}x{lift.reps}"
                 for lift in day.lifts
             ],
         )
         return
     if args.what == "add":
         try:
-            row = den.normalize_lift(args.split, args.exercise, args.weight, args.reps)
+            sets = den.parse_sets(" ".join(args.sets))
+            rows = [
+                den.normalize_lift(args.exercise, load, reps) for load, reps in sets
+            ]
         except ValueError as trouble:
             raise Stop(str(trouble)) from None
-        day = apply(here, when, lambda text: den.add_row(text, "workout", row))
-        emit(args, day.to_dict(), f"{day.date}: {row}")
+
+        def rewrite(text: str) -> str:
+            for row in rows:
+                text = den.add_row(text, "workout", row)
+            return text
+
+        day = apply(here, when, rewrite)
+        emit(args, day.to_dict(), f"{day.date}: {'; '.join(rows)}")
+        return
+    if args.what == "edit":
+        # The movement is written whole, so a set added and a set dropped are
+        # the same call. No sets at all removes it.
+        try:
+            named = args.rename or args.exercise
+            sets = den.parse_sets(" ".join(args.sets)) if args.sets else []
+            rows = [den.normalize_lift(named, load, reps) for load, reps in sets]
+        except ValueError as trouble:
+            raise Stop(str(trouble)) from None
+        day = apply(
+            here,
+            when,
+            lambda text: den.set_rows(text, "workout", args.exercise, rows),
+        )
+        said = "; ".join(rows) if rows else f"removed {args.exercise}"
+        emit(args, day.to_dict(), f"{day.date}: {said}")
         return
     day = apply(here, when, lambda text: den.remove_row(text, "workout", args.index))
     emit(args, day.to_dict(), written(day))

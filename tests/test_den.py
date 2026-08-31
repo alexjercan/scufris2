@@ -50,10 +50,12 @@ rice 100g,7,78,0.6
 
 ### Workout
 
-split,exercise,weight,reps
-Push,bench press,60,8
-Push,bench press,60,7
-Pull,barbell row,50,10
+Push
+
+exercise,weight,reps
+bench press,60,8
+bench press,60,7
+overhead press,35,10
 
 ### Notes
 
@@ -142,16 +144,16 @@ class ParseDay(Den):
     def test_reads_the_weight(self) -> None:
         self.assertEqual(self.day.weight, 71.2)
 
-    def test_reads_every_set_and_the_splits_behind_them(self) -> None:
+    def test_reads_every_set_under_the_one_split_the_day_was(self) -> None:
         self.assertEqual(
-            [(lift.split, lift.exercise, lift.weight, lift.reps) for lift in self.day.lifts],
+            [(lift.exercise, lift.weight, lift.reps) for lift in self.day.lifts],
             [
-                ("Push", "bench press", 60.0, 8),
-                ("Push", "bench press", 60.0, 7),
-                ("Pull", "barbell row", 50.0, 10),
+                ("bench press", 60.0, 8),
+                ("bench press", 60.0, 7),
+                ("overhead press", 35.0, 10),
             ],
         )
-        self.assertEqual(self.day.splits, ["Push", "Pull"])
+        self.assertEqual(self.day.split, "Push")
         self.assertEqual(self.day.lifts[0].volume, 480.0)
 
     def test_reads_notes_as_blocks_with_their_bodies(self) -> None:
@@ -178,19 +180,29 @@ class ParseEdges(Den):
     def test_half_written_rows_are_passed_over(self) -> None:
         path = self.write(
             date(2026, 8, 31),
-            "# M\n\n### Workout\n\nsplit,exercise,weight,reps\n"
-            "Push,bench press,60\nPush,bench press,heavy,8\n"
-            "Push,bench press,60,0\nPush,bench press,60,8\n",
+            "# M\n\n### Workout\n\nPush\n\nexercise,weight,reps\n"
+            "bench press,60\nbench press,heavy,8\n"
+            "bench press,60,0\nbench press,60,8\n",
         )
-        lifts = den.parse_day(path).lifts
-        self.assertEqual([(lift.index, lift.reps) for lift in lifts], [(1, 8)])
+        day = den.parse_day(path)
+        self.assertEqual([(lift.index, lift.reps) for lift in day.lifts], [(1, 8)])
+        self.assertEqual(day.split, "Push")
 
     def test_a_bodyweight_set_is_a_set(self) -> None:
         path = self.write(
             date(2026, 8, 31),
-            "# M\n\n### Workout\n\nsplit,exercise,weight,reps\nPull,pull up,0,12\n",
+            "# M\n\n### Workout\n\nPull\n\nexercise,weight,reps\npull up,0,12\n",
         )
         self.assertEqual(den.parse_day(path).lifts[0].weight, 0.0)
+
+    def test_a_section_with_sets_and_no_split_reads_as_unnamed(self) -> None:
+        path = self.write(
+            date(2026, 8, 31),
+            "# M\n\n### Workout\n\nexercise,weight,reps\npull up,0,12\n",
+        )
+        day = den.parse_day(path)
+        self.assertEqual(day.split, "")
+        self.assertEqual(len(day.lifts), 1)
 
 
 class Sections(unittest.TestCase):
@@ -199,7 +211,7 @@ class Sections(unittest.TestCase):
         self.assertIn("### Workout", written)
         self.assertLess(written.index("### Weight"), written.index("### Workout"))
         self.assertLess(written.index("### Workout"), written.index("### Notes"))
-        self.assertIn("split,exercise,weight,reps", written)
+        self.assertIn("exercise,weight,reps", written)
 
     def test_a_section_that_is_there_is_left_alone(self) -> None:
         self.assertEqual(den.ensure_section(DAY, "workout"), DAY)
@@ -240,7 +252,42 @@ class Edits(unittest.TestCase):
 
     def test_a_set_is_removed_by_its_number(self) -> None:
         written = den.remove_row(DAY, "workout", 2)
-        self.assertEqual(written.count("Push,bench press"), 1)
+        self.assertEqual(written.count("bench press,60"), 1)
+
+    def test_a_movement_is_written_over_where_its_first_set_was(self) -> None:
+        written = den.set_rows(
+            DAY, "workout", "bench press", ["bench press,62.5,8", "bench press,62.5,6"]
+        )
+        after = den.parse_text(written)
+        self.assertEqual(
+            [(lift.exercise, lift.weight, lift.reps) for lift in after.lifts],
+            [
+                ("bench press", 62.5, 8),
+                ("bench press", 62.5, 6),
+                ("overhead press", 35.0, 10),
+            ],
+        )
+
+    def test_a_movement_written_over_by_nothing_is_removed(self) -> None:
+        written = den.set_rows(DAY, "workout", "Bench Press", [])
+        self.assertNotIn("bench press", written)
+        self.assertIn("overhead press,35,10", written)
+
+    def test_writing_over_a_movement_that_is_not_there_is_refused(self) -> None:
+        with self.assertRaises(LookupError):
+            den.set_rows(DAY, "workout", "squat", ["squat,80,5"])
+
+    def test_the_split_is_named_over_the_table_and_corrected_in_place(self) -> None:
+        written = den.set_split(DAY, "Pull")
+        section = written.split("### Workout")[1].split("### Notes")[0]
+        self.assertLess(section.index("Pull"), section.index("exercise,weight,reps"))
+        self.assertNotIn("Push", section)
+        self.assertEqual(den.parse_text(written).split, "Pull")
+
+    def test_a_split_lands_over_the_table_in_a_day_that_never_trained(self) -> None:
+        written = den.set_split(OLD, "Legs")
+        section = written.split("### Workout")[1].split("### Notes")[0]
+        self.assertLess(section.index("Legs"), section.index("exercise,weight,reps"))
 
     def test_a_note_is_added_after_the_notes_already_there(self) -> None:
         written = den.add_note(DAY, "23:00 - later", "one more thing")
@@ -275,15 +322,36 @@ class Validation(unittest.TestCase):
 
     def test_a_set_is_checked_before_it_is_written(self) -> None:
         self.assertEqual(
-            den.normalize_lift("Push", "bench press", "60.0", "8"),
-            "Push,bench press,60,8",
+            den.normalize_lift("bench press", "60.0", "8"), "bench press,60,8"
         )
         with self.assertRaises(ValueError):
-            den.normalize_lift("Push", "bench press", "-1", "8")
+            den.normalize_lift("bench press", "-1", "8")
         with self.assertRaises(ValueError):
-            den.normalize_lift("Push", "bench press", "60", "8.5")
+            den.normalize_lift("bench press", "60", "8.5")
         with self.assertRaises(ValueError):
-            den.normalize_lift("Push", "bench, press", "60", "8")
+            den.normalize_lift("bench, press", "60", "8")
+        with self.assertRaises(ValueError):
+            den.normalize_lift("exercise", "60", "8")
+
+    def test_a_split_holds_no_comma_so_it_is_never_read_back_as_a_set(self) -> None:
+        self.assertEqual(den.normalize_split("  Push  "), "Push")
+        with self.assertRaises(ValueError):
+            den.normalize_split("push,pull")
+        with self.assertRaises(ValueError):
+            den.normalize_split("   ")
+
+    def test_sets_are_read_in_the_notation_they_are_printed_in(self) -> None:
+        self.assertEqual(den.parse_sets("60x8"), [("60", "8")])
+        self.assertEqual(
+            den.parse_sets(" 60x8  57.5X7 0x12 "),
+            [("60", "8"), ("57.5", "7"), ("0", "12")],
+        )
+        with self.assertRaises(ValueError):
+            den.parse_sets("60")
+        with self.assertRaises(ValueError):
+            den.parse_sets("")
+        with self.assertRaises(ValueError):
+            den.parse_sets("60x8 heavy")
 
     def test_a_note_is_stamped_with_the_time_it_was_written(self) -> None:
         when = datetime(2026, 8, 31, 22, 4)
@@ -343,13 +411,50 @@ class Store(Den):
                 lambda text: den.add_task(text, "go"),
             )
 
-    def test_a_set_is_logged_through_the_store(self) -> None:
+    def test_every_set_of_one_movement_is_logged_in_one_edit(self) -> None:
         self.write(date(2026, 8, 30), OLD)
         _day, current = den.read_day(self.den, date(2026, 8, 30))
-        after, _later = den.add_lift(
-            self.den, date(2026, 8, 30), "Legs", "squat", "80", "5", current
+        after, later = den.add_lifts(
+            self.den, date(2026, 8, 30), "squat", den.parse_sets("80x5 80x5 80x4"), current
         )
-        self.assertEqual(after.lifts[0].to_dict()["exercise"], "squat")
+        self.assertEqual(
+            [(lift.exercise, lift.reps) for lift in after.lifts],
+            [("squat", 5), ("squat", 5), ("squat", 4)],
+        )
+        after, _later = den.change(
+            self.den, date(2026, 8, 30), later, lambda text: den.set_split(text, "Legs")
+        )
+        self.assertEqual(after.split, "Legs")
+
+    def test_a_movement_is_renamed_and_kept_where_it_was(self) -> None:
+        self.write(date(2026, 8, 31), DAY)
+        _day, current = den.read_day(self.den, date(2026, 8, 31))
+        after, _later = den.edit_lifts(
+            self.den,
+            date(2026, 8, 31),
+            "bench press",
+            "incline press",
+            den.parse_sets("60x8"),
+            current,
+        )
+        self.assertEqual(
+            [(lift.exercise, lift.reps) for lift in after.lifts],
+            [("incline press", 8), ("overhead press", 10)],
+        )
+
+    def test_a_bad_set_in_the_middle_leaves_the_day_as_it_was(self) -> None:
+        self.write(date(2026, 8, 30), OLD)
+        _day, current = den.read_day(self.den, date(2026, 8, 30))
+        with self.assertRaises(ValueError):
+            den.add_lifts(
+                self.den,
+                date(2026, 8, 30),
+                "squat",
+                [("80", "5"), ("80", "half")],
+                current,
+            )
+        after, _later = den.read_day(self.den, date(2026, 8, 30), create=False)
+        self.assertEqual(after.lifts, [])
 
 
 class Backlog(Den):
@@ -440,24 +545,31 @@ class Workouts(Den):
         super().setUp()
         self.write(
             date(2026, 8, 28),
-            "# F\n\n### Workout\n\nsplit,exercise,weight,reps\nPull,barbell row,50,10\n",
+            "# F\n\n### Workout\n\nPull\n\nexercise,weight,reps\nbarbell row,50,10\n",
         )
         self.write(
             date(2026, 8, 31),
-            "# M\n\n### Workout\n\nsplit,exercise,weight,reps\n"
-            "Push,bench press,60,8\nPush,overhead press,35,10\n",
+            "# M\n\n### Workout\n\nPush\n\nexercise,weight,reps\n"
+            "bench press,60,8\noverhead press,35,10\n",
         )
         self.history = den.lift_history(self.den, date(2026, 8, 31), 7)
 
     def test_history_is_newest_first_and_skips_rest_days(self) -> None:
-        self.assertEqual([day for day, _lifts in self.history], ["2026-08-31", "2026-08-28"])
+        self.assertEqual(
+            [session.date for session in self.history], ["2026-08-31", "2026-08-28"]
+        )
+
+    def test_a_session_carries_the_split_the_day_was(self) -> None:
+        self.assertEqual([session.split for session in self.history], ["Push", "Pull"])
+        self.assertEqual(self.history[0].volume, 60 * 8 + 35 * 10)
 
     def test_splits_are_offered_most_recent_first(self) -> None:
         self.assertEqual(den.splits_used(self.history), ["Push", "Pull"])
 
     def test_exercises_can_be_narrowed_to_one_split(self) -> None:
         self.assertEqual(
-            den.exercises_used(self.history), ["bench press", "overhead press", "barbell row"]
+            den.exercises_used(self.history),
+            ["bench press", "overhead press", "barbell row"],
         )
         self.assertEqual(den.exercises_used(self.history, "pull"), ["barbell row"])
 
@@ -466,6 +578,87 @@ class Workouts(Den):
         assert found is not None
         self.assertEqual((found.weight, found.reps), (60.0, 8))
         self.assertIsNone(den.last_lift(self.history, "deadlift"))
+
+
+class Moves(unittest.TestCase):
+    """The exercise database: what can be offered before it has been trained."""
+
+    def setUp(self) -> None:
+        self.room = tempfile.TemporaryDirectory()
+        self.addCleanup(self.room.cleanup)
+        self.den = Path(self.room.name)
+        self.book = den.resolve_exercises(None, self.den)
+
+    def write(self, text: str) -> den.Exercises:
+        self.book.write_text(text, encoding="utf-8")
+        return den.Exercises.load(self.book)
+
+    def test_a_den_with_no_database_yet_reads_as_an_empty_one(self) -> None:
+        self.assertEqual(den.Exercises.load(self.book).names(), [])
+
+    def test_the_header_and_half_written_rows_are_passed_over(self) -> None:
+        known = self.write(
+            "split,exercise\npull,tbar\nnonsense\npush,\n,squat\npull,tbar\n"
+        )
+        self.assertEqual(known.names(), ["tbar"])
+
+    def test_the_split_puts_its_own_movements_first(self) -> None:
+        known = self.write("split,exercise\npush,bench press\npull,tbar\nlegs,squat\n")
+        self.assertEqual(known.names("pull"), ["tbar", "bench press", "squat"])
+        self.assertEqual(known.names(), ["bench press", "tbar", "squat"])
+        self.assertEqual(known.splits(), ["push", "pull", "legs"])
+        self.assertEqual(known.split_of("SQUAT"), "legs")
+        self.assertIsNone(known.split_of("deadlift"))
+
+    def test_a_query_ranks_prefixes_before_the_rest(self) -> None:
+        known = self.write("split,exercise\npull,barbell row\npull,bent over row\n")
+        self.assertEqual([m.name for m in known.query("row")], ["barbell row", "bent over row"])
+        self.assertEqual([m.name for m in known.query("bent")], ["bent over row"])
+
+    def test_a_movement_is_learned_once_and_forgotten_once(self) -> None:
+        den.learn_move(self.book, "pull", "tbar")
+        den.learn_move(self.book, "push", "dips")
+        self.assertEqual(
+            self.book.read_text(encoding="utf-8"),
+            "split,exercise\npull,tbar\npush,dips\n",
+        )
+        with self.assertRaises(ValueError):
+            den.learn_move(self.book, "legs", "TBAR")
+        self.assertEqual(den.forget_move(self.book, "TBar").name, "tbar")
+        self.assertEqual(den.Exercises.load(self.book).names(), ["dips"])
+        with self.assertRaises(ValueError):
+            den.forget_move(self.book, "tbar")
+
+    def test_a_movement_with_a_comma_in_it_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            den.learn_move(self.book, "pull", "row, seated")
+
+
+class Databases(unittest.TestCase):
+    """Where each database is, which the den answers before anywhere else."""
+
+    def setUp(self) -> None:
+        self.room = tempfile.TemporaryDirectory()
+        self.addCleanup(self.room.cleanup)
+        self.den = Path(self.room.name)
+
+    def test_the_den_owns_its_foods_once_it_holds_a_file(self) -> None:
+        self.assertEqual(den.resolve_database(None, self.den), den.DEFAULT_DATABASE)
+        held = self.den / den.FOODS
+        held.write_text("egg 1pc,6,0,5\n", encoding="utf-8")
+        self.assertEqual(den.resolve_database(None, self.den), held)
+
+    def test_what_was_asked_for_beats_the_den(self) -> None:
+        (self.den / den.FOODS).write_text("egg 1pc,6,0,5\n", encoding="utf-8")
+        self.assertEqual(
+            den.resolve_database("/tmp/other.csv", self.den), Path("/tmp/other.csv")
+        )
+        self.assertEqual(
+            den.resolve_exercises("/tmp/moves.csv", self.den), Path("/tmp/moves.csv")
+        )
+
+    def test_the_exercise_database_is_in_the_den_whether_or_not_it_exists(self) -> None:
+        self.assertEqual(den.resolve_exercises(None, self.den), self.den / den.EXERCISES)
 
 
 class Foods(unittest.TestCase):

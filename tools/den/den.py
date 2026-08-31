@@ -66,12 +66,18 @@ DEFAULT_DATABASE = Path.home() / ".local" / "share" / "nvim" / "macros.csv"
 #: morning is a panel that gets ignored.
 HORIZON = 60
 
+#: The food database inside the den, which is macros.nvim's format.
+FOODS = "Foods.csv"
+
+#: The exercise database inside the den: `split,exercise` rows.
+EXERCISES = "Exercises.csv"
+
 #: The sections a day has, in the order they are written. A file missing one
 #: reads as empty, and a write that needs one puts it back in this order.
 SECTIONS = ("tasks", "habits", "macros", "weight", "workout", "notes")
 
 #: The header line each table carries, which is not a row.
-TABLES = {"macros": "what,protein,carbs,fat", "workout": "split,exercise,weight,reps"}
+TABLES = {"macros": "what,protein,carbs,fat", "workout": "exercise,weight,reps"}
 
 _H1 = re.compile(r"^#\s+(.+?)\s*$")
 _H3 = re.compile(r"^###\s+(.+?)\s*$")
@@ -80,6 +86,7 @@ _CHECK = re.compile(r"^\s*-\s+\[([ xX])\]\s+(.+?)\s*$")
 _BOX = re.compile(r"\[[ xX~]\]")
 _KILOS = re.compile(r"^([0-9]+(?:\.[0-9]+)?)\s*kg$", re.IGNORECASE)
 _STEM = re.compile(r"^(\d{4}-\d{2}-\d{2})-[A-Za-z]+$")
+_SET = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*[xX]\s*([0-9]+)")
 
 
 class Conflict(RuntimeError):
@@ -141,15 +148,17 @@ class Macros:
 
 @dataclass(frozen=True)
 class Lift:
-    """One set: the split it belongs to, the movement, the load, the reps.
+    """One set: the movement, the load, the reps.
 
     A set rather than an exercise, because a set is what is done and what is
     written down at the moment it is done. An exercise with three sets is three
     rows, and the panel groups them back together.
+
+    No split here. A day is one split and every set of it belongs to that, so
+    the split is written once at the top of the section - see `Day.split`.
     """
 
     index: int
-    split: str
     exercise: str
     weight: float
     reps: int
@@ -161,7 +170,6 @@ class Lift:
     def to_dict(self) -> dict[str, object]:
         return {
             "index": self.index,
-            "split": self.split,
             "exercise": self.exercise,
             "weight": self.weight,
             "reps": self.reps,
@@ -202,6 +210,26 @@ class Dated:
         return {"date": self.date, "index": self.index, "text": self.text}
 
 
+@dataclass(frozen=True)
+class Session:
+    """One day of training: the split it was, and the sets done on it."""
+
+    date: str
+    split: str
+    lifts: list[Lift]
+
+    @property
+    def volume(self) -> float:
+        return sum(lift.volume for lift in self.lifts)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "date": self.date,
+            "split": self.split,
+            "lifts": [lift.to_dict() for lift in self.lifts],
+        }
+
+
 @dataclass
 class Day:
     date: str
@@ -214,15 +242,7 @@ class Day:
     notes: list[Note] = field(default_factory=list)
     macros: Macros = field(default_factory=Macros)
     weight: float | None = None
-
-    @property
-    def splits(self) -> list[str]:
-        """The splits trained, in the order they were first written."""
-        found: list[str] = []
-        for lift in self.lifts:
-            if lift.split and lift.split not in found:
-                found.append(lift.split)
-        return found
+    split: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -236,6 +256,7 @@ class Day:
             "notes": [note.to_dict() for note in self.notes],
             "macros": self.macros.to_dict(),
             "weight": self.weight,
+            "split": self.split,
         }
 
 
@@ -310,14 +331,34 @@ def _parse_lifts(lines: list[str]) -> list[Lift]:
         cells = _cells(line, "workout")
         if cells is None:
             continue
-        weight = _number(cells[2])
-        reps = _number(cells[3])
+        weight = _number(cells[1])
+        reps = _number(cells[2])
         if weight is None or weight < 0 or reps is None or reps < 1:
             continue
-        lifts.append(
-            Lift(len(lifts) + 1, cells[0], cells[1], weight, int(reps)),
-        )
+        lifts.append(Lift(len(lifts) + 1, cells[0], weight, int(reps)))
     return lifts
+
+
+def _heading(table: str) -> str:
+    """The start of a table's header line, which is not a row of it."""
+    return TABLES[table].split(",", 1)[0] + ","
+
+
+def _parse_split(lines: list[str]) -> str:
+    """The split the day was, which is the one line that is not the table.
+
+    A day is one split - push, pull, legs - and every set of it belongs to
+    that, so it is written once above the rows rather than on each of them.
+    """
+    head = _heading("workout")
+    for line in lines:
+        written = line.strip()
+        if not written or written.startswith(head):
+            continue
+        if _cells(line, "workout") is not None:
+            continue
+        return written
+    return ""
 
 
 def _parse_weight(lines: list[str]) -> float | None:
@@ -361,7 +402,16 @@ def _parse_notes(lines: list[str]) -> list[Note]:
 
 def parse_day(path: Path) -> Day:
     """Reads one day's entry."""
-    lines = path.read_text(encoding="utf-8").splitlines()
+    return parse_text(path.read_text(encoding="utf-8"), path.stem, str(path))
+
+
+def parse_text(text: str, stem: str = "", file: str = "") -> Day:
+    """Reads one day out of the text of an entry.
+
+    Where `parse_day` reads a file, this reads what a write is about to make
+    one: the same day, before it is on disk.
+    """
+    lines = text.splitlines()
     title = next(
         (found.group(1).strip() for line in lines if (found := _H1.match(line))),
         "",
@@ -369,8 +419,8 @@ def parse_day(path: Path) -> Day:
     sections = _sections(lines)
     foods, macros = _parse_foods(sections.get("macros", []))
     return Day(
-        date=path.stem,
-        file=str(path),
+        date=stem,
+        file=file,
         title=title,
         tasks=[
             Task(number + 1, text, done)
@@ -379,6 +429,7 @@ def parse_day(path: Path) -> Day:
         habits=[Habit(name, done) for name, done in _boxes(sections.get("habits", []))],
         foods=foods,
         lifts=_parse_lifts(sections.get("workout", [])),
+        split=_parse_split(sections.get("workout", [])),
         notes=_parse_notes(sections.get("notes", [])),
         macros=macros,
         weight=_parse_weight(sections.get("weight", [])),
@@ -538,6 +589,25 @@ def set_weight(text: str, value: str) -> str:
     return "".join(lines)
 
 
+def set_split(text: str, value: str) -> str:
+    """Names the split the day is, on its own line over the table of sets."""
+    lines = ensure_section(text, "workout").splitlines(keepends=True)
+    start, end = _region(lines, "workout")
+    newline = _newline(lines)
+    head = _heading("workout")
+    written = value + newline
+    for index in range(start, end):
+        bare = lines[index].strip()
+        if not bare or bare.startswith(head) or _cells(lines[index], "workout"):
+            continue
+        lines[index] = written
+        return "".join(lines)
+    # None yet, so it goes above the table: the split is read before the sets.
+    lines.insert(start, newline)
+    lines.insert(start + 1, written)
+    return "".join(lines)
+
+
 def _rows(lines: list[str], table: str) -> list[int]:
     start, end = _region(lines, table)
     return [index for index in range(start, end) if _cells(lines[index], table)]
@@ -555,6 +625,31 @@ def remove_row(text: str, table: str, index: int) -> str:
     if index < 1 or index > len(found):
         raise IndexError(f"row {index} not found in {table}")
     del lines[found[index - 1]]
+    return "".join(lines)
+
+
+def set_rows(text: str, table: str, name: str, rows: list[str]) -> str:
+    """Writes over every row of one thing, where the first of them was.
+
+    A movement is three lines of the file and one line of a training log, so it
+    is edited whole: what is written now replaces what is there. No rows at all
+    removes it. The place is kept, because the order of a workout is the order
+    it was done in.
+    """
+    lines = text.splitlines(keepends=True)
+    wanted = name.strip().lower()
+    found: list[int] = []
+    for index in _rows(lines, table):
+        cells = _cells(lines[index], table)
+        if cells is not None and cells[0].lower() == wanted:
+            found.append(index)
+    if not found:
+        raise LookupError(f"no {table} rows named {name}")
+    newline = _newline(lines)
+    for index in reversed(found):
+        del lines[index]
+    for offset, row in enumerate(rows):
+        lines.insert(found[0] + offset, row + newline)
     return "".join(lines)
 
 
@@ -719,7 +814,13 @@ def template(den: Path) -> str:
     found = den / "Templates" / "daily.md"
     if found.is_file():
         return found.read_text(encoding="utf-8")
-    body = "".join(f"### {name.title()}\n\n" for name in SECTIONS)
+    body = ""
+    for name in SECTIONS:
+        # The same shape `ensure_section` builds, table header and all, so a
+        # den with no template of its own is not a den with a different format.
+        body += f"### {name.title()}\n\n"
+        if name in TABLES:
+            body += TABLES[name] + "\n\n"
     return f"# {{{{title}}}}\n\n{body}"
 
 
@@ -833,23 +934,51 @@ def normalize_food(row: str) -> str:
     return ",".join([name] + cells[1:])
 
 
-def normalize_lift(split: str, exercise: str, weight: str, reps: str) -> str:
-    """Checks one `split,exercise,weight,reps` row before it is written.
+def normalize_split(value: str) -> str:
+    """Checks the name of a day's split before it is written.
+
+    A comma is refused by `_plain`, which is what keeps a split off the table
+    below it: a line with no comma is never read back as a set.
+    """
+    return _plain(value, "a split")
+
+
+def normalize_lift(exercise: str, weight: str, reps: str) -> str:
+    """Checks one `exercise,weight,reps` row before it is written.
 
     A weight of zero is a pull-up, not a mistake. Reps are whole: half a
     repetition is a thing people say and not a thing to record.
     """
-    named = _plain(split, "a split")
-    if named == "split":
-        raise ValueError("a split cannot be called split: that is the table header")
     movement = _plain(exercise, "an exercise")
+    if movement == "exercise":
+        raise ValueError(
+            "an exercise cannot be called exercise: that is the table header"
+        )
     load = _number(str(weight).strip())
     if load is None or load < 0:
         raise ValueError(f"a weight is a number of kilograms: {weight}")
     count = _number(str(reps).strip())
     if count is None or count < 1 or count != int(count):
         raise ValueError(f"reps are a whole number above zero: {reps}")
-    return f"{named},{movement},{_figure(load)},{int(count)}"
+    return f"{movement},{_figure(load)},{int(count)}"
+
+
+def parse_sets(text: str) -> list[tuple[str, str]]:
+    """Reads `60x8 60x8 60x7` as three sets, in the notation the panel prints.
+
+    Written the way the sets are read back, so logging an exercise is one
+    answer rather than one answer per set. The halves come back as they were
+    typed and `normalize_lift` is what decides whether they are a set.
+    """
+    found: list[tuple[str, str]] = []
+    for token in text.split():
+        matched = _SET.fullmatch(token)
+        if matched is None:
+            raise ValueError(f"a set is weight x reps, like 60x8: {token}")
+        found.append((matched.group(1), matched.group(2)))
+    if not found:
+        raise ValueError("name at least one set, like 60x8")
+    return found
 
 
 def _figure(value: float) -> str:
@@ -866,21 +995,49 @@ def remove_food(den: Path, day: date, index: int, expected: str) -> tuple[Day, s
     return change(den, day, expected, lambda text: remove_row(text, "macros", index))
 
 
-def add_lift(
+def add_lifts(
     den: Path,
     day: date,
-    split: str,
     exercise: str,
-    weight: str,
-    reps: str,
+    sets: list[tuple[str, str]],
     expected: str,
 ) -> tuple[Day, str]:
-    written = normalize_lift(split, exercise, weight, reps)
-    return change(den, day, expected, lambda text: add_row(text, "workout", written))
+    """Writes every set of one movement in one edit.
+
+    Checked before anything is written, so three sets with a bad one in the
+    middle leave the day as it was rather than half logged.
+    """
+    rows = [normalize_lift(exercise, weight, reps) for weight, reps in sets]
+
+    def rewrite(text: str) -> str:
+        for row in rows:
+            text = add_row(text, "workout", row)
+        return text
+
+    return change(den, day, expected, rewrite)
 
 
 def remove_lift(den: Path, day: date, index: int, expected: str) -> tuple[Day, str]:
     return change(den, day, expected, lambda text: remove_row(text, "workout", index))
+
+
+def edit_lifts(
+    den: Path,
+    day: date,
+    was: str,
+    exercise: str,
+    sets: list[tuple[str, str]],
+    expected: str,
+) -> tuple[Day, str]:
+    """Writes over every set of one movement, in one edit.
+
+    No sets removes the movement. An exercise named is a movement renamed, and
+    an empty one is the name it already had. Every row is checked before any of
+    them is written, so a bad set leaves the day as it was.
+    """
+    named = exercise.strip() or was
+    rows = [normalize_lift(named, weight, reps) for weight, reps in sets]
+    return change(den, day, expected, lambda text: set_rows(text, "workout", was, rows))
 
 
 def note_heading(title: str | None, now: datetime) -> str:
@@ -1050,70 +1207,69 @@ def weight_history(den: Path, end: date, days: int) -> list[tuple[str, float]]:
     return found
 
 
-def lift_history(den: Path, end: date, days: int) -> list[tuple[str, list[Lift]]]:
-    """Every workout in a window, newest first.
+def lift_history(den: Path, end: date, days: int) -> list[Session]:
+    """Every day of training in a window, newest first.
 
-    What the panel offers under a field comes from here rather than from a
-    database somebody has to fill in first: the exercises worth suggesting are
-    the ones already done, and the den is the only place that knows them.
+    What the panel offers under a field starts here: the movements worth
+    suggesting first are the ones already done, and the den is the only place
+    that knows when they were done. The database beside it knows the rest.
     """
     if days < 1:
         raise ValueError("a window is at least one day")
-    found: list[tuple[str, list[Lift]]] = []
+    found: list[Session] = []
     for step in range(days):
         day = end - timedelta(days=step)
         if not entry_path(den, day).is_file():
             continue
         written, _current = read_day(den, day, create=False)
         if written.lifts:
-            found.append((day.isoformat(), written.lifts))
+            found.append(Session(day.isoformat(), written.split, written.lifts))
     return found
 
 
-def _recent(history: list[tuple[str, list[Lift]]], read: Callable[[Lift], str]) -> list[str]:
+def splits_used(history: list[Session]) -> list[str]:
+    """The splits trained in a window, most recent first."""
     seen: list[str] = []
-    for _day, lifts in history:
-        for lift in lifts:
-            value = read(lift)
-            if value and value not in seen:
-                seen.append(value)
+    for session in history:
+        if session.split and session.split not in seen:
+            seen.append(session.split)
     return seen
 
 
-def splits_used(history: list[tuple[str, list[Lift]]]) -> list[str]:
-    """The splits trained in a window, most recent first."""
-    return _recent(history, lambda lift: lift.split)
+def exercises_used(history: list[Session], split: str | None = None) -> list[str]:
+    """The movements done in a window, most recent first.
 
-
-def exercises_used(
-    history: list[tuple[str, list[Lift]]], split: str | None = None
-) -> list[str]:
-    """The movements done in a window, most recent first, one split or all."""
+    A split narrows it to the days that were that split, because the movements
+    worth offering under today's split are the ones done on days like it.
+    """
     wanted = split.strip().lower() if split and split.strip() else None
-    chosen = [
-        (day, [lift for lift in lifts if not wanted or lift.split.lower() == wanted])
-        for day, lifts in history
-    ]
-    return _recent(chosen, lambda lift: lift.exercise)
+    seen: list[str] = []
+    for session in history:
+        if wanted and session.split.lower() != wanted:
+            continue
+        for lift in session.lifts:
+            if lift.exercise and lift.exercise not in seen:
+                seen.append(lift.exercise)
+    return seen
 
 
-def last_lift(
-    history: list[tuple[str, list[Lift]]], exercise: str
-) -> Lift | None:
+def last_lift(history: list[Session], exercise: str) -> Lift | None:
     """The last set of one movement, which is what the next one is judged on."""
     wanted = exercise.strip().lower()
-    for _day, lifts in history:
-        for lift in reversed(lifts):
+    for session in history:
+        for lift in reversed(session.lifts):
             if lift.exercise.lower() == wanted:
                 return lift
     return None
 
 
-# The food database is not the den. It is macros.nvim's own CSV, so a food
-# added in the editor is one the panel can log and the other way round, and
-# nothing about it is journal data. It lives here rather than beside here
-# because a widget backend is one program text with no directory behind it, and
-# two files concatenated into one namespace is a collision waiting to happen.
+# The two databases the den keeps beside the days: the foods that can be
+# logged and the movements that can be trained. Both are the person's own
+# reference data rather than a day of it, both are plain CSV they can edit by
+# hand, and both live in the den so they travel with the journal they describe.
+#
+# The food file keeps macros.nvim's own row format, so the editor and the panel
+# read and write the same foods.
 
 #: What a quantity can be called, and what it is called here.
 UNITS = {
@@ -1179,10 +1335,21 @@ class Item:
         )
 
 
-def resolve_database(given: str | None = None) -> Path:
-    """The food database: what was asked for, then the variable, then Neovim's."""
+def resolve_database(given: str | None = None, den: Path | None = None) -> Path:
+    """The food database: what was asked for, then the variable, then the den.
+
+    Neovim's path is the last answer rather than the first, and only when the
+    den holds no file of its own: a den that has one owns its foods, and a den
+    that has not yet been given one keeps working off what macros.nvim wrote.
+    """
     chosen = given or os.environ.get("MACROS_DATABASE")
-    return Path(chosen).expanduser() if chosen else DEFAULT_DATABASE
+    if chosen:
+        return Path(chosen).expanduser()
+    if den is not None:
+        held = den / FOODS
+        if held.is_file():
+            return held
+    return DEFAULT_DATABASE
 
 
 def parse_item(row: str) -> Item:
@@ -1296,3 +1463,154 @@ def insert_item(path: Path, row: str) -> Item:
         finally:
             fcntl.flock(guard.fileno(), fcntl.LOCK_UN)
     return item
+
+
+# The exercise database. What it is for is the field under the panel's set box:
+# a movement can be offered before it has ever been trained, and the split it
+# usually belongs to is what puts today's movements at the top of that list.
+
+
+@dataclass(frozen=True)
+class Move:
+    """One movement the database knows, and the split it belongs to."""
+
+    split: str
+    name: str
+
+    def choice(self) -> dict[str, str]:
+        return {"id": self.name, "label": f"{self.name} ({self.split})"}
+
+    def to_dict(self) -> dict[str, object]:
+        return {"split": self.split, "name": self.name}
+
+
+class Exercises:
+    """Every movement that could be read, in the order they were written."""
+
+    def __init__(self, moves: list[Move] | None = None) -> None:
+        self.moves = moves or []
+
+    @classmethod
+    def load(cls, path: Path) -> Exercises:
+        """Reads what parses and passes over what does not.
+
+        A den with no file yet is an empty database rather than a refusal: the
+        panel falls back on what has been trained, which is where every one of
+        these rows came from in the first place.
+        """
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            return cls()
+        moves: list[Move] = []
+        seen: set[str] = set()
+        for line in lines:
+            cells = [cell.strip() for cell in line.split(",")]
+            if len(cells) != 2 or not cells[0] or not cells[1]:
+                continue
+            if (cells[0].lower(), cells[1].lower()) == ("split", "exercise"):
+                continue
+            if cells[1].lower() in seen:
+                continue
+            seen.add(cells[1].lower())
+            moves.append(Move(cells[0], cells[1]))
+        return cls(moves)
+
+    def names(self, split: str | None = None) -> list[str]:
+        """The movements, the ones for a split first when one is named."""
+        wanted = split.strip().lower() if split and split.strip() else None
+        if wanted is None:
+            return [move.name for move in self.moves]
+        fits = [move for move in self.moves if move.split.lower() == wanted]
+        rest = [move for move in self.moves if move.split.lower() != wanted]
+        return [move.name for move in fits + rest]
+
+    def splits(self) -> list[str]:
+        """The splits the database names, in the order they were written."""
+        found: list[str] = []
+        for move in self.moves:
+            if move.split not in found:
+                found.append(move.split)
+        return found
+
+    def split_of(self, name: str) -> str | None:
+        """Which split one movement belongs to, if the database knows it."""
+        wanted = name.strip().lower()
+        for move in self.moves:
+            if move.name.lower() == wanted:
+                return move.split
+        return None
+
+    def query(self, words: str) -> list[Move]:
+        """The movements a few typed letters could mean, best first."""
+        wanted = words.strip().lower()
+        if not wanted:
+            return list(self.moves)
+        starts = [m for m in self.moves if m.name.lower().startswith(wanted)]
+        holds = [m for m in self.moves if wanted in m.name.lower() and m not in starts]
+        loose = [
+            m
+            for m in self.moves
+            if _within(wanted, m.name.lower()) and m not in starts and m not in holds
+        ]
+        return starts + holds + loose
+
+
+def resolve_exercises(given: str | None = None, den: Path | None = None) -> Path:
+    """The exercise database: what was asked for, the variable, then the den."""
+    chosen = given or os.environ.get("EXERCISES_DATABASE")
+    if chosen:
+        return Path(chosen).expanduser()
+    return (den or resolve_den()) / EXERCISES
+
+
+def normalize_move(split: str, name: str) -> str:
+    """Checks one `split,exercise` row before it is written."""
+    return f"{_plain(split, 'a split')},{_plain(name, 'an exercise')}"
+
+
+def learn_move(path: Path, split: str, name: str) -> Move:
+    """Adds one movement to the database, under a lock, keeping the header."""
+    row = normalize_move(split, name)
+    known = Exercises.load(path)
+    if known.split_of(name) is not None:
+        raise ValueError(f"already known: {name.strip()}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with (path.parent / f".{path.name}.lock").open("a", encoding="utf-8") as guard:
+        fcntl.flock(guard.fileno(), fcntl.LOCK_EX)
+        try:
+            held = path.read_text(encoding="utf-8") if path.is_file() else ""
+            if not held.strip():
+                held = "split,exercise\n"
+            elif not held.endswith(("\n", "\r")):
+                held += "\n"
+            atomic_write(path, held + row + "\n")
+        finally:
+            fcntl.flock(guard.fileno(), fcntl.LOCK_UN)
+    split_name, move_name = row.split(",", 1)
+    return Move(split_name, move_name)
+
+
+def forget_move(path: Path, name: str) -> Move:
+    """Takes one movement out of the database. Trained days keep their sets."""
+    wanted = name.strip().lower()
+    if not wanted:
+        raise ValueError("an exercise must not be empty")
+    with (path.parent / f".{path.name}.lock").open("a", encoding="utf-8") as guard:
+        fcntl.flock(guard.fileno(), fcntl.LOCK_EX)
+        try:
+            held = path.read_text(encoding="utf-8") if path.is_file() else ""
+            kept: list[str] = []
+            gone: Move | None = None
+            for line in held.splitlines(keepends=True):
+                cells = [cell.strip() for cell in line.split(",")]
+                if len(cells) == 2 and cells[1].lower() == wanted and gone is None:
+                    gone = Move(cells[0], cells[1])
+                    continue
+                kept.append(line)
+            if gone is None:
+                raise ValueError(f"unknown exercise: {name.strip()}")
+            atomic_write(path, "".join(kept))
+        finally:
+            fcntl.flock(guard.fileno(), fcntl.LOCK_UN)
+    return gone

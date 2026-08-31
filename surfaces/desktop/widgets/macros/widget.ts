@@ -57,6 +57,20 @@ function figure(): HTMLSpanElement {
   return span;
 }
 
+/** The red x that removes what its row is.
+ *
+ * Drawn on the row rather than behind a click, because a control that deletes
+ * is one the person has to see before they reach for the line beside it. */
+function erase(hint: string, act: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "erase";
+  button.textContent = "x";
+  button.title = hint;
+  button.addEventListener("click", act);
+  return button;
+}
+
 /** One heading row over a list, with the tick that adds to it.
  *
  * The heading comes back as a button. The workout's heading is the day's
@@ -284,6 +298,24 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     });
   });
 
+  /** Asks for one logged food back, cell by cell, to write over the row.
+   *
+   * The four cells rather than a name and an amount: the row may have been
+   * scaled from a food the database no longer holds, or typed by hand, and a
+   * correction has to reach it either way. */
+  const correct = (row: Food): void => {
+    ctx.ask({
+      title: row.name,
+      fields: [
+        { name: "what", label: "Food", value: row.name },
+        { name: "protein", label: "Protein", value: grams(row.protein) },
+        { name: "carbs", label: "Carbohydrate", value: grams(row.carbs) },
+        { name: "fat", label: "Fat", value: grams(row.fat) },
+      ],
+      action: { action: "refood", index: row.index },
+    });
+  };
+
   /** Asks for one movement's sets back, to write over the ones it has.
    *
    * A movement reads as one line, so it is edited as one line: a set added, a
@@ -424,13 +456,12 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     });
   };
 
-  /** A row that only reads, or one that can be clicked and reads the same. */
-  const shell = (act: (() => void) | undefined): HTMLElement => {
+  /** The reading part of a row: what it says, or a button saying the same. */
+  const face = (act: (() => void) | undefined): HTMLElement => {
     if (act === undefined) return document.createElement("div");
     const button = document.createElement("button");
     button.type = "button";
     button.style.font = "inherit";
-    button.style.width = "100%";
     button.style.textAlign = "left";
     button.style.background = "transparent";
     button.style.border = "none";
@@ -440,16 +471,29 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     return button;
   };
 
-  /** One row: what was on the left, the numbers on the right. */
+  /** One row: what was on the left, the numbers on the right.
+   *
+   * The name is cut to the width of the panel, so the whole of it is on the
+   * row as its title: a food logged under a long name is still readable
+   * without opening it. */
   const pair = (
     what: string,
     behind: string,
     act?: () => void,
+    remove?: { title: string; act: () => void },
   ): HTMLElement => {
-    const item = shell(act);
+    const item = document.createElement("div");
     item.style.display = "flex";
-    item.style.justifyContent = "space-between";
-    item.style.gap = "10px";
+    item.style.alignItems = "center";
+    item.style.gap = "6px";
+
+    const said = face(act);
+    said.style.flex = "1";
+    said.style.minWidth = "0";
+    said.style.display = "flex";
+    said.style.justifyContent = "space-between";
+    said.style.gap = "10px";
+    said.title = what;
 
     const left = document.createElement("span");
     left.style.color = "var(--sw-fg)";
@@ -463,7 +507,9 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     right.style.textTransform = "none";
     right.textContent = behind;
 
-    item.append(left, right);
+    said.append(left, right);
+    item.append(said);
+    if (remove !== undefined) item.append(erase(remove.title, remove.act));
     return item;
   };
 
@@ -491,10 +537,21 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
       const parts = group.map(
         (row) => `${grams(row.weight)}x${String(row.reps)}`,
       );
+      const movement = first.exercise;
       sets.append(
-        pair(first.exercise, parts.join("  "), () => {
-          edit(first.exercise, parts.join(" "));
-        }),
+        pair(
+          movement,
+          parts.join("  "),
+          () => {
+            edit(movement, parts.join(" "));
+          },
+          {
+            title: `Remove every set of ${movement}`,
+            act: () => {
+              ctx.send({ action: "relift", was: movement, sets: "" });
+            },
+          },
+        ),
       );
     }
   };
@@ -609,6 +666,15 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
           pair(
             row.name,
             `${grams(row.protein)}/${grams(row.carbs)}/${grams(row.fat)}`,
+            () => {
+              correct(row);
+            },
+            {
+              title: `Remove ${row.name}`,
+              act: () => {
+                ctx.send({ action: "unfood", index: row.index });
+              },
+            },
           ),
         );
       }

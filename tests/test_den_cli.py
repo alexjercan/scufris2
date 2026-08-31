@@ -176,6 +176,17 @@ class Writes(Command):
         self.ok("macros", "log", "chicken breast:g", "150")
         self.assertIn("chicken breast 150g,46.5,0,5.4", self.entry().read_text(encoding="utf-8"))
 
+    def test_a_food_row_is_written_over_and_then_removed(self) -> None:
+        self.ok("macros", "log", "chicken breast:g", "150")
+        self.ok("macros", "edit", "1", "chicken breast 200g,62,0,7.2")
+        found = self.answered("macros", "list", "--json")
+        assert isinstance(found, dict)
+        self.assertEqual(
+            [food["name"] for food in found["foods"]], ["chicken breast 200g"]
+        )
+        self.ok("macros", "rm", "1")
+        self.assertEqual(self.answered("macros", "list", "--json")["foods"], [])
+
     def test_words_matching_more_than_one_food_are_refused_with_the_names(self) -> None:
         self.database.write_text(
             "egg 1pc,6,0,5\negg white 100g,11,0,0.2\n", encoding="utf-8"

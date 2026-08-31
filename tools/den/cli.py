@@ -126,6 +126,9 @@ def parse(argv: list[str]) -> argparse.Namespace:
     food = nested(top("macros", help="the day's food rows"), common)
     food.add_parser("list")
     food.add_parser("add").add_argument("row", help="what,protein,carbs,fat")
+    correcting = food.add_parser("edit", help="write one row over the one there")
+    correcting.add_argument("index", type=int)
+    correcting.add_argument("row", help="what,protein,carbs,fat")
     food.add_parser("rm").add_argument("index", type=int)
     logging = food.add_parser("log", help="one database food, scaled to an amount")
     logging.add_argument("name")
@@ -390,11 +393,16 @@ def macros(args: argparse.Namespace, here: Path, when: date) -> None:
         day = apply(here, when, lambda text: den.add_row(text, "macros", den.normalize_food(row)))
         emit(args, day.to_dict(), f"{day.date}: {row}")
         return
-    if args.what == "add":
+    if args.what in ("add", "edit"):
         try:
             row = den.normalize_food(args.row)
         except ValueError as trouble:
             raise Stop(str(trouble)) from None
+        if args.what == "edit":
+            index = args.index
+            day = apply(here, when, lambda text: den.edit_row(text, "macros", index, row))
+            emit(args, day.to_dict(), f"{day.date}: {row}")
+            return
         day = apply(here, when, lambda text: den.add_row(text, "macros", row))
     else:
         day = apply(here, when, lambda text: den.remove_row(text, "macros", args.index))

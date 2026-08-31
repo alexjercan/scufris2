@@ -113,6 +113,30 @@ body {
   border-color: var(--sw-accent);
 }
 
+/* The one control on a row that deletes what the row is.
+ *
+ * Red, and drawn at full weight rather than only on hover: a control that
+ * removes something is a control the person has to see before they reach for
+ * the row, not one they find by passing over it. Small, because it stands at
+ * the end of a line rather than over a list - the tick that adds is the one
+ * with a box around it. */
+.erase {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  font-family: inherit;
+  font-size: var(--sw-size-small);
+  line-height: 1;
+  color: var(--sw-alarm);
+  background: transparent;
+  border: none;
+  cursor: default;
+  opacity: 0.8;
+}
+
+.erase:hover {
+  opacity: 1;
+}
+
 /* Opposite corners, by review decision: the destructive tick and the
  * reversible one are never next to each other. */
 .close {

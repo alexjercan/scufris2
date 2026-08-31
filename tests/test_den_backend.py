@@ -133,6 +133,16 @@ class Agenda(Panel):
         )
         self.assertEqual([habit["name"] for habit in reading["habits"]], ["Gym", "Learn"])
 
+    def test_a_task_is_removed_by_its_number(self) -> None:
+        reading = self.do({"action": "untask", "index": 1})
+        self.assertEqual([task["text"] for task in reading["tasks"]], ["water the plants"])
+        self.assertNotIn("ship the panels", self.entry())
+
+    def test_removing_a_task_that_is_not_there_is_said_out_loud(self) -> None:
+        reading = self.do({"action": "untask", "index": 9})
+        self.assertIsNotNone(reading["trouble"])
+        self.assertEqual(len(reading["tasks"]), 2)
+
     def test_what_was_left_behind_and_what_is_coming_arrive_apart(self) -> None:
         reading = self.read()
         self.assertEqual(
@@ -215,7 +225,7 @@ class Backlog(Panel):
     def test_an_idea_is_dropped_by_its_number(self) -> None:
         self.do({"action": "idea", "text": "one"})
         self.do({"action": "idea", "text": "two"})
-        reading = self.do({"action": "drop", "index": 1})
+        reading = self.do({"action": "unidea", "index": 1})
         self.assertEqual([idea["text"] for idea in reading["backlog"]], ["two"])
 
     def test_ideas_already_done_are_not_offered(self) -> None:
@@ -247,6 +257,46 @@ class Macros(Panel):
         reading = self.do({"action": "weight", "value": "80.9"})
         self.assertEqual(reading["weight"], 80.9)
         self.assertIn("80.9 kg", self.entry())
+
+    def test_a_food_row_is_written_over_by_the_cells_it_is_asked_for(self) -> None:
+        reading = self.do(
+            {
+                "action": "refood",
+                "index": 1,
+                "what": "rice 200g",
+                "protein": "14",
+                "carbs": "156",
+                "fat": "1.2",
+            }
+        )
+        self.assertEqual([food["name"] for food in reading["foods"]], ["rice 200g"])
+        self.assertEqual(reading["macros"]["carbs"], 156)
+
+    def test_a_food_row_keeps_its_name(self) -> None:
+        reading = self.do(
+            {"action": "refood", "index": 1, "what": " ", "protein": "1", "carbs": "1", "fat": "1"}
+        )
+        self.assertIn("name", str(reading["trouble"]))
+        self.assertEqual([food["name"] for food in reading["foods"]], ["rice 100g"])
+
+    def test_a_cell_that_is_not_a_number_writes_nothing(self) -> None:
+        reading = self.do(
+            {
+                "action": "refood",
+                "index": 1,
+                "what": "rice 200g",
+                "protein": "lots",
+                "carbs": "156",
+                "fat": "1.2",
+            }
+        )
+        self.assertIsNotNone(reading["trouble"])
+        self.assertEqual([food["name"] for food in self.read()["foods"]], ["rice 100g"])
+
+    def test_a_food_row_is_removed_by_its_number(self) -> None:
+        reading = self.do({"action": "unfood", "index": 1})
+        self.assertEqual(reading["foods"], [])
+        self.assertEqual(reading["macros"]["calories"], 0)
 
     def test_words_are_not_a_weight(self) -> None:
         reading = self.do({"action": "weight", "value": "heavy"})
@@ -514,6 +564,12 @@ class Notes(Panel):
             {"action": "edit", "index": 1, "heading": "09:00 - idea", "body": "a month"}
         )
         self.assertEqual(reading["notes"][0]["body"], "a month")
+
+    def test_a_note_is_removed_by_its_number(self) -> None:
+        self.do({"action": "note", "heading": "standup", "body": "said it"})
+        reading = self.do({"action": "unnote", "index": 1})
+        self.assertEqual([note["body"] for note in reading["notes"]], ["said it"])
+        self.assertNotIn("a calendar", self.entry())
 
     def test_an_edit_with_no_heading_keeps_the_one_the_note_has(self) -> None:
         reading = self.do({"action": "edit", "index": 1, "body": "a month"})

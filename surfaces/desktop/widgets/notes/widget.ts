@@ -64,6 +64,20 @@ function stamp(iso: string): string {
   return `${DAYS[at.getUTCDay()]} ${String(day)} ${MONTHS[month - 1]} ${String(year)}`;
 }
 
+/** The red x that removes what its row is.
+ *
+ * Drawn on the note rather than behind a click, because a control that deletes
+ * is one the person has to see before they reach for the block beside it. */
+function erase(hint: string, act: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "erase";
+  button.textContent = "x";
+  button.title = hint;
+  button.addEventListener("click", act);
+  return button;
+}
+
 /** One small uppercase line, the shell's own quiet register. */
 function label(): HTMLSpanElement {
   const span = document.createElement("span");
@@ -187,13 +201,23 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
       }
       list.replaceChildren();
       for (const note of notes) {
+        // The note and the one control that removes it, side by side.
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.alignItems = "flex-start";
+        row.style.gap = "6px";
+
         // A button, because a note is the way back into itself: clicking one
         // opens the same two fields it was written with, filled in. The chrome
         // is stripped rather than styled - a note reads as a note, and the
         // pointer is what says it can be changed.
         const block = document.createElement("button");
         block.type = "button";
-        block.title = "Rewrite this note";
+        // What the note says, in full: the panel scrolls, and a note read at
+        // the edge of it is one the person should not have to scroll to.
+        block.title = `${note.heading}\n${note.body}`;
+        block.style.flex = "1";
+        block.style.minWidth = "0";
         block.style.font = "inherit";
         block.style.background = "transparent";
         block.style.border = "none";
@@ -234,7 +258,13 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
         });
 
         block.append(heading, body);
-        list.append(block);
+        row.append(
+          block,
+          erase(`Remove ${note.heading}`, () => {
+            ctx.send({ action: "unnote", index: note.index });
+          }),
+        );
+        list.append(row);
       }
     },
     destroy(): void {

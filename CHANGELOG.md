@@ -29,6 +29,11 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   asks for its sets back, and what is typed replaces them, an empty answer
   removing the movement. An entry written before the section existed gains it on
   the first write.
+- Removing and correcting from the panels. A task, an idea, a note, a food row
+  and a movement each carry a red `x`; a food row and a movement open the box
+  that wrote them when clicked. Hovering a line shows the whole of it, which a
+  panel three hundred pixels wide would otherwise cut. The same correction is
+  `scufris-den macros edit` from the command line.
 - Two databases in the den itself. `Exercises.csv` holds `split,exercise` rows
   and is what the panel offers under the exercise field before a movement has
   ever been trained - what was trained recently comes first, then what the

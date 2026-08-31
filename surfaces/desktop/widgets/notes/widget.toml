@@ -1,6 +1,6 @@
 id = "notes"
 name = "Notes"
-description = "Show one day of structured notes out of the-den journal, heading and body, in the order they were written. A note is added to the day that is showing, and one already there is edited in place. The spawn payload is empty."
+description = "Show one day of structured notes out of the-den journal, heading and body, in the order they were written. A note is added to the day that is showing, and one already there is edited in place by clicking it or removed by the red x beside it. Hovering a note shows what it says in full. The spawn payload is empty."
 width = 348
 height = 460
 backend = "den"

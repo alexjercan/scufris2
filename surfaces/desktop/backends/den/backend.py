@@ -26,16 +26,20 @@ Every line after it is an action:
     {"action": "refresh"}
     {"action": "habit", "name": "Gym"}
     {"action": "task", "index": 2}
+    {"action": "untask", "index": 2}
     {"action": "add", "text": "Call the dentist"}
     {"action": "idea", "text": "learn to weld"}
     {"action": "promote", "index": 1}
     {"action": "weight", "value": "81.4"}
     {"action": "food", "name": "chicken breast:g", "amount": "150"}
+    {"action": "refood", "index": 1, "what": "rice 100g", "protein": "7", ...}
+    {"action": "unfood", "index": 1}
     {"action": "lift", "exercise": "bench press", "sets": "60x8 60x8 60x6"}
     {"action": "relift", "was": "bench press", "exercise": "bench press", "sets": "60x8"}
     {"action": "split", "split": "push"}
     {"action": "note", "heading": "Standup", "body": "..."}
     {"action": "edit", "index": 2, "heading": "Standup", "body": "..."}
+    {"action": "unnote", "index": 2}
     {"action": "search", "name": "chick"}
 
 The ones that write are the panel's ticks and the words the person typed into
@@ -295,15 +299,29 @@ class Panel:
             index = counted(action.get("index"))
             if index is not None:
                 self.on_day(selected, lambda text: remove_row(text, "workout", index))
+        elif name == "untask":
+            index = counted(action.get("index"))
+            if index is not None:
+                self.on_day(selected, lambda text: remove_task(text, index))
+        elif name == "refood":
+            self.relabel(selected, action)
+        elif name == "unfood":
+            index = counted(action.get("index"))
+            if index is not None:
+                self.on_day(selected, lambda text: remove_row(text, "macros", index))
         elif name == "note":
             self.remember(selected, action)
         elif name == "edit":
             self.rewrite(selected, action)
+        elif name == "unnote":
+            index = counted(action.get("index"))
+            if index is not None:
+                self.on_day(selected, lambda text: remove_note(text, index))
         elif name == "idea":
             self.imagine(action)
         elif name == "promote":
             self.pull(selected, action)
-        elif name == "drop":
+        elif name == "unidea":
             index = counted(action.get("index"))
             if index is not None:
                 self.backlog(lambda text: remove_idea(text, index))
@@ -491,6 +509,26 @@ class Panel:
         except ValueError as trouble:
             raise Refused(str(trouble)) from None
         self.on_day(selected, lambda text: add_row(text, "macros", normalize_food(row)))
+
+    def relabel(self, selected: str, action: dict[str, object]) -> None:
+        """Writes one food row over the one that is there.
+
+        The four cells the row is, rather than a name and an amount: a row that
+        was logged is a row that may have been scaled from a food the database
+        no longer holds, and a correction has to reach it either way.
+        """
+        self.choices = []
+        index = counted(action.get("index"))
+        if index is None:
+            return
+        cells = [words(action.get(cell)) for cell in ("what", "protein", "carbs", "fat")]
+        if not cells[0]:
+            raise Refused("a food row keeps its name")
+        try:
+            row = normalize_food(",".join(cells))
+        except ValueError as trouble:
+            raise Refused(str(trouble)) from None
+        self.on_day(selected, lambda text: edit_row(text, "macros", index, row))
 
     def train(self, selected: str, action: dict[str, object]) -> None:
         """Logs every set of one movement, in one edit.

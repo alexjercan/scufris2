@@ -619,6 +619,16 @@ def add_row(text: str, table: str, row: str) -> str:
     return "".join(lines)
 
 
+def edit_row(text: str, table: str, index: int, row: str) -> str:
+    """Writes one row over the one that is there, where it is."""
+    lines = text.splitlines(keepends=True)
+    found = _rows(lines, table)
+    if index < 1 or index > len(found):
+        raise IndexError(f"row {index} not found in {table}")
+    lines[found[index - 1]] = row + _newline(lines)
+    return "".join(lines)
+
+
 def remove_row(text: str, table: str, index: int) -> str:
     lines = text.splitlines(keepends=True)
     found = _rows(lines, table)
@@ -989,6 +999,11 @@ def _figure(value: float) -> str:
 def add_food(den: Path, day: date, row: str, expected: str) -> tuple[Day, str]:
     written = normalize_food(row)
     return change(den, day, expected, lambda text: add_row(text, "macros", written))
+
+
+def edit_food(den: Path, day: date, index: int, row: str, expected: str) -> tuple[Day, str]:
+    written = normalize_food(row)
+    return change(den, day, expected, lambda text: edit_row(text, "macros", index, written))
 
 
 def remove_food(den: Path, day: date, index: int, expected: str) -> tuple[Day, str]:

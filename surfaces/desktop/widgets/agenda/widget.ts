@@ -107,6 +107,20 @@ function shortly(value: string): string {
   return `${String(day)} ${named(month).slice(0, 3)}`;
 }
 
+/** The red x that removes what its row is.
+ *
+ * Drawn on the row rather than behind a click, because a control that deletes
+ * is one the person has to see before they reach for the line beside it. */
+function erase(hint: string, act: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "erase";
+  button.textContent = "x";
+  button.title = hint;
+  button.addEventListener("click", act);
+  return button;
+}
+
 /** One small uppercase line, the shell's own quiet register. */
 function label(): HTMLSpanElement {
   const span = document.createElement("span");
@@ -316,25 +330,44 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     return block;
   };
 
-  /** One line that can be ticked, or one that only reads. */
+  /** One line that can be ticked, or one that only reads.
+   *
+   * A line is one row of a panel three hundred pixels wide, so what does not
+   * fit is cut. The whole of it goes on the row as its title: a task is read
+   * by hovering it rather than by opening the file. */
   const line = (
     box: string,
     text: string,
     done: boolean,
     act: (() => void) | undefined,
+    remove?: { title: string; act: () => void },
   ): HTMLElement => {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.style.font = "inherit";
+    const row = document.createElement("div");
     row.style.display = "flex";
-    row.style.gap = "8px";
-    row.style.width = "100%";
-    row.style.textAlign = "left";
-    row.style.background = "transparent";
-    row.style.border = "none";
-    row.style.padding = "0";
-    row.style.cursor = "default";
-    row.style.color = done ? "var(--sw-muted)" : "var(--sw-fg)";
+    row.style.alignItems = "center";
+    row.style.gap = "6px";
+    row.title = text;
+
+    let said: HTMLElement;
+    if (act === undefined) {
+      said = document.createElement("div");
+    } else {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.addEventListener("click", act);
+      said = button;
+    }
+    said.style.font = "inherit";
+    said.style.display = "flex";
+    said.style.gap = "8px";
+    said.style.flex = "1";
+    said.style.minWidth = "0";
+    said.style.textAlign = "left";
+    said.style.background = "transparent";
+    said.style.border = "none";
+    said.style.padding = "0";
+    said.style.cursor = "default";
+    said.style.color = done ? "var(--sw-muted)" : "var(--sw-fg)";
 
     const mark = document.createElement("span");
     mark.style.flex = "0 0 auto";
@@ -350,8 +383,9 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     if (done) what.style.textDecoration = "line-through";
     what.textContent = text;
 
-    row.append(mark, what);
-    if (act !== undefined) row.addEventListener("click", act);
+    said.append(mark, what);
+    row.append(said);
+    if (remove !== undefined) row.append(erase(remove.title, remove.act));
     return row;
   };
 
@@ -417,9 +451,20 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     }
     for (const task of tasks) {
       block.append(
-        line(task.done ? "[x]" : "[ ]", task.text, task.done, () => {
-          ctx.send({ action: "task", index: task.index });
-        }),
+        line(
+          task.done ? "[x]" : "[ ]",
+          task.text,
+          task.done,
+          () => {
+            ctx.send({ action: "task", index: task.index });
+          },
+          {
+            title: `Remove ${task.text}`,
+            act: () => {
+              ctx.send({ action: "untask", index: task.index });
+            },
+          },
+        ),
       );
     }
 
@@ -439,7 +484,7 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
             ctx.send({ action: "select", date: task.date });
           },
         );
-        row.title = `Left undone on ${shortly(task.date)} - open that day`;
+        row.title = `${task.text}\nLeft undone on ${shortly(task.date)} - open that day`;
         late.append(row);
       }
     }
@@ -489,10 +534,21 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
     for (const idea of backlog) {
       // The arrow is the tick: clicking one of these is how an idea stops
       // being an idea and lands on the day that is showing.
-      const row = line("->", idea.text, false, () => {
-        ctx.send({ action: "promote", index: idea.index });
-      });
-      row.title = `Put on ${shortly(selected)}`;
+      const row = line(
+        "->",
+        idea.text,
+        false,
+        () => {
+          ctx.send({ action: "promote", index: idea.index });
+        },
+        {
+          title: `Forget ${idea.text}`,
+          act: () => {
+            ctx.send({ action: "unidea", index: idea.index });
+          },
+        },
+      );
+      row.title = `${idea.text}\nPut on ${shortly(selected)}`;
       kept.append(row);
     }
   };

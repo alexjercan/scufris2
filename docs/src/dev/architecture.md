@@ -141,6 +141,11 @@ socket. `tools/den/den.py` is compiled into the desktop's `den` backend by
 same file is what `scufris-den` runs for the agent. Neither reaches the other:
 they share a format and a lock, not a process.
 
+Every list a panel draws can be corrected and removed from the panel, not
+only added to: a row is clicked to open what wrote it, and the red `x` beside
+it is the one control that deletes. The command line carries the same verbs, so
+the agent and the person are never able to do different things to a day.
+
 The den holds the reference data the days are written against: `Foods.csv`,
 which keeps macros.nvim's row format, and `Exercises.csv`, which is
 `split,exercise`. Both are plain files the person can edit, both travel with

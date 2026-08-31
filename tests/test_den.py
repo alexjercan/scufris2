@@ -250,6 +250,18 @@ class Edits(unittest.TestCase):
         self.assertIn("Legs,squat,80,5", written)
         self.assertLess(written.index("### Workout"), written.index("### Notes"))
 
+    def test_a_food_row_is_written_over_where_it_is(self) -> None:
+        written = den.edit_row(DAY, "macros", 1, "chicken breast 200g,62,0,7.2")
+        after = den.parse_text(written)
+        self.assertEqual(
+            [food.name for food in after.foods],
+            ["chicken breast 200g", "rice 100g"],
+        )
+
+    def test_writing_over_a_row_that_is_not_there_is_refused(self) -> None:
+        with self.assertRaises(IndexError):
+            den.edit_row(DAY, "macros", 9, "rice 50g,3.5,39,0.3")
+
     def test_a_set_is_removed_by_its_number(self) -> None:
         written = den.remove_row(DAY, "workout", 2)
         self.assertEqual(written.count("bench press,60"), 1)

@@ -34,6 +34,7 @@ scufris-den habit toggle Gym
 scufris-den note add "what was decided" --title standup
 scufris-den weight 81.4
 scufris-den macros log "chicken breast:g" 150
+scufris-den macros edit 1 "chicken breast 200g,62,0,7.2"
 scufris-den gym split push
 scufris-den gym add "bench press" 60x8 60x8 60x6
 scufris-den gym edit "bench press" 60x8 60x8 60x7

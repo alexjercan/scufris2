@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import {
   defineTool,
@@ -16,16 +15,14 @@ import {
   ATTENTION_NOTICE_EVENT,
   type AttentionNoticeSignal,
 } from "../shared/attention-notice.ts";
-import { runPrivateHelper, toolResult } from "../shared/runtime.ts";
+import { runPrivateHelper, toolPath, toolResult } from "../shared/runtime.ts";
 import {
   startQuickReviewAgent,
   type QuickReviewAgent,
   type QuickReviewCompletion,
 } from "./quick-review-agent.ts";
 
-const jobsHelperPath = fileURLToPath(
-  new URL("../../../tools/jobs/scufris-jobs", import.meta.url),
-);
+const jobsHelperPath = toolPath("jobs/scufris-jobs", import.meta.url);
 
 const CONTEXT_ID = /^[a-f0-9]{24}$/;
 const JOB_ID = /^[a-f0-9]{12}$/;

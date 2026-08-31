@@ -1,11 +1,8 @@
-import { fileURLToPath } from "node:url";
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { runPrivateHelper, toolResult } from "../shared/runtime.ts";
+import { runPrivateHelper, toolPath, toolResult } from "../shared/runtime.ts";
 
-const jobsHelperPath = fileURLToPath(
-  new URL("../../../tools/jobs/scufris-jobs", import.meta.url),
-);
+const jobsHelperPath = toolPath("jobs/scufris-jobs", import.meta.url);
 const JOB_ID = /^[a-f0-9]{12}$/;
 
 export const WORKER_REPORT_TOOL = "scufris_report";

@@ -1,12 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { toolPath } from "../shared/runtime.ts";
 
 const MAX_LINE_BYTES = 4 * 1024 * 1024;
-const helperPath = fileURLToPath(
-  new URL(
-    "../../../tools/quick-review-agent/scufris-quick-review-agent",
-    import.meta.url,
-  ),
+const helperPath = toolPath(
+  "quick-review-agent/scufris-quick-review-agent",
+  import.meta.url,
 );
 
 export interface QuickReviewCompletion {

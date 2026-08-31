@@ -40,6 +40,7 @@
     inherit pkgs;
     resources = defaults.resources;
     piPackage = agentCfg.piPackage;
+    den = defaults.denPackage;
     projectRoots = agentCfg.projectRoots;
   };
   # The frontend owns the speaker, so the synthesiser is bound here and handed
@@ -64,7 +65,11 @@ in {
     (lib.mkRenamedOptionModule ["programs" "scufris" "desktop" "cancelKey"] ["programs" "scufris" "desktop" "backgroundKey"])
     (lib.mkRenamedOptionModule ["programs" "scufris" "desktop" "stopKey"] ["programs" "scufris" "desktop" "abortKey"])
     (lib.mkRenamedOptionModule ["programs" "scufris" "desktop" "chatCommand"] ["programs" "scufris" "desktop" "terminalCommand"])
-    (lib.mkRenamedOptionModule ["programs" "scufris" "desktop" "todayCommand"] ["programs" "scufris" "desktop" "widgets" "todayCommand"])
+    # The journal is read in the widget backend now, so there is no command to
+    # point at. Removed rather than renamed: a path that silently did nothing
+    # would look like a working setting.
+    (lib.mkRemovedOptionModule ["programs" "scufris" "desktop" "todayCommand"] "The journal widgets read the-den directly. Remove this option; set desktop.widgets.denPath if the journal is not where DEN_PATH says.")
+    (lib.mkRemovedOptionModule ["programs" "scufris" "desktop" "widgets" "todayCommand"] "The journal widgets read the-den directly. Remove this option; set desktop.widgets.denPath if the journal is not where DEN_PATH says.")
     (lib.mkRenamedOptionModule ["programs" "scufris" "desktop" "denPath"] ["programs" "scufris" "desktop" "widgets" "denPath"])
     (lib.mkRenamedOptionModule ["programs" "scufris" "desktop" "macrosDatabase"] ["programs" "scufris" "desktop" "widgets" "macrosDatabase"])
   ];
@@ -276,23 +281,13 @@ in {
       };
 
       widgets = {
-        todayCommand = lib.mkOption {
-          type = lib.types.nullOr lib.types.package;
-          default = null;
-          description = ''
-            Executable that reads and writes the-den journal for the agenda,
-            macros, and notes widgets. Widgets that need it report when it is
-            absent.
-          '';
-        };
-
         denPath = lib.mkOption {
           type = lib.types.nullOr lib.types.str;
           default = null;
           example = "/home/you/personal/the-den";
           description = ''
-            Journal directory when it is not where today looks by default. A
-            systemd user service does not inherit the login shell's DEN_PATH.
+            Journal directory when it is not the default. A systemd user
+            service does not inherit the login shell's DEN_PATH.
           '';
         };
 
@@ -471,8 +466,6 @@ in {
             "SCUFRIS_DESKTOP_STOP_KEY=${desktopCfg.abortKey}"
             ++ lib.optional (desktopCfg.terminalCommand != null)
             "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe desktopCfg.terminalCommand}"
-            ++ lib.optional (widgetCfg.todayCommand != null)
-            "SCUFRIS_TODAY_COMMAND=${lib.getExe widgetCfg.todayCommand}"
             ++ lib.optional (widgetCfg.denPath != null)
             "DEN_PATH=${widgetCfg.denPath}"
             ++ lib.optional (widgetCfg.macrosDatabase != null)

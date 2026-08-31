@@ -151,6 +151,8 @@ function expectedArgs(projectRoot: string, sessionDirectory: string): string[] {
     ]),
     "--skill",
     join(projectRoot, "agent", "skills", "workflow"),
+    "--skill",
+    join(projectRoot, "agent", "skills", "den"),
     "--session-dir",
     sessionDirectory,
     "--continue",

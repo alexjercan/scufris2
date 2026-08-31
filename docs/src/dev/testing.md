@@ -193,7 +193,9 @@ tests/*.test.ts                 Pi extension behavior
  tests/test_scufris_jobs.py      durable jobs + real isolated tmux
  tests/test_quick_review_agent.py isolated review adapter
  tests/test_scufris_staging.py   environment + exact PID/route cleanup
- tests/test_today_backend.py     journal backend
+ tests/test_den.py               the-den format, store, and queries
+ tests/test_den_backend.py       journal backend, assembled with its prelude
+ tests/test_den_cli.py           the journal command line
  tests/test_usage_backends.py    account usage backends
  shared/control                  framing, types, bounds
  host/service                    agent + three sockets + gateway

@@ -35,6 +35,10 @@ in {
     test -x ${resources}/share/scufris/scripts/scufris-jobs
     test ! -e ${resources}/share/scufris/scripts/scufris-artifacts-prune
     test -f ${resources}/share/scufris/skills/workflow/SKILL.md
+    test -f ${resources}/share/scufris/skills/den/SKILL.md
+    # The journal command the den skill runs, and the library behind it.
+    test -f ${resources}/share/scufris/tools/den/cli.py
+    test -f ${resources}/share/scufris/tools/den/den.py
     test ! -e ${resources}/share/scufris/skills/widgets/SKILL.md
     touch "$out"
   '';

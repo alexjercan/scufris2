@@ -76,7 +76,7 @@ all flake systems                    Linux only
 scufris / default                    scufris-service
 resources                            scufris-ctl
 docs                                 scufris-desktop
-                                     scufris-speak
+scufris-den                          scufris-speak
                                      scufris-staging
                                      ai-tools-api
 ```

@@ -34,9 +34,7 @@ test("package loads only capability-owned Scufris extensions", async () => {
     access(join(root, "surfaces", "desktop", "widgets", "widget.d.ts")),
     access(join(root, "surfaces", "ios", "project.yml")),
     access(join(root, "surfaces", "ios", "Sources", "ScufrisApp.swift")),
-    access(
-      join(root, "surfaces", "desktop", "backends", "today", "backend.py"),
-    ),
+    access(join(root, "surfaces", "desktop", "backends", "den", "backend.py")),
   ]);
   await assert.rejects(access(join(root, "native")));
   await assert.rejects(access(join(root, "host", "gateway")));

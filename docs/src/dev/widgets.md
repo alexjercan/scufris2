@@ -119,12 +119,12 @@ process group and stops only that process.
 
 Use an existing backend when possible:
 
-| Backend           | Use                                        |
-| ----------------- | ------------------------------------------ |
-| `system`          | Host CPU, memory, temperature, and load    |
-| `timer`           | Independent countdown state                |
-| `today`           | Read/write the-den journal through `today` |
-| `claude`, `codex` | Local account usage data                   |
+| Backend           | Use                                     |
+| ----------------- | --------------------------------------- |
+| `system`          | Host CPU, memory, temperature, and load |
+| `timer`           | Independent countdown state             |
+| `den`             | Read/write the-den journal              |
+| `claude`, `codex` | Local account usage data                |
 
 A new backend is needed only for a new machine or data boundary. Keep it small,
 use Python 3 standard library unless a package is justified, and write one JSON

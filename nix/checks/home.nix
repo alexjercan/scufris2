@@ -35,7 +35,6 @@
         cancelKey = "Super+Escape";
         stopKey = "Super+Delete";
         chatCommand = pkgs.hello;
-        todayCommand = pkgs.hello;
         denPath = "/legacy/den";
         macrosDatabase = "/legacy/macros.csv";
       };
@@ -64,7 +63,6 @@ in
     assert legacyConfig.desktop.backgroundKey == "Super+Escape";
     assert legacyConfig.desktop.abortKey == "Super+Delete";
     assert legacyConfig.desktop.terminalCommand == pkgs.hello;
-    assert legacyConfig.desktop.widgets.todayCommand == pkgs.hello;
     assert legacyConfig.desktop.widgets.denPath == "/legacy/den";
     assert legacyConfig.desktop.widgets.macrosDatabase == "/legacy/macros.csv";
     assert speechConfig.programs.scufris.desktop.speech.enable;

@@ -1,24 +1,28 @@
-// One day of the journal, and what follows it.
+// One day of the journal, and everything standing around it.
 //
 // There is one rule here rather than two modes: the selected day in full, then
-// the tasks dated after it. Today is only the day selected by default, so a
-// future day shows an empty habit list - which is honest - and a past day shows
-// what was done, without a second layout to keep in step with the first.
+// what is owed to it. Today is only the day selected by default, so a future
+// day shows an empty habit list - which is honest - and a past day shows what
+// was done, without a second layout to keep in step with the first.
+//
+// Four lists follow the day, and they are four because they answer four
+// different questions. `restant` is what was not done and is now late.
+// `ahead` is what is already dated and coming. The backlog is what has no day
+// at all - an idea worth keeping and not worth pretending to schedule - and
+// clicking one is how it gets a day.
 //
 // The month is drawn from `marks`, the dates the backend found an incomplete
-// task on. It looks forward: a day before the earlier of today and the
-// selection carries no dot, because nothing scans a whole month to find one.
+// task on, late and coming alike.
 //
 // Clicks, never keys. The window is built unfocusable so a panel landing
 // mid-sentence cannot take the keyboard, and ticking a habit has never needed
-// focus. A tick sends one action, the backend writes it through `today` and
-// reads the journal back, so a habit ticked here and one ticked in the editor
-// arrive the same way.
+// focus. A tick sends one action and the backend writes it into the journal,
+// so a habit ticked here and one ticked in the editor arrive the same way.
 //
-// The one thing that needs words is adding a task, and `ctx.ask` is how a page
-// with no keyboard gets them: the companion takes them in a window of its own
-// and sends the finished action here. The task lands on the day that is
-// showing, which is the day whose tasks are on screen above the tick.
+// The things that need words - a task, an idea - come through `ctx.ask`, which
+// is how a page with no keyboard gets any: the companion takes them in a
+// window of its own and sends the finished action here. A task lands on the
+// day that is showing, which is the day whose tasks are on screen above it.
 
 const MONTHS = [
   "January",
@@ -55,6 +59,11 @@ interface Task {
 
 interface Ahead {
   date: string;
+  text: string;
+}
+
+interface Idea {
+  index: number;
   text: string;
 }
 
@@ -272,7 +281,10 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
    *
    * The heading is a row rather than a word, because one group carries a tick:
    * the thing that adds to a list belongs on the list it adds to. */
-  const group = (name: string, add?: () => void): HTMLElement => {
+  const group = (
+    name: string,
+    add?: { title: string; act: () => void },
+  ): HTMLElement => {
     const block = document.createElement("div");
     block.style.display = "flex";
     block.style.flexDirection = "column";
@@ -294,8 +306,8 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
       tick.type = "button";
       tick.className = "tick";
       tick.textContent = "+";
-      tick.title = "Write a task for this day";
-      tick.addEventListener("click", add);
+      tick.title = add.title;
+      tick.addEventListener("click", add.act);
       bar.append(tick);
     }
 
@@ -381,15 +393,20 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
         ? [{ index: item.index, text: item.text, done: item.done === true }]
         : [],
     );
-    const block = group("tasks", () => {
-      // On the day that is showing, which is the day whose tasks this tick
-      // stands under. The backend writes to the same day it is reporting, so
-      // the two cannot disagree.
-      ctx.ask({
-        title: `Task for ${shortly(selected)}`,
-        fields: [{ name: "text", label: "Task", hint: "what has to be done" }],
-        action: { action: "add" },
-      });
+    const block = group("tasks", {
+      title: "Write a task for this day",
+      act: () => {
+        // On the day that is showing, which is the day whose tasks this tick
+        // stands under. The backend writes to the same day it is reporting, so
+        // the two cannot disagree.
+        ctx.ask({
+          title: `Task for ${shortly(selected)}`,
+          fields: [
+            { name: "text", label: "Task", hint: "what has to be done" },
+          ],
+          action: { action: "add" },
+        });
+      },
     });
     if (tasks.length === 0) {
       const empty = label();
@@ -404,6 +421,27 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
           ctx.send({ action: "task", index: task.index });
         }),
       );
+    }
+
+    const restant = items(data, "restant").flatMap((item): Ahead[] =>
+      typeof item.text === "string" && typeof item.date === "string"
+        ? [{ date: item.date, text: item.text }]
+        : [],
+    );
+    if (restant.length > 0) {
+      const late = group("restant");
+      for (const task of restant) {
+        const row = line(
+          shortly(task.date).padStart(6, " "),
+          task.text,
+          false,
+          () => {
+            ctx.send({ action: "select", date: task.date });
+          },
+        );
+        row.title = `Left undone on ${shortly(task.date)} - open that day`;
+        late.append(row);
+      }
     }
 
     const ahead = items(data, "ahead").flatMap((item): Ahead[] =>
@@ -422,6 +460,40 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
           }),
         );
       }
+    }
+
+    const backlog = items(data, "backlog").flatMap((item): Idea[] =>
+      typeof item.text === "string" && typeof item.index === "number"
+        ? [{ index: item.index, text: item.text }]
+        : [],
+    );
+    const kept = group("backlog", {
+      title: "Keep an idea with no day yet",
+      act: () => {
+        ctx.ask({
+          title: "Backlog",
+          fields: [
+            { name: "text", label: "Idea", hint: "something to do, one day" },
+          ],
+          action: { action: "idea" },
+        });
+      },
+    });
+    if (backlog.length === 0) {
+      const empty = label();
+      empty.style.textTransform = "none";
+      empty.style.letterSpacing = "normal";
+      empty.textContent = "Nothing kept.";
+      kept.append(empty);
+    }
+    for (const idea of backlog) {
+      // The arrow is the tick: clicking one of these is how an idea stops
+      // being an idea and lands on the day that is showing.
+      const row = line("->", idea.text, false, () => {
+        ctx.send({ action: "promote", index: idea.index });
+      });
+      row.title = `Put on ${shortly(selected)}`;
+      kept.append(row);
     }
   };
 

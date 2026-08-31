@@ -1,4 +1,9 @@
-// What the day was eaten and weighed.
+// What the day was eaten, weighed and lifted.
+//
+// One day, three things that belong to it. They share a panel because they
+// share a day: what was eaten, what it weighs, and what was lifted are read
+// together or not at all, and a second window for the third would be a second
+// window to put somewhere.
 //
 // Calories lead because they are the number the day is judged on; the three
 // macronutrients behind them are the reason for it, and sit smaller. The
@@ -34,6 +39,14 @@ interface Food {
   fat: number;
 }
 
+interface Lift {
+  index: number;
+  split: string;
+  exercise: string;
+  weight: number;
+  reps: number;
+}
+
 /** One small uppercase figure, the shell's own quiet register. */
 function figure(): HTMLSpanElement {
   const span = document.createElement("span");
@@ -43,6 +56,51 @@ function figure(): HTMLSpanElement {
   span.style.fontVariantNumeric = "tabular-nums";
   span.style.color = "var(--sw-muted)";
   return span;
+}
+
+/** One heading row over a list, with the tick that adds to it. */
+function header(
+  name: string,
+  hint: string,
+): [HTMLElement, HTMLSpanElement, HTMLButtonElement] {
+  const bar = document.createElement("div");
+  bar.style.display = "flex";
+  bar.style.alignItems = "center";
+  bar.style.justifyContent = "space-between";
+  bar.style.gap = "6px";
+  bar.style.flex = "0 0 auto";
+
+  const heading = figure();
+  heading.textContent = name;
+  heading.style.color = "var(--sw-line)";
+
+  // Between the name and the tick, because it is the one figure that says
+  // what the list below adds up to.
+  const total = figure();
+  total.style.flex = "1";
+  total.style.textAlign = "right";
+  total.style.textTransform = "none";
+
+  const tick = document.createElement("button");
+  tick.type = "button";
+  tick.className = "tick";
+  tick.textContent = "+";
+  tick.title = hint;
+
+  bar.append(heading, total, tick);
+  return [bar, total, tick];
+}
+
+/** A list that scrolls on its own, so one long day does not push out another. */
+function column(): HTMLDivElement {
+  const held = document.createElement("div");
+  held.style.flex = "1";
+  held.style.minHeight = "0";
+  held.style.overflowY = "auto";
+  held.style.display = "flex";
+  held.style.flexDirection = "column";
+  held.style.gap = "2px";
+  return held;
 }
 
 /** Reads a gram figure without trailing noise: 128, not 128.0. */
@@ -136,34 +194,13 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
 
   trend.append(line, last);
 
-  const bar = document.createElement("div");
-  bar.style.display = "flex";
-  bar.style.alignItems = "center";
-  bar.style.justifyContent = "space-between";
-  bar.style.gap = "6px";
-  bar.style.flex = "0 0 auto";
+  const [bar, eaten, eat] = header("food", "Log a food for this day");
+  const list = column();
 
-  const heading = figure();
-  heading.textContent = "food";
-  heading.style.color = "var(--sw-line)";
+  const [board, lifted, train] = header("workout", "Log a set for this day");
+  const sets = column();
 
-  const eat = document.createElement("button");
-  eat.type = "button";
-  eat.className = "tick";
-  eat.textContent = "+";
-  eat.title = "Log a food for this day";
-
-  bar.append(heading, eat);
-
-  const list = document.createElement("div");
-  list.style.flex = "1";
-  list.style.minHeight = "0";
-  list.style.overflowY = "auto";
-  list.style.display = "flex";
-  list.style.flexDirection = "column";
-  list.style.gap = "2px";
-
-  frame.append(head, split, trend, bar, list);
+  frame.append(head, split, trend, bar, list, board, sets);
   root.append(frame);
 
   /** The day on screen, and the weight it carries. Both go into the box the
@@ -171,6 +208,9 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
    * it starts from what is already logged. */
   let showing = "";
   let logged: number | undefined;
+  /** The last set written today, so the next one starts from it: a second set
+   * of the same movement is a number of reps away, not four fields away. */
+  let last3: Lift | undefined;
 
   weight.addEventListener("click", () => {
     ctx.ask({
@@ -202,6 +242,42 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
         { name: "amount", label: "Amount", hint: "grams, or pieces" },
       ],
       action: { action: "food" },
+    });
+  });
+
+  train.addEventListener("click", () => {
+    ctx.ask({
+      title: showing === "" ? "Set" : `Set for ${showing}`,
+      fields: [
+        {
+          name: "split",
+          label: "Split",
+          value: last3?.split ?? "",
+          hint: "push, pull, legs",
+          // Offered out of the journal rather than a list somebody has to fill
+          // in first: the splits worth naming are the ones already trained.
+          suggest: { action: "splits" },
+        },
+        {
+          name: "exercise",
+          label: "Exercise",
+          value: last3?.exercise ?? "",
+          hint: "start typing a name",
+          suggest: { action: "moves" },
+        },
+        {
+          name: "weight",
+          label: "Kilograms",
+          value: last3 === undefined ? "" : grams(last3.weight),
+          hint: "0 for bodyweight",
+        },
+        {
+          name: "reps",
+          label: "Reps",
+          value: last3 === undefined ? "" : String(last3.reps),
+        },
+      ],
+      action: { action: "lift" },
     });
   });
 
@@ -261,6 +337,86 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
         },
       ];
     });
+  };
+
+  const lifts = (data: unknown): Lift[] => {
+    const held = (data as { lifts?: unknown }).lifts;
+    if (!Array.isArray(held)) return [];
+    return held.flatMap((item): Lift[] => {
+      if (typeof item !== "object" || item === null) return [];
+      const row = item as {
+        index?: unknown;
+        split?: unknown;
+        exercise?: unknown;
+        weight?: unknown;
+        reps?: unknown;
+      };
+      if (typeof row.exercise !== "string") return [];
+      return [
+        {
+          index: number(row.index) ?? 0,
+          split: typeof row.split === "string" ? row.split : "",
+          exercise: row.exercise,
+          weight: number(row.weight) ?? 0,
+          reps: number(row.reps) ?? 0,
+        },
+      ];
+    });
+  };
+
+  /** One row: what was on the left, the numbers on the right. */
+  const pair = (what: string, behind: string): HTMLElement => {
+    const item = document.createElement("div");
+    item.style.display = "flex";
+    item.style.justifyContent = "space-between";
+    item.style.gap = "10px";
+
+    const left = document.createElement("span");
+    left.style.color = "var(--sw-fg)";
+    left.style.overflow = "hidden";
+    left.style.textOverflow = "ellipsis";
+    left.style.whiteSpace = "nowrap";
+    left.textContent = what;
+
+    const right = figure();
+    right.style.flex = "0 0 auto";
+    right.style.textTransform = "none";
+    right.textContent = behind;
+
+    item.append(left, right);
+    return item;
+  };
+
+  /** The day's sets, one row per movement.
+   *
+   * Grouped rather than listed, because three sets of the same movement are
+   * one line of a training log and three lines of a file. The order is the
+   * order they were done in, which is the order they were written. */
+  const rack = (rows: Lift[]): void => {
+    sets.replaceChildren();
+    const order: string[] = [];
+    const held = new Map<string, Lift[]>();
+    for (const row of rows) {
+      const key = row.exercise.toLowerCase();
+      if (!held.has(key)) {
+        held.set(key, []);
+        order.push(key);
+      }
+      held.get(key)?.push(row);
+    }
+    for (const key of order) {
+      const group = held.get(key) ?? [];
+      const first = group[0];
+      if (first === undefined) continue;
+      sets.append(
+        pair(
+          first.exercise,
+          group
+            .map((row) => `${grams(row.weight)}x${String(row.reps)}`)
+            .join("  "),
+        ),
+      );
+    }
   };
 
   const foods = (data: unknown): Food[] => {
@@ -342,33 +498,44 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
 
       draw(weighings(data));
 
+      // The split leads the workout total, because a day is judged on which
+      // one it was before it is judged on how much was moved.
+      const done = lifts(data);
+      last3 = done[done.length - 1];
+      const volume = number((data as { volume?: unknown }).volume) ?? 0;
+      const splits = Array.isArray((data as { splits?: unknown }).splits)
+        ? ((data as { splits: unknown[] }).splits.filter(
+            (name): name is string => typeof name === "string",
+          ) as string[])
+        : [];
+      lifted.textContent =
+        done.length === 0
+          ? ""
+          : `${splits.join(", ")}  ${grams(volume)} kg`.trim();
+      rack(done);
+      if (done.length === 0) {
+        const empty = figure();
+        empty.style.textTransform = "none";
+        empty.style.letterSpacing = "normal";
+        empty.textContent = "No sets.";
+        sets.append(empty);
+      }
+
       if (typeof fields.trouble === "string" && fields.trouble !== "") return;
       const rows = foods(data);
+      eaten.textContent = rows.length === 0 ? "" : String(rows.length);
       if (rows.length === 0) {
         say("Nothing logged.", "var(--sw-muted)");
         return;
       }
       list.replaceChildren();
       for (const row of rows) {
-        const item = document.createElement("div");
-        item.style.display = "flex";
-        item.style.justifyContent = "space-between";
-        item.style.gap = "10px";
-
-        const what = document.createElement("span");
-        what.style.color = "var(--sw-fg)";
-        what.style.overflow = "hidden";
-        what.style.textOverflow = "ellipsis";
-        what.style.whiteSpace = "nowrap";
-        what.textContent = row.name;
-
-        const behind = figure();
-        behind.style.flex = "0 0 auto";
-        behind.style.textTransform = "none";
-        behind.textContent = `${grams(row.protein)}/${grams(row.carbs)}/${grams(row.fat)}`;
-
-        item.append(what, behind);
-        list.append(item);
+        list.append(
+          pair(
+            row.name,
+            `${grams(row.protein)}/${grams(row.carbs)}/${grams(row.fat)}`,
+          ),
+        );
       }
     },
     destroy(): void {

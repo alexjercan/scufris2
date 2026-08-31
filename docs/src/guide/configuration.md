@@ -48,7 +48,7 @@ programs.scufris
     ├── backgroundKey
     ├── abortKey
     ├── terminalCommand
-    ├── widgets.{todayCommand,denPath,macrosDatabase}
+    ├── widgets.{denPath,macrosDatabase}
     ├── serviceName                  (read-only)
     └── restartCommand               (read-only)
 ```
@@ -77,7 +77,6 @@ programs.scufris
 | Hide/cancel key                                   | `desktop.backgroundKey`                    | derived `Super+Escape`                  |
 | Abort key                                         | `desktop.abortKey`                         | derived `Super+Delete`                  |
 | Add terminal menu action                          | `desktop.terminalCommand`                  | `null`                                  |
-| Connect journal widgets                           | `desktop.widgets.todayCommand`             | `null`                                  |
 | Locate the journal                                | `desktop.widgets.denPath`                  | `null`                                  |
 | Locate food data                                  | `desktop.widgets.macrosDatabase`           | `null`                                  |
 
@@ -145,7 +144,10 @@ These aliases exist for one compatibility release and map to the ownership tree
 above: `piPackage`, `projectRoots`, `finalPackage`, `voice`, `service.agent`,
 `service.agentPackage`, `desktop.aiToolsApi.manage`, `desktop.hotkey`,
 `desktop.cancelKey`, `desktop.stopKey`, `desktop.chatCommand`,
-`desktop.todayCommand`, `desktop.denPath`, and `desktop.macrosDatabase`.
+`desktop.denPath`, and `desktop.macrosDatabase`.
+
+`desktop.todayCommand` and `desktop.widgets.todayCommand` are removed. The
+journal widgets read the-den themselves and there is no command to point at.
 
 Use the new names in all new configuration.
 

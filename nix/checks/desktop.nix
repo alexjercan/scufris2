@@ -27,9 +27,6 @@
   testChat = pkgs.writeShellScriptBin "scufris-chat" ''
     printf 'open the chat\n'
   '';
-  testToday = pkgs.writeShellScriptBin "today" ''
-    printf 'today %s\n' "$@"
-  '';
   testAgent = pkgs.writeShellScriptBin "scufris" ''
     printf 'scufris %s\n' "$@"
   '';
@@ -68,7 +65,6 @@
           package = desktop;
           terminalCommand = testChat;
           widgets = {
-            todayCommand = testToday;
             denPath = "/home/tester/the-den";
             macrosDatabase = "/home/tester/macros.csv";
           };
@@ -258,15 +254,13 @@ in
     assert lib.elem "SCUFRIS_STT_LANGUAGE=en" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_HOTKEY=Super+D" desktopUnit.Service.Environment;
     assert lib.elem "SCUFRIS_DESKTOP_CHAT_COMMAND=${lib.getExe testChat}" desktopUnit.Service.Environment;
-    # The journal is personal data, so the deployment names the command that
-    # reads it and where it lives. A unit does not inherit a login shell, so a
-    # den somewhere other than the default has to be written here.
-    assert lib.elem "SCUFRIS_TODAY_COMMAND=${lib.getExe testToday}" desktopUnit.Service.Environment;
+    # The journal is personal data, and where it lives is the deployment's to
+    # say. A unit does not inherit a login shell, so a den somewhere other than
+    # the default has to be written here.
     assert lib.elem "DEN_PATH=/home/tester/the-den" desktopUnit.Service.Environment;
     # Logging a food turns a name and an amount into a row, and the database is
     # what does that. It follows the den for the same reason.
     assert lib.elem "MACROS_DATABASE=/home/tester/macros.csv" desktopUnit.Service.Environment;
-    assert !(lib.any (lib.hasPrefix "SCUFRIS_TODAY_COMMAND=") configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment);
     assert !(lib.any (lib.hasPrefix "DEN_PATH=") configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment);
     assert !(lib.any (lib.hasPrefix "MACROS_DATABASE=") configuredDesktop.systemd.user.services.scufris-desktop.Service.Environment);
     # The two keys beside the hotkey are the deployment's to name. A module

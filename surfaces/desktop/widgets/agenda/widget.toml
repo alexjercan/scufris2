@@ -1,8 +1,8 @@
 id = "agenda"
 name = "Agenda"
-description = "Show one day of the-den journal and what follows it: a month to pick from, then that day's habits and tasks, then the next incomplete tasks dated after it. Days carrying an incomplete task are marked in the month. Habits and tasks are ticked by clicking them, which writes to the journal through the today command. The spawn payload is { ahead: number }, how many later tasks to name, and 5 is the usual answer."
-width = 340
+description = "Show one day of the-den journal and everything standing around it: a month to pick from, then that day's habits and tasks, then what was left undone on earlier days, then the next tasks dated after it, then the backlog of ideas with no day yet. Days carrying an incomplete task are marked in the month. Habits and tasks are ticked by clicking them, a task is added to the day that is showing, an idea is added to the backlog, and a backlog idea is pulled onto the day. The spawn payload is { ahead: number, horizon: number }: how many later tasks to name, and how many days back to look for what was left undone. 5 and 60 are the usual answers."
+width = 348
 height = 500
-backend = "today"
+backend = "den"
 cadence = 6000
 spawn = { view = "agenda" }

@@ -124,6 +124,7 @@ local.
 flowchart TB
     Resources[resources] --> Launcher[scufris launcher]
     Pi[Pi] --> Launcher
+    Den[scufris-den] --> Launcher
     Service["scufris-service + scufris-ctl<br/>Linux, headless"] --> Gateway["optional surface gateway"]
     Gateway --> Tailscale[declarative Tailscale Serve root route]
     Desktop["scufris-desktop<br/>Linux + X11"] --> Speak[optional scufris-speak]
@@ -133,6 +134,12 @@ flowchart TB
 
 The desktop is not in the launcher closure. Graphical libraries are not in the
 service closure. Speech is not in the agent process tree.
+
+The journal is one library in two places rather than one program behind a
+socket. `tools/den/den.py` is compiled into the desktop's `den` backend by
+`build.rs`, which reads the paths named in the backend's `prelude`, and the
+same file is what `scufris-den` runs for the agent. Neither reaches the other:
+they share a format and a lock, not a process.
 
 ## State map
 

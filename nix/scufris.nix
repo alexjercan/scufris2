@@ -16,6 +16,10 @@
       ../host
       ../shared
       ../surfaces
+      # The den library the widget backend is compiled with. `build.rs` reads
+      # the paths named in surfaces/desktop/backends/den/prelude, so a source
+      # tree without it builds a backend missing half of itself.
+      ../tools/den
     ];
   };
   resources = import ./resources.nix {inherit pkgs;};
@@ -25,11 +29,14 @@
   # shipping a speech module and setting a variable for it. Both are gone: the
   # agent shapes the answer and never decides to make a sound.
   launcher = import ./launcher.nix {
-    inherit pkgs resources piPackage;
+    inherit pkgs resources piPackage den;
   };
   # The synthesiser belongs to whoever is sitting in front of the machine, so
   # it is its own program rather than part of the agent's launcher.
   speak = import ./speak.nix {inherit pkgs;};
+  # The journal's command line. The panels compile the library in; this is the
+  # same library for whoever is not a panel.
+  den = import ./den.nix {inherit pkgs;};
   desktop = import ./desktop.nix {
     inherit pkgs version;
     source = rustSource;
@@ -55,6 +62,7 @@ in {
     piPackage
     launcher
     speak
+    den
     desktop
     service
     ctl

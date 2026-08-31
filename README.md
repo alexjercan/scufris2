@@ -75,7 +75,6 @@ programs.scufris = {
 
     terminalCommand = null;
     widgets = {
-      todayCommand = null;
       denPath = null;
       macrosDatabase = null;
     };

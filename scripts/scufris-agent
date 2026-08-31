@@ -71,6 +71,7 @@ extensions=(
 )
 skills=(
   "$root/agent/skills/workflow"
+  "$root/agent/skills/den"
 )
 # No speech inference or playback. The agent shapes the answer and the frontend
 # chooses whether to send it to the shared API, so no voice mode exists here.

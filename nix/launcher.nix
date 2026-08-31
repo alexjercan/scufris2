@@ -2,6 +2,7 @@
   pkgs,
   resources,
   piPackage,
+  den,
   projectRoots ? ["~/personal" "~/work" "~/third-party"],
 }: let
   extensionArgs = [
@@ -15,6 +16,8 @@
     "${resources}/share/scufris/extensions/scufris/calm.ts"
     "--extension"
     "${resources}/share/scufris/extensions/scufris/service/index.ts"
+    "--skill"
+    "${resources}/share/scufris/skills/den"
   ];
   renderedArgs = pkgs.lib.concatMapStringsSep " " pkgs.lib.escapeShellArg extensionArgs;
 in
@@ -25,6 +28,8 @@ in
     runtimeInputs = [
       pkgs.python3
       pkgs.tmux
+      # The journal, which the den skill runs by name.
+      den
     ];
     text = ''
       if [[ -z "''${SCUFRIS_PROJECT_ROOTS+x}" ]]; then

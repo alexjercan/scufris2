@@ -1,0 +1,3 @@
+# The den itself, compiled in ahead of this backend. One file, one namespace:
+# see build_backends in surfaces/desktop/build.rs.
+tools/den/den.py

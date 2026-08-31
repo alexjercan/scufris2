@@ -9,6 +9,41 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Added
+
+- The-den journal is read and written inside Scufris. `tools/den/den.py` is the
+  whole format - days, backlog, and the food database - compiled into the
+  desktop's `den` backend and run by the new `scufris-den` command.
+- `scufris-den`, a non-interactive command line over the journal, plus a `den`
+  agent skill, so the agent reads and writes the day by the same rules a panel
+  does.
+- A backlog: ideas with no day yet, kept in `Backlog.md` at the top of the den.
+  The agenda panel keeps one and pulls one onto the day that is showing.
+- Restant on the agenda: what was left undone on earlier days, bounded by a
+  horizon of 60 days by default and marked on the month with everything else.
+- A workout log. A `### Workout` section holds `split,exercise,weight,reps`
+  rows, the macros panel logs and shows the day's sets with its total volume,
+  and splits and movements are offered out of what was trained before. An entry
+  written before the section existed gains it on the first write.
+- A widget backend may name libraries in a `prelude` file, which `build.rs`
+  compiles in ahead of it.
+
+### Changed
+
+- The agenda, macros, and notes panels no longer run the `today` command. They
+  read the journal in their own process, so a panel no longer depends on what
+  is on the path and a click costs a read rather than a process.
+- The macros panel shows one whole day - eaten, weighed, and lifted - and is
+  taller for it. The agenda holds its two new lists in the frame it already
+  had, which is the tallest a pair of panels on one edge can be.
+
+### Removed
+
+- **(breaking)** `programs.scufris.desktop.widgets.todayCommand` and its
+  `desktop.todayCommand` alias, with `SCUFRIS_TODAY_COMMAND`. There is no
+  command to point at. `desktop.widgets.denPath` and `DEN_PATH` are unchanged
+  and still say where the journal is.
+
 ## [2.0.0] - 2026-08-30
 
 ### Added

@@ -34,6 +34,8 @@ in {
       ${resources}/share/scufris/extensions/scufris/calm.ts
       --extension
       ${resources}/share/scufris/extensions/scufris/service/index.ts
+      --skill
+      ${resources}/share/scufris/skills/den
       user-argument
       EOF
       diff -u expected actual

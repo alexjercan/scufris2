@@ -54,9 +54,8 @@ exact socket variable -> SCUFRIS_RUNTIME_DIR/NAME -> XDG_RUNTIME_DIR/scufris/NAM
 | `SCUFRIS_DESKTOP_RESTART_COMMAND` | unset                                                                         | Absolute executable for backend restart. Home Manager generates a safe service-specific command.       |
 | `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | unset                                                                         | Absolute executable that reads one paragraph on stdin and owns synthesis/playback. Unset means silent. |
 | `SCUFRIS_WIDGET_PATH`             | unset                                                                         | Colon-separated roots of external compiled desktop widgets.                                            |
-| `SCUFRIS_TODAY_COMMAND`           | `today` on `PATH` inside the backend                                          | Journal command used by the today backend. Home Manager sets an absolute package path.                 |
-| `DEN_PATH`                        | command-specific                                                              | Journal directory passed to the today backend.                                                         |
-| `MACROS_DATABASE`                 | command-specific                                                              | Food database used by the macros widget.                                                               |
+| `DEN_PATH`                        | `~/personal/the-den`                                                          | Journal directory read by the den backend and by `scufris-den`.                                        |
+| `MACROS_DATABASE`                 | `~/.local/share/nvim/macros.csv`                                              | Food database used by the macros widget and by `scufris-den`.                                          |
 
 All three desktop hook variables must name absolute executables. They are not
 shell snippets.

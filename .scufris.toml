@@ -13,7 +13,7 @@ request asks for it.
 
 [agents.work]
 description = "Implement a change in the project."
-keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium" }
+keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "xhigh" }
 guidance = """
 Keep orchestration narrow. Prefer product skills and small deterministic
 helpers over extension complexity. Follow repository AGENTS.md instructions and
@@ -22,7 +22,7 @@ existing conventions.
 
 [agents.review]
 description = "Read finished work independently and report findings."
-keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "medium", spawn = "review_of", command = "/scufris-review" }
+keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "xhigh", spawn = "review_of", command = "/scufris-review" }
 guidance = """
 Run `/scufris-review` over the range the work produced. It is this project's
 own review panel: it dispatches the reviewer lanes and adjudicates what they

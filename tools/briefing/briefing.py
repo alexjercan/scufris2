@@ -191,8 +191,8 @@ def contribution_prompt(source: dict[str, Any], profile: str, date: str) -> str:
     return f"""# Scufris {profile} briefing for {date}
 
 You are one source in the {profile} briefing. Report on this project only, from
-data you read in it during this run. This is a read: report what is there and
-change nothing.
+data you read in it during this run. Change nothing and run nothing that costs
+anything, unless the guidance below names it, and then only what it names.
 
 ## Source
 

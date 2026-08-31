@@ -152,6 +152,8 @@ class Command(unittest.TestCase):
         self.assertIn("/home/x/the-den", prompt)
         self.assertIn("one fenced `json` block", prompt)
         self.assertIn("Never estimate a number you", prompt)
+        # A source reads unless its own project asked it for something more.
+        self.assertIn("unless the guidance below names it", prompt)
 
 
 class Run(unittest.TestCase):

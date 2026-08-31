@@ -82,6 +82,13 @@ boundary and not a sandbox: a source that runs a refresh command runs it with
 the owner's own hands, exactly as a review workspace does. The project's
 guidance is what keeps it honest.
 
+A source is asked to change nothing and spend nothing unless its own guidance
+names it, and then only what it names. A project whose morning is worth a
+refresh says so in its own file: seedzero's briefing reads the channel through
+the API and writes the two data files it just read, under a stated cap on how
+many reads that may cost. What a source may spend is the project's decision,
+written where the rest of that project's intent lives.
+
 Every source starts at once. Each is bounded on its own at 900 seconds, and the
 whole run at 1800; both move with `SCUFRIS_BRIEFING_SOURCE_DEADLINE` and
 `SCUFRIS_BRIEFING_DEADLINE`. One project that hangs costs the run its own

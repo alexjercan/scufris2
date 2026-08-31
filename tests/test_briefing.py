@@ -272,6 +272,8 @@ class Run(unittest.TestCase):
         self.assertEqual(manifest["sources"], [])
         self.assertEqual(manifest["state"], "collected")
         self.assertFalse(briefing.delivered("2026-08-31"))
+        rendered = (briefing.run_dir("2026-08-31") / "briefing.html").read_text(encoding="utf-8")
+        self.assertIn("No project declared this briefing.", rendered)
 
     def test_a_broken_project_configuration_is_carried_as_a_diagnostic(self) -> None:
         self.project("broken", "[briefings.morning]\nguidance = 12\n")
@@ -279,6 +281,16 @@ class Run(unittest.TestCase):
         self.assertEqual(manifest["sources"], [])
         self.assertEqual(len(manifest["diagnostics"]), 1)
         self.assertEqual(manifest["diagnostics"][0]["project"], "projects/broken")
+
+    def test_collection_writes_the_page_before_anyone_writes_the_prose(self) -> None:
+        # The page is what the owner opens. Whether the day has one is decided
+        # by the collection and not by anything a model chooses to do next.
+        self.declare("the-den")
+        briefing.collect("morning", "2026-08-31")
+        rendered = (briefing.run_dir("2026-08-31") / "briefing.html").read_text(encoding="utf-8")
+        self.assertIn("The Den", rendered)
+        self.assertIn("call the dentist", rendered)
+        self.assertIn("no prose yet", rendered)
 
     def test_publishing_keeps_the_prose_and_renders_the_same_run(self) -> None:
         self.declare("the-den")
@@ -292,6 +304,8 @@ class Run(unittest.TestCase):
         self.assertIn("Two tasks are left over.", rendered)
         self.assertIn("The Den", rendered)
         self.assertIn("call the dentist", rendered)
+        # The page collection wrote is replaced, not left beside the prose.
+        self.assertNotIn("no prose yet", rendered)
 
     def test_publishing_a_run_that_is_not_there_is_refused(self) -> None:
         with self.assertRaises(briefing.Refused):

@@ -94,8 +94,14 @@ $XDG_STATE_HOME/scufris/briefings/2026-08-31/
 ├── manifest.json          the index: state, every source, every diagnostic
 ├── contributions/*.json   one envelope for each source, with its body
 ├── briefing.md            the prose Scufris wrote
-└── briefing.html          the page rendered from all of it
+└── briefing.html          the page, written when the sources answer
 ```
+
+`briefing.md` appears when Scufris writes the day up. `briefing.html` does not
+wait for it: the collection renders the page from the contributions alone, and
+renders it again over the prose when there is some. Whether the day has a page
+is decided by code, so a write-up that never happens costs the day its prose and
+not its briefing.
 
 The last thirty runs are kept. The manifest state is the record of what
 happened, and it is what a restarting session reads:
@@ -130,6 +136,11 @@ for something.
 The collected run wakes the foreground once, through the same proactive path a
 worker event uses. Scufris reads the run, writes one briefing in its own voice
 from what the sources reported, publishes that prose, and says it in chat.
+
+Everything before that point is code. The time, the sources, the runs and the
+record are decided by `schedule.ts` and `briefing.py`, and no model is asked
+whether the morning should happen. Scufris adds the prose on top of a run that
+already exists and already has a page.
 
 The page never opens by itself. Nothing in the stack answers "is the owner at
 the desk": the service tracks registered surfaces, but no presence field

@@ -468,6 +468,13 @@ def collect(
 
 
 def finish(manifest: dict[str, Any], contributions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Write what came back, and the page for it.
+
+    The page is rendered here and not only at publish, so the day has one as
+    soon as the sources have answered. Everything on it is measured by the
+    sources; the prose Scufris writes is added on top later. A morning nobody
+    wrote up is then still a morning the owner can read.
+    """
     directory = run_dir(manifest["date"])
     for contribution in contributions:
         atomic_write(
@@ -482,6 +489,7 @@ def finish(manifest: dict[str, Any], contributions: list[dict[str, Any]]) -> dic
         "sources": [index_entry(item) for item in contributions],
     }
     write_manifest(manifest)
+    atomic_write(directory / "briefing.html", page.render_page(read_run(manifest["date"])))
     prune()
     return manifest
 
@@ -549,7 +557,12 @@ def read_run(date: str) -> dict[str, Any]:
 
 
 def publish(date: str, prose: str) -> dict[str, Any]:
-    """Keep the prose Scufris wrote and render the page from the same run."""
+    """Keep the prose Scufris wrote and render the page over again with it.
+
+    Collection already wrote a page from the contributions alone. This adds the
+    prose to the same run and renders it once more, so the page the owner opens
+    is never behind what Scufris said.
+    """
     manifest = read_manifest(date)
     if not isinstance(prose, str) or not prose.strip():
         raise Refused("a briefing needs its prose")

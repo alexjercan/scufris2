@@ -18,7 +18,9 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - `scufris-briefing`, the same collection and rendering from a terminal, and a
   read-only page for the day beside the prose. The page is rendered from the
   finished run rather than generated a second time, so it cannot say anything
-  the briefing did not. It opens when it is asked for and never by itself.
+  the briefing did not. It is written as soon as the sources answer, so the day
+  has one whether or not it is written up. It opens when it is asked for and
+  never by itself.
 - `programs.scufris.agent.briefing.time`, the local morning the briefing is
   assembled, or `off`. A session that opens later in the day catches up once.
 - The-den journal is read and written inside Scufris. `tools/den/den.py` is the

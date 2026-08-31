@@ -116,10 +116,22 @@ if [[ -z "$(ls -A -- "$projects")" ]]; then
   seed="$projects/hello"
   mkdir -p -- "$seed"
   printf '# hello\n\nA staging project. Nothing here is real work.\n' >"$seed/README.md"
+  # A briefing source, so a staging stack exercises the morning end to end
+  # against this project instead of finding nothing to ask.
+  cat >"$seed/.scufris.toml" <<'CONFIGURATION'
+[briefings.morning]
+description = "Report this staging project."
+keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "low" }
+guidance = """
+Read README.md and `git log --oneline`. Report what this project is and how
+many commits it holds. Nothing here is real work, so the status is `ok` and the
+body is one line. This source exists so a staging stack has a morning to run.
+"""
+CONFIGURATION
   git -C "$seed" init -q -b master
   git -C "$seed" config user.email "staging@scufris.invalid"
   git -C "$seed" config user.name "Scufris Staging"
-  git -C "$seed" add README.md
+  git -C "$seed" add README.md .scufris.toml
   git -C "$seed" commit -q -m "Seed the staging project"
   printf 'scufris-staging: seeded %s\n' "$seed"
 fi

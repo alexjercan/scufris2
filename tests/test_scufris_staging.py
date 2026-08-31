@@ -319,6 +319,8 @@ class StagingTests(unittest.TestCase):
 
         seeded = self.staging / "projects" / "hello"
         self.assertTrue((seeded / "README.md").is_file())
+        # The seed declares a briefing, so the staging morning has a source.
+        self.assertIn("[briefings.morning]", (seeded / ".scufris.toml").read_text())
         log = subprocess.run(
             ["git", "-C", str(seeded), "log", "--oneline"],
             capture_output=True,

@@ -65,6 +65,7 @@ export PATH="$system_path"
 
 extensions=(
   "$root/agent/extensions/scufris/workflow/index.ts"
+  "$root/agent/extensions/scufris/briefing/index.ts"
   "$root/agent/extensions/scufris/response.ts"
   "$root/agent/extensions/scufris/calm.ts"
   "$root/agent/extensions/scufris/service/index.ts"

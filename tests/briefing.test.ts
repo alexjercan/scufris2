@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import { wakeMessage } from "../agent/extensions/scufris/briefing/briefing.ts";
+import { toolPath } from "../agent/extensions/scufris/shared/runtime.ts";
 import {
   DEFAULT_BRIEFING_TIME,
   decide,
@@ -115,4 +126,31 @@ test("the wake asks for one briefing and names what could not answer", () => {
   });
   assert.match(quiet, /2 sources answered\./);
   assert.doesNotMatch(quiet, /, \d+ could not answer/);
+});
+
+test("the helper is found from the source tree and from a package", () => {
+  // Extensions sit three levels under `share/scufris` in a package and four
+  // under the repository root in the working tree. Staging runs the working
+  // tree, so a path written for one layout only is a helper nobody can spawn.
+  const source = new URL(
+    "../agent/extensions/scufris/briefing/briefing.ts",
+    import.meta.url,
+  ).href;
+  assert.ok(existsSync(toolPath("briefing/cli.py", source)));
+
+  const room = mkdtempSync(join(tmpdir(), "scufris-tool-path-"));
+  const share = join(room, "share", "scufris");
+  mkdirSync(join(share, "tools", "briefing"), { recursive: true });
+  mkdirSync(join(share, "extensions", "scufris", "briefing"), {
+    recursive: true,
+  });
+  writeFileSync(join(share, "tools", "briefing", "cli.py"), "");
+  const packaged = pathToFileURL(
+    join(share, "extensions", "scufris", "briefing", "briefing.ts"),
+  ).href;
+  assert.equal(
+    toolPath("briefing/cli.py", packaged),
+    join(share, "tools", "briefing", "cli.py"),
+  );
+  rmSync(room, { recursive: true, force: true });
 });

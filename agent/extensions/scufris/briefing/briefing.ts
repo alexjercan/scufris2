@@ -1,12 +1,11 @@
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { Type } from "@earendil-works/pi-ai";
 import {
   defineTool,
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { toolResult } from "../shared/runtime.ts";
+import { toolPath, toolResult } from "../shared/runtime.ts";
 import {
   decide,
   localDate,
@@ -15,9 +14,7 @@ import {
   type RunState,
 } from "./schedule.ts";
 
-const helperPath = fileURLToPath(
-  new URL("../../../tools/briefing/cli.py", import.meta.url),
-);
+const helperPath = toolPath("briefing/cli.py", import.meta.url);
 
 export const BRIEFING_WAKE = "scufris-briefing";
 const DATE = "^\\d{4}-\\d{2}-\\d{2}$";

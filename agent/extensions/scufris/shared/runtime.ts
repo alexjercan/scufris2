@@ -1,6 +1,22 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const maxHelperOutput = 2 * 1024 * 1024;
+
+/** Where a tool this extension runs lives, in a package and in the source tree.
+ *
+ * A deployment loads extensions from `share/scufris/extensions/scufris/<name>/`
+ * and finds the tools three levels up, at `share/scufris/tools/`. The working
+ * tree keeps extensions under `agent/` and the tools at the repository root,
+ * one level further out. Staging runs the working tree, so a path written for
+ * only one of the two layouts works in a deployment and not on the desk.
+ */
+export function toolPath(relative: string, from: string): string {
+  const packaged = fileURLToPath(new URL(`../../../tools/${relative}`, from));
+  if (existsSync(packaged)) return packaged;
+  return fileURLToPath(new URL(`../../../../tools/${relative}`, from));
+}
 
 export interface HelperEnvelope<T> {
   ok: boolean;

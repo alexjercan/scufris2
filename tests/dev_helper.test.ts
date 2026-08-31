@@ -138,6 +138,7 @@ async function run(
 function expectedArgs(projectRoot: string, sessionDirectory: string): string[] {
   const extensions = [
     join("workflow", "index.ts"),
+    join("briefing", "index.ts"),
     "response.ts",
     "calm.ts",
     // The service extension is how a working-tree agent reaches the service

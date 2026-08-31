@@ -9,6 +9,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-08-31
+
 ### Fixed
 
 - A briefing source can run the commands its own guidance names. `claude`
@@ -528,7 +530,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/alexjercan/scufris2/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/alexjercan/scufris2/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/alexjercan/scufris2/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/alexjercan/scufris2/compare/v1.1.0...v1.1.1

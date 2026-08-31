@@ -1,4 +1,6 @@
 import PhotosUI
+import QuickLook
+import QuickLookThumbnailing
 import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
@@ -10,6 +12,7 @@ struct ContentView: View {
     @State private var isShowingDocumentPicker = false
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var isLoadingPhoto = false
+    @State private var previewAttachment: LocalAttachment?
     @State private var sharedAttachment: LocalAttachment?
     @FocusState private var composerFocused: Bool
 
@@ -32,6 +35,10 @@ struct ContentView: View {
                 try store.configure(settings)
             }
             .preferredColorScheme(.dark)
+        }
+        .sheet(item: $previewAttachment) { attachment in
+            QuickLookSheet(url: attachment.url)
+                .ignoresSafeArea()
         }
         .sheet(item: $sharedAttachment) { attachment in
             ActivitySheet(items: [attachment.url])
@@ -118,6 +125,7 @@ struct ContentView: View {
                             ConversationRow(
                                 entry: entry,
                                 loadAttachment: store.localCopy,
+                                onPreview: preview,
                                 onSave: save
                             )
                             .id(entry.id)
@@ -411,6 +419,19 @@ struct ContentView: View {
         }
     }
 
+    private func preview(_ descriptor: AttachmentDescriptor) {
+        Task {
+            do {
+                previewAttachment = LocalAttachment(
+                    id: descriptor.id,
+                    url: try await store.localCopy(of: descriptor)
+                )
+            } catch {
+                store.attachmentFailed(error)
+            }
+        }
+    }
+
     private func save(_ descriptor: AttachmentDescriptor) {
         Task {
             do {
@@ -534,6 +555,7 @@ private struct ThinkingRow: View {
 private struct ConversationRow: View {
     let entry: ConversationEntry
     let loadAttachment: (AttachmentDescriptor) async throws -> URL
+    let onPreview: (AttachmentDescriptor) -> Void
     let onSave: (AttachmentDescriptor) -> Void
 
     var body: some View {
@@ -566,6 +588,7 @@ private struct ConversationRow: View {
                             AttachmentCard(
                                 attachment: attachment,
                                 loadAttachment: { try await loadAttachment(attachment) },
+                                onPreview: { onPreview(attachment) },
                                 onSave: { onSave(attachment) }
                             )
                         }
@@ -622,12 +645,17 @@ private struct SelectedAttachmentChip: View {
 private struct AttachmentCard: View {
     let attachment: AttachmentDescriptor
     let loadAttachment: () async throws -> URL
+    let onPreview: () -> Void
     let onSave: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            if attachment.hasInlineImage {
-                InlineAttachmentImage(attachment: attachment, load: loadAttachment)
+            if attachment.hasThumbnail {
+                Button(action: onPreview) {
+                    AttachmentThumbnail(attachment: attachment, load: loadAttachment)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Preview \(attachment.name)")
             } else {
                 HStack(spacing: 9) {
                     Image(systemName: attachment.mediaType == "application/pdf" ? "doc.richtext" : "doc")
@@ -637,7 +665,7 @@ private struct AttachmentCard: View {
                 }
             }
 
-            if attachment.hasInlineImage {
+            if attachment.hasThumbnail {
                 attachmentIdentity
             }
 
@@ -676,7 +704,7 @@ private struct AttachmentCard: View {
     }
 }
 
-private struct InlineAttachmentImage: View {
+private struct AttachmentThumbnail: View {
     enum Phase {
         case loading
         case loaded(UIImage)
@@ -694,9 +722,19 @@ private struct InlineAttachmentImage: View {
                 ProgressView()
                     .tint(ScufrisPalette.quartz)
             case let .loaded(image):
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
+                ZStack {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                    if attachment.hasVideoThumbnail {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(ScufrisPalette.background)
+                            .frame(width: 52, height: 52)
+                            .background(ScufrisPalette.quartz.opacity(0.9))
+                            .clipShape(Circle())
+                    }
+                }
             case .unavailable:
                 Image(systemName: "photo.badge.exclamationmark")
                     .font(.system(size: 24, weight: .medium))
@@ -709,22 +747,59 @@ private struct InlineAttachmentImage: View {
         .task(id: attachment.id) {
             do {
                 let url = try await load()
-                guard let image = UIImage(contentsOfFile: url.path) else {
-                    phase = .unavailable
-                    return
-                }
-                phase = .loaded(image)
+                let request = QLThumbnailGenerator.Request(
+                    fileAt: url,
+                    size: CGSize(width: 720, height: 480),
+                    scale: UIScreen.main.scale,
+                    representationTypes: .thumbnail
+                )
+                let thumbnail = try await QLThumbnailGenerator.shared
+                    .generateBestRepresentation(for: request)
+                phase = .loaded(thumbnail.uiImage)
             } catch {
                 phase = .unavailable
             }
         }
-        .accessibilityLabel("Image attachment \(attachment.name)")
+        .accessibilityLabel("Preview attachment \(attachment.name)")
     }
 }
 
 private struct LocalAttachment: Identifiable {
     let id: String
     let url: URL
+}
+
+private struct QuickLookSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(url: url)
+    }
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let controller = QLPreviewController()
+        controller.dataSource = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: QLPreviewController, context: Context) {}
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let url: URL
+
+        init(url: URL) {
+            self.url = url
+        }
+
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+
+        func previewController(
+            _ controller: QLPreviewController,
+            previewItemAt index: Int
+        ) -> QLPreviewItem {
+            url as NSURL
+        }
+    }
 }
 
 private struct ActivitySheet: UIViewControllerRepresentable {
@@ -738,8 +813,16 @@ private struct ActivitySheet: UIViewControllerRepresentable {
 }
 
 private extension AttachmentDescriptor {
-    var hasInlineImage: Bool {
+    var hasThumbnail: Bool {
+        hasRasterImageThumbnail || hasVideoThumbnail
+    }
+
+    var hasRasterImageThumbnail: Bool {
         mediaType.hasPrefix("image/") && mediaType != "image/svg+xml"
+    }
+
+    var hasVideoThumbnail: Bool {
+        mediaType.hasPrefix("video/")
     }
 
     var displaySize: String {

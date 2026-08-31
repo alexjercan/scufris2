@@ -5,6 +5,7 @@
     printf '%s\n' \
       "''${SCUFRIS_PROJECT_ROOTS-}" \
       "''${SCUFRIS_ROLE-}" \
+      "''${SCUFRIS_BRIEFING_TIME-}" \
       "''${SCUFRIS_CALM-}" \
       "$(type -P pw-play || true)" \
       system-pi \

@@ -50,6 +50,7 @@
             default = scufris.launcher;
             scufris = scufris.launcher;
             scufris-den = scufris.den;
+            scufris-briefing = scufris.briefing;
             inherit (scufris) docs resources;
           }
           // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
@@ -110,6 +111,7 @@
             resources = self.packages.${system}.resources;
             piPackage = inputs.llm-agents.packages.${system}.pi;
             denPackage = self.packages.${system}.scufris-den;
+            briefingPackage = self.packages.${system}.scufris-briefing;
             desktopPackage = self.packages.${system}.scufris-desktop;
             servicePackage = self.packages.${system}.scufris-service;
             ctlPackage = self.packages.${system}.scufris-ctl;

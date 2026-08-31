@@ -460,21 +460,26 @@ def guidance_text(scope: str, value: Any) -> str:
 def render_menu(project: str, raw: bytes) -> list[str]:
     # The file is a menu of agent types, not a workflow. Conventions are
     # inferred; agents run only when the request names them.
+    #
+    # Briefings are read here only to be left out. They are scheduled sources,
+    # not agents the foreground may start, and a menu that named one would be
+    # read as an offer. Their own reader validates them, so a mistake in a
+    # briefing table costs the project its briefing and not its agents.
     document = tomllib.loads(raw.decode("utf-8"))
-    unexpected = set(document) - {"conventions", "agents"}
+    unexpected = set(document) - {"conventions", "agents", "briefings"}
     if "preferences" in unexpected:
         raise ValueError(
             "the preferences workflow shape was retired; declare conventions and agents tables"
         )
     if unexpected:
-        raise ValueError("expected only conventions and agents tables")
+        raise ValueError("expected only conventions, agents and briefings tables")
     conventions = document.get("conventions", {})
     agents = document.get("agents", {})
     if not isinstance(conventions, dict):
         raise TypeError("conventions must be a table")
     if not isinstance(agents, dict):
         raise TypeError("agents must be a table")
-    if not conventions and not agents:
+    if not conventions and not agents and "briefings" not in document:
         raise ValueError("expected at least one convention or agent")
     sections: list[str] = [
         f"# Project context: {project}",
@@ -574,6 +579,91 @@ def render_context(project: str, source: Path) -> dict[str, Any]:
             "markdown": f"# Project context: {project}\n\nThe project configuration was unusable. Infer the conventions from the request and project instructions, and delegate only to what the request names.\n",
             "diagnostic": f"ignored .scufris.toml: {error}",
         }
+
+
+def briefing_entry(scope: str, entry: Any) -> dict[str, Any]:
+    # A briefing source is described the way an agent is, because the person
+    # writing it should not have to learn a second shape. What differs is that
+    # nobody chooses it: it is asked on a schedule, so its guidance is what the
+    # source is asked and is required rather than optional.
+    if not isinstance(entry, dict) or set(entry) - {
+        "description",
+        "keywords",
+        "guidance",
+    }:
+        raise ValueError(f"{scope} accepts only description, keywords and guidance")
+    description = entry.get("description")
+    if (
+        not isinstance(description, str)
+        or not description.strip()
+        or len(description) > 200
+        or not description.strip().isprintable()
+    ):
+        raise ValueError(f"{scope} needs one short printable description line")
+    keywords = entry.get("keywords", {})
+    lines = keyword_lines(scope, keywords)
+    try:
+        harness, model, thinking = selected_adapter(
+            keywords.get("harness"),
+            keywords.get("model"),
+            keywords.get("thinking"),
+        )
+    except JobError as error:
+        raise ValueError(f"{scope} has an unsupported adapter: {error}") from error
+    return {
+        "description": description.strip(),
+        "guidance": guidance_text(scope, entry.get("guidance")),
+        "keywords": lines,
+        "harness": harness,
+        "model": model,
+        "thinking": thinking,
+    }
+
+
+def briefing_sources(profile: str) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Every project that declares this profile, and why any were passed over."""
+    sources: list[dict[str, Any]] = []
+    diagnostics: list[dict[str, str]] = []
+    for project, root in sorted(discover_projects().items()):
+        source = root / ".scufris.toml"
+        if not source.is_file():
+            continue
+        try:
+            document = tomllib.loads(source.read_bytes().decode("utf-8"))
+            declared = document.get("briefings", {})
+            if not isinstance(declared, dict):
+                raise ValueError("briefings must be a table")
+            entry = declared.get(profile)
+            if entry is None:
+                continue
+            sources.append(
+                {
+                    "project": project,
+                    "project_root": str(root),
+                    "profile": profile,
+                    **briefing_entry(f"briefing {profile}", entry),
+                }
+            )
+        except (
+            OSError,
+            TypeError,
+            UnicodeError,
+            tomllib.TOMLDecodeError,
+            ValueError,
+        ) as error:
+            diagnostics.append(
+                {"project": project, "diagnostic": f"ignored .scufris.toml: {error}"}
+            )
+    return sources, diagnostics
+
+
+def briefings(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"profile"})
+    profile = request["profile"]
+    if not simple_identifier(profile):
+        raise JobError("invalid briefing profile")
+    sources, diagnostics = briefing_sources(profile)
+    return {"profile": profile, "sources": sources, "diagnostics": diagnostics}
 
 
 def projects(request: dict[str, Any]) -> dict[str, Any]:
@@ -2862,6 +2952,7 @@ def main() -> int:
     handlers = {
         "projects": projects,
         "context": context,
+        "briefings": briefings,
         "spawn": spawn,
         "events": read_events,
         "ack-event": acknowledge_event,

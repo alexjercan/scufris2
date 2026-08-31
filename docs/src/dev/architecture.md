@@ -125,6 +125,7 @@ flowchart TB
     Resources[resources] --> Launcher[scufris launcher]
     Pi[Pi] --> Launcher
     Den[scufris-den] --> Launcher
+    Briefing[scufris-briefing] --> Launcher
     Service["scufris-service + scufris-ctl<br/>Linux, headless"] --> Gateway["optional surface gateway"]
     Gateway --> Tailscale[declarative Tailscale Serve root route]
     Desktop["scufris-desktop<br/>Linux + X11"] --> Speak[optional scufris-speak]
@@ -146,6 +147,14 @@ only added to: a row is clicked to open what wrote it, and the red `x` beside
 it is the one control that deletes. The command line carries the same verbs, so
 the agent and the person are never able to do different things to a day.
 
+The morning briefing is assembled the same way and for the same reason. A
+project says what it wants reported in its own `.scufris.toml`; one bounded
+headless run asks it; the answers, the prose Scufris writes from them, and the
+page rendered from all of it live in one directory named for the day. The page
+is a second reading of that directory rather than a second generation, so it
+cannot say anything the morning did not. See
+[Morning briefings](briefings.md).
+
 The den holds the reference data the days are written against: `Foods.csv`,
 which keeps macros.nvim's row format, and `Exercises.csv`, which is
 `split,exercise`. Both are plain files the person can edit, both travel with
@@ -157,6 +166,7 @@ the journal, and either can be pointed elsewhere with a variable.
 $XDG_RUNTIME_DIR/scufris/         sockets; disappears with the login session
 $XDG_DATA_HOME/scufris/sessions/  canonical Pi conversation
 $XDG_STATE_HOME/scufris/jobs/     jobs and archived workflows
+$XDG_STATE_HOME/scufris/briefings/ one directory for each day's briefing run
 $XDG_STATE_HOME/scufris-desktop/  pending transcript + stable surface ID
 ```
 

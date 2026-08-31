@@ -590,6 +590,70 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
             self.assertFalse(unsupported["configured"])
             self.assertIn("unsupported adapter", unsupported["diagnostic"])
 
+    def test_a_briefing_source_is_listed_but_never_offered_as_an_agent(self) -> None:
+        menu = (self.project / ".scufris.toml").read_text()
+        (self.project / ".scufris.toml").write_text(
+            menu
+            + "\n[briefings.morning]\n"
+            'description = "Report the cadence gap and pending QA."\n'
+            'keywords = { harness = "claude", model = "opus", thinking = "high" }\n'
+            'guidance = "Read web/data and report what changed overnight."\n'
+            "\n[briefings.weekly]\n"
+            'description = "Report the week."\n'
+            'guidance = "Read the week."\n'
+        )
+        listed = self.call("briefings", {"profile": "morning"})["result"]
+        self.assertEqual(listed["diagnostics"], [])
+        self.assertEqual(len(listed["sources"]), 1)
+        source = listed["sources"][0]
+        self.assertEqual(source["project"], "projects/nova-protocol")
+        self.assertEqual(source["project_root"], str(self.project))
+        self.assertEqual(source["harness"], "claude")
+        self.assertEqual(source["model"], "opus")
+        self.assertEqual(source["thinking"], "high")
+        self.assertIn("Read web/data", source["guidance"])
+        # A profile nobody declared is an empty morning, not an error.
+        self.assertEqual(self.call("briefings", {"profile": "evening"})["result"]["sources"], [])
+        self.assertEqual(len(self.call("briefings", {"profile": "weekly"})["result"]["sources"]), 1)
+
+        # The delegation menu must not carry it. A briefing entry rendered
+        # beside the agents reads as one more agent the request may name.
+        context = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        self.assertTrue(context["configured"])
+        self.assertIsNone(context["diagnostic"])
+        self.assertIn("### work", context["markdown"])
+        self.assertNotIn("morning", context["markdown"])
+        self.assertNotIn("Read web/data", context["markdown"])
+
+    def test_a_broken_briefing_table_costs_the_briefing_and_not_the_menu(self) -> None:
+        menu = (self.project / ".scufris.toml").read_text()
+        (self.project / ".scufris.toml").write_text(
+            menu + '\n[briefings.morning]\nguidance = "Read the project."\n'
+        )
+        listed = self.call("briefings", {"profile": "morning"})["result"]
+        self.assertEqual(listed["sources"], [])
+        self.assertEqual(len(listed["diagnostics"]), 1)
+        self.assertIn("short printable description", listed["diagnostics"][0]["diagnostic"])
+        # The agents survive it.
+        context = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        self.assertTrue(context["configured"])
+        self.assertIn("### work", context["markdown"])
+
+    def test_a_project_that_only_declares_a_briefing_keeps_a_usable_context(self) -> None:
+        (self.project / ".scufris.toml").write_text(
+            "[briefings.morning]\n"
+            'description = "Report yesterday from the journal."\n'
+            'guidance = "Run scufris-den and report the day."\n'
+        )
+        context = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        self.assertTrue(context["configured"])
+        self.assertIsNone(context["diagnostic"])
+        self.assertNotIn("scufris-den", context["markdown"])
+        self.assertIn("Never start an agent because the project declares it.", context["markdown"])
+        self.assertEqual(
+            len(self.call("briefings", {"profile": "morning"})["result"]["sources"]), 1
+        )
+
     def test_recommended_menu_fixture_renders_conventions_and_every_agent(
         self,
     ) -> None:

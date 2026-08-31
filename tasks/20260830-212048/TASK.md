@@ -1,6 +1,6 @@
 # Add extensible morning briefings
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 0
 - TAGS: backlog
 
@@ -83,8 +83,66 @@ jobs. Its data refresh helper and status schema remain owned by seedzero.
 - Use `[briefings.morning]`, not `[agents.briefing]`.
 - Keep the schedule global and briefing sources project-local.
 - Use Git projects as the initial container for non-project briefing sources.
-- Make Markdown the canonical presentation artifact; defer the HTML renderer.
 - Treat seedzero as the first integration rather than embedding it in the
   scheduler.
 
+Revised on 2026-08-31, with the owner:
+
+- The canonical artifact is the run directory, not one Markdown file. It holds
+  the manifest, one contribution file for each source, the aggregated prose,
+  and the rendered page. The chat prose and the page are two readings of the
+  same run.
+- The HTML view is in scope now, not deferred. It is a deterministic render of
+  a completed run, read-only, self-contained, and styled from the desktop
+  tokens.
+- A contribution is a JSON envelope with a Markdown body, not free Markdown.
+  The envelope carries `title`, `status`, `headline`, `facts` and `body` so the
+  page can be laid out without a model in the loop. The runner stamps `source`.
+  A source that answers with something unparseable is recorded as failed with
+  its raw text kept, and is named in the briefing.
+- Build the configuration, the collector, the renderer, and one manual run tool
+  before the scheduler. The format is what needs proving first.
+- Do not collect through `scufris_job_spawn`. Jobs are tmux panes bound to an
+  owner session and steerable; a morning source is one bounded headless run.
+  Each source runs `pi -p` or `claude --print` in its project root.
+- The `briefings` table must never reach the delegation menu. The foreground
+  orchestrator would read a briefing entry as an agent it may start.
+- Catch up unconditionally inside the local date. A start at any hour with no
+  delivered run for today runs the briefing then. No cutoff hour at first.
+- Never open the page by itself. Nothing in the stack answers "is the owner at
+  the desk": the service tracks registered surfaces, but no presence field
+  reaches the agent, and a graphical session is present whether or not the
+  owner is home. The prose goes to chat, which reaches every surface, and the
+  page opens when it is asked for.
+- One deadline for each source at 900 seconds, and one for the whole run. All
+  sources start at once; there is no concurrency cap. A source that misses its
+  deadline is recorded as failed and named in the briefing, and the run
+  publishes with what came back.
+
 ## Evidence
+
+Completed on 2026-08-31:
+
+- `npm run check`: 85 tests passed; type checking and Prettier passed.
+- `python3 -m unittest discover -s tests -p 'test_*.py'`: 249 passed.
+- `cargo test -p scufris-service`: 9 service tests passed.
+- `nix flake check`: all checks passed on `x86_64-linux`.
+- One real run over two sources with a scratch `XDG_STATE_HOME`: this project
+  answered `attention` in 69.5 s and `the-den` answered `stale` in 75.0 s. The
+  Den reported the missing data for yesterday instead of guessing it. `publish`
+  wrote the prose and `render` wrote a 7.2 KB self-contained page.
+- The renderer escapes every source value before it applies markup.
+  `tests/test_briefing.py` holds the script, attribute, and `javascript:` link
+  cases, and asserts that the page loads nothing from the network.
+- The page is a deterministic render of a completed run. Chat and the page read
+  the same manifest and the same contributions.
+- Association after a fresh service restart: an answer sent before any surface
+  message is rejected with `no_surface` and reaches no surface at all. There is
+  no display-only period. `scufris_briefing_publish` writes the prose and the
+  page before Scufris speaks, so the run holds the briefing whether or not chat
+  accepted it, and the run is already `delivered`, so no later session collects
+  the morning twice. `a_proactive_response_waits_for_the_first_surface_message`
+  in `host/service/src/service.rs` holds the behavior, and
+  `docs/src/dev/briefings.md` and `docs/src/dev/surfaces.md` document it.
+- Seedzero declares no briefing yet, so it is not part of this run. Its entry is
+  three fields in its own `.scufris.toml` and needs no change here.

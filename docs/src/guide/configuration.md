@@ -25,6 +25,7 @@ programs.scufris
 ├── agent
 │   ├── piPackage
 │   ├── projectRoots
+│   ├── briefing.time
 │   └── package
 ├── aiToolsApi.{enable,baseUrl}
 ├── service

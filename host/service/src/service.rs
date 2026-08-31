@@ -1039,4 +1039,51 @@ mod tests {
             assert!(drain(inbox).iter().any(|body| matches!(body, SurfaceResponseBody::Message { role: ConversationRole::Assistant, surface, .. } if surface == "two")));
         }
     }
+
+    #[test]
+    fn a_proactive_response_waits_for_the_first_surface_message() {
+        let service = service();
+        let (_, one) = surface(&service, 1, "one");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        // A morning briefing reaches a service nobody has spoken to yet.
+        service.agent_request(
+            10,
+            AgentRequestBody::Response {
+                text: "Good morning.".into(),
+                details: None,
+                widgets: None,
+                attachments: vec![],
+            },
+        );
+        assert!(
+            matches!(agent_in.recv().unwrap().body, AgentResponseBody::Rejected { code, .. } if code == "no_surface")
+        );
+        assert!(
+            !drain(&one)
+                .iter()
+                .any(|body| matches!(body, SurfaceResponseBody::Message { .. }))
+        );
+        // The owner's first message associates the surface, and the same
+        // response then lands on it.
+        service.surface_message(1, "m-1".into(), "hello".into(), vec![]);
+        agent_in.recv().unwrap();
+        service.agent_request(
+            10,
+            AgentRequestBody::Response {
+                text: "Good morning.".into(),
+                details: None,
+                widgets: None,
+                attachments: vec![],
+            },
+        );
+        assert!(drain(&one).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Message {
+                role: ConversationRole::Assistant,
+                ..
+            }
+        )));
+    }
 }

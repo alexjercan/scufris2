@@ -19,6 +19,7 @@
 - [Pi extensions](dev/extensions.md)
 - [Jobs](dev/jobs.md)
 - [Messages](dev/messaging.md)
+- [Morning briefings](dev/briefings.md)
 - [Tmux](dev/tmux.md)
 - [Operate it](dev/operation.md)
 - [Run staging](dev/staging.md)

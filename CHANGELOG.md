@@ -11,6 +11,16 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Added
 
+- An unprompted morning briefing. A project declares `[briefings.morning]` in
+  its own `.scufris.toml` and is asked once a day for one bounded, evidence
+  based contribution. Scufris writes them up in its own voice, says it in chat,
+  and keeps the run under `$XDG_STATE_HOME/scufris/briefings/`.
+- `scufris-briefing`, the same collection and rendering from a terminal, and a
+  read-only page for the day beside the prose. The page is rendered from the
+  finished run rather than generated a second time, so it cannot say anything
+  the briefing did not. It opens when it is asked for and never by itself.
+- `programs.scufris.agent.briefing.time`, the local morning the briefing is
+  assembled, or `off`. A session that opens later in the day catches up once.
 - The-den journal is read and written inside Scufris. `tools/den/den.py` is the
   whole format - days, backlog, and the food database - compiled into the
   desktop's `den` backend and run by the new `scufris-den` command.

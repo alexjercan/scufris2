@@ -41,7 +41,9 @@
     resources = defaults.resources;
     piPackage = agentCfg.piPackage;
     den = defaults.denPackage;
+    briefing = defaults.briefingPackage;
     projectRoots = agentCfg.projectRoots;
+    briefingTime = agentCfg.briefing.time;
   };
   # The frontend owns the speaker, so the synthesiser is bound here and handed
   # to the companion. A deployment with no speech hands it nothing and the
@@ -100,6 +102,21 @@ in {
         type = lib.types.listOf lib.types.str;
         default = ["~/personal" "~/work" "~/third-party"];
         description = "Directories recursively searched for workflow projects.";
+      };
+
+      briefing = {
+        time = lib.mkOption {
+          type = lib.types.strMatching "(([01]?[0-9]|2[0-3]):[0-5][0-9]|off)";
+          default = "08:00";
+          example = "07:15";
+          description = ''
+            Local time of day the unprompted briefing is assembled, or `off`
+            for a deployment that wants none. A session that opens after this
+            time with no run for the day catches it up once. Only projects
+            declaring `[briefings.morning]` in their own `.scufris.toml`
+            contribute, so the schedule costs nothing until one does.
+          '';
+        };
       };
 
       package = lib.mkOption {

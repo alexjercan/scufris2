@@ -9,7 +9,7 @@ import {
 const calmStateKey = Symbol.for("scufris:calm-state:v1");
 const calmPatchKey = Symbol.for("scufris:calm-patches:v1");
 const calmStateType = "scufris-calm-state-v1";
-const hiddenCustomTypes = new Set(["scufris-job-event"]);
+const hiddenCustomTypes = new Set(["scufris-job-event", "scufris-briefing"]);
 
 type CalmState = { enabled: boolean };
 

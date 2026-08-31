@@ -127,6 +127,10 @@ sequenceDiagram
 Every surface displays the response. Only the associated ready surface may
 speak it or execute its live widget calls.
 
+A service that has just started holds no association. An unprompted answer sent
+before the owner's first message is rejected with `no_surface` and reaches no
+surface at all.
+
 ## Bounds to copy into every client
 
 | Value                       | Bound                          |

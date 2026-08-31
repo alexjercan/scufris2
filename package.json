@@ -18,6 +18,7 @@
   "pi": {
     "extensions": [
       "./agent/extensions/scufris/workflow/index.ts",
+      "./agent/extensions/scufris/briefing/index.ts",
       "./agent/extensions/scufris/response.ts",
       "./agent/extensions/scufris/calm.ts",
       "./agent/extensions/scufris/service/index.ts"

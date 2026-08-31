@@ -1,6 +1,6 @@
 # Tmux
 
-[Previous: Messages](messaging.md)
+[Previous: Morning briefings](briefings.md)
 
 ```text
 job record -> exact session/window/pane IDs -> owned tmux execution

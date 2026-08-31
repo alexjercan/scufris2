@@ -21,6 +21,7 @@ in {
       cat > expected <<'EOF'
       ["~/personal","~/work","~/third-party"]
       orchestrator
+      08:00
 
 
       system-pi
@@ -28,6 +29,8 @@ in {
       ${resources}/share/scufris/extensions/scufris/workflow/index.ts
       --skill
       ${resources}/share/scufris/skills/workflow
+      --extension
+      ${resources}/share/scufris/extensions/scufris/briefing/index.ts
       --extension
       ${resources}/share/scufris/extensions/scufris/response.ts
       --extension

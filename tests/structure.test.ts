@@ -21,6 +21,7 @@ test("package loads only capability-owned Scufris extensions", async () => {
   );
   assert.deepEqual(manifest.pi.extensions, [
     "./agent/extensions/scufris/workflow/index.ts",
+    "./agent/extensions/scufris/briefing/index.ts",
     "./agent/extensions/scufris/response.ts",
     "./agent/extensions/scufris/calm.ts",
     "./agent/extensions/scufris/service/index.ts",
@@ -71,6 +72,18 @@ test("package loads only capability-owned Scufris extensions", async () => {
       "worker-report.ts",
     ),
   );
+  // The briefing holds one timer for the day and nothing that polls. Its
+  // decision is arithmetic in a file of its own, so the timer stays a detail
+  // of the extension rather than a thing to test around.
+  const briefing = await readFile(
+    join(root, "agent", "extensions", "scufris", "briefing", "briefing.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(briefing, /setInterval/);
+  assert.equal(briefing.match(/setTimeout\(/g)?.length, 2);
+  assert.match(briefing, /keepTheDayGoing/);
+  await access(join(root, "tools", "briefing", "cli.py"));
+  await access(join(root, "tools", "briefing", "page.py"));
   await access(join(root, "tools", "jobs", "scufris-report"));
   await access(join(root, "tools", "voice", "scufris-speak"));
   assert.deepEqual((await readdir(join(root, "scripts"))).sort(), [

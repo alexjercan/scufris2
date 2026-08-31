@@ -29,7 +29,7 @@
   # shipping a speech module and setting a variable for it. Both are gone: the
   # agent shapes the answer and never decides to make a sound.
   launcher = import ./launcher.nix {
-    inherit pkgs resources piPackage den;
+    inherit pkgs resources piPackage den briefing;
   };
   # The synthesiser belongs to whoever is sitting in front of the machine, so
   # it is its own program rather than part of the agent's launcher.
@@ -37,6 +37,9 @@
   # The journal's command line. The panels compile the library in; this is the
   # same library for whoever is not a panel.
   den = import ./den.nix {inherit pkgs;};
+  # The morning, collected and rendered. The agent runs it through the briefing
+  # extension; this is the same program for a person and for the checks.
+  briefing = import ./briefing.nix {inherit pkgs;};
   desktop = import ./desktop.nix {
     inherit pkgs version;
     source = rustSource;
@@ -63,6 +66,7 @@ in {
     launcher
     speak
     den
+    briefing
     desktop
     service
     ctl

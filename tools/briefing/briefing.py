@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date as Date
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -61,6 +61,14 @@ KEEP_RUNS = 30
 
 SOURCE_DEADLINE = 900.0
 RUN_DEADLINE = 1800.0
+
+#: A source that answered badly is asked once more, with its own answer and
+#: the one reason it could not be used. The repair reads nothing and runs
+#: nothing, so it is short; below the floor there is no time to try.
+REPAIR_DEADLINE = 300.0
+REPAIR_FLOOR = 45.0
+REPAIR_THINKING = "low"
+MAX_QUOTED = 32 * 1024
 
 # A source reads its project and reports. The edit tools are off because
 # nothing here asks for a change, not because this is a sandbox: a source that
@@ -234,7 +242,54 @@ Reply with exactly one fenced `json` block and nothing outside it:
 """
 
 
-def harness_argv(source: dict[str, Any], prompt: str) -> list[str]:
+def repair_prompt(source: dict[str, Any], profile: str, trouble: str, answer: str) -> str:
+    """Ask a source to say again, correctly, what it already found.
+
+    The work is done by the time this is asked. This run reads nothing, spends
+    nothing, and gathers nothing: it is given the source's own words and the
+    one reason they could not be used, and it may change only that.
+    """
+    quoted = answer[:MAX_QUOTED]
+    cut = "\n\n(The rest of your answer was too long to quote back.)" if len(answer) > MAX_QUOTED else ""
+    return f"""# Scufris {profile} briefing: your answer could not be read
+
+You reported on {source["project"]} and the report was rejected:
+
+    {trouble}
+
+Send the same report again as exactly one fenced `json` block and nothing
+else. Change only what the rejection names, and keep every finding, number and
+path you already wrote.
+
+Read nothing, run nothing, and look nothing up. Everything you need is below.
+If a value is too long, shorten that value; do not go and measure it again.
+
+```json
+{{
+  "title": "Short name for this source, as a person would say it",
+  "status": "ok",
+  "headline": "One sentence: the thing to know this morning",
+  "facts": [{{ "label": "Short label", "value": "Short value" }}],
+  "body": "Markdown. What you found, with the paths and numbers behind it."
+}}
+```
+
+- `status` is one of {", ".join(REPORTED)}.
+- `title` is at most {MAX_TITLE} characters, and `headline` is one plain
+  sentence of at most {MAX_HEADLINE} characters.
+- `facts` is at most {MAX_FACTS} entries, each with a label of at most
+  {MAX_LABEL} characters and a value of at most {MAX_VALUE} characters.
+- `body` is Markdown of at most {MAX_BODY} characters, carried as one JSON
+  string. Escape every quotation mark and newline inside it. Fenced code
+  inside the body is fine.
+
+## What you answered
+
+{quoted}{cut}
+"""
+
+
+def harness_argv(source: dict[str, Any], prompt: str, *, tools: bool = True) -> list[str]:
     """The one-shot command for a source.
 
     Not a job. A job is a tmux pane bound to an owner session that can be
@@ -259,9 +314,8 @@ def harness_argv(source: dict[str, Any], prompt: str) -> list[str]:
             "--model",
             source["model"],
             "--thinking",
-            source["thinking"],
-            "--tools",
-            PI_TOOLS,
+            source["thinking"] if tools else REPAIR_THINKING,
+            *(["--tools", PI_TOOLS] if tools else ["--no-tools"]),
             prompt,
         ]
     return [
@@ -270,13 +324,12 @@ def harness_argv(source: dict[str, Any], prompt: str) -> list[str]:
         "--model",
         source["model"],
         "--effort",
-        source["thinking"],
+        source["thinking"] if tools else REPAIR_THINKING,
         "--permission-mode",
         "bypassPermissions",
         "--tools",
-        CLAUDE_TOOLS,
-        "--disallowed-tools",
-        CLAUDE_DENIED_TOOLS,
+        CLAUDE_TOOLS if tools else "",
+        *(["--disallowed-tools", CLAUDE_DENIED_TOOLS] if tools else []),
         "--disable-slash-commands",
         prompt,
     ]
@@ -295,7 +348,7 @@ def envelope(text: str) -> Any:
     """
     decoder = json.JSONDecoder()
     values: list[Any] = []
-    first_trouble: json.JSONDecodeError | None = None
+    first_trouble: Exception | None = None
     read_to = -1
     for opener in re.finditer(r"```[ \t]*(?:json)?[ \t]*\r?\n", text, re.IGNORECASE):
         start = text.find("{", opener.end())
@@ -303,7 +356,7 @@ def envelope(text: str) -> Any:
             continue
         try:
             value, read_to = decoder.raw_decode(text, start)
-        except json.JSONDecodeError as trouble:
+        except (ValueError, RecursionError) as trouble:
             first_trouble = first_trouble or trouble
             continue
         values.append(value)
@@ -311,7 +364,7 @@ def envelope(text: str) -> Any:
         return values[-1]
     try:
         return json.loads(text)
-    except json.JSONDecodeError as trouble:
+    except (ValueError, RecursionError) as trouble:
         raise Unusable(
             f"the answer is not one JSON envelope: {first_trouble or trouble}"
         ) from None
@@ -364,58 +417,131 @@ def parse_contribution(text: str) -> dict[str, Any]:
     }
 
 
-def ask(source: dict[str, Any], profile: str, date: str, deadline: float) -> dict[str, Any]:
-    """Run one source and read what it answered.
+class Attempt(NamedTuple):
+    """One run of one source: what it gave, or why that is not a contribution.
 
-    Every way this can go wrong ends in a contribution that says so. A morning
-    with one silent project is still a morning; a morning that stops because
-    one project could not answer is not.
+    `spoke` separates a source that answered badly from one that never
+    answered. Only the first is worth asking again: it did the work and
+    mis-said it, and everything needed to fix that is already in its words.
     """
-    prompt = contribution_prompt(source, profile, date)
+
+    contribution: dict[str, Any] | None
+    trouble: str
+    raw: str | None
+    spoke: bool
+    seconds: float
+
+
+def attempt(
+    source: dict[str, Any], prompt: str, deadline: float, *, tools: bool = True
+) -> Attempt:
+    """Run the harness once and read what came back.
+
+    Nothing here raises. Every way a source can fail is a sentence about why,
+    because the caller is assembling a morning and not debugging a project.
+    """
     started = time.monotonic()
-    if deadline <= 0:
-        return failed_contribution(source, "the run was out of time before this source")
     try:
         done = subprocess.run(
-            harness_argv(source, prompt),
+            harness_argv(source, prompt, tools=tools),
             cwd=source["project_root"],
             text=True,
+            errors="replace",
             capture_output=True,
             check=False,
             timeout=deadline,
         )
     except subprocess.TimeoutExpired:
-        return failed_contribution(
-            source,
+        return Attempt(
+            None,
             f"the source did not answer within {int(deadline)} seconds",
-            seconds=time.monotonic() - started,
+            None,
+            False,
+            time.monotonic() - started,
         )
-    except OSError as trouble:
-        return failed_contribution(source, f"the harness would not run: {trouble}")
+    except (OSError, ValueError) as trouble:
+        return Attempt(
+            None,
+            f"the harness would not run: {trouble}",
+            None,
+            False,
+            time.monotonic() - started,
+        )
     seconds = time.monotonic() - started
-    answer = done.stdout[:MAX_OUTPUT]
+    answer = (done.stdout or "")[:MAX_OUTPUT]
     if done.returncode != 0:
-        detail = " ".join(done.stderr.split())[:MAX_HEADLINE]
-        return failed_contribution(
-            source,
-            f"the harness exited {done.returncode}: {detail}" if detail else f"the harness exited {done.returncode}",
-            raw=answer,
-            seconds=seconds,
+        detail = " ".join((done.stderr or "").split())[:MAX_HEADLINE]
+        said = f": {detail}" if detail else ""
+        return Attempt(
+            None, f"the harness exited {done.returncode}{said}", answer, False, seconds
         )
     try:
-        contribution = parse_contribution(answer)
+        return Attempt(parse_contribution(answer), "", answer, True, seconds)
     except Unusable as trouble:
-        return failed_contribution(source, str(trouble), raw=answer, seconds=seconds)
+        return Attempt(None, str(trouble), answer, True, seconds)
+
+
+def ask(source: dict[str, Any], profile: str, date: str, deadline: float) -> dict[str, Any]:
+    """Run one source and read what it answered.
+
+    A source that answered badly is asked once more. It has already read its
+    project and spent whatever its guidance allowed; the report exists and was
+    mis-said. Handing it back its own words and the one reason they could not
+    be used costs one short run with nothing to read and nothing to run, and
+    it has saved a whole morning from a stray quotation mark.
+
+    Every way this can go wrong ends in a contribution that says so. A morning
+    with one silent project is still a morning; a morning that stops because
+    one project could not answer is not.
+    """
+    if deadline <= 0:
+        return failed_contribution(source, "the run was out of time before this source")
+    first = attempt(source, contribution_prompt(source, profile, date), deadline)
+    if first.contribution is not None:
+        return contributed(source, first.contribution, first.seconds)
+    left = deadline - first.seconds
+    if not (first.spoke and first.raw and left >= REPAIR_FLOOR):
+        return failed_contribution(
+            source, first.trouble, raw=first.raw, seconds=first.seconds
+        )
+    second = attempt(
+        source,
+        repair_prompt(source, profile, first.trouble, first.raw),
+        min(left, environment_seconds("SCUFRIS_BRIEFING_REPAIR_DEADLINE", REPAIR_DEADLINE)),
+        tools=False,
+    )
+    spent = first.seconds + second.seconds
+    if second.contribution is not None:
+        return contributed(source, second.contribution, spent)
+    if second.spoke:
+        return failed_contribution(
+            source, f"{second.trouble}, and again when asked to correct it",
+            raw=second.raw,
+            seconds=spent,
+        )
+    # The repair run never happened. What is worth reporting is the answer the
+    # source did give, not the second command that would not start.
+    return failed_contribution(source, first.trouble, raw=first.raw, seconds=spent)
+
+
+def contributed(
+    source: dict[str, Any], contribution: dict[str, Any], seconds: float
+) -> dict[str, Any]:
     return {**stamp(source), **contribution, "seconds": round(seconds, 1), "raw": None}
 
 
 def stamp(source: dict[str, Any]) -> dict[str, Any]:
-    """What the runner knows about a source, which the source never says."""
+    """What the runner knows about a source, which the source never says.
+
+    Read rather than indexed. This is also what a failure is recorded with, so
+    a source that reached here malformed must still be nameable.
+    """
+    project = str(source.get("project") or "unknown")
     return {
-        "project": source["project"],
-        "slug": slug(source["project"]),
-        "harness": source["harness"],
-        "model": source["model"],
+        "project": project,
+        "slug": slug(project),
+        "harness": str(source.get("harness") or ""),
+        "model": str(source.get("model") or ""),
     }
 
 
@@ -426,11 +552,14 @@ def failed_contribution(
     raw: str | None = None,
     seconds: float = 0.0,
 ) -> dict[str, Any]:
+    marked = stamp(source)
     return {
-        **stamp(source),
-        "title": source["project"],
+        **marked,
+        "title": marked["project"][:MAX_TITLE],
         "status": "failed",
-        "headline": why,
+        # Bounded like any other headline: this one is written from a harness
+        # message, and the page lays out a sentence rather than a log line.
+        "headline": " ".join(why.split())[:MAX_HEADLINE] or "the source could not answer",
         "facts": [],
         "body": "",
         "seconds": round(seconds, 1),
@@ -497,7 +626,16 @@ def collect(
 
     def bounded(source: dict[str, Any]) -> dict[str, Any]:
         left = run_deadline - (time.monotonic() - clock)
-        return ask(source, profile, date, min(source_deadline, left))
+        try:
+            return ask(source, profile, date, min(source_deadline, left))
+        except Exception as trouble:  # noqa: BLE001
+            # The last line between one source and the whole morning. `ask`
+            # answers rather than raises, so reaching here means a way to fail
+            # nobody has thought of yet; the run still publishes with the rest
+            # and this source is named.
+            return failed_contribution(
+                source, f"the runner could not ask this source: {trouble!r}"
+            )
 
     with ThreadPoolExecutor(max_workers=len(sources)) as pool:
         contributions = list(pool.map(bounded, sources))
@@ -513,11 +651,29 @@ def finish(manifest: dict[str, Any], contributions: list[dict[str, Any]]) -> dic
     wrote up is then still a morning the owner can read.
     """
     directory = run_dir(manifest["date"])
+    kept = []
     for contribution in contributions:
-        atomic_write(
-            directory / "contributions" / f"{contribution['slug']}.json",
-            json.dumps(contribution, indent=2, sort_keys=True),
-        )
+        try:
+            atomic_write(
+                directory / "contributions" / f"{contribution['slug']}.json",
+                json.dumps(contribution, indent=2, sort_keys=True),
+            )
+            kept.append(contribution)
+        except (OSError, TypeError, ValueError, KeyError) as trouble:
+            # One contribution that cannot be written down is one source lost,
+            # not a morning lost. What it said is gone, so the manifest carries
+            # the reason in its place.
+            manifest = {
+                **manifest,
+                "diagnostics": [
+                    *manifest["diagnostics"],
+                    {
+                        "project": str(contribution.get("project", "")),
+                        "diagnostic": f"the contribution could not be kept: {trouble!r}",
+                    },
+                ],
+            }
+    contributions = kept
     answered = [item for item in contributions if item["status"] != "failed"]
     manifest = {
         **manifest,
@@ -526,8 +682,26 @@ def finish(manifest: dict[str, Any], contributions: list[dict[str, Any]]) -> dic
         "sources": [index_entry(item) for item in contributions],
     }
     write_manifest(manifest)
-    atomic_write(directory / "briefing.html", page.render_page(read_run(manifest["date"])))
-    prune()
+    # The record is written before the page and the pruning, and neither of
+    # them may take it back. A morning that was collected stays collected even
+    # if it cannot be laid out or the old runs cannot be swept.
+    try:
+        atomic_write(
+            directory / "briefing.html", page.render_page(read_run(manifest["date"]))
+        )
+    except Exception as trouble:  # noqa: BLE001
+        manifest = {
+            **manifest,
+            "diagnostics": [
+                *manifest["diagnostics"],
+                {"project": "", "diagnostic": f"the page could not be rendered: {trouble!r}"},
+            ],
+        }
+        write_manifest(manifest)
+    try:
+        prune()
+    except OSError:
+        pass
     return manifest
 
 

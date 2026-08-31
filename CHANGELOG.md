@@ -9,6 +9,25 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Added
+
+- A source that answered badly is asked once more. It has already read its
+  project by then, so the second asking hands back its own words and the one
+  reason they could not be used, with no tools at all, and it may change only
+  that. A real 4507 character answer lost to a stray quotation mark came back
+  in 26 seconds against the 197 the first run cost. Bounded by
+  `SCUFRIS_BRIEFING_REPAIR_DEADLINE` and never past what the source has left.
+  A source that never answered is not asked again.
+
+### Fixed
+
+- Nothing a source does can end a run. A malformed answer is refused by name
+  rather than raised, including one nested past the decoder's stack or written
+  in bytes that are not text; a source that finds a way past that is caught and
+  named; a contribution that cannot be written costs one source and not the
+  morning; and a page that cannot be laid out leaves the collected run
+  standing, with the reason kept in the manifest.
+
 ## [2.1.1] - 2026-08-31
 
 ### Fixed

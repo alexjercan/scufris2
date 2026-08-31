@@ -36,6 +36,31 @@ import time
 time.sleep(30)
 """
 
+#: Answers from a list of files, one for each time it is asked, and keeps the
+#: prompt of every run. The last file answers every run after it.
+IN_TURN = """#!/usr/bin/env python3
+import os
+import pathlib
+import sys
+counter = pathlib.Path(os.environ["BRIEFING_COUNT"])
+asked = int(counter.read_text()) if counter.exists() else 0
+counter.write_text(str(asked + 1))
+pathlib.Path(f'{os.environ["BRIEFING_PROMPT"]}.{asked}').write_text(sys.argv[-1])
+answers = os.environ["BRIEFING_ANSWERS"].split(os.pathsep)
+said = pathlib.Path(answers[min(asked, len(answers) - 1)]).read_text()
+if said.startswith("#sleep"):
+    import time
+
+    time.sleep(30)
+print(said)
+"""
+
+#: Writes bytes that are not text at all.
+BINARY = """#!/usr/bin/env python3
+import sys
+sys.stdout.buffer.write(b"\\xff\\xfe not text")
+"""
+
 FAILING = """#!/usr/bin/env python3
 import sys
 print("nothing to report")
@@ -88,6 +113,109 @@ class Envelope(unittest.TestCase):
     def test_a_bare_envelope_without_a_fence_is_accepted(self) -> None:
         found = briefing.parse_contribution(json.dumps(ENVELOPE))
         self.assertEqual(found["headline"], ENVELOPE["headline"])
+
+    def test_a_stray_quotation_mark_is_refused_and_not_raised(self) -> None:
+        # The real seedzero answer: a quotation mark inside the body ended the
+        # JSON string early. The reader must say so, not fall over.
+        broken = (
+            '```json\n{"title": "Seed Zero", "status": "ok", '
+            '"headline": "Six shorts are out.", "facts": [], '
+            '"body": "The comment ("plinko") is unchanged."}\n```\n'
+        )
+        with self.assertRaises(briefing.Unusable) as caught:
+            briefing.parse_contribution(broken)
+        self.assertIn("not one JSON envelope", str(caught.exception))
+
+    def test_an_answer_nested_past_the_stack_is_refused_and_not_raised(self) -> None:
+        # A decoder that runs out of stack raises something that is not a
+        # decode error. A source cannot be allowed to end the run that way.
+        deep = "[" * 200_000 + "]" * 200_000
+        with self.assertRaises(briefing.Unusable):
+            briefing.parse_contribution('{"body": ' + deep + "}")
+
+    def test_an_empty_or_silent_answer_is_refused_by_name(self) -> None:
+        for text in ("", "   \n\t ", "```\n```\n", "```sh\nls -la\n```\n"):
+            with self.assertRaises(briefing.Unusable) as caught:
+                briefing.parse_contribution(text)
+            self.assertIn("not one JSON envelope", str(caught.exception), repr(text))
+
+    def test_a_fence_is_read_however_it_was_written(self) -> None:
+        body = json.dumps(ENVELOPE)
+        for opening in ("```json", "```JSON", "```json  ", "```"):
+            for ending in ("\n", "\r\n"):
+                text = f"{opening}{ending}{body}{ending}```{ending}"
+                found = briefing.parse_contribution(text)
+                self.assertEqual(found["title"], "The Den", f"{opening!r} {ending!r}")
+
+    def test_words_around_the_block_are_not_the_answer(self) -> None:
+        text = (
+            "I read the journal.\n\n```json\n"
+            + json.dumps(ENVELOPE)
+            + "\n```\n\nSay the word and I will file the two tasks.\n"
+        )
+        self.assertEqual(briefing.parse_contribution(text)["title"], "The Den")
+
+    def test_a_value_exactly_at_its_limit_is_kept(self) -> None:
+        found = briefing.parse_contribution(
+            json.dumps(
+                {
+                    **ENVELOPE,
+                    "title": "t" * briefing.MAX_TITLE,
+                    "headline": "h" * briefing.MAX_HEADLINE,
+                    "body": "b" * briefing.MAX_BODY,
+                    "facts": [
+                        {"label": "l" * briefing.MAX_LABEL, "value": "v" * briefing.MAX_VALUE}
+                    ],
+                }
+            )
+        )
+        self.assertEqual(len(found["headline"]), briefing.MAX_HEADLINE)
+        self.assertEqual(len(found["body"]), briefing.MAX_BODY)
+
+    def test_a_fact_that_is_not_a_label_and_a_value_is_refused(self) -> None:
+        for facts, expected in (
+            ("two of them", "facts must be a list"),
+            (["Restant: 2"], "one label and one value"),
+            ([{"label": 2, "value": "b"}], "a fact label must be text"),
+            ([{"label": "a", "value": ""}], "a fact value must be text"),
+            ([{"label": "a"}], "a fact value must be text"),
+        ):
+            with self.assertRaises(briefing.Unusable) as caught:
+                briefing.parse_contribution(json.dumps({**ENVELOPE, "facts": facts}))
+            self.assertIn(expected, str(caught.exception), repr(facts))
+
+    def test_a_headline_of_whitespace_is_not_a_headline(self) -> None:
+        for field in ("title", "headline"):
+            for value in ("", "   ", None, 7):
+                with self.assertRaises(briefing.Unusable):
+                    briefing.parse_contribution(json.dumps({**ENVELOPE, field: value}))
+
+    def test_an_answer_that_is_not_an_object_is_refused(self) -> None:
+        for text in ("```json\n[1, 2]\n```", "7", '"a headline"', "null", "true"):
+            with self.assertRaises(briefing.Unusable) as caught:
+                briefing.parse_contribution(text)
+            self.assertIn("not one JSON envelope", str(caught.exception), repr(text))
+
+    def test_a_failure_is_recorded_as_a_headline_and_not_a_log_line(self) -> None:
+        # The page lays out a sentence. A harness message can be a paragraph,
+        # so the runner's own headline is bounded like any other.
+        entry = briefing.failed_contribution(
+            {"project": "personal/seedzero", "harness": "claude", "model": "opus"},
+            "the harness exited 1:\n" + "detail " * 200,
+        )
+        self.assertEqual(len(entry["headline"]), briefing.MAX_HEADLINE)
+        self.assertNotIn("\n", entry["headline"])
+        self.assertEqual(entry["status"], "failed")
+        self.assertEqual(entry["slug"], "personal-seedzero")
+
+    def test_a_source_missing_its_own_fields_can_still_be_named(self) -> None:
+        # This is what a failure is recorded with, so it must not be the thing
+        # that fails.
+        entry = briefing.failed_contribution({}, "")
+        self.assertEqual(entry["project"], "unknown")
+        self.assertEqual(entry["slug"], "unknown")
+        self.assertEqual(entry["headline"], "the source could not answer")
+        self.assertEqual(entry["title"], "unknown")
 
     def test_only_the_runner_may_call_a_source_failed(self) -> None:
         with self.assertRaises(briefing.Unusable):
@@ -246,6 +374,33 @@ class Run(unittest.TestCase):
         (root / ".scufris.toml").write_text(configuration, encoding="utf-8")
         return root
 
+    def answers(self, *texts: str) -> None:
+        """Answer with each of these in turn, keeping every prompt."""
+        files = []
+        for index, text in enumerate(texts):
+            written = self.root / f"answer-{index}.txt"
+            written.write_text(text, encoding="utf-8")
+            files.append(str(written))
+        environment = mock.patch.dict(
+            os.environ,
+            {
+                "BRIEFING_ANSWERS": os.pathsep.join(files),
+                "BRIEFING_COUNT": str(self.root / "asked.txt"),
+            },
+        )
+        environment.start()
+        self.addCleanup(environment.stop)
+        self.harness(IN_TURN)
+
+    def asked(self) -> list[str]:
+        """Every prompt the harness was given, in order."""
+        return [
+            path.read_text(encoding="utf-8")
+            for path in sorted(
+                self.root.glob("prompt.txt.*"), key=lambda item: int(item.suffix[1:])
+            )
+        ]
+
     def declare(self, name: str, harness: str = "pi") -> Path:
         return self.project(
             name,
@@ -296,6 +451,115 @@ class Run(unittest.TestCase):
         )
         self.assertIn("could not read the journal", kept["raw"])
 
+    def test_a_source_that_mis_said_its_report_is_asked_to_say_it_again(self) -> None:
+        # It read the project and spent whatever its guidance allowed. The
+        # report exists; only the saying of it was wrong.
+        self.declare("seedzero")
+        self.answers(
+            '```json\n{"title": "Seed Zero", "status": "ok", "headline": "Six are out.",'
+            ' "facts": [], "body": "The comment ("plinko") is unchanged."}\n```\n',
+            "```json\n" + json.dumps(ENVELOPE) + "\n```\n",
+        )
+        manifest = briefing.collect("morning", "2026-08-31")
+        entry = manifest["sources"][0]
+        self.assertEqual(entry["status"], "attention")
+        self.assertEqual(entry["headline"], ENVELOPE["headline"])
+        first, second = self.asked()
+        self.assertIn("Read seedzero and report it.", first)
+        # The second run is given the rejection and its own words, and is told
+        # to gather nothing: the work is already done.
+        self.assertIn("not one JSON envelope", second)
+        self.assertIn("plinko", second)
+        self.assertIn("Read nothing, run nothing", second)
+        self.assertNotIn("Read seedzero and report it.", second)
+
+    def test_a_source_over_a_limit_is_asked_to_shorten_it(self) -> None:
+        # Not only unreadable answers. A good report with one field over its
+        # limit is a report, and the source is the one who can shorten it.
+        self.declare("seedzero")
+        self.answers(
+            "```json\n" + json.dumps({**ENVELOPE, "headline": "h" * 227}) + "\n```\n",
+            "```json\n" + json.dumps(ENVELOPE) + "\n```\n",
+        )
+        manifest = briefing.collect("morning", "2026-08-31")
+        self.assertEqual(manifest["sources"][0]["status"], "attention")
+        self.assertIn("longer than 200 characters", self.asked()[1])
+
+    def test_a_source_that_cannot_say_it_twice_is_failed_and_says_so(self) -> None:
+        self.declare("seedzero")
+        self.answers("I could not read the channel today.")
+        manifest = briefing.collect("morning", "2026-08-31")
+        entry = manifest["sources"][0]
+        self.assertEqual(entry["status"], "failed")
+        self.assertIn("not one JSON envelope", entry["headline"])
+        self.assertIn("again when asked to correct it", entry["headline"])
+        self.assertEqual(len(self.asked()), 2)
+
+    def test_the_second_asking_reads_nothing_and_runs_nothing(self) -> None:
+        argv = briefing.harness_argv(
+            {
+                "project": "personal/seedzero",
+                "project_root": "/tmp",
+                "harness": "pi",
+                "model": "opus",
+                "thinking": "high",
+            },
+            "the prompt",
+            tools=False,
+        )
+        self.assertIn("--no-tools", argv)
+        self.assertNotIn("--tools", argv)
+        claude = briefing.harness_argv(
+            {
+                "project": "personal/seedzero",
+                "project_root": "/tmp",
+                "harness": "claude",
+                "model": "opus",
+                "thinking": "high",
+            },
+            "the prompt",
+            tools=False,
+        )
+        self.assertEqual(claude[claude.index("--tools") + 1], "")
+
+    def test_a_source_that_never_answered_is_not_asked_to_correct_itself(self) -> None:
+        # Nothing was said, so there is nothing to correct. Asking again would
+        # spend the deadline of a source that has already failed to start.
+        self.declare("the-den")
+        self.harness(FAILING)
+        manifest = briefing.collect("morning", "2026-08-31")
+        self.assertEqual(manifest["sources"][0]["status"], "failed")
+        self.assertNotIn("again when asked", manifest["sources"][0]["headline"])
+
+    def test_a_source_with_no_time_left_is_not_asked_twice(self) -> None:
+        self.declare("seedzero")
+        self.answers("not an envelope at all")
+        manifest = briefing.collect(
+            "morning", "2026-08-31", source_deadline=briefing.REPAIR_FLOOR - 1
+        )
+        self.assertEqual(manifest["sources"][0]["status"], "failed")
+        self.assertEqual(len(self.asked()), 1)
+
+    def test_the_second_asking_is_bounded_like_every_other_run(self) -> None:
+        # The first asking answers badly at once; the second never returns.
+        self.declare("seedzero")
+        self.answers("not an envelope at all", "#sleep")
+        with mock.patch.dict(os.environ, {"SCUFRIS_BRIEFING_REPAIR_DEADLINE": "0.4"}):
+            manifest = briefing.collect("morning", "2026-08-31")
+        entry = manifest["sources"][0]
+        self.assertEqual(entry["status"], "failed")
+        # The repair timed out, so what is reported is what the source did say.
+        self.assertIn("not one JSON envelope", entry["headline"])
+        self.assertNotIn("again when asked", entry["headline"])
+        self.assertEqual(len(self.asked()), 2)
+
+    def test_bytes_that_are_not_text_are_refused_rather_than_raised(self) -> None:
+        self.declare("the-den")
+        self.harness(BINARY)
+        manifest = briefing.collect("morning", "2026-08-31")
+        self.assertEqual(manifest["sources"][0]["status"], "failed")
+        self.assertEqual(manifest["state"], "failed")
+
     def test_a_harness_that_exits_badly_is_named_rather_than_guessed(self) -> None:
         self.declare("the-den")
         self.harness(FAILING)
@@ -304,6 +568,58 @@ class Run(unittest.TestCase):
         self.assertEqual(entry["status"], "failed")
         self.assertIn("exited 3", entry["headline"])
         self.assertIn("the token expired", entry["headline"])
+
+    def test_a_source_that_breaks_the_runner_does_not_take_the_morning(self) -> None:
+        # `ask` answers rather than raises, so this is a way to fail nobody has
+        # thought of yet. The morning still publishes, and the source is named.
+        self.declare("the-den")
+        self.declare("seedzero")
+        real = briefing.ask
+
+        def explode(source: dict[str, object], *rest: object) -> dict[str, object]:
+            if source["project"].endswith("seedzero"):
+                raise ZeroDivisionError("a way nobody thought of")
+            return real(source, *rest)
+
+        with mock.patch.object(briefing, "ask", explode):
+            manifest = briefing.collect("morning", "2026-08-31")
+        self.assertEqual(manifest["state"], "collected")
+        by_project = {item["project"]: item for item in manifest["sources"]}
+        self.assertEqual(by_project["projects/the-den"]["status"], "attention")
+        broken = by_project["projects/seedzero"]
+        self.assertEqual(broken["status"], "failed")
+        self.assertIn("could not ask this source", broken["headline"])
+        self.assertIn("ZeroDivisionError", broken["headline"])
+
+    def test_a_page_that_cannot_be_laid_out_does_not_unmake_the_run(self) -> None:
+        # The record is written before the page. A morning that was collected
+        # stays collected, and the reason the page is missing is kept with it.
+        self.declare("the-den")
+        with mock.patch.object(page, "render_page", side_effect=RuntimeError("no layout")):
+            manifest = briefing.collect("morning", "2026-08-31")
+        self.assertEqual(manifest["state"], "collected")
+        self.assertFalse((briefing.run_dir("2026-08-31") / "briefing.html").exists())
+        said = " ".join(item["diagnostic"] for item in manifest["diagnostics"])
+        self.assertIn("the page could not be rendered", said)
+        kept = json.loads((briefing.run_dir("2026-08-31") / "manifest.json").read_text())
+        self.assertEqual(kept["state"], "collected")
+
+    def test_a_contribution_that_cannot_be_kept_costs_one_source(self) -> None:
+        self.declare("the-den")
+        self.declare("seedzero")
+        real = briefing.atomic_write
+
+        def refuse(path: object, data: str) -> None:
+            if str(path).endswith("projects-seedzero.json"):
+                raise OSError("the disk is full")
+            real(path, data)
+
+        with mock.patch.object(briefing, "atomic_write", refuse):
+            manifest = briefing.collect("morning", "2026-08-31")
+        self.assertEqual(manifest["state"], "collected")
+        self.assertEqual([item["project"] for item in manifest["sources"]], ["projects/the-den"])
+        said = " ".join(item["diagnostic"] for item in manifest["diagnostics"])
+        self.assertIn("the contribution could not be kept", said)
 
     def test_one_slow_source_costs_its_own_deadline_and_no_other(self) -> None:
         self.declare("the-den")

@@ -71,10 +71,26 @@ Every limit the reader holds a source to is in the prompt it was given: the
 title, headline, label, value and body lengths. A contribution dropped for a
 rule nobody stated is work done twice.
 
-Only the runner writes `failed`. A source that answers with prose, exits badly,
-or misses its deadline becomes a failed contribution whose headline says why,
-with its own words kept beside it, and it is named in the briefing rather than
-quietly dropped.
+A source that answered badly is asked once more. By then it has read its
+project and spent whatever its guidance allowed, so the report exists and was
+only mis-said: a stray quotation mark inside the body, a headline a few
+characters long. The second asking is given the source's own words and the one
+reason they could not be used, with no tools at all, and may change only that.
+It is short - a real 4507 character answer was recovered in 26 seconds against
+the 197 the first run cost - and it is bounded by
+`SCUFRIS_BRIEFING_REPAIR_DEADLINE`, capped by whatever the source has left. A
+source that never answered is not asked again: there is nothing to correct.
+
+Only the runner writes `failed`. A source that answers with prose twice, exits
+badly, or misses its deadline becomes a failed contribution whose headline says
+why, with its own words kept beside it, and it is named in the briefing rather
+than quietly dropped.
+
+Nothing a source does ends the run. The reader refuses every malformed answer
+by name rather than raising, including one nested past the decoder's stack or
+written in bytes that are not text; a source that finds a way past that is
+caught at the fan-out and named; and a page that cannot be laid out leaves the
+collected run standing, with the reason kept in the manifest.
 
 ## How a source runs
 
@@ -108,7 +124,8 @@ written where the rest of that project's intent lives.
 
 Every source starts at once. Each is bounded on its own at 900 seconds, and the
 whole run at 1800; both move with `SCUFRIS_BRIEFING_SOURCE_DEADLINE` and
-`SCUFRIS_BRIEFING_DEADLINE`. One project that hangs costs the run its own
+`SCUFRIS_BRIEFING_DEADLINE`. A second asking is bounded at 300 by
+`SCUFRIS_BRIEFING_REPAIR_DEADLINE`, never past what its source has left. One project that hangs costs the run its own
 deadline and nothing else.
 
 ## The run directory

@@ -11,6 +11,17 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Fixed
 
+- A briefing source can run the commands its own guidance names. `claude`
+  sources ran sandboxed, so a project told to read CI or refresh its numbers
+  reported that `gh` or `python3` had been denied instead of reporting itself.
+  Both harnesses now answer without asking, and what a source may reach is
+  decided by its tool list and its guidance.
+- A contribution whose body fences code of its own is read whole. The closing
+  fence was matched against the first ``` inside the answer, which cut the
+  envelope off mid-string and lost the whole contribution.
+- A source is told the limits it is held to. Title, headline, fact, and body
+  lengths are in the prompt, so an answer is no longer dropped for a limit it
+  was never given.
 - A session no longer waits for the morning before the surfaces can reach it.
   The briefing was collected inside session startup, and pi runs the startup
   listeners one after another, so every surface was left with an agent that

@@ -63,6 +63,28 @@ class Envelope(unittest.TestCase):
         self.assertEqual(found["status"], "attention")
         self.assertEqual(found["facts"], [{"label": "Restant", "value": "2 tasks"}])
 
+    def test_a_body_that_fences_code_of_its_own_is_read_whole(self) -> None:
+        # A body is Markdown, so it may fence a diff or a status listing. The
+        # closing fence of the answer is then not the first ``` after the
+        # opening one, and matching fences against each other cuts the answer
+        # off mid-string. A real nova-protocol answer was lost this way.
+        quoted = {
+            **ENVELOPE,
+            "body": "## The tree\n\n```\n M Cargo.toml\n?? scripts/gen.py\n```\n\nDone.",
+        }
+        text = "Here is the morning.\n\n```json\n" + json.dumps(quoted) + "\n```\n"
+        found = briefing.parse_contribution(text)
+        self.assertEqual(found["headline"], ENVELOPE["headline"])
+        self.assertIn("?? scripts/gen.py", found["body"])
+        self.assertTrue(found["body"].endswith("Done."))
+
+    def test_an_envelope_quoted_inside_a_body_is_not_the_answer(self) -> None:
+        # A source may show the shape it was asked for inside its own body.
+        # That block starts inside the answer, so it was quoted by it.
+        quoted = {**ENVELOPE, "body": "I was asked for:\n\n```json\n{\"title\": \"shape\"}\n```\n"}
+        text = "```json\n" + json.dumps(quoted) + "\n```\n"
+        self.assertEqual(briefing.parse_contribution(text)["title"], "The Den")
+
     def test_a_bare_envelope_without_a_fence_is_accepted(self) -> None:
         found = briefing.parse_contribution(json.dumps(ENVELOPE))
         self.assertEqual(found["headline"], ENVELOPE["headline"])
@@ -134,6 +156,22 @@ class Command(unittest.TestCase):
         self.assertIn("Edit", denied)
         self.assertIn("Write", denied)
 
+    def test_both_harnesses_answer_without_asking_anyone(self) -> None:
+        # Nobody is watching a source run, so a question it cannot ask is a
+        # refusal. `dontAsk` sandboxes the shell, and sources reported `gh`
+        # and `python3` denied instead of reporting their project.
+        source = {
+            "project": "personal/seedzero",
+            "project_root": "/tmp",
+            "harness": "claude",
+            "model": "opus",
+            "thinking": "high",
+        }
+        argv = briefing.harness_argv(source, "the prompt")
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "bypassPermissions")
+        pi_argv = briefing.harness_argv({**source, "harness": "pi"}, "the prompt")
+        self.assertIn("--approve", pi_argv)
+
     def test_the_prompt_carries_the_project_guidance_and_the_shape(self) -> None:
         prompt = briefing.contribution_prompt(
             {
@@ -154,6 +192,18 @@ class Command(unittest.TestCase):
         self.assertIn("Never estimate a number you", prompt)
         # A source reads unless its own project asked it for something more.
         self.assertIn("unless the guidance below names it", prompt)
+        # A limit the runner enforces is a limit the source is told. A source
+        # that wrote a 227 character headline lost a whole good answer to one
+        # it was never given.
+        said = " ".join(prompt.split())
+        for limit in (
+            briefing.MAX_TITLE,
+            briefing.MAX_HEADLINE,
+            briefing.MAX_LABEL,
+            briefing.MAX_VALUE,
+            briefing.MAX_BODY,
+        ):
+            self.assertIn(f"at most {limit} characters", said)
 
 
 class Run(unittest.TestCase):

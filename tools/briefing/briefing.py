@@ -220,10 +220,14 @@ Reply with exactly one fenced `json` block and nothing outside it:
 
 - `status` is `ok` when nothing needs the owner, `attention` when something
   does, or `stale` when the data you needed is missing or too old to trust.
-- `facts` is at most {facts} entries, each a measured value with a short label.
+- `title` is at most {MAX_TITLE} characters, and `headline` is one plain
+  sentence of at most {MAX_HEADLINE} characters. An answer over either limit
+  is dropped whole, so put the detail in `body` instead.
+- `facts` is at most {facts} entries, each a measured value with a label of at
+  most {MAX_LABEL} characters and a value of at most {MAX_VALUE} characters.
   Leave it empty rather than filling it with prose.
-- `body` is Markdown: headings, paragraphs, lists, links and code. Keep it to
-  what a person reads over coffee.
+- `body` is Markdown of at most {MAX_BODY} characters: headings, paragraphs,
+  lists, links, and fenced code. Keep it to what a person reads over coffee.
 - Every claim comes from data you read in this run. If something is missing,
   say it is missing and set `status` to `stale`. Never estimate a number you
   did not measure, and never carry a value over from another day.
@@ -236,6 +240,14 @@ def harness_argv(source: dict[str, Any], prompt: str) -> list[str]:
     Not a job. A job is a tmux pane bound to an owner session that can be
     steered and landed; a morning source answers once and is gone, so it keeps
     no session and leaves nothing to recover.
+
+    Both harnesses run without asking. A source is answering a question this
+    program put to it, in its own project, with nobody watching, so a prompt
+    it cannot answer is the same as a refusal. `claude` is given
+    `bypassPermissions` to match `pi --approve`: under `dontAsk` its shell
+    runs sandboxed, and a source that needed `gh` or `python3` reported the
+    denial instead of the data. What a source may reach is decided by the tool
+    list and by its own guidance, not by a sandbox it cannot see.
     """
     if source["harness"] == "pi":
         return [
@@ -260,7 +272,7 @@ def harness_argv(source: dict[str, Any], prompt: str) -> list[str]:
         "--effort",
         source["thinking"],
         "--permission-mode",
-        "dontAsk",
+        "bypassPermissions",
         "--tools",
         CLAUDE_TOOLS,
         "--disallowed-tools",
@@ -270,10 +282,39 @@ def harness_argv(source: dict[str, Any], prompt: str) -> list[str]:
     ]
 
 
-def fenced(text: str) -> str | None:
-    """The last fenced json block, if the answer has one."""
-    blocks = re.findall(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
-    return blocks[-1] if blocks else None
+def envelope(text: str) -> Any:
+    """The JSON value an answer carries, fenced or bare.
+
+    A body is Markdown and may fence code of its own, so the closing fence is
+    not the first ``` after the opening one and no pair of fences marks the
+    block out. Each block is read for its own end instead: the decoder stops
+    where the value stops, and a fence inside that value is inside a string.
+    A block that starts inside one already read was quoted by it rather than
+    answered with it. The last block left is the answer, so a source may still
+    correct itself.
+    """
+    decoder = json.JSONDecoder()
+    values: list[Any] = []
+    first_trouble: json.JSONDecodeError | None = None
+    read_to = -1
+    for opener in re.finditer(r"```[ \t]*(?:json)?[ \t]*\r?\n", text, re.IGNORECASE):
+        start = text.find("{", opener.end())
+        if start == -1 or start < read_to:
+            continue
+        try:
+            value, read_to = decoder.raw_decode(text, start)
+        except json.JSONDecodeError as trouble:
+            first_trouble = first_trouble or trouble
+            continue
+        values.append(value)
+    if values:
+        return values[-1]
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as trouble:
+        raise Unusable(
+            f"the answer is not one JSON envelope: {first_trouble or trouble}"
+        ) from None
 
 
 def short(value: Any, limit: int, what: str) -> str:
@@ -287,11 +328,7 @@ def short(value: Any, limit: int, what: str) -> str:
 
 def parse_contribution(text: str) -> dict[str, Any]:
     """One source's answer, or a refusal naming what was wrong with it."""
-    block = fenced(text)
-    try:
-        found = json.loads(block if block is not None else text)
-    except json.JSONDecodeError as trouble:
-        raise Unusable(f"the answer is not one JSON envelope: {trouble}") from None
+    found = envelope(text)
     if not isinstance(found, dict):
         raise Unusable("the answer is not one JSON envelope")
     unexpected = set(found) - {"title", "status", "headline", "facts", "body"}

@@ -61,6 +61,16 @@ values. Free Markdown would read well and lay out badly: the page needs a
 title, a state and a few values it can put in a row without a model in the
 loop.
 
+The envelope is read for its own end, not for a closing fence. A body is
+Markdown and may fence a diff or a status listing of its own, so the first
+fence after the opening one is usually inside the answer rather than after it.
+Each fenced block is decoded from its opening brace, a block that starts inside
+one already read was quoted by it, and the last block left is the answer.
+
+Every limit the reader holds a source to is in the prompt it was given: the
+title, headline, label, value and body lengths. A contribution dropped for a
+rule nobody stated is work done twice.
+
 Only the runner writes `failed`. A source that answers with prose, exits badly,
 or misses its deadline becomes a failed contribution whose headline says why,
 with its own words kept beside it, and it is named in the briefing rather than
@@ -77,10 +87,17 @@ One bounded headless run in the project root, not a job:
 | steerable | yes                  | no              |
 | session   | restored by ID       | none            |
 
-`pi --print` or `claude --print`, with the edit tools off. That is an intent
-boundary and not a sandbox: a source that runs a refresh command runs it with
-the owner's own hands, exactly as a review workspace does. The project's
-guidance is what keeps it honest.
+`pi --print --approve` or `claude --print --permission-mode bypassPermissions`,
+with the edit tools off. That is an intent boundary and not a sandbox: a source
+that runs a refresh command runs it with the owner's own hands, exactly as a
+review workspace does. The project's guidance is what keeps it honest.
+
+Both harnesses answer without asking on purpose. Nobody is watching a source
+run, so a question it cannot ask is a refusal. Under `claude`'s `dontAsk` the
+shell is sandboxed, and a source told to read CI or refresh its numbers spent
+its run reporting that `gh` or `python3` had been denied. The tool list and the
+project's guidance decide what a source may reach; a sandbox it cannot see
+decides nothing but whether the morning is empty.
 
 A source is asked to change nothing and spend nothing unless its own guidance
 names it, and then only what it names. A project whose morning is worth a

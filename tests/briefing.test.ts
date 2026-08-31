@@ -10,7 +10,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
-import { wakeMessage } from "../agent/extensions/scufris/briefing/briefing.ts";
+import briefing, {
+  wakeMessage,
+} from "../agent/extensions/scufris/briefing/briefing.ts";
 import { toolPath } from "../agent/extensions/scufris/shared/runtime.ts";
 import {
   DEFAULT_BRIEFING_TIME,
@@ -153,4 +155,37 @@ test("the helper is found from the source tree and from a package", () => {
     join(share, "tools", "briefing", "cli.py"),
   );
   rmSync(room, { recursive: true, force: true });
+});
+
+test("the session start handler hands the morning off instead of holding the session open", () => {
+  // pi awaits the session_start listeners one after another, in the order the
+  // extensions were loaded. This one is loaded before the extension that
+  // connects to the service, so a handler that awaited the collection would
+  // leave every surface unable to reach the agent for as long as the sources
+  // took to answer. It must return something pi has nothing to wait for.
+  const role = process.env.SCUFRIS_ROLE;
+  const time = process.env.SCUFRIS_BRIEFING_TIME;
+  process.env.SCUFRIS_ROLE = "orchestrator";
+  process.env.SCUFRIS_BRIEFING_TIME = "off";
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+  const pi = {
+    registerTool() {},
+    sendMessage() {},
+    on(name: string, handler: (event: unknown, ctx: unknown) => unknown) {
+      handlers.set(name, handler);
+    },
+  };
+  try {
+    briefing(pi as never);
+    const start = handlers.get("session_start");
+    assert.ok(start);
+    const answer = start({ reason: "startup" }, { hasUI: false });
+    assert.equal(answer, undefined);
+    handlers.get("session_shutdown")?.(undefined, undefined);
+  } finally {
+    if (role === undefined) delete process.env.SCUFRIS_ROLE;
+    else process.env.SCUFRIS_ROLE = role;
+    if (time === undefined) delete process.env.SCUFRIS_BRIEFING_TIME;
+    else process.env.SCUFRIS_BRIEFING_TIME = time;
+  }
 });

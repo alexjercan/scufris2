@@ -345,10 +345,17 @@ export default function briefing(pi: ExtensionAPI): void {
     }),
   );
 
-  pi.on("session_start", async (_event, ctx) => {
+  // The morning is started here and not awaited. pi runs the session_start
+  // listeners one after another, so awaiting a collection would hold back
+  // every extension loaded after this one, the agent channel the surfaces
+  // speak through included. The session finishes opening while the sources
+  // answer.
+  pi.on("session_start", (_event, ctx) => {
     extensionContext = ctx;
     stopped = false;
-    await tick();
+    void tick().catch((error) => {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    });
   });
 
   pi.on("session_shutdown", () => {

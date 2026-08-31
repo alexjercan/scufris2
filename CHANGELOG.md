@@ -9,6 +9,14 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Fixed
+
+- A session no longer waits for the morning before the surfaces can reach it.
+  The briefing was collected inside session startup, and pi runs the startup
+  listeners one after another, so every surface was left with an agent that
+  could not answer for as long as the sources took. The collection now starts
+  with the session instead of holding it open.
+
 ## [2.1.0] - 2026-08-31
 
 ### Changed

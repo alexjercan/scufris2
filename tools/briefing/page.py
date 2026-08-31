@@ -333,10 +333,11 @@ def card(contribution: dict[str, Any]) -> str:
 def run_footer(manifest: dict[str, Any]) -> str:
     counted = len(manifest["sources"])
     failed = [item for item in manifest["sources"] if item["status"] == "failed"]
+    collected = html.escape(str(manifest.get("finished") or "not yet"))
     lines = [
         f"{manifest['profile'].capitalize()} run of {manifest['date']}, "
-        f"{counted} source{'' if counted == 1 else 's'}, "
-        f"collected {html.escape(str(manifest.get('finished') or 'not yet'))}."
+        + f"{counted} source{'' if counted == 1 else 's'}, "
+        + f"collected {collected}."
     ]
     if failed:
         named = "".join(

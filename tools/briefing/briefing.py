@@ -35,7 +35,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import page  # noqa: E402
+import page
 
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PROFILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")

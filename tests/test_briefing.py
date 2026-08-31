@@ -19,8 +19,8 @@ from unittest import mock
 REPOSITORY = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY / "tools" / "briefing"))
 
-import briefing  # noqa: E402
-import page  # noqa: E402
+import briefing
+import page
 
 ANSWERING = """#!/usr/bin/env python3
 import os

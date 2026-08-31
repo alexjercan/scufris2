@@ -41,10 +41,12 @@ composer state, and submits only its opaque ID. A message can contain at most
 eight different files, each at most 16 MiB.
 
 Canonical attachment descriptors render below their message with name, media
-type, and size. Bounded raster images and recognized videos render inline
-through a private custom webview scheme backed directly by `content.sock`.
-Videos use native inline controls. SVG and general files remain metadata cards.
-The only explicit file action is Save, which uses a native
+type, and size. Bounded raster images and recognized video thumbnails render
+inline through a private custom webview scheme backed by `content.sock`.
+Video thumbnails are bounded PNG frames extracted by packaged `ffmpeg`. Tapping
+an image or video thumbnail opens a private mode-0600 runtime copy through
+packaged `xdg-open`. SVG and general files remain metadata cards. The only
+labeled file action is Save, which uses a native
 destination picker and an atomic mode-0600 write. Attachment bytes or host paths
 never enter logs or protocol messages.
 

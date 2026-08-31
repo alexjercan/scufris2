@@ -394,10 +394,10 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                 })
                 .build(),
         )
-        // Canonical image and video attachments are served only to the
-        // conversation webview. The page receives an opaque URL; this boundary
-        // resolves the ID from canonical replay and downloads bounded bytes
-        // from content.sock.
+        // Canonical images and extracted video thumbnails are served only to
+        // the conversation webview. The page receives an opaque URL; this
+        // boundary resolves the ID from canonical replay and downloads bounded
+        // bytes from content.sock.
         .register_uri_scheme_protocol("scufris-attachment", |ctx, request| {
             if ctx.webview_label() != hud::LABEL {
                 return refused();
@@ -409,7 +409,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                 .and_then(|conversation| conversation.attachment(id));
             let client = ctx.app_handle().try_state::<Arc<AttachmentClient>>();
             match (descriptor, client) {
-                (Some(descriptor), Some(client)) => match client.presentation(&descriptor) {
+                (Some(descriptor), Some(client)) => match client.thumbnail(&descriptor) {
                     Ok((media_type, bytes)) => http::Response::builder()
                         .header(http::header::CONTENT_TYPE, media_type)
                         .header("x-content-type-options", "nosniff")
@@ -462,6 +462,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             hud_submit,
             hud_attach,
             hud_detach,
+            hud_open_attachment,
             hud_save_attachment,
             hud_close,
             hud_toggle
@@ -975,6 +976,22 @@ async fn hud_attach(
 #[tauri::command]
 fn hud_detach(conversation: tauri::State<'_, Arc<Hud>>, id: String) -> conversation::Notice {
     conversation.detach(&id)
+}
+
+/// Opens one image or video attachment from a private runtime copy.
+#[tauri::command]
+async fn hud_open_attachment(
+    conversation: tauri::State<'_, Arc<Hud>>,
+    attachments: tauri::State<'_, Arc<AttachmentClient>>,
+    descriptor: AttachmentDescriptor,
+) -> Result<(), String> {
+    match attachments.open(&descriptor) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            conversation.attachment_failed(error.clone());
+            Err(error)
+        }
+    }
 }
 
 /// Saves one canonical attachment to a destination chosen by the person.

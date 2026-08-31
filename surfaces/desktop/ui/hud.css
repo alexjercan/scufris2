@@ -185,11 +185,50 @@ body {
   background: #161616;
 }
 
+.attachment-thumbnail {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  border: 0;
+  padding: 0;
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.attachment-thumbnail:focus {
+  outline: 1px solid var(--yellow);
+}
+
 .attachment-preview {
+  display: block;
   width: 100%;
   max-height: 280px;
   object-fit: contain;
   background: var(--bg);
+}
+
+.attachment-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  min-width: 52px;
+  min-height: 52px;
+  border-radius: 50%;
+  background: rgba(229, 228, 226, 0.9);
+  color: var(--bg);
+  font-size: 0;
+  transform: translate(-50%, -50%);
+}
+
+.attachment-play::after {
+  content: "";
+  position: absolute;
+  top: 15px;
+  left: 21px;
+  border-top: 11px solid transparent;
+  border-bottom: 11px solid transparent;
+  border-left: 17px solid var(--bg);
 }
 
 .attachment-identity {

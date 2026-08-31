@@ -134,11 +134,13 @@ in
       grep -Fx ${lib.escapeShellArg (toString pkgs.webkitgtk_4_1)} "$desktop"
       ! grep -Fx ${lib.escapeShellArg (toString launcher)} "$desktop"
 
-      # Widget backends are Python 3 programs the companion spawns, so the
-      # interpreter is part of the package rather than of the person's PATH.
-      grep -Fx ${lib.escapeShellArg (toString pkgs.python3)} "$desktop"
-      grep -F ${lib.escapeShellArg (toString pkgs.python3)} \
-        "$(readlink -f ${desktop}/bin/scufris-desktop)"
+      # Runtime helpers are package-owned rather than taken from the person's
+      # PATH. ffmpeg extracts bounded thumbnails and xdg-open previews a private
+      # attachment copy without a shell.
+      for package in ${lib.escapeShellArgs [pkgs.python3 pkgs.ffmpeg pkgs.xdg-utils]}; do
+        grep -Fx "$package" "$desktop"
+        grep -F "$package" "$(readlink -f ${desktop}/bin/scufris-desktop)"
+      done
       test -f ${desktop}/share/applications/scufris-desktop.desktop
       test -f ${desktop}/share/icons/hicolor/scalable/apps/scufris.svg
 

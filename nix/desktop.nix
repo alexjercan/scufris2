@@ -34,9 +34,9 @@
     env.OPENSSL_NO_VENDOR = "1";
     preFixup = ''
       gappsWrapperArgs+=(--prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath tauriLibraries})
-      # Widget backends are Python 3 programs the companion spawns. The
-      # interpreter belongs to the package rather than the person's PATH.
-      gappsWrapperArgs+=(--prefix PATH : ${lib.makeBinPath [pkgs.python3]})
+      # Widget backends, bounded video thumbnail extraction, and attachment
+      # preview do not depend on the person's PATH.
+      gappsWrapperArgs+=(--prefix PATH : ${lib.makeBinPath [pkgs.python3 pkgs.ffmpeg pkgs.xdg-utils]})
     '';
     meta = {
       description = "Scufris voice pill and tray companion";

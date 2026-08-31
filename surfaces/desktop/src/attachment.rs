@@ -7,8 +7,9 @@
 use std::{
     fs::{self, OpenOptions},
     io::{Read, Write},
-    os::unix::fs::OpenOptionsExt,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
+    process::Command,
     time::Duration,
 };
 
@@ -17,10 +18,9 @@ use scufris_control::service::{
     AttachmentDescriptor, MAX_ATTACHMENT_BYTES, validate_attachment_descriptor,
 };
 use serde::Serialize;
-#[cfg(test)]
-use std::os::unix::fs::PermissionsExt;
 
 const RESPONSE_BYTES: u64 = 16 * 1024;
+const THUMBNAIL_BYTES: u64 = 4 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Serialize)]
@@ -32,16 +32,21 @@ struct ImportRequest<'a> {
 /// Client for the service-owned private attachment API.
 pub struct AttachmentClient {
     client: Client,
+    cache: PathBuf,
 }
 
 impl AttachmentClient {
     pub fn new(content_socket: PathBuf) -> Result<Self, String> {
+        let cache = content_socket
+            .parent()
+            .ok_or_else(unavailable)?
+            .join("desktop-preview");
         let client = Client::builder()
             .unix_socket(content_socket)
             .timeout(TIMEOUT)
             .build()
             .map_err(|_| unavailable())?;
-        Ok(Self { client })
+        Ok(Self { client, cache })
     }
 
     /// Imports one selected host file without reading its bytes into the UI.
@@ -67,13 +72,63 @@ impl AttachmentClient {
         Ok(descriptor)
     }
 
-    /// Returns one bounded image or video for inline conversation presentation.
-    pub fn presentation<'a>(
+    /// Returns a bounded raster image or extracted video thumbnail.
+    pub fn thumbnail<'a>(
         &self,
         descriptor: &'a AttachmentDescriptor,
     ) -> Result<(&'a str, Vec<u8>), String> {
         let media_type = presentation_media_type(descriptor).ok_or_else(unavailable)?;
-        Ok((media_type, self.download(descriptor)?))
+        let bytes = self.download(descriptor)?;
+        if media_type.starts_with("image/") {
+            return Ok((media_type, bytes));
+        }
+        let source = self.private_copy(descriptor, &bytes)?;
+        let output = source
+            .parent()
+            .ok_or_else(unavailable)?
+            .join("thumbnail.png");
+        if output.exists() {
+            let thumbnail = read_bounded_file(&output, THUMBNAIL_BYTES)?;
+            if thumbnail.starts_with(b"\x89PNG\r\n\x1a\n") {
+                return Ok(("image/png", thumbnail));
+            }
+            fs::remove_file(&output).map_err(|_| preview_failure())?;
+        }
+        let status = Command::new("ffmpeg")
+            .args(["-v", "error", "-nostdin", "-y", "-i"])
+            .arg(&source)
+            .args([
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=720:480:force_original_aspect_ratio=decrease",
+            ])
+            .arg(&output)
+            .status()
+            .map_err(|_| preview_failure())?;
+        if !status.success() {
+            return Err(preview_failure());
+        }
+        let thumbnail = read_bounded_file(&output, THUMBNAIL_BYTES)?;
+        if !thumbnail.starts_with(b"\x89PNG\r\n\x1a\n") {
+            return Err(preview_failure());
+        }
+        Ok(("image/png", thumbnail))
+    }
+
+    /// Opens one safe canonical attachment from a private runtime copy.
+    pub fn open(&self, descriptor: &AttachmentDescriptor) -> Result<(), String> {
+        let media_type = presentation_media_type(descriptor).ok_or_else(preview_failure)?;
+        if !inline_media(media_type) {
+            return Err(preview_failure());
+        }
+        let bytes = self.download(descriptor)?;
+        let path = self.private_copy(descriptor, &bytes)?;
+        Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|_| preview_failure())?;
+        Ok(())
     }
 
     /// Downloads canonical bytes and writes them to the selected destination.
@@ -84,6 +139,27 @@ impl AttachmentClient {
     ) -> Result<(), String> {
         let bytes = self.download(descriptor)?;
         atomic_write(destination, &bytes).map_err(|_| "The attachment could not be saved.".into())
+    }
+
+    fn private_copy(
+        &self,
+        descriptor: &AttachmentDescriptor,
+        bytes: &[u8],
+    ) -> Result<PathBuf, String> {
+        fs::create_dir_all(&self.cache).map_err(|_| preview_failure())?;
+        fs::set_permissions(&self.cache, fs::Permissions::from_mode(0o700))
+            .map_err(|_| preview_failure())?;
+        let directory = self.cache.join(&descriptor.id);
+        if !directory.exists() {
+            fs::create_dir(&directory).map_err(|_| preview_failure())?;
+        }
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+            .map_err(|_| preview_failure())?;
+        let path = directory.join(&descriptor.name);
+        if !path.exists() {
+            write_new(&path, bytes).map_err(|_| preview_failure())?;
+        }
+        Ok(path)
     }
 
     fn download(&self, descriptor: &AttachmentDescriptor) -> Result<Vec<u8>, String> {
@@ -110,6 +186,18 @@ impl AttachmentClient {
         }
         Ok(bytes)
     }
+}
+
+fn read_bounded_file(path: &Path, maximum: u64) -> Result<Vec<u8>, String> {
+    let file = fs::File::open(path).map_err(|_| preview_failure())?;
+    let mut bytes = Vec::new();
+    file.take(maximum + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| preview_failure())?;
+    if bytes.len() as u64 > maximum {
+        return Err(preview_failure());
+    }
+    Ok(bytes)
 }
 
 fn bounded(response: reqwest::blocking::Response, maximum: u64) -> Result<Vec<u8>, String> {
@@ -221,6 +309,10 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 fn unavailable() -> String {
     "Attachment storage is unavailable.".into()
+}
+
+fn preview_failure() -> String {
+    "The attachment preview is unavailable.".into()
 }
 
 #[cfg(test)]

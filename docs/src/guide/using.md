@@ -82,8 +82,8 @@ scufris-ctl state   # read service state
 On iOS, the paperclip selects a document and the photo control selects an
 image. The app uploads each selection to the private host before adding it to
 the composer. Canonical raster images and recognized videos render inline. Tap an
-iOS media thumbnail to open Quick Look; desktop videos use inline controls.
-Every attachment has an explicit Save action. The same limits apply on both surfaces: eight attachments per message and 16
+iOS media thumbnail to open Quick Look; tap a desktop media thumbnail to open
+its private preview copy. Every attachment has an explicit Save action. The same limits apply on both surfaces: eight attachments per message and 16
 MiB per object.
 
 A window manager can bind the desktop commands:

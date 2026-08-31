@@ -136,21 +136,24 @@
       for (const descriptor of entry.attachments) {
         const item = document.createElement("span");
         item.className = "message-attachment";
-        if (hasInlineImage(descriptor)) {
+        if (hasInlineImage(descriptor) || hasInlineVideo(descriptor)) {
+          const preview = action("", `Preview ${descriptor.name}`, () =>
+            invoke("hud_open_attachment", { descriptor }),
+          );
+          preview.className = "attachment-thumbnail";
           const image = document.createElement("img");
           image.className = "attachment-preview";
           image.src = `scufris-attachment://content/${descriptor.id}`;
           image.alt = descriptor.name;
           image.loading = "lazy";
-          item.append(image);
-        } else if (hasInlineVideo(descriptor)) {
-          const video = document.createElement("video");
-          video.className = "attachment-preview attachment-video";
-          video.src = `scufris-attachment://content/${descriptor.id}`;
-          video.controls = true;
-          video.preload = "metadata";
-          video.title = descriptor.name;
-          item.append(video);
+          preview.append(image);
+          if (hasInlineVideo(descriptor)) {
+            const play = document.createElement("span");
+            play.className = "attachment-play";
+            play.textContent = "play";
+            preview.append(play);
+          }
+          item.append(preview);
         }
         const identity = document.createElement("span");
         identity.className = "attachment-identity";

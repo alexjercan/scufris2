@@ -91,8 +91,6 @@ class Stub {
   src = "";
   alt = "";
   loading = "";
-  controls = false;
-  preload = "";
   width = 0;
   height = 0;
   offsetWidth = 0;
@@ -908,12 +906,22 @@ test("managed attachments are selected, rendered inline, saved, and removed by i
   assert.ok(rendered !== undefined);
   const card = rendered.children[0];
   assert.ok(card !== undefined);
-  assert.equal(card.children[0]?.className, "attachment-preview");
-  assert.equal(card.children[0]?.src, "scufris-attachment://content/att_one");
+  const preview = card.children[0];
+  assert.equal(preview?.className, "attachment-thumbnail");
+  assert.equal(preview?.children[0]?.className, "attachment-preview");
+  assert.equal(
+    preview?.children[0]?.src,
+    "scufris-attachment://content/att_one",
+  );
   assert.equal(card.children[1]?.children[0]?.textContent, "diagram.png");
+  preview?.dispatch("click", { stopPropagation: () => {} });
+  await settle();
+  assert.deepEqual(
+    page.lastCall("hud_open_attachment")["descriptor"],
+    descriptor,
+  );
   card.children[2]?.dispatch("click", { stopPropagation: () => {} });
   await settle();
-  assert.ok(!page.commands().includes("hud_open_attachment"));
   assert.deepEqual(
     page.lastCall("hud_save_attachment")["descriptor"],
     descriptor,
@@ -927,7 +935,7 @@ test("managed attachments are selected, rendered inline, saved, and removed by i
   assert.equal(selected.children.length, 0);
 });
 
-test("octet-stream videos use their filename for inline playback", async () => {
+test("octet-stream videos use their filename for a clickable thumbnail", async () => {
   const descriptor = {
     id: "att_video",
     name: "answer.mp4",
@@ -943,12 +951,21 @@ test("octet-stream videos use their filename for inline playback", async () => {
   });
   const card = page.element("lines").children[0]?.children[2]?.children[0];
   assert.ok(card !== undefined);
-  const video = card.children[0];
-  assert.equal(video?.className, "attachment-preview attachment-video");
-  assert.equal(video?.src, "scufris-attachment://content/att_video");
-  assert.equal(video?.controls, true);
-  assert.equal(video?.preload, "metadata");
+  const preview = card.children[0];
+  assert.equal(preview?.className, "attachment-thumbnail");
+  assert.equal(preview?.children[0]?.className, "attachment-preview");
+  assert.equal(
+    preview?.children[0]?.src,
+    "scufris-attachment://content/att_video",
+  );
+  assert.equal(preview?.children[1]?.className, "attachment-play");
   assert.equal(card.children[1]?.children[1]?.textContent, "video/mp4 - 4 KiB");
+  preview?.dispatch("click", { stopPropagation: () => {} });
+  await settle();
+  assert.deepEqual(
+    page.lastCall("hud_open_attachment")["descriptor"],
+    descriptor,
+  );
 });
 
 test("a person who has scrolled up to read is not dragged back down", async () => {

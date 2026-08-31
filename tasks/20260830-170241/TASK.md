@@ -1,6 +1,6 @@
 # Add protocol v5 attachments
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 80
 - TAGS: protocol, attachments, surfaces
 
@@ -82,10 +82,10 @@ transcription bodies never enter INFO or DEBUG logs.
        existing gateway. Keep its listener loopback-only.
 4. [x] Add the agent `store_attachment` tool and resolve attachment IDs at the
        service boundary in both message directions.
-5. [ ] Add desktop file selection, upload, rendering, open, and save behavior.
-6. [ ] Add iOS document and photo selection, upload, rendering, download, and share
+5. [x] Add desktop file selection, upload, rendering, open, and save behavior.
+6. [x] Add iOS document and photo selection, upload, rendering, download, and share
        behavior.
-7. [ ] Deploy a complete protocol-v5 stack to staging, run end-to-end and physical
+7. [x] Deploy a complete protocol-v5 stack to staging, run end-to-end and physical
        tests, then prepare the coordinated v2.0.0 replacement.
 
 ## Progress
@@ -113,6 +113,17 @@ transcription bodies never enter INFO or DEBUG logs.
   bounded relative or absolute path, infers a conservative media type, imports
   through `content.sock`, validates the returned descriptor, and returns the
   opaque ID for `scufris_final_response`.
+- Added staging-only OpenAPI and Swagger documentation for the authenticated
+  gateway without exposing the trusted local import route.
+- Added desktop and iOS selection, upload, canonical rendering, protected
+  download, save, and replay behavior. Raster images render inline. Recognized
+  videos use extracted thumbnails and native preview behavior.
+- Corrected bot video MIME inference and retained a safe filename-extension
+  fallback for existing canonical octet-stream video descriptors.
+- Physical TestFlight staging checks covered user and bot attachments, image
+  and video thumbnails, native preview, cross-surface delivery, and canonical
+  replay. The final desktop replay check passed after replacing WebKit custom
+  video playback with bounded PNG extraction.
 
 ## Verification
 
@@ -165,6 +176,15 @@ response descriptor validation. Repository run
 and documentation run
 [33329932024](https://github.com/alexjercan/scufris2/actions/runs/33329932024)
 passed for agent-tool commit `1e4be6e`.
+
+The complete surface implementation passed repository, documentation, and iOS
+CI through commit `1fbfaa9`. TestFlight builds 8 through 11 provided physical
+staging iterations. The product owner accepted the final iOS and desktop image
+and video attachment presentation. Repository run
+[33364069105](https://github.com/alexjercan/scufris2/actions/runs/33364069105)
+and documentation run
+[33364069103](https://github.com/alexjercan/scufris2/actions/runs/33364069103)
+passed for the final desktop preview correction.
 
 ## Acceptance
 

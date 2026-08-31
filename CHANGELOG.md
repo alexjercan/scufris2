@@ -9,6 +9,40 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-30
+
+### Added
+
+- Managed attachments across the service, agent, desktop, and iOS. Messages
+  carry bounded opaque references while the service owns private durable bytes,
+  canonical metadata, quotas, retention, and replay.
+- Authenticated upload, download, HEAD, and single-range attachment transfer on
+  the existing private surface gateway.
+- Native document and photo selection, protected downloads, Save to Files, and
+  inline image and video thumbnails on iOS.
+- Native desktop file selection, atomic private saves, inline raster images,
+  extracted video thumbnails, and safe media preview behavior.
+- An orchestrator-only `store_attachment(path)` tool for delivering generated
+  files through canonical responses.
+- Staging-only offline Swagger and OpenAPI documentation for the remote gateway.
+
+### Changed
+
+- Surface protocol v5 replaces v4 without negotiation. Service, gateway, agent,
+  desktop, and iOS must be updated together.
+- Desktop and iOS attachment presentation uses prominent Save actions and
+  thumbnail-driven native previews. iOS also has larger accented controls and
+  interactive keyboard dismissal.
+
+### Fixed
+
+- Empty attachment arrays omitted by canonical serialization now decode as
+  empty arrays at the agent boundary.
+- Bot-generated videos retain recognized media types. Existing opaque video
+  descriptors use a conservative filename-extension fallback.
+- Desktop video thumbnails avoid WebKit custom-scheme media playback and its
+  blank conversation-window failure.
+
 ## [1.1.1] - 2026-08-30
 
 ### Fixed
@@ -399,7 +433,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/alexjercan/scufris2/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/alexjercan/scufris2/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/alexjercan/scufris2/compare/v0.6.0...v1.1.0
 [0.6.0]: https://github.com/alexjercan/scufris2/compare/v0.5.0...v0.6.0

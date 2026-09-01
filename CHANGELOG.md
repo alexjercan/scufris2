@@ -9,6 +9,14 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [2.1.3] - 2026-09-01
+
+### Fixed
+
+- Delegated Pi workers can start from packaged Scufris resources. The launcher
+  now finds the dedicated `scufris_report` extension in both packaged and
+  source-tree layouts instead of leaving a dead pane with a working job.
+
 ## [2.1.2] - 2026-08-31
 
 ### Added
@@ -551,7 +559,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.1.2...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.1.3...HEAD
+[2.1.3]: https://github.com/alexjercan/scufris2/compare/v2.1.2...v2.1.3
 [2.1.2]: https://github.com/alexjercan/scufris2/compare/v2.1.1...v2.1.2
 [2.1.1]: https://github.com/alexjercan/scufris2/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/alexjercan/scufris2/compare/v2.0.0...v2.1.0

@@ -1520,6 +1520,27 @@ def validate_execution_cwd(job: dict[str, Any]) -> None:
         raise JobError("execution working directory identity changed")
 
 
+def worker_report_extension(helper: Path | None = None) -> Path:
+    resource_root = (helper or Path(__file__)).resolve().parents[2]
+    candidates = (
+        resource_root
+        / "extensions"
+        / "scufris"
+        / "workflow"
+        / "worker-report.ts",
+        resource_root
+        / "agent"
+        / "extensions"
+        / "scufris"
+        / "workflow"
+        / "worker-report.ts",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise JobError("worker report extension is unavailable")
+
+
 def worker_environment() -> dict[str, str]:
     env = os.environ.copy()
     for variable in (
@@ -1560,16 +1581,7 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
     session_dir = directory / "harness-session"
     session_dir.mkdir(mode=0o700, exist_ok=True)
     if job["harness"] == "pi":
-        report_extension = (
-            Path(__file__).resolve().parents[2]
-            / "agent"
-            / "extensions"
-            / "scufris"
-            / "workflow"
-            / "worker-report.ts"
-        )
-        if not report_extension.is_file():
-            raise JobError("worker report extension is unavailable")
+        report_extension = worker_report_extension()
         # Pi creates the session ID when missing and resumes it when present,
         # so one flag covers the first launch and every restore.
         argv = [

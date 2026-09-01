@@ -75,6 +75,50 @@ with (directory / 'status').open('a') as stream:
 """
 
 
+class WorkerResourcePathTest(unittest.TestCase):
+    def test_worker_report_extension_supports_packaged_and_source_layouts(
+        self,
+    ) -> None:
+        jobs_module = load_jobs_module()
+        with tempfile.TemporaryDirectory(
+            prefix="scufris-worker-resource-"
+        ) as temporary:
+            root = Path(temporary)
+            helper = root / "tools" / "jobs" / "scufris-jobs"
+            helper.parent.mkdir(parents=True)
+            helper.touch()
+
+            packaged = (
+                root
+                / "extensions"
+                / "scufris"
+                / "workflow"
+                / "worker-report.ts"
+            )
+            packaged.parent.mkdir(parents=True)
+            packaged.touch()
+            self.assertEqual(jobs_module.worker_report_extension(helper), packaged)
+
+            packaged.unlink()
+            source = (
+                root
+                / "agent"
+                / "extensions"
+                / "scufris"
+                / "workflow"
+                / "worker-report.ts"
+            )
+            source.parent.mkdir(parents=True)
+            source.touch()
+            self.assertEqual(jobs_module.worker_report_extension(helper), source)
+
+            source.unlink()
+            with self.assertRaisesRegex(
+                jobs_module.JobError, "worker report extension is unavailable"
+            ):
+                jobs_module.worker_report_extension(helper)
+
+
 class ReplacementJobsTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="scufris-jobs-")

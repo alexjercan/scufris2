@@ -118,6 +118,7 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
   // The panel scrolls, not the page: the shell's root is `overflow: hidden` so
   // that a widget drawing past its window clips instead of moving the chrome.
   const list = document.createElement("div");
+  list.className = "scroll-list";
   list.style.flex = "1";
   list.style.minHeight = "0";
   list.style.overflowY = "auto";

@@ -137,6 +137,19 @@ body {
   opacity: 1;
 }
 
+/* Every scrolling widget list keeps its row actions before a narrow end lane.
+ * WebKitGTK can draw its scrollbar over the content instead of taking layout
+ * space, so a red x at the edge would otherwise sit under it. Bounding the
+ * scrollbar and reserving a little more than that width keeps the control
+ * clear with overlay and non-overlay scrollbars alike. */
+.scroll-list {
+  padding-inline-end: var(--sw-scroll-clearance);
+}
+
+.scroll-list::-webkit-scrollbar {
+  width: var(--sw-scroll-width);
+}
+
 /* Opposite corners, by review decision: the destructive tick and the
  * reversible one are never next to each other. */
 .close {

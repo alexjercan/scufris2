@@ -121,6 +121,7 @@ function header(
 /** A list that scrolls on its own, so one long day does not push out another. */
 function column(): HTMLDivElement {
   const held = document.createElement("div");
+  held.className = "scroll-list";
   held.style.flex = "1";
   held.style.minHeight = "0";
   held.style.overflowY = "auto";

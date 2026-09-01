@@ -213,6 +213,7 @@ export function mount(root: HTMLElement, ctx: WidgetContext): WidgetView {
   }
 
   const list = document.createElement("div");
+  list.className = "scroll-list";
   list.style.flex = "1";
   list.style.minHeight = "0";
   list.style.overflowY = "auto";

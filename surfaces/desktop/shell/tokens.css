@@ -40,4 +40,8 @@
   --sw-size-small: 11px;
   --sw-lead: 1.6;
   --sw-track: 0.16em;
+
+  /* Keep overlay scrollbars in a known lane at the inline end of a list. */
+  --sw-scroll-width: 8px;
+  --sw-scroll-clearance: 12px;
 }

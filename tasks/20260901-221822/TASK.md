@@ -1,6 +1,6 @@
 # Release and deploy Scufris v2.1.5
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: release, deployment
 
@@ -43,3 +43,16 @@ The complete local release gate passed on 2026-09-01:
 - `python3 tools/release/check_versions.py --tag v2.1.5` and
   `git diff --check` passed.
 - iOS build and tests remain assigned to the macOS GitHub workflow.
+
+## Publication and deployment
+
+- Pushed release commit `288cb19` and annotated tag `v2.1.5`.
+- Release workflow `33549439496` passed its JavaScript and Nix checks, verified
+  the tag version, and published the source-only GitHub release:
+  <https://github.com/alexjercan/scufris2/releases/tag/v2.1.5>.
+- The ordinary iOS workflow passed for the release commit.
+- TestFlight workflow `33550889532` built, signed, exported, and uploaded the
+  2.1.5 iPhone application to App Store Connect successfully.
+- nix.dotfiles commit `49be2bc` pins v2.1.5. Home Manager activated the 2.1.5
+  desktop, service, and surface gateway; all three units are active and their
+  executables resolve to 2.1.5 Nix store paths.

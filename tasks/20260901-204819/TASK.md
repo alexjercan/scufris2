@@ -22,11 +22,11 @@ verify the release and live services.
 - Deploy the Linux desktop by pinning the immutable tag in the clean canonical
   `/home/alex/personal/nix.dotfiles` checkout, building its Home Manager
   activation package, switching, and checking the owned services.
-- Do not dispatch TestFlight for this release. The landed change is confined to
-  desktop widget CSS and TypeScript. `RELEASE.md` requires the source release
-  but not a phone upload, and the manually dispatched TestFlight procedure is
-  used for iOS delivery milestones. The normal unsigned iOS workflow will
-  still verify aligned marketing metadata.
+- The initial release did not dispatch TestFlight because the landed change is
+  confined to desktop widget CSS and TypeScript. The unsigned iOS workflow
+  verified the aligned marketing metadata. In a follow-up request, the owner
+  chose to deliver the aligned 2.1.4 iOS build too. Dispatch the protected
+  TestFlight workflow from the immutable release commit on `master`.
 
 ## Preflight evidence
 
@@ -92,4 +92,14 @@ The complete `RELEASE.md` checklist passed on 2026-09-01:
 
 ## Publication and deployment evidence
 
-Pending.
+- The source release workflow completed successfully for annotated tag
+  `v2.1.4`. GitHub published the non-draft, non-prerelease release at
+  <https://github.com/alexjercan/scufris2/releases/tag/v2.1.4>.
+- The unsigned iOS workflow for release commit
+  `d26ffa5b7da13cd25dc17b8b1a86ec222f1d080e` completed successfully.
+- On the owner's follow-up request, dispatched the protected TestFlight
+  workflow from `master`. Run `33545547418` archived marketing version 2.1.4,
+  exported the signed application, and App Store Connect accepted the upload.
+  The workflow completed successfully in 1 minute 21 seconds:
+  <https://github.com/alexjercan/scufris2/actions/runs/33545547418>.
+- The canonical desktop deployment and live-service checks remain pending.

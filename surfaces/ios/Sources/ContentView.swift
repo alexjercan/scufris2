@@ -5,6 +5,25 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
 
+/// The scroll view's own space, which the conversation's offset is read in.
+private let conversationSpace = "scufris.conversation"
+
+/// The transient row that stands for a reply that has not arrived. It is the
+/// end of the conversation while it is on screen, so it is what the way back
+/// scrolls to.
+private let thinkingAnchor = "scufris.thinking"
+
+/// The column the speaker markers sit in. One width for both of them, so the
+/// words start on the same edge whoever said them.
+private let speakerGutter: CGFloat = 67
+
+/// Where the conversation content sits, as one value so a change to any part
+/// of it settles the follow state once.
+private struct ContentPlacement: Equatable {
+    let height: CGFloat
+    let minY: CGFloat
+}
+
 struct ContentView: View {
     @StateObject private var store = ConversationStore()
     @State private var isShowingSetup = false
@@ -14,6 +33,9 @@ struct ContentView: View {
     @State private var isLoadingPhoto = false
     @State private var previewAttachment: LocalAttachment?
     @State private var sharedAttachment: LocalAttachment?
+    @State private var follow = ConversationFollow()
+    @State private var geometry = ConversationGeometry()
+    @State private var isPinning = false
     @FocusState private var composerFocused: Bool
 
     var body: some View {
@@ -116,56 +138,203 @@ struct ContentView: View {
 
     private var conversation: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 17) {
-                    if store.conversation.isEmpty && !store.isThinking {
-                        emptyConversation
-                    } else {
-                        ForEach(store.conversation) { entry in
-                            ConversationRow(
-                                entry: entry,
-                                loadAttachment: store.localCopy,
-                                onPreview: preview,
-                                onSave: save
-                            )
-                            .id(entry.id)
+            ZStack(alignment: .bottomTrailing) {
+                ScrollView {
+                    LazyVStack(spacing: 17) {
+                        if store.conversation.isEmpty && !store.isThinking {
+                            emptyConversation
+                        } else {
+                            ForEach(store.conversation) { entry in
+                                ConversationRow(
+                                    entry: entry,
+                                    loadAttachment: store.localCopy,
+                                    onPreview: preview,
+                                    onSave: save
+                                )
+                                .id(entry.id)
+                            }
+                            if store.isThinking {
+                                ThinkingRow()
+                                    .id(thinkingAnchor)
+                            }
                         }
-                        if store.isThinking {
-                            ThinkingRow()
-                                .id("thinking")
-                        }
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 17)
+                    .padding(.vertical, 22)
+                    .background(contentProbe)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 17)
-                .padding(.vertical, 22)
-            }
-            .scrollIndicators(.hidden)
-            .scrollDismissesKeyboard(.interactively)
-            .simultaneousGesture(
-                TapGesture().onEnded { composerFocused = false }
-            )
-            .defaultScrollAnchor(.bottom)
-            .onChange(of: store.conversation.count) {
-                if let last = store.conversation.last {
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
+                .coordinateSpace(.named(conversationSpace))
+                .background(viewportProbe)
+                .scrollIndicators(.hidden)
+                .scrollDismissesKeyboard(.interactively)
+                .simultaneousGesture(
+                    TapGesture().onEnded { composerFocused = false }
+                )
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: geometry) { previous, current in
+                    settle(from: previous, to: current, proxy: proxy)
+                }
+                .onChange(of: store.conversation.count) { previous, current in
+                    arrived(current - previous, proxy: proxy)
+                }
+                .onChange(of: store.isThinking) {
+                    guard store.isThinking, follow.isFollowing else { return }
+                    pin(proxy, animated: true)
+                }
+
+                if follow.showsLatestControl {
+                    latestControl(proxy)
                 }
             }
-            .onChange(of: store.isThinking) {
-                if store.isThinking {
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo("thinking", anchor: .bottom)
-                    }
+            .animation(.easeOut(duration: 0.15), value: follow)
+        }
+    }
+
+    /// How tall the conversation is, and how far it has been scrolled.
+    private var contentProbe: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onChange(
+                    of: ContentPlacement(
+                        height: proxy.size.height,
+                        minY: proxy.frame(in: .named(conversationSpace)).minY
+                    ),
+                    initial: true
+                ) { _, placement in
+                    geometry.contentHeight = placement.height
+                    geometry.contentMinY = placement.minY
                 }
-            }
+        }
+    }
+
+    /// How tall the window onto the conversation is. It shrinks when the
+    /// keyboard, the attachment chips or a dictation notice appear under it.
+    private var viewportProbe: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onChange(of: proxy.size.height, initial: true) { _, height in
+                    geometry.viewportHeight = height
+                }
+        }
+    }
+
+    /// The way back to the newest message. On screen only when there is
+    /// somewhere to go, and accented once messages are waiting at the end of it.
+    private func latestControl(_ proxy: ScrollViewProxy) -> some View {
+        Button {
+            pin(proxy, animated: true)
+        } label: {
+            Image(systemName: "arrow.down")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(
+                    follow.hasUnseen
+                        ? ScufrisPalette.background
+                        : ScufrisPalette.quartz
+                )
+                .frame(width: 44, height: 44)
+                .background(
+                    follow.hasUnseen
+                        ? ScufrisPalette.yellow
+                        : ScufrisPalette.background
+                )
+                .overlay(
+                    Rectangle().stroke(
+                        follow.hasUnseen
+                            ? ScufrisPalette.yellow
+                            : ScufrisPalette.lineStrong,
+                        lineWidth: 1
+                    )
+                )
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 17)
+        .padding(.bottom, 14)
+        .transition(.opacity)
+        .accessibilityLabel(follow.latestControlLabel)
+        .accessibilityHint("Scrolls to the end of the conversation")
+    }
+
+    /// Reads where the reader is, and settles what follows from it.
+    private func settle(
+        from previous: ConversationGeometry,
+        to current: ConversationGeometry,
+        proxy: ScrollViewProxy
+    ) {
+        // A scroll of this window's own making passes through positions that
+        // are not the bottom. Reading one of them as the reader moving away is
+        // what makes the way back flicker while it is being used.
+        guard !isPinning else { return }
+        // Content that grew under a follower, or a window that shrank under
+        // one: a thumbnail that finished loading, a details disclosure opening,
+        // the keyboard arriving. Following the newest message means following
+        // it through all of them.
+        let grew = current.contentHeight > previous.contentHeight
+        let shrank = current.viewportHeight < previous.viewportHeight
+        if follow.isFollowing, grew || shrank {
+            pin(proxy, animated: false)
+            return
+        }
+        follow.observe(distanceFromBottom: current.distanceFromBottom)
+    }
+
+    /// Counts what arrived, or follows it.
+    private func arrived(_ count: Int, proxy: ScrollViewProxy) {
+        // A conversation the service cleared and replayed has no reading
+        // position in it: what was under the reader is gone.
+        guard count > 0 else {
+            follow.caughtUp()
+            return
+        }
+        if follow.isFollowing {
+            pin(proxy, animated: true)
+            return
+        }
+        let quiet = !follow.hasUnseen
+        follow.appended(count)
+        // Said once, when the conversation moves on without the reader.
+        if quiet, follow.hasUnseen {
+            AccessibilityNotification.Announcement(follow.announcement).post()
+        }
+    }
+
+    /// Puts the newest message back in view.
+    private func pin(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard store.isThinking || !store.conversation.isEmpty else {
+            follow.caughtUp()
+            return
+        }
+        // A scroll that lands at once needs no guard: the geometry it reports
+        // is the bottom, and reading it settles the state correctly.
+        guard animated else {
+            scrollToLatest(proxy)
+            follow.caughtUp()
+            return
+        }
+        isPinning = true
+        withAnimation(.easeOut(duration: 0.18)) { scrollToLatest(proxy) }
+        // Long enough for the scroll to land. The positions it passes through
+        // on the way are not the reader moving, and are not read as it.
+        Task {
+            try? await Task.sleep(for: .milliseconds(280))
+            isPinning = false
+            follow.caughtUp()
+        }
+    }
+
+    /// The end of the conversation is the transient row while it is on screen,
+    /// and the newest message otherwise.
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        if store.isThinking {
+            proxy.scrollTo(thinkingAnchor, anchor: .bottom)
+        } else if let last = store.conversation.last {
+            proxy.scrollTo(last.id, anchor: .bottom)
         }
     }
 
     private var emptyConversation: some View {
         VStack(spacing: 12) {
-            Spacer(minLength: 80)
+            Spacer(minLength: 0)
 
             Text(store.visualState.emptyTitle)
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
@@ -194,9 +363,13 @@ struct ContentView: View {
                 EmptyView()
             }
 
-            Spacer(minLength: 80)
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: 290)
+        // A window with nothing in it hangs its message in the middle rather
+        // than at the bottom, where the scroll view's own anchor would put it.
+        // The subtracted room is the padding the conversation is drawn inside.
+        .containerRelativeFrame(.vertical) { height, _ in max(0, height - 44) }
     }
 
     @ViewBuilder
@@ -534,16 +707,18 @@ private struct ComposerIcon: View {
 }
 
 private struct ThinkingRow: View {
+    @ScaledMetric(relativeTo: .body) private var textSize: CGFloat = 13
+
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text("SCUFRIS")
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .tracking(1.15)
                 .foregroundStyle(ScufrisPalette.niagara)
-                .frame(width: 67, alignment: .trailing)
+                .frame(width: speakerGutter, alignment: .trailing)
 
             Text("thinking...")
-                .font(.system(size: 13, design: .monospaced))
+                .font(.system(size: textSize, design: .monospaced))
                 .foregroundStyle(ScufrisPalette.niagara)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -557,6 +732,11 @@ private struct ConversationRow: View {
     let loadAttachment: (AttachmentDescriptor) async throws -> URL
     let onPreview: (AttachmentDescriptor) -> Void
     let onSave: (AttachmentDescriptor) -> Void
+    // The words are what the phone is held up to read, so they follow the
+    // reader's own text size. The markers around them do not: they are
+    // furniture, and one that grew would take the column the words start at.
+    @ScaledMetric(relativeTo: .body) private var textSize: CGFloat = 13
+    @ScaledMetric(relativeTo: .footnote) private var detailSize: CGFloat = 11
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -568,11 +748,15 @@ private struct ConversationRow: View {
                         ? ScufrisPalette.quartz
                         : ScufrisPalette.wisteria
                 )
-                .frame(width: 67, alignment: .trailing)
+                .frame(width: speakerGutter, alignment: .trailing)
+                // The marker is read as part of the words it marks rather than
+                // as an element of its own, so VoiceOver says who said what
+                // instead of spelling a label and then reading a sentence.
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 9) {
                 Text(entry.text)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.system(size: textSize, design: .monospaced))
                     .foregroundStyle(
                         entry.role == .assistant
                             ? ScufrisPalette.foregroundStrong
@@ -581,6 +765,11 @@ private struct ConversationRow: View {
                     .lineSpacing(4)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityLabel(
+                        entry.role == .user
+                            ? "You said: \(entry.text)"
+                            : "Scufris said: \(entry.text)"
+                    )
 
                 if !entry.attachments.isEmpty {
                     VStack(alignment: .leading, spacing: 7) {
@@ -598,7 +787,7 @@ private struct ConversationRow: View {
                 if let details = entry.details, !details.isEmpty {
                     DisclosureGroup {
                         Text(details)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: detailSize, design: .monospaced))
                             .foregroundStyle(ScufrisPalette.foreground)
                             .lineSpacing(3)
                             .textSelection(.enabled)

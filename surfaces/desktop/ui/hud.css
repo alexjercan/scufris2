@@ -100,11 +100,21 @@ body {
 
 /* ---------- the conversation ---------- */
 
+/* The scroller and the control that leads back to the bottom of it. The
+ * control is positioned against this block rather than against the list, so
+ * scrolling the list does not carry it off the screen. */
+.stream {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .lines {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
   padding: var(--step);
   overflow-y: auto;
   list-style: none;
@@ -122,6 +132,7 @@ body {
  * spare room, which is exactly when the anchoring has to stop. */
 .line:first-child {
   margin-top: auto;
+  padding-top: 0;
 }
 
 /* No scrollbar furniture. The window is 760 wide and every pixel of it is the
@@ -131,15 +142,49 @@ body {
   width: 0;
 }
 
+/* Two columns: the speaker's marker, then everything they said.
+ *
+ * A grid rather than a wrapping flex row, which is what this was and what put
+ * a long message on a row of its own: a flex item keeps its content width as
+ * its basis, so a line wider than the window broke to the next row and started
+ * at the window's own padding instead of at the column every other line starts
+ * at. A grid column cannot do that. The words, the attachments and the details
+ * are all placed in the second column, so the body of a message begins in one
+ * place whatever it is made of and however long it runs.
+ *
+ * `position` is for the rule drawn above a continued line, which is a
+ * pseudo-element rather than a border so that it stops where the column does. */
 .line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--step);
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--gutter) 1fr;
+  column-gap: var(--step);
+  row-gap: 7px;
   align-items: baseline;
+  /* The room a change of speaker gets. */
+  padding-top: 13px;
+}
+
+/* One person saying two things in a row is two messages, and at the same
+ * spacing as a reply it reads as one. A hairline costs a pixel of the window
+ * and says where one ends, and it is drawn across the body column only: the
+ * gutter is the marker's, and a rule through it would read as a divider
+ * between speakers rather than within one. */
+.line[data-run="continued"] {
+  padding-top: 9px;
+}
+
+.line[data-run="continued"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: calc(var(--gutter) + var(--step));
+  border-top: 1px solid var(--line);
 }
 
 .who {
-  flex: 0 0 var(--gutter);
+  grid-column: 1;
   font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -158,7 +203,7 @@ body {
 }
 
 .what {
-  flex: 1 1 auto;
+  grid-column: 2;
   min-width: 0;
   /* A URL or a path is one word and longer than the window. Breaking inside it
    * is better than a line that runs off the edge. */
@@ -167,11 +212,11 @@ body {
 }
 
 .message-attachments {
+  grid-column: 2;
   display: flex;
-  flex: 1 0 calc(100% - var(--gutter) - var(--step));
   flex-direction: column;
   gap: 6px;
-  margin-left: calc(var(--gutter) + var(--step));
+  min-width: 0;
 }
 
 .message-attachment {
@@ -287,8 +332,9 @@ body {
 }
 
 .details {
-  flex: 1 0 calc(100% - var(--gutter) - var(--step));
-  margin: 0 0 0 calc(var(--gutter) + var(--step));
+  grid-column: 2;
+  min-width: 0;
+  margin: 0;
   color: var(--muted);
   font: inherit;
   white-space: pre-wrap;
@@ -308,6 +354,68 @@ body {
 .line[data-transient="thinking"] .who,
 .line[data-transient="thinking"] .what {
   color: var(--niagara);
+}
+
+/* The way back to the newest line.
+ *
+ * On screen only when there is somewhere to go, which is the whole of what it
+ * says: a control that is always there says nothing about where the reader is.
+ * A filled control with the mark cut out of it, the way the attach control is,
+ * and it turns yellow when lines have arrived that the reader has not reached.
+ *
+ * `hidden` is honoured explicitly: this element is laid out, and a display of
+ * its own would otherwise beat the attribute's. */
+.latest {
+  position: absolute;
+  right: var(--step);
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--quartz);
+  padding: 0;
+  background: var(--quartz);
+  cursor: pointer;
+}
+
+.latest[hidden] {
+  display: none;
+}
+
+.latest[data-unseen="yes"] {
+  border-color: var(--yellow);
+  background: var(--yellow);
+}
+
+.latest:hover,
+.latest:focus-visible {
+  border-color: var(--yellow);
+  background: var(--yellow);
+  outline: none;
+}
+
+.latest:focus-visible {
+  outline: 1px solid var(--yellow);
+  outline-offset: 2px;
+}
+
+.latest-glyph {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+
+/* Said to a screen reader and to nobody else. Not `display: none`, which is
+ * not read out at all. */
+.offscreen {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* An empty conversation says so rather than showing an empty box: a window with

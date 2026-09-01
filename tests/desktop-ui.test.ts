@@ -13,6 +13,9 @@
 // The stub is a fake, and it says so. That is enough for the invariants here,
 // all of which are about which element holds what and what the page asks the
 // host to do, and none of which are about the shape of a letter.
+//
+// A stub cannot lay anything out, so the few rules a page's reading depends on
+// are read from its stylesheet instead, at the end of this file.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -84,6 +87,8 @@ type Listener = (event: Record<string, unknown>) => void;
 
 class Stub {
   id = "";
+  /** Upper case, the way the DOM spells it. */
+  tagName = "DIV";
   className = "";
   hidden = false;
   readOnly = false;
@@ -109,6 +114,7 @@ class Stub {
     },
   };
   readonly dataset: Record<string, string> = {};
+  readonly attributes = new Map<string, string>();
   readonly children: Stub[] = [];
   readonly classes = new Set<string>();
   readonly listeners = new Map<string, Listener[]>();
@@ -160,6 +166,13 @@ class Stub {
     this.children.push(...nodes);
   }
 
+  insertBefore(node: Stub, before: Stub): Stub {
+    const index = this.children.indexOf(before);
+    node.parent = this;
+    this.children.splice(index < 0 ? this.children.length : index, 0, node);
+    return node;
+  }
+
   remove(): void {
     if (this.parent === null) return;
     const index = this.parent.children.indexOf(this);
@@ -175,6 +188,14 @@ class Stub {
 
   dispatch(type: string, event: Record<string, unknown>): void {
     for (const handler of this.listeners.get(type) ?? []) handler(event);
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes.set(name, value);
+  }
+
+  getAttribute(name: string): string | null {
+    return this.attributes.get(name) ?? null;
   }
 
   getBoundingClientRect(): Rect {
@@ -279,15 +300,26 @@ class Page {
     for (const fire of waiting) fire();
   }
 
+  /** Every box a page asked to be told the size of, in the order it asked. */
+  readonly observed: { target: Stub; report: () => void }[] = [];
+
   element(id: string): Stub {
     const found = this.elements.get(id);
     if (found === undefined) throw new Error(`the stub page has no #${id}`);
     return found;
   }
 
-  add(id: string): Stub {
+  /** Tells one page its box changed size, the way a layout would. */
+  resize(target: Stub): void {
+    for (const watch of this.observed) {
+      if (watch.target === target) watch.report();
+    }
+  }
+
+  add(id: string, tagName = "DIV"): Stub {
     const node = new Stub();
     node.id = id;
+    node.tagName = tagName;
     node.page = this;
     this.elements.set(id, node);
     return node;
@@ -328,8 +360,9 @@ function run(page: Page, ids: string[], scripts: string[]): void {
     document: Object.assign(page.document, {
       getElementById: (id: string): Stub | null =>
         page.elements.get(id) ?? null,
-      createElement: (): Stub => {
+      createElement: (tag: string): Stub => {
         const node = new Stub();
+        node.tagName = tag.toUpperCase();
         node.page = page;
         return node;
       },
@@ -351,6 +384,19 @@ function run(page: Page, ids: string[], scripts: string[]): void {
       return page.frames.length;
     },
     cancelAnimationFrame: () => {},
+    // Driven from the test, the way the timers are: a page that re-reads its
+    // scroller when the box under it changes has to be told that it did.
+    ResizeObserver: class {
+      readonly report: () => void;
+
+      constructor(report: () => void) {
+        this.report = report;
+      }
+
+      observe(target: Stub): void {
+        page.observed.push({ target, report: this.report });
+      }
+    },
     AudioContext: class {
       state = "running";
       currentTime = 0;
@@ -450,8 +496,25 @@ function hud(taken = true, lines: Record<string, string>[] = []): Page {
     notice: { sending: false, thinking: false, attachments: [], trouble: "" },
   };
   page.answers["hud_submit"] = taken;
-  run(page, ["lines", "notice", "words", "selected", "attach"], [pages().hud]);
+  page.add("lines", "OL");
+  page.add("notice", "SPAN");
+  page.add("words", "TEXTAREA");
+  page.add("selected", "DIV");
+  page.add("attach", "BUTTON");
+  page.add("latest", "BUTTON");
+  page.add("fresh", "P");
+  run(page, [], [pages().hud]);
   return page;
+}
+
+/** A scroller with more in it than fits, parked at the bottom of itself. */
+function scroller(page: Page, height = 1000, viewport = 200): Stub {
+  const lines = page.element("lines");
+  lines.scrollHeight = height;
+  lines.clientHeight = viewport;
+  lines.scrollTop = height - viewport;
+  lines.dispatch("scroll", {});
+  return lines;
 }
 
 /** The form box, loaded with its title and the block the fields go in. */
@@ -992,6 +1055,201 @@ test("a person who has scrolled up to read is not dragged back down", async () =
   assert.equal(lines.scrollTop, 776);
 });
 
+test("a run from one speaker is marked apart from a reply", async () => {
+  const page = hud(true, [
+    line("user", "one"),
+    line("user", "two"),
+    line("assistant", "three"),
+  ]);
+  await settle();
+  const lines = page.element("lines");
+  assert.deepEqual(
+    lines.children.map((entry) => entry.dataset["run"]),
+    ["new", "continued", "new"],
+  );
+
+  page.publish("scufris://said", line("assistant", "four"));
+  assert.equal(lines.children[3]?.dataset["run"], "continued");
+
+  // The thinking row is presentation, so it takes its own mark from the line
+  // above it and gives none to the line below it.
+  page.publish("scufris://notice", {
+    sending: false,
+    thinking: true,
+    attachments: [],
+    trouble: "",
+  });
+  assert.equal(lines.children[4]?.dataset["transient"], "thinking");
+  assert.equal(lines.children[4]?.dataset["run"], "continued");
+
+  // A line said while Scufris is working goes above the row that says so, and
+  // that row is re-marked for the line it now follows.
+  page.publish("scufris://said", line("user", "five"));
+  assert.deepEqual(
+    lines.children.map((entry) => [
+      entry.dataset["speaker"],
+      entry.dataset["run"],
+      entry.dataset["transient"] ?? "",
+    ]),
+    [
+      ["user", "new", ""],
+      ["user", "continued", ""],
+      ["assistant", "new", ""],
+      ["assistant", "continued", ""],
+      ["user", "new", ""],
+      ["assistant", "new", "thinking"],
+    ],
+  );
+});
+
+test("the way back appears when the reader leaves the bottom", async () => {
+  const page = hud();
+  await settle();
+  const lines = scroller(page);
+  const latest = page.element("latest");
+  const fresh = page.element("fresh");
+  assert.equal(latest.hidden, true);
+
+  // Scrolled up to read something. There is a way back, and nothing waiting
+  // at the end of it yet.
+  lines.scrollTop = 400;
+  lines.dispatch("scroll", {});
+  assert.equal(latest.hidden, false);
+  assert.equal(latest.dataset["unseen"], undefined);
+  assert.equal(latest.getAttribute("aria-label"), "Jump to the latest message");
+  assert.equal(fresh.textContent, "");
+
+  page.publish("scufris://said", line("assistant", "one"));
+  assert.equal(lines.scrollTop, 400);
+  assert.equal(latest.dataset["unseen"], "yes");
+  assert.equal(
+    latest.getAttribute("aria-label"),
+    "Jump to the latest message, 1 new",
+  );
+  assert.equal(fresh.textContent, "1 new message below");
+
+  page.publish("scufris://said", line("assistant", "two"));
+  assert.equal(
+    latest.getAttribute("aria-label"),
+    "Jump to the latest message, 2 new",
+  );
+  assert.equal(fresh.textContent, "2 new messages below");
+
+  // Reading the bottom again is arriving, however it was arrived at.
+  lines.scrollTop = 800;
+  lines.dispatch("scroll", {});
+  assert.equal(latest.hidden, true);
+  assert.equal(latest.dataset["unseen"], undefined);
+  assert.equal(fresh.textContent, "");
+});
+
+test("the way back lands on the newest line and returns the keys", async () => {
+  const page = hud();
+  await settle();
+  const lines = scroller(page);
+  const latest = page.element("latest");
+  lines.scrollTop = 0;
+  lines.dispatch("scroll", {});
+  page.publish("scufris://said", line("assistant", "one"));
+  assert.equal(latest.hidden, false);
+
+  latest.focus();
+  latest.dispatch("click", {});
+  assert.equal(lines.scrollTop, lines.scrollHeight);
+  assert.equal(latest.hidden, true);
+  assert.equal(page.element("fresh").textContent, "");
+  // The control has just left the page, so the keyboard cannot stay on it.
+  assert.equal(page.activeElement, page.element("words"));
+});
+
+test("a conversation that fits the window offers no way back", async () => {
+  const page = hud();
+  await settle();
+  const lines = page.element("lines");
+  lines.scrollHeight = 120;
+  lines.clientHeight = 400;
+  lines.scrollTop = 0;
+  lines.dispatch("scroll", {});
+  assert.equal(page.element("latest").hidden, true);
+
+  page.publish("scufris://said", line("assistant", "one"));
+  assert.equal(page.element("latest").hidden, true);
+  assert.equal(page.element("fresh").textContent, "");
+});
+
+test("a replayed conversation lands on its newest line", async () => {
+  const page = hud();
+  await settle();
+  const lines = scroller(page);
+  lines.scrollTop = 100;
+  lines.dispatch("scroll", {});
+  assert.equal(page.element("latest").hidden, false);
+
+  page.publish("scufris://conversation", {
+    lines: [line("user", "one"), line("assistant", "two")],
+    notice: { sending: false, thinking: false, attachments: [], trouble: "" },
+  });
+  assert.equal(lines.scrollTop, 1000);
+  assert.equal(page.element("latest").hidden, true);
+  assert.equal(page.element("fresh").textContent, "");
+});
+
+test("content that grows under a follower keeps the newest line in view", async () => {
+  const page = hud();
+  await settle();
+  const lines = scroller(page);
+
+  // A thumbnail that finished loading is the conversation getting taller
+  // after the line holding it was drawn.
+  lines.scrollHeight = 1400;
+  lines.dispatch("load", {});
+  assert.equal(lines.scrollTop, 1400);
+
+  // The field growing under the list is the same thing from the other end.
+  lines.clientHeight = 140;
+  page.resize(lines);
+  assert.equal(lines.scrollTop, 1400);
+  assert.equal(page.element("latest").hidden, true);
+});
+
+test("content that grows under a reader leaves them where they are", async () => {
+  const page = hud();
+  await settle();
+  const lines = scroller(page);
+  lines.scrollTop = 200;
+  lines.dispatch("scroll", {});
+
+  lines.scrollHeight = 1400;
+  lines.dispatch("load", {});
+  assert.equal(lines.scrollTop, 200);
+
+  lines.clientHeight = 140;
+  page.resize(lines);
+  assert.equal(lines.scrollTop, 200);
+  assert.equal(page.element("latest").hidden, false);
+});
+
+test("a control holding the keyboard answers Enter itself", async () => {
+  const page = hud();
+  await settle();
+  const words = page.element("words");
+  words.value = "say this";
+
+  for (const id of ["attach", "latest"]) {
+    page.element(id).focus();
+    assert.equal(tap(page, "Enter"), false);
+    assert.ok(
+      !page.commands().includes("hud_submit"),
+      `Enter on #${id} sent the field instead of working the control`,
+    );
+  }
+
+  words.focus();
+  assert.equal(tap(page, "Enter"), true);
+  await settle();
+  assert.equal(page.lastCall("hud_submit")["text"], "say this");
+});
+
 test("the notice says the worst thing that is true", async () => {
   const page = hud();
   await settle();
@@ -1146,6 +1404,77 @@ test("the keys are the field's, however the window came by them", async () => {
 // ---------- the form box ----------
 
 /** The food ask, which is the one with a typeahead on it. */
+// ---------- the conversation window's layout ----------
+
+/** One rule's declarations, by the selector written at the start of a line. */
+function rule(source: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const found = new RegExp(`(?:^|\n)${escaped}\\s*\\{([^}]*)\\}`).exec(source);
+  assert.ok(found !== null, `hud.css has no rule for ${selector}`);
+  return found[1] ?? "";
+}
+
+test("every part of a message begins in the same column", () => {
+  const source = readFileSync(join(ui, "hud.css"), "utf8");
+  // A grid rather than a wrapping flex row. A flex item keeps its content
+  // width as its basis, so a message wider than the window broke onto a row of
+  // its own and began at the window's padding instead of at the column every
+  // shorter message began at.
+  const line = rule(source, ".line");
+  assert.match(line, /display:\s*grid/);
+  assert.match(line, /grid-template-columns:\s*var\(--gutter\)\s+1fr/);
+  assert.match(rule(source, ".who"), /grid-column:\s*1/);
+  for (const part of [".what", ".message-attachments", ".details"]) {
+    assert.match(
+      rule(source, part),
+      /grid-column:\s*2/,
+      `${part} does not start where the rest of a message starts`,
+    );
+  }
+  // What separates one message from the next: room for a reply, a hairline
+  // and less room for one more thing from the same speaker.
+  assert.match(line, /padding-top:\s*(\d+)px/);
+  const reply = Number(/padding-top:\s*(\d+)px/.exec(line)?.[1]);
+  const continued = Number(
+    /padding-top:\s*(\d+)px/.exec(
+      rule(source, '.line[data-run="continued"]'),
+    )?.[1],
+  );
+  assert.ok(
+    continued < reply,
+    "a continued line takes at least as much room as a reply",
+  );
+  assert.match(
+    rule(source, '.line[data-run="continued"]::before'),
+    /left:\s*calc\(var\(--gutter\) \+ var\(--step\)\)/,
+  );
+});
+
+test("the way back is drawn over the conversation and can be hidden", () => {
+  const source = readFileSync(join(ui, "hud.css"), "utf8");
+  // Positioned against the block that holds the scroller rather than against
+  // the scroller, so scrolling does not carry it off the window.
+  assert.match(rule(source, ".stream"), /position:\s*relative/);
+  assert.match(rule(source, ".latest"), /position:\s*absolute/);
+  // The element is laid out, so a display of its own would beat the attribute.
+  assert.match(rule(source, ".latest[hidden]"), /display:\s*none/);
+  assert.doesNotMatch(rule(source, ".offscreen"), /display:\s*none/);
+
+  const page = readFileSync(join(ui, "hud.html"), "utf8");
+  assert.match(page, /id="latest"[\s\S]*?hidden/);
+  assert.match(page, /aria-label="Jump to the latest message"/);
+  assert.match(page, /src="latest\.svg"/);
+  assert.match(page, /id="fresh"[\s\S]*?role="status"/);
+
+  // The glyph is a file, so the build has to put it beside the page.
+  const build = readFileSync(
+    join(root, "surfaces", "desktop", "build.rs"),
+    "utf8",
+  );
+  assert.match(build, /"latest\.svg",/);
+  assert.match(build, /rerun-if-changed=ui\/latest\.svg/);
+});
+
 function food(page: Page): void {
   put(page, [
     asking({ name: "name", label: "Food", suggest: true }),

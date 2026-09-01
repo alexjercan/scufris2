@@ -111,6 +111,16 @@ optional widget calls, and zero to eight immutable attachment descriptors. Each
 descriptor contains the opaque ID, display name, media type, and size. The
 `surface` field is the stable ID associated with that turn.
 
+A conversation view follows the newest message only while the reader is within
+24 points of the end of it. A reader who has scrolled away keeps that position
+when messages arrive and is offered a down-arrow control back to the end,
+accented while messages they have not reached are waiting and naming the count
+to a screen reader. The measurement is taken from the scroll geometry rather
+than remembered, so content that grows after it is drawn - a thumbnail, an
+opened details disclosure, a keyboard - does not strand the reader or drag them.
+Each surface draws this in its own idiom: `surfaces/desktop/ui/hud.ts` and
+`surfaces/ios/Sources/ConversationFollow.swift`.
+
 ## Association rule
 
 ```mermaid

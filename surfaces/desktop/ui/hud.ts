@@ -47,6 +47,8 @@
   const words = element<HTMLTextAreaElement>("words");
   const selected = element<HTMLElement>("selected");
   const attach = element<HTMLButtonElement>("attach");
+  const latest = element<HTMLButtonElement>("latest");
+  const fresh = element<HTMLElement>("fresh");
 
   // What the gutter says for each speaker. A speaker with no word here is one
   // this build does not know about, and it is drawn rather than dropped: a line
@@ -58,8 +60,20 @@
 
   /** What one line does to the notice line, when nothing is in flight. */
   const KEYS = "enter sends - + attaches - esc closes";
+  /**
+   * How near the bottom still counts as reading the newest line.
+   *
+   * A person is at the bottom of a conversation long before they are at the
+   * last pixel of it: a window that only followed an exact bottom would stop
+   * following the moment a line wrapped one row further than the last one did.
+   */
+  const NEAR = 24;
   let thinkingLine: HTMLLIElement | null = null;
   let selectedAttachments: AttachmentDescriptor[] = [];
+  /** True while the window is to keep the newest line in view. */
+  let following = true;
+  /** Lines that have arrived since the reader stopped following. */
+  let unseen = 0;
 
   const size = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -111,16 +125,87 @@
     return button;
   };
 
-  // ---------- drawing ----------
+  // ---------- following the newest line ----------
 
   /** True while the person is reading the bottom of the conversation. */
   const atBottom = (): boolean =>
-    lines.scrollHeight - lines.scrollTop - lines.clientHeight < 24;
+    lines.scrollHeight - lines.scrollTop - lines.clientHeight < NEAR;
 
-  const draw = (entry: ConversationEntry): HTMLLIElement => {
+  /** Puts the newest line back in view. */
+  const pin = (): void => {
+    lines.scrollTop = lines.scrollHeight;
+  };
+
+  /** Shows the way back, and says how much is waiting at the end of it. */
+  const drawLatest = (): void => {
+    latest.hidden = following;
+    if (unseen > 0) latest.dataset["unseen"] = "yes";
+    else delete latest.dataset["unseen"];
+    const waiting =
+      unseen === 0 ? "" : unseen === 1 ? ", 1 new" : `, ${unseen} new`;
+    latest.setAttribute("aria-label", `Jump to the latest message${waiting}`);
+    // Said once, when the conversation moves on without the reader. Repeating
+    // it for every line that follows would talk over what they are reading.
+    fresh.textContent =
+      unseen === 0
+        ? ""
+        : unseen === 1
+          ? "1 new message below"
+          : `${unseen} new messages below`;
+  };
+
+  /**
+   * Reads where the person is and settles what follows from it.
+   *
+   * The position is measured rather than remembered. A wheel, a drag, a key,
+   * the field growing under the list and the window putting a line back all
+   * move it, and the only account of it that cannot go stale is the scroller's
+   * own.
+   */
+  const settle = (): void => {
+    following = atBottom();
+    if (following) unseen = 0;
+    drawLatest();
+  };
+
+  // ---------- drawing ----------
+
+  /**
+   * Who said the last line of the conversation, ignoring the thinking row.
+   *
+   * The thinking row is presentation and never part of what was said, so a
+   * line that arrives under it is a reply to the line above it.
+   */
+  const lastSpeaker = (): string | null => {
+    const drawn = lines.children;
+    for (let index = drawn.length - 1; index >= 0; index -= 1) {
+      const line = drawn[index] as HTMLElement | undefined;
+      if (line === undefined) continue;
+      if (line.dataset["transient"] !== undefined) continue;
+      return line.dataset["speaker"] ?? null;
+    }
+    return null;
+  };
+
+  /**
+   * Says what the space above a line is for: a change of speaker, or one more
+   * thing from whoever said the line above it.
+   */
+  const mark = (line: HTMLElement, before: string | null): void => {
+    line.dataset["run"] =
+      before !== null && before === line.dataset["speaker"]
+        ? "continued"
+        : "new";
+  };
+
+  const draw = (
+    entry: ConversationEntry,
+    before: string | null,
+  ): HTMLLIElement => {
     const line = document.createElement("li");
     line.className = "line";
     line.dataset["speaker"] = entry.role;
+    mark(line, before);
 
     const who = document.createElement("span");
     who.className = "who";
@@ -185,16 +270,39 @@
     if (entry.role === "assistant") setThinking(false);
     // Whether to follow is decided before the line goes in, because adding it
     // is what changes the answer. A person who has scrolled up to read
-    // something is not dragged back down by the next line arriving.
-    const follow = atBottom();
-    lines.append(draw(entry));
-    if (follow) lines.scrollTop = lines.scrollHeight;
+    // something is not dragged back down by the next line arriving; they are
+    // told there is something under them instead.
+    following = atBottom();
+    const line = draw(entry, lastSpeaker());
+    // The thinking row is the reply that has not arrived yet, so it stays
+    // under everything that has. A line said while Scufris is working goes
+    // above it rather than after it.
+    if (thinkingLine === null) {
+      lines.append(line);
+    } else {
+      lines.insertBefore(line, thinkingLine);
+      mark(thinkingLine, entry.role);
+    }
+    if (following) pin();
+    else unseen += 1;
+    drawLatest();
   };
 
   const replace = (entries: ConversationEntry[]): void => {
     thinkingLine = null;
-    lines.replaceChildren(...entries.map(draw));
-    lines.scrollTop = lines.scrollHeight;
+    let before: string | null = null;
+    const drawn = entries.map((entry) => {
+      const line = draw(entry, before);
+      before = entry.role;
+      return line;
+    });
+    lines.replaceChildren(...drawn);
+    // A whole conversation arriving is the service replaying itself, which
+    // there is no reading position in: what was under the reader is gone.
+    following = true;
+    unseen = 0;
+    pin();
+    drawLatest();
   };
 
   const setThinking = (active: boolean): void => {
@@ -205,15 +313,18 @@
     }
     const follow = atBottom();
     if (thinkingLine === null) {
-      thinkingLine = draw({
-        role: "assistant",
-        surface: "presentation",
-        text: "thinking...",
-      });
+      thinkingLine = draw(
+        {
+          role: "assistant",
+          surface: "presentation",
+          text: "thinking...",
+        },
+        lastSpeaker(),
+      );
       thinkingLine.dataset["transient"] = "thinking";
       lines.append(thinkingLine);
     }
-    if (follow) lines.scrollTop = lines.scrollHeight;
+    if (follow) pin();
   };
 
   const drawSelected = (attachments: AttachmentDescriptor[]): void => {
@@ -266,6 +377,40 @@
 
   words.addEventListener("input", fit);
 
+  // ---------- the way back ----------
+
+  lines.addEventListener("scroll", settle);
+
+  latest.addEventListener("click", () => {
+    pin();
+    settle();
+    // The control is about to leave the page, and the keyboard cannot stay on
+    // an element that is not there. It goes back where this window keeps it.
+    words.focus();
+  });
+
+  // An attachment thumbnail is a picture that arrives after the line holding
+  // it, and the conversation gets taller under whoever is reading it. Load
+  // events do not bubble, so this listens on the way down.
+  lines.addEventListener(
+    "load",
+    () => {
+      if (following) pin();
+    },
+    true,
+  );
+
+  // The window cannot be resized, but the scroller can: the field grows as it
+  // is typed into and the selected attachments appear above it. Whoever was
+  // reading the newest line is still reading it afterwards.
+  if (typeof ResizeObserver !== "undefined") {
+    const watch = new ResizeObserver(() => {
+      if (following) pin();
+      settle();
+    });
+    watch.observe(lines);
+  }
+
   attach.addEventListener("click", () => {
     if (selectedAttachments.length >= 8 || attach.disabled) return;
     attach.disabled = true;
@@ -310,6 +455,11 @@
       return;
     }
     if (event.key === "Enter" && !event.shiftKey) {
+      // A control that has the keyboard answers Enter itself. Sending from
+      // under it is how the attach control, the save on an attachment and the
+      // way back to the newest line were all unreachable without a mouse.
+      const owner = document.activeElement as HTMLElement | null;
+      if (owner !== null && owner.tagName === "BUTTON") return;
       // Shift+Enter is the newline. One Enter is one message, which is the
       // same bargain the textbox makes.
       event.preventDefault();

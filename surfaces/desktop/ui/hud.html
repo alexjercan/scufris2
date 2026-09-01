@@ -15,8 +15,22 @@
         <span id="notice" class="notice"></span>
       </header>
       <!-- Every line said, oldest at the top. The host pushes them as they
-           are said and hands over the backlog when this page loads. -->
-      <ol id="lines" class="lines" aria-label="Conversation"></ol>
+           are said and hands over the backlog when this page loads. The
+           control over it is the way back to the newest line, and it is on
+           screen only while there is somewhere to go. -->
+      <div class="stream">
+        <ol id="lines" class="lines" aria-label="Conversation"></ol>
+        <button
+          id="latest"
+          class="latest"
+          type="button"
+          hidden
+          aria-label="Jump to the latest message"
+        >
+          <img class="latest-glyph" src="latest.svg" alt="" />
+        </button>
+        <p id="fresh" class="offscreen" role="status"></p>
+      </div>
       <!-- The typing line. An ordinary field in a focused window, so the
            caret, the selection, and every editing key are the browser's. -->
       <form id="ask" class="ask">

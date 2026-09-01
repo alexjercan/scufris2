@@ -84,7 +84,9 @@ class Command(unittest.TestCase):
             "BRIEFING_OPENED": str(self.opened),
         }
 
-    def run_briefing(self, *arguments: str, stdin: str = "") -> subprocess.CompletedProcess[str]:
+    def run_briefing(
+        self, *arguments: str, stdin: str = ""
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(COMMAND), "--date", "2026-08-31", *arguments],
             input=stdin,
@@ -109,7 +111,9 @@ class Command(unittest.TestCase):
         self.assertEqual(
             [item["project"] for item in found["sources"]], ["projects/the-den"]
         )
-        self.assertEqual(self.answered("sources", "--profile", "evening")["sources"], [])
+        self.assertEqual(
+            self.answered("sources", "--profile", "evening")["sources"], []
+        )
 
     def test_a_run_is_collected_shown_published_and_opened(self) -> None:
         collected = self.answered("collect")

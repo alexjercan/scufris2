@@ -21,6 +21,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 from types import ModuleType
+from typing import ClassVar
 from unittest import mock
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -50,7 +51,9 @@ def backend(name: str) -> ModuleType:
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
-    exec(compile(assemble(name), f"{name}/backend.py", "exec"), module.__dict__)
+    exec(  # noqa: S102 - exercise the exact assembled backend program
+        compile(assemble(name), f"{name}/backend.py", "exec"), module.__dict__
+    )
     return module
 
 
@@ -70,7 +73,7 @@ class Panel(unittest.TestCase):
     """A den with a few days in it, and a panel opened on one of them."""
 
     view = "agenda"
-    spawn: dict[str, object] = {}
+    spawn: ClassVar[dict[str, object]] = {}
 
     def setUp(self) -> None:
         self.room = tempfile.TemporaryDirectory()
@@ -131,11 +134,15 @@ class Agenda(Panel):
             [task["text"] for task in reading["tasks"]],
             ["ship the panels", "water the plants"],
         )
-        self.assertEqual([habit["name"] for habit in reading["habits"]], ["Gym", "Learn"])
+        self.assertEqual(
+            [habit["name"] for habit in reading["habits"]], ["Gym", "Learn"]
+        )
 
     def test_a_task_is_removed_by_its_number(self) -> None:
         reading = self.do({"action": "untask", "index": 1})
-        self.assertEqual([task["text"] for task in reading["tasks"]], ["water the plants"])
+        self.assertEqual(
+            [task["text"] for task in reading["tasks"]], ["water the plants"]
+        )
         self.assertNotIn("ship the panels", self.entry())
 
     def test_removing_a_task_that_is_not_there_is_said_out_loud(self) -> None:
@@ -192,7 +199,9 @@ class Agenda(Panel):
         self.write(TODAY, "# Monday\n\n### Tasks\n\n- [ ] something else\n")
         reading = self.do({"action": "task", "index": 1})
         self.assertIn("changed elsewhere", str(reading["trouble"]))
-        self.assertEqual([task["text"] for task in reading["tasks"]], ["something else"])
+        self.assertEqual(
+            [task["text"] for task in reading["tasks"]], ["something else"]
+        )
         self.assertFalse(reading["tasks"][0]["done"])
 
     def test_a_refusal_arrives_beside_the_day_rather_than_instead_of_it(self) -> None:
@@ -213,7 +222,9 @@ class Agenda(Panel):
 class Backlog(Panel):
     def test_an_idea_with_no_day_goes_to_the_backlog(self) -> None:
         reading = self.do({"action": "idea", "text": "learn to weld"})
-        self.assertEqual([idea["text"] for idea in reading["backlog"]], ["learn to weld"])
+        self.assertEqual(
+            [idea["text"] for idea in reading["backlog"]], ["learn to weld"]
+        )
         self.assertTrue(den.backlog_path(self.den).is_file())
 
     def test_an_idea_pulled_onto_the_day_leaves_the_backlog(self) -> None:
@@ -274,7 +285,14 @@ class Macros(Panel):
 
     def test_a_food_row_keeps_its_name(self) -> None:
         reading = self.do(
-            {"action": "refood", "index": 1, "what": " ", "protein": "1", "carbs": "1", "fat": "1"}
+            {
+                "action": "refood",
+                "index": 1,
+                "what": " ",
+                "protein": "1",
+                "carbs": "1",
+                "fat": "1",
+            }
         )
         self.assertIn("name", str(reading["trouble"]))
         self.assertEqual([food["name"] for food in reading["foods"]], ["rice 100g"])
@@ -312,9 +330,7 @@ class Macros(Panel):
         self.write(YESTERDAY, "# Sunday\n\n### Weight\n\n82.4 kg\n")
         self.panel.forget()
         reading = self.read()
-        self.assertEqual(
-            [point["weight"] for point in reading["recent"]], [82.4, 81.4]
-        )
+        self.assertEqual([point["weight"] for point in reading["recent"]], [82.4, 81.4])
         self.assertEqual(reading["change"], -1.0)
 
     def test_a_food_taken_from_the_list_is_scaled_and_logged(self) -> None:
@@ -340,7 +356,8 @@ class Macros(Panel):
         before = self.entry()
         reading = self.do({"action": "search", "name": "chbr"})
         self.assertEqual(
-            reading["choices"], [{"id": "chicken breast:g", "label": "chicken breast (g)"}]
+            reading["choices"],
+            [{"id": "chicken breast:g", "label": "chicken breast (g)"}],
         )
         self.assertEqual(self.entry(), before)
 
@@ -358,14 +375,28 @@ class Workout(Panel):
             }
         )
         self.assertEqual(
-            [(lift["exercise"], lift["weight"], lift["reps"]) for lift in reading["lifts"]],
-            [("bench press", 60.0, 8), ("bench press", 60.0, 8), ("bench press", 60.0, 7)],
+            [
+                (lift["exercise"], lift["weight"], lift["reps"])
+                for lift in reading["lifts"]
+            ],
+            [
+                ("bench press", 60.0, 8),
+                ("bench press", 60.0, 8),
+                ("bench press", 60.0, 7),
+            ],
         )
         self.assertEqual(reading["split"], "Push")
         self.assertEqual(reading["volume"], 60 * 8 + 60 * 8 + 60 * 7)
 
     def test_the_split_is_the_day_s_and_is_not_asked_for_twice(self) -> None:
-        self.do({"action": "lift", "split": "Push", "exercise": "bench press", "sets": "60x8"})
+        self.do(
+            {
+                "action": "lift",
+                "split": "Push",
+                "exercise": "bench press",
+                "sets": "60x8",
+            }
+        )
         # The second exercise carries no split, the way the box asks for it
         # once the day has one.
         reading = self.do({"action": "lift", "exercise": "dips", "sets": "0x12"})
@@ -484,7 +515,10 @@ class Workout(Panel):
             [{"id": "Pull", "label": "Pull"}],
         )
         self.assertEqual(
-            [choice["id"] for choice in self.do({"action": "moves", "split": "Pull"})["choices"]],
+            [
+                choice["id"]
+                for choice in self.do({"action": "moves", "split": "Pull"})["choices"]
+            ],
             ["barbell row", "lat pulldown"],
         )
 
@@ -495,7 +529,9 @@ class Workout(Panel):
             "barbell row,50,10\nlat pulldown,40,12\n",
         )
         reading = self.do({"action": "moves", "exercise": "pull"})
-        self.assertEqual([choice["id"] for choice in reading["choices"]], ["lat pulldown"])
+        self.assertEqual(
+            [choice["id"] for choice in reading["choices"]], ["lat pulldown"]
+        )
 
     def test_the_database_offers_movements_never_trained(self) -> None:
         (self.den / "Exercises.csv").write_text(

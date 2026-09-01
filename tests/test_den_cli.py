@@ -79,7 +79,15 @@ class Reads(Command):
         self.ok("task", "add", "call the dentist")
         after = self.answered("task", "list", "--json")
         done = subprocess.run(
-            [sys.executable, str(COMMAND), "--json", "--date", "2026-08-31", "task", "list"],
+            [
+                sys.executable,
+                str(COMMAND),
+                "--json",
+                "--date",
+                "2026-08-31",
+                "task",
+                "list",
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -164,7 +172,9 @@ class Writes(Command):
         found = self.answered("gym", "known", "--json")
         assert isinstance(found, list)
         self.assertEqual([move["name"] for move in found], ["tbar", "dips"])
-        self.assertEqual(self.ok("gym", "database").strip(), str(self.den / "Exercises.csv"))
+        self.assertEqual(
+            self.ok("gym", "database").strip(), str(self.den / "Exercises.csv")
+        )
         self.ok("gym", "forget", "tbar")
         self.assertEqual(
             [move["name"] for move in self.answered("gym", "known", "--json")], ["dips"]
@@ -174,7 +184,9 @@ class Writes(Command):
 
     def test_a_food_is_scaled_out_of_the_database(self) -> None:
         self.ok("macros", "log", "chicken breast:g", "150")
-        self.assertIn("chicken breast 150g,46.5,0,5.4", self.entry().read_text(encoding="utf-8"))
+        self.assertIn(
+            "chicken breast 150g,46.5,0,5.4", self.entry().read_text(encoding="utf-8")
+        )
 
     def test_a_food_row_is_written_over_and_then_removed(self) -> None:
         self.ok("macros", "log", "chicken breast:g", "150")

@@ -80,7 +80,7 @@ ENVELOPE = {
 class Envelope(unittest.TestCase):
     def test_the_last_fenced_block_is_the_answer(self) -> None:
         text = (
-            "Here is a draft.\n\n```json\n{\"title\": \"draft\"}\n```\n\n"
+            'Here is a draft.\n\n```json\n{"title": "draft"}\n```\n\n'
             "On reflection:\n\n```json\n" + json.dumps(ENVELOPE) + "\n```\n"
         )
         found = briefing.parse_contribution(text)
@@ -106,7 +106,10 @@ class Envelope(unittest.TestCase):
     def test_an_envelope_quoted_inside_a_body_is_not_the_answer(self) -> None:
         # A source may show the shape it was asked for inside its own body.
         # That block starts inside the answer, so it was quoted by it.
-        quoted = {**ENVELOPE, "body": "I was asked for:\n\n```json\n{\"title\": \"shape\"}\n```\n"}
+        quoted = {
+            **ENVELOPE,
+            "body": 'I was asked for:\n\n```json\n{"title": "shape"}\n```\n',
+        }
         text = "```json\n" + json.dumps(quoted) + "\n```\n"
         self.assertEqual(briefing.parse_contribution(text)["title"], "The Den")
 
@@ -164,7 +167,10 @@ class Envelope(unittest.TestCase):
                     "headline": "h" * briefing.MAX_HEADLINE,
                     "body": "b" * briefing.MAX_BODY,
                     "facts": [
-                        {"label": "l" * briefing.MAX_LABEL, "value": "v" * briefing.MAX_VALUE}
+                        {
+                            "label": "l" * briefing.MAX_LABEL,
+                            "value": "v" * briefing.MAX_VALUE,
+                        }
                     ],
                 }
             )
@@ -228,7 +234,9 @@ class Envelope(unittest.TestCase):
             (json.dumps({**ENVELOPE, "mood": "good"}), "unexpected keys: mood"),
             (json.dumps({**ENVELOPE, "status": "fine"}), "status must be one of"),
             (
-                json.dumps({**ENVELOPE, "facts": [{"label": "a", "value": "b", "why": "c"}]}),
+                json.dumps(
+                    {**ENVELOPE, "facts": [{"label": "a", "value": "b", "why": "c"}]}
+                ),
                 "one label and one value",
             ),
             (
@@ -236,7 +244,10 @@ class Envelope(unittest.TestCase):
                 "at most 6 entries",
             ),
             (json.dumps({**ENVELOPE, "title": "t" * 200}), "longer than 80"),
-            (json.dumps({**ENVELOPE, "body": "b" * (briefing.MAX_BODY + 1)}), "longer than"),
+            (
+                json.dumps({**ENVELOPE, "body": "b" * (briefing.MAX_BODY + 1)}),
+                "longer than",
+            ),
         ):
             with self.subTest(text=text[:40]):
                 with self.assertRaises(briefing.Unusable) as caught:
@@ -344,7 +355,9 @@ class Run(unittest.TestCase):
         self.projects = self.root / "projects"
         self.answer = self.root / "answer.txt"
         self.prompt = self.root / "prompt.txt"
-        self.answer.write_text(f"```json\n{json.dumps(ENVELOPE)}\n```\n", encoding="utf-8")
+        self.answer.write_text(
+            f"```json\n{json.dumps(ENVELOPE)}\n```\n", encoding="utf-8"
+        )
         self.environment = mock.patch.dict(
             os.environ,
             {
@@ -417,7 +430,9 @@ class Run(unittest.TestCase):
             '[agents.work]\ndescription = "Implement a change."\n',
         )
         manifest = briefing.collect("morning", "2026-08-31")
-        self.assertEqual([item["project"] for item in manifest["sources"]], ["projects/the-den"])
+        self.assertEqual(
+            [item["project"] for item in manifest["sources"]], ["projects/the-den"]
+        )
         self.assertEqual(manifest["state"], "collected")
         self.assertIn("Read the-den and report it.", self.prompt.read_text())
 
@@ -431,13 +446,17 @@ class Run(unittest.TestCase):
         self.assertNotIn("body", entry)
         kept = json.loads(
             (
-                briefing.run_dir("2026-08-31") / "contributions" / "projects-the-den.json"
+                briefing.run_dir("2026-08-31")
+                / "contributions"
+                / "projects-the-den.json"
             ).read_text()
         )
         self.assertEqual(kept["body"], ENVELOPE["body"].strip())
         self.assertEqual(kept["harness"], "pi")
 
-    def test_a_source_that_answers_with_prose_is_failed_and_its_words_are_kept(self) -> None:
+    def test_a_source_that_answers_with_prose_is_failed_and_its_words_are_kept(
+        self,
+    ) -> None:
         self.declare("the-den")
         self.answer.write_text("I could not read the journal today.", encoding="utf-8")
         manifest = briefing.collect("morning", "2026-08-31")
@@ -446,7 +465,9 @@ class Run(unittest.TestCase):
         self.assertIn("not one JSON envelope", entry["headline"])
         kept = json.loads(
             (
-                briefing.run_dir("2026-08-31") / "contributions" / "projects-the-den.json"
+                briefing.run_dir("2026-08-31")
+                / "contributions"
+                / "projects-the-den.json"
             ).read_text()
         )
         self.assertIn("could not read the journal", kept["raw"])
@@ -595,13 +616,17 @@ class Run(unittest.TestCase):
         # The record is written before the page. A morning that was collected
         # stays collected, and the reason the page is missing is kept with it.
         self.declare("the-den")
-        with mock.patch.object(page, "render_page", side_effect=RuntimeError("no layout")):
+        with mock.patch.object(
+            page, "render_page", side_effect=RuntimeError("no layout")
+        ):
             manifest = briefing.collect("morning", "2026-08-31")
         self.assertEqual(manifest["state"], "collected")
         self.assertFalse((briefing.run_dir("2026-08-31") / "briefing.html").exists())
         said = " ".join(item["diagnostic"] for item in manifest["diagnostics"])
         self.assertIn("the page could not be rendered", said)
-        kept = json.loads((briefing.run_dir("2026-08-31") / "manifest.json").read_text())
+        kept = json.loads(
+            (briefing.run_dir("2026-08-31") / "manifest.json").read_text()
+        )
         self.assertEqual(kept["state"], "collected")
 
     def test_a_contribution_that_cannot_be_kept_costs_one_source(self) -> None:
@@ -617,7 +642,9 @@ class Run(unittest.TestCase):
         with mock.patch.object(briefing, "atomic_write", refuse):
             manifest = briefing.collect("morning", "2026-08-31")
         self.assertEqual(manifest["state"], "collected")
-        self.assertEqual([item["project"] for item in manifest["sources"]], ["projects/the-den"])
+        self.assertEqual(
+            [item["project"] for item in manifest["sources"]], ["projects/the-den"]
+        )
         said = " ".join(item["diagnostic"] for item in manifest["diagnostics"])
         self.assertIn("the contribution could not be kept", said)
 
@@ -640,7 +667,9 @@ class Run(unittest.TestCase):
         self.assertEqual(manifest["sources"], [])
         self.assertEqual(manifest["state"], "collected")
         self.assertFalse(briefing.delivered("2026-08-31"))
-        rendered = (briefing.run_dir("2026-08-31") / "briefing.html").read_text(encoding="utf-8")
+        rendered = (briefing.run_dir("2026-08-31") / "briefing.html").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("No project declared this briefing.", rendered)
 
     def test_a_broken_project_configuration_is_carried_as_a_diagnostic(self) -> None:
@@ -655,7 +684,9 @@ class Run(unittest.TestCase):
         # by the collection and not by anything a model chooses to do next.
         self.declare("the-den")
         briefing.collect("morning", "2026-08-31")
-        rendered = (briefing.run_dir("2026-08-31") / "briefing.html").read_text(encoding="utf-8")
+        rendered = (briefing.run_dir("2026-08-31") / "briefing.html").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("The Den", rendered)
         self.assertIn("call the dentist", rendered)
         self.assertIn("no prose yet", rendered)
@@ -664,7 +695,9 @@ class Run(unittest.TestCase):
         self.declare("the-den")
         briefing.collect("morning", "2026-08-31")
         self.assertFalse(briefing.delivered("2026-08-31"))
-        result = briefing.publish("2026-08-31", "Good morning. Two tasks are left over.")
+        result = briefing.publish(
+            "2026-08-31", "Good morning. Two tasks are left over."
+        )
         self.assertTrue(briefing.delivered("2026-08-31"))
         markdown = Path(result["markdown"]).read_text(encoding="utf-8")
         rendered = Path(result["page"]).read_text(encoding="utf-8")
@@ -780,13 +813,10 @@ class Page(unittest.TestCase):
         # spans out first used to leave the whole thing as literal Markdown.
         self.assertEqual(
             page.inline("[`docs/a.md`](https://x.invalid/a)"),
-            '<a href="https://x.invalid/a" rel="noreferrer">'
-            "<code>docs/a.md</code></a>",
+            '<a href="https://x.invalid/a" rel="noreferrer"><code>docs/a.md</code></a>',
         )
         # A target this page will not follow keeps its words and loses the link.
-        self.assertEqual(
-            page.inline("[go](javascript:alert(1)) after"), "go after"
-        )
+        self.assertEqual(page.inline("[go](javascript:alert(1)) after"), "go after")
         # A target with brackets in it is one target, not a truncated one.
         self.assertIn(
             'href="https://x.invalid/Set_(maths)"',

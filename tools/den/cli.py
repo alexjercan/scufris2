@@ -33,7 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import den  # noqa: E402
+import den
 
 
 class Stop(Exception):
@@ -121,7 +121,9 @@ def parse(argv: list[str]) -> argparse.Namespace:
 
     weight = top("weight", help="the day's weight, and its trend")
     weight.add_argument("value", nargs="?")
-    weight.add_argument("--days", type=int, default=30, help="how far the trend reaches")
+    weight.add_argument(
+        "--days", type=int, default=30, help="how far the trend reaches"
+    )
 
     food = nested(top("macros", help="the day's food rows"), common)
     food.add_parser("list")
@@ -224,7 +226,10 @@ def tasks(args: argparse.Namespace, here: Path, when: date) -> None:
         lines(
             args,
             [task.to_dict() for task in day.tasks],
-            [f"{task.index}. [{'x' if task.done else ' '}] {task.text}" for task in day.tasks],
+            [
+                f"{task.index}. [{'x' if task.done else ' '}] {task.text}"
+                for task in day.tasks
+            ],
         )
         return
     if args.what == "add":
@@ -255,7 +260,10 @@ def backlog(args: argparse.Namespace, here: Path, when: date) -> None:
         lines(
             args,
             [idea.to_dict() for idea in ideas],
-            [f"{idea.index}. [{'x' if idea.done else ' '}] {idea.text}" for idea in ideas],
+            [
+                f"{idea.index}. [{'x' if idea.done else ' '}] {idea.text}"
+                for idea in ideas
+            ],
         )
         return
     if args.what == "promote":
@@ -268,15 +276,18 @@ def backlog(args: argparse.Namespace, here: Path, when: date) -> None:
             )
         except (den.Conflict, IndexError, ValueError) as trouble:
             raise Stop(str(trouble)) from None
-        emit(args, {"day": day.to_dict(), "backlog": [idea.to_dict() for idea in left]},
-             written(day))
+        emit(
+            args,
+            {"day": day.to_dict(), "backlog": [idea.to_dict() for idea in left]},
+            written(day),
+        )
         return
     if args.what == "add":
-        rewrite = lambda text: den.add_idea(text, args.text.strip())  # noqa: E731
+        rewrite = lambda text: den.add_idea(text, args.text.strip())
     elif args.what == "done":
-        rewrite = lambda text: den.toggle_idea(text, args.index)  # noqa: E731
+        rewrite = lambda text: den.toggle_idea(text, args.index)
     else:
-        rewrite = lambda text: den.remove_idea(text, args.index)  # noqa: E731
+        rewrite = lambda text: den.remove_idea(text, args.index)
     try:
         left, _revision = den.change_backlog(here, current, rewrite)
     except (den.Conflict, IndexError, ValueError) as trouble:
@@ -295,7 +306,7 @@ def notes(args: argparse.Namespace, here: Path, when: date) -> None:
         return
     if args.what == "add":
         try:
-            heading = den.note_heading(args.title, datetime.now())
+            heading = den.note_heading(args.title, datetime.now().astimezone())
         except ValueError as trouble:
             raise Stop(str(trouble)) from None
         body = args.body.strip()
@@ -347,7 +358,9 @@ def macros(args: argparse.Namespace, here: Path, when: date) -> None:
         return
     if args.what == "query":
         try:
-            found = den.Database.load(den.resolve_database(None, here)).query(args.words)
+            found = den.Database.load(den.resolve_database(None, here)).query(
+                args.words
+            )
         except ValueError as trouble:
             raise Stop(str(trouble)) from None
         lines(
@@ -367,7 +380,10 @@ def macros(args: argparse.Namespace, here: Path, when: date) -> None:
         day, _current = read(here, when)
         lines(
             args,
-            {"macros": day.macros.to_dict(), "foods": [food.to_dict() for food in day.foods]},
+            {
+                "macros": day.macros.to_dict(),
+                "foods": [food.to_dict() for food in day.foods],
+            },
             [f"{food.index}. {food.name}" for food in day.foods]
             + [f"{day.macros.calories} kcal"],
         )
@@ -390,7 +406,11 @@ def macros(args: argparse.Namespace, here: Path, when: date) -> None:
             row = database.calculate(chosen.id, args.amount).to_row()
         except ValueError as trouble:
             raise Stop(str(trouble)) from None
-        day = apply(here, when, lambda text: den.add_row(text, "macros", den.normalize_food(row)))
+        day = apply(
+            here,
+            when,
+            lambda text: den.add_row(text, "macros", den.normalize_food(row)),
+        )
         emit(args, day.to_dict(), f"{day.date}: {row}")
         return
     if args.what in ("add", "edit"):
@@ -400,7 +420,9 @@ def macros(args: argparse.Namespace, here: Path, when: date) -> None:
             raise Stop(str(trouble)) from None
         if args.what == "edit":
             index = args.index
-            day = apply(here, when, lambda text: den.edit_row(text, "macros", index, row))
+            day = apply(
+                here, when, lambda text: den.edit_row(text, "macros", index, row)
+            )
             emit(args, day.to_dict(), f"{day.date}: {row}")
             return
         day = apply(here, when, lambda text: den.add_row(text, "macros", row))

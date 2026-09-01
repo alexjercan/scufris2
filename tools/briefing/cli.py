@@ -63,8 +63,12 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser(
         "sources", parents=[common], help="the projects that declare this briefing"
     )
-    commands.add_parser("collect", parents=[common], help="ask every source and keep what it said")
-    commands.add_parser("show", parents=[common], help="the run, with every contribution")
+    commands.add_parser(
+        "collect", parents=[common], help="ask every source and keep what it said"
+    )
+    commands.add_parser(
+        "show", parents=[common], help="the run, with every contribution"
+    )
     commands.add_parser("state", parents=[common], help="what the run for a date says")
     commands.add_parser(
         "publish",
@@ -95,7 +99,10 @@ def say(options: argparse.Namespace, value: object, lines: list[str]) -> None:
 
 
 def source_lines(sources: list[dict], diagnostics: list[dict]) -> list[str]:
-    lines = [f"{item['project']}  {item['harness']}  {item['description']}" for item in sources]
+    lines = [
+        f"{item['project']}  {item['harness']}  {item['description']}"
+        for item in sources
+    ]
     lines.extend(f"{item['project']}: {item['diagnostic']}" for item in diagnostics)
     return lines or ["no project declares this briefing"]
 

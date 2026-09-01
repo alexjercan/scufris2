@@ -322,7 +322,15 @@ class StagingTests(unittest.TestCase):
             ["git", "-C", str(seeded), "config", "user.email", "old@scufris.invalid"],
             ["git", "-C", str(seeded), "config", "user.name", "Old Staging"],
             ["git", "-C", str(seeded), "add", "README.md"],
-            ["git", "-C", str(seeded), "commit", "-q", "-m", "Seed the staging project"],
+            [
+                "git",
+                "-C",
+                str(seeded),
+                "commit",
+                "-q",
+                "-m",
+                "Seed the staging project",
+            ],
         ):
             subprocess.run(command, check=True, capture_output=True)
 

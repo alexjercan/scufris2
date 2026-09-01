@@ -88,13 +88,7 @@ class WorkerResourcePathTest(unittest.TestCase):
             helper.parent.mkdir(parents=True)
             helper.touch()
 
-            packaged = (
-                root
-                / "extensions"
-                / "scufris"
-                / "workflow"
-                / "worker-report.ts"
-            )
+            packaged = root / "extensions" / "scufris" / "workflow" / "worker-report.ts"
             packaged.parent.mkdir(parents=True)
             packaged.touch()
             self.assertEqual(jobs_module.worker_report_extension(helper), packaged)
@@ -637,8 +631,7 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
     def test_a_briefing_source_is_listed_but_never_offered_as_an_agent(self) -> None:
         menu = (self.project / ".scufris.toml").read_text()
         (self.project / ".scufris.toml").write_text(
-            menu
-            + "\n[briefings.morning]\n"
+            menu + "\n[briefings.morning]\n"
             'description = "Report the cadence gap and pending QA."\n'
             'keywords = { harness = "claude", model = "opus", thinking = "high" }\n'
             'guidance = "Read web/data and report what changed overnight."\n'
@@ -657,8 +650,12 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         self.assertEqual(source["thinking"], "high")
         self.assertIn("Read web/data", source["guidance"])
         # A profile nobody declared is an empty morning, not an error.
-        self.assertEqual(self.call("briefings", {"profile": "evening"})["result"]["sources"], [])
-        self.assertEqual(len(self.call("briefings", {"profile": "weekly"})["result"]["sources"]), 1)
+        self.assertEqual(
+            self.call("briefings", {"profile": "evening"})["result"]["sources"], []
+        )
+        self.assertEqual(
+            len(self.call("briefings", {"profile": "weekly"})["result"]["sources"]), 1
+        )
 
         # The delegation menu must not carry it. A briefing entry rendered
         # beside the agents reads as one more agent the request may name.
@@ -677,13 +674,17 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         listed = self.call("briefings", {"profile": "morning"})["result"]
         self.assertEqual(listed["sources"], [])
         self.assertEqual(len(listed["diagnostics"]), 1)
-        self.assertIn("short printable description", listed["diagnostics"][0]["diagnostic"])
+        self.assertIn(
+            "short printable description", listed["diagnostics"][0]["diagnostic"]
+        )
         # The agents survive it.
         context = self.call("context", {"project": "projects/nova-protocol"})["result"]
         self.assertTrue(context["configured"])
         self.assertIn("### work", context["markdown"])
 
-    def test_a_project_that_only_declares_a_briefing_keeps_a_usable_context(self) -> None:
+    def test_a_project_that_only_declares_a_briefing_keeps_a_usable_context(
+        self,
+    ) -> None:
         (self.project / ".scufris.toml").write_text(
             "[briefings.morning]\n"
             'description = "Report yesterday from the journal."\n'
@@ -693,7 +694,9 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         self.assertTrue(context["configured"])
         self.assertIsNone(context["diagnostic"])
         self.assertNotIn("scufris-den", context["markdown"])
-        self.assertIn("Never start an agent because the project declares it.", context["markdown"])
+        self.assertIn(
+            "Never start an agent because the project declares it.", context["markdown"]
+        )
         self.assertEqual(
             len(self.call("briefings", {"profile": "morning"})["result"]["sources"]), 1
         )

@@ -11,7 +11,7 @@ import importlib.util
 import sys
 import tempfile
 import unittest
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -366,7 +366,7 @@ class Validation(unittest.TestCase):
             den.parse_sets("60x8 heavy")
 
     def test_a_note_is_stamped_with_the_time_it_was_written(self) -> None:
-        when = datetime(2026, 8, 31, 22, 4)
+        when = datetime(2026, 8, 31, 22, 4, tzinfo=UTC)
         self.assertEqual(den.note_heading(None, when), "22:04")
         self.assertEqual(den.note_heading("standup", when), "22:04 - standup")
 
@@ -385,7 +385,7 @@ class Store(Den):
         self.assertEqual(day.tasks, [])
 
     def test_a_change_carries_the_revision_forward(self) -> None:
-        day, current = den.read_day(self.den, date(2026, 8, 31))
+        _day, current = den.read_day(self.den, date(2026, 8, 31))
         after, later = den.change(
             self.den, date(2026, 8, 31), current, lambda text: den.add_task(text, "go")
         )
@@ -393,7 +393,7 @@ class Store(Den):
         self.assertNotEqual(later, current)
 
     def test_a_change_against_a_stale_revision_is_refused(self) -> None:
-        day, current = den.read_day(self.den, date(2026, 8, 31))
+        _day, current = den.read_day(self.den, date(2026, 8, 31))
         den.change(
             self.den, date(2026, 8, 31), current, lambda text: den.add_task(text, "one")
         )
@@ -406,7 +406,7 @@ class Store(Den):
             )
 
     def test_a_caller_that_saw_no_file_may_make_it(self) -> None:
-        day, current = den.read_day(self.den, date(2026, 9, 1), create=False)
+        _day, current = den.read_day(self.den, date(2026, 9, 1), create=False)
         after, _later = den.change(
             self.den, date(2026, 9, 1), current, lambda text: den.add_task(text, "go")
         )
@@ -427,7 +427,11 @@ class Store(Den):
         self.write(date(2026, 8, 30), OLD)
         _day, current = den.read_day(self.den, date(2026, 8, 30))
         after, later = den.add_lifts(
-            self.den, date(2026, 8, 30), "squat", den.parse_sets("80x5 80x5 80x4"), current
+            self.den,
+            date(2026, 8, 30),
+            "squat",
+            den.parse_sets("80x5 80x5 80x4"),
+            current,
         )
         self.assertEqual(
             [(lift.exercise, lift.reps) for lift in after.lifts],
@@ -524,11 +528,15 @@ class Queries(Den):
 
     def test_upcoming_names_unfinished_tasks_after_a_day(self) -> None:
         found = den.upcoming(self.den, date(2026, 8, 31))
-        self.assertEqual([(task.date, task.text) for task in found], [("2026-09-02", "later")])
+        self.assertEqual(
+            [(task.date, task.text) for task in found], [("2026-09-02", "later")]
+        )
 
     def test_restant_names_what_was_left_behind(self) -> None:
         found = den.restant(self.den, date(2026, 8, 31), horizon=5)
-        self.assertEqual([(task.date, task.text) for task in found], [("2026-08-30", "left")])
+        self.assertEqual(
+            [(task.date, task.text) for task in found], [("2026-08-30", "left")]
+        )
 
     def test_restant_stops_at_the_horizon(self) -> None:
         near = den.restant(self.den, date(2026, 8, 31), horizon=5)
@@ -624,7 +632,9 @@ class Moves(unittest.TestCase):
 
     def test_a_query_ranks_prefixes_before_the_rest(self) -> None:
         known = self.write("split,exercise\npull,barbell row\npull,bent over row\n")
-        self.assertEqual([m.name for m in known.query("row")], ["barbell row", "bent over row"])
+        self.assertEqual(
+            [m.name for m in known.query("row")], ["barbell row", "bent over row"]
+        )
         self.assertEqual([m.name for m in known.query("bent")], ["bent over row"])
 
     def test_a_movement_is_learned_once_and_forgotten_once(self) -> None:
@@ -670,7 +680,9 @@ class Databases(unittest.TestCase):
         )
 
     def test_the_exercise_database_is_in_the_den_whether_or_not_it_exists(self) -> None:
-        self.assertEqual(den.resolve_exercises(None, self.den), self.den / den.EXERCISES)
+        self.assertEqual(
+            den.resolve_exercises(None, self.den), self.den / den.EXERCISES
+        )
 
 
 class Foods(unittest.TestCase):
@@ -684,9 +696,7 @@ class Foods(unittest.TestCase):
         self.database = den.Database.load(self.path)
 
     def test_rows_that_do_not_parse_are_passed_over(self) -> None:
-        self.assertEqual(
-            sorted(self.database.items), ["chicken breast:g", "egg:pc"]
-        )
+        self.assertEqual(sorted(self.database.items), ["chicken breast:g", "egg:pc"])
 
     def test_a_query_matches_letters_in_order_and_ranks_prefixes_first(self) -> None:
         found = self.database.query("chbr")

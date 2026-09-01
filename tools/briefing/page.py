@@ -308,7 +308,7 @@ def facts_block(facts: list[dict[str, Any]]) -> str:
         return ""
     entries = "".join(
         f'<div class="fact"><dt>{html.escape(fact["label"])}</dt>'
-        f'<dd>{html.escape(fact["value"])}</dd></div>'
+        f"<dd>{html.escape(fact['value'])}</dd></div>"
         for fact in facts
     )
     return f'<dl class="facts">{entries}</dl>'

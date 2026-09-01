@@ -348,7 +348,9 @@ class Panel:
         if not body:
             return
         try:
-            heading = note_heading(words(action.get("heading")) or None, datetime.now())
+            heading = note_heading(
+                words(action.get("heading")) or None, datetime.now().astimezone()
+            )
         except ValueError as trouble:
             raise Refused(str(trouble)) from None
         self.on_day(selected, lambda text: add_note(text, heading, body))
@@ -369,7 +371,11 @@ class Panel:
         if not heading:
             held = self.frame or {}
             notes = held.get("notes") if isinstance(held, dict) else None
-            found = notes[index - 1] if isinstance(notes, list) and index <= len(notes) else {}
+            found = (
+                notes[index - 1]
+                if isinstance(notes, list) and index <= len(notes)
+                else {}
+            )
             heading = words(found.get("heading")) if isinstance(found, dict) else ""
         if not heading:
             raise Refused("a note keeps its heading")
@@ -521,7 +527,9 @@ class Panel:
         index = counted(action.get("index"))
         if index is None:
             return
-        cells = [words(action.get(cell)) for cell in ("what", "protein", "carbs", "fat")]
+        cells = [
+            words(action.get(cell)) for cell in ("what", "protein", "carbs", "fat")
+        ]
         if not cells[0]:
             raise Refused("a food row keeps its name")
         try:
@@ -578,9 +586,11 @@ class Panel:
         typed = words(action.get("sets"))
         named = words(action.get("exercise")) or was
         try:
-            rows = [
-                normalize_lift(named, load, reps) for load, reps in parse_sets(typed)
-            ] if typed else []
+            rows = (
+                [normalize_lift(named, load, reps) for load, reps in parse_sets(typed)]
+                if typed
+                else []
+            )
         except ValueError as trouble:
             raise Refused(str(trouble)) from None
         self.on_day(selected, lambda text: set_rows(text, "workout", was, rows))
@@ -670,9 +680,9 @@ class Panel:
             "habits": [habit.to_dict() for habit in day.habits],
             "tasks": [task.to_dict() for task in day.tasks],
             "restant": [task.to_dict() for task in late if task.date != selected],
-            "ahead": [
-                task.to_dict() for task in later if task.date > selected
-            ][: self.ahead],
+            "ahead": [task.to_dict() for task in later if task.date > selected][
+                : self.ahead
+            ],
             "backlog": [idea.to_dict() for idea in ideas if not idea.done],
             "marks": sorted(marks),
         }

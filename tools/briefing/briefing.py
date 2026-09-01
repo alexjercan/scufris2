@@ -242,7 +242,9 @@ Reply with exactly one fenced `json` block and nothing outside it:
 """
 
 
-def repair_prompt(source: dict[str, Any], profile: str, trouble: str, answer: str) -> str:
+def repair_prompt(
+    source: dict[str, Any], profile: str, trouble: str, answer: str
+) -> str:
     """Ask a source to say again, correctly, what it already found.
 
     The work is done by the time this is asked. This run reads nothing, spends
@@ -250,7 +252,11 @@ def repair_prompt(source: dict[str, Any], profile: str, trouble: str, answer: st
     one reason they could not be used, and it may change only that.
     """
     quoted = answer[:MAX_QUOTED]
-    cut = "\n\n(The rest of your answer was too long to quote back.)" if len(answer) > MAX_QUOTED else ""
+    cut = (
+        "\n\n(The rest of your answer was too long to quote back.)"
+        if len(answer) > MAX_QUOTED
+        else ""
+    )
     return f"""# Scufris {profile} briefing: your answer could not be read
 
 You reported on {source["project"]} and the report was rejected:
@@ -289,7 +295,9 @@ If a value is too long, shorten that value; do not go and measure it again.
 """
 
 
-def harness_argv(source: dict[str, Any], prompt: str, *, tools: bool = True) -> list[str]:
+def harness_argv(
+    source: dict[str, Any], prompt: str, *, tools: bool = True
+) -> list[str]:
     """The one-shot command for a source.
 
     Not a job. A job is a tmux pane bound to an owner session that can be
@@ -481,7 +489,9 @@ def attempt(
         return Attempt(None, str(trouble), answer, True, seconds)
 
 
-def ask(source: dict[str, Any], profile: str, date: str, deadline: float) -> dict[str, Any]:
+def ask(
+    source: dict[str, Any], profile: str, date: str, deadline: float
+) -> dict[str, Any]:
     """Run one source and read what it answered.
 
     A source that answered badly is asked once more. It has already read its
@@ -507,7 +517,10 @@ def ask(source: dict[str, Any], profile: str, date: str, deadline: float) -> dic
     second = attempt(
         source,
         repair_prompt(source, profile, first.trouble, first.raw),
-        min(left, environment_seconds("SCUFRIS_BRIEFING_REPAIR_DEADLINE", REPAIR_DEADLINE)),
+        min(
+            left,
+            environment_seconds("SCUFRIS_BRIEFING_REPAIR_DEADLINE", REPAIR_DEADLINE),
+        ),
         tools=False,
     )
     spent = first.seconds + second.seconds
@@ -515,7 +528,8 @@ def ask(source: dict[str, Any], profile: str, date: str, deadline: float) -> dic
         return contributed(source, second.contribution, spent)
     if second.spoke:
         return failed_contribution(
-            source, f"{second.trouble}, and again when asked to correct it",
+            source,
+            f"{second.trouble}, and again when asked to correct it",
             raw=second.raw,
             seconds=spent,
         )
@@ -559,7 +573,8 @@ def failed_contribution(
         "status": "failed",
         # Bounded like any other headline: this one is written from a harness
         # message, and the page lays out a sentence rather than a log line.
-        "headline": " ".join(why.split())[:MAX_HEADLINE] or "the source could not answer",
+        "headline": " ".join(why.split())[:MAX_HEADLINE]
+        or "the source could not answer",
         "facts": [],
         "body": "",
         "seconds": round(seconds, 1),
@@ -575,7 +590,17 @@ def index_entry(contribution: dict[str, Any]) -> dict[str, Any]:
     """
     return {
         key: contribution[key]
-        for key in ("project", "slug", "title", "status", "headline", "facts", "harness", "model", "seconds")
+        for key in (
+            "project",
+            "slug",
+            "title",
+            "status",
+            "headline",
+            "facts",
+            "harness",
+            "model",
+            "seconds",
+        )
     }
 
 
@@ -642,7 +667,9 @@ def collect(
     return finish(manifest, contributions)
 
 
-def finish(manifest: dict[str, Any], contributions: list[dict[str, Any]]) -> dict[str, Any]:
+def finish(
+    manifest: dict[str, Any], contributions: list[dict[str, Any]]
+) -> dict[str, Any]:
     """Write what came back, and the page for it.
 
     The page is rendered here and not only at publish, so the day has one as
@@ -694,7 +721,10 @@ def finish(manifest: dict[str, Any], contributions: list[dict[str, Any]]) -> dic
             **manifest,
             "diagnostics": [
                 *manifest["diagnostics"],
-                {"project": "", "diagnostic": f"the page could not be rendered: {trouble!r}"},
+                {
+                    "project": "",
+                    "diagnostic": f"the page could not be rendered: {trouble!r}",
+                },
             ],
         }
         write_manifest(manifest)
@@ -726,7 +756,11 @@ def prune(keep: int = KEEP_RUNS) -> None:
     if not root.is_dir():
         return
     runs = sorted(
-        (path for path in root.iterdir() if path.is_dir() and DATE.fullmatch(path.name)),
+        (
+            path
+            for path in root.iterdir()
+            if path.is_dir() and DATE.fullmatch(path.name)
+        ),
         reverse=True,
     )
     for old in runs[keep:]:

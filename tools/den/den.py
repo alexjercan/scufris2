@@ -48,11 +48,11 @@ import math
 import os
 import re
 import tempfile
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Callable, Iterator
 
 #: Where the journal is when nobody says otherwise.
 DEFAULT_DEN = Path.home() / "personal" / "the-den"
@@ -733,7 +733,7 @@ def resolve_date(value: str | None = None, offset: int | None = None) -> date:
             return date.fromisoformat(value)
         except ValueError:
             raise ValueError(f"invalid date: {value}") from None
-    return date.today() + timedelta(days=offset or 0)
+    return datetime.now().astimezone().date() + timedelta(days=offset or 0)
 
 
 def stem_for(day: date) -> str:
@@ -1001,9 +1001,13 @@ def add_food(den: Path, day: date, row: str, expected: str) -> tuple[Day, str]:
     return change(den, day, expected, lambda text: add_row(text, "macros", written))
 
 
-def edit_food(den: Path, day: date, index: int, row: str, expected: str) -> tuple[Day, str]:
+def edit_food(
+    den: Path, day: date, index: int, row: str, expected: str
+) -> tuple[Day, str]:
     written = normalize_food(row)
-    return change(den, day, expected, lambda text: edit_row(text, "macros", index, written))
+    return change(
+        den, day, expected, lambda text: edit_row(text, "macros", index, written)
+    )
 
 
 def remove_food(den: Path, day: date, index: int, expected: str) -> tuple[Day, str]:

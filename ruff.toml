@@ -1,0 +1,5 @@
+[lint.per-file-ignores]
+# This backend is a build fragment. build.rs prepends the den prelude into the
+# same Python namespace before execution, and its integration tests assemble it
+# by the same rule.
+"surfaces/desktop/backends/den/backend.py" = ["F821"]

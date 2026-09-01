@@ -26,4 +26,3 @@ Completed on 2026-09-01:
   and explicit clear and attention policy are present.
 - The configured `tatr ls` query completed successfully.
 - `git diff --check` passed.
-

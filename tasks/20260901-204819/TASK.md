@@ -1,6 +1,6 @@
 # Release and deploy Scufris v2.1.4
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: release, deployment
 

@@ -115,6 +115,7 @@ class StagingTests(unittest.TestCase):
             "XDG_STATE_HOME",
             "XDG_DATA_HOME",
             "PI_CODING_AGENT_DIR",
+            "SCUFRIS_SERVICE_CONVERSATION_FILE",
             "SCUFRIS_DESKTOP_SPEAK_COMMAND",
             "SCUFRIS_TTS_ENDPOINT",
             "SCUFRIS_STAGING_SPEAK",
@@ -193,6 +194,10 @@ class StagingTests(unittest.TestCase):
             self.assertEqual(
                 env["SCUFRIS_SERVICE_AGENT"],
                 str(REPOSITORY / "scripts" / "scufris-agent"),
+            )
+            self.assertEqual(
+                env["SCUFRIS_SERVICE_CONVERSATION_FILE"],
+                str(self.staging / "data" / "scufris" / "conversation.json"),
             )
             # Not Super+D. The deployed companion keeps its own activation key.
             self.assertEqual(env["SCUFRIS_DESKTOP_HOTKEY"], "Super+G")

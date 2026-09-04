@@ -9,6 +9,13 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Fixed
+
+- The latest 200 canonical conversation messages now survive a background
+  service restart or Home Manager switch. Scufris stores one private atomic
+  replay snapshot under its XDG data directory and safely isolates malformed
+  or incompatible snapshots instead of failing startup.
+
 ## [2.1.5] - 2026-09-01
 
 ### Changed

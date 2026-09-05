@@ -55,21 +55,22 @@ also exits 3 when no staging backend is running.
 
 `up` prints this block before it starts either process.
 
-| Variable                            | Value                                            |
-| ----------------------------------- | ------------------------------------------------ |
-| `SCUFRIS_STAGING_ROOT`              | `/tmp/scufris-staging`                           |
-| `XDG_STATE_HOME`                    | `$SCUFRIS_STAGING_ROOT/state`                    |
-| `XDG_DATA_HOME`                     | `$SCUFRIS_STAGING_ROOT/data`                     |
-| `SCUFRIS_RUNTIME_DIR`               | `$XDG_RUNTIME_DIR/scufris-staging`               |
-| `PI_CODING_AGENT_DIR`               | `$SCUFRIS_STAGING_ROOT/pi-agent`                 |
-| `SCUFRIS_PROJECT_ROOTS`             | `["$SCUFRIS_STAGING_ROOT/projects"]`             |
-| `SCUFRIS_SERVICE_AGENT`             | `scripts/scufris-agent`                          |
-| `SCUFRIS_DESKTOP_HOTKEY`            | `Super+G`                                        |
-| `SCUFRIS_STT_ENDPOINT`              | `http://127.0.0.1:10300/v1/audio/transcriptions` |
-| `SCUFRIS_TTS_ENDPOINT`              | `http://127.0.0.1:10300/v1/audio/speech`         |
-| `SCUFRIS_STAGING_AI_TOOLS_API`      | `external`                                       |
-| `SCUFRIS_STAGING_GATEWAY_PORT`      | `10441`                                          |
-| `SCUFRIS_STAGING_EXTERNAL_SURFACES` | `auto`                                           |
+| Variable                            | Value                                                  |
+| ----------------------------------- | ------------------------------------------------------ |
+| `SCUFRIS_STAGING_ROOT`              | `/tmp/scufris-staging`                                 |
+| `XDG_STATE_HOME`                    | `$SCUFRIS_STAGING_ROOT/state`                          |
+| `XDG_DATA_HOME`                     | `$SCUFRIS_STAGING_ROOT/data`                           |
+| `SCUFRIS_RUNTIME_DIR`               | `$XDG_RUNTIME_DIR/scufris-staging`                     |
+| `PI_CODING_AGENT_DIR`               | `$SCUFRIS_STAGING_ROOT/pi-agent`                       |
+| `SCUFRIS_PROJECT_ROOTS`             | `["$SCUFRIS_STAGING_ROOT/projects"]`                   |
+| `SCUFRIS_SERVICE_AGENT`             | `scripts/scufris-agent`                                |
+| `SCUFRIS_SERVICE_CONVERSATION_FILE` | `$SCUFRIS_STAGING_ROOT/data/scufris/conversation.json` |
+| `SCUFRIS_DESKTOP_HOTKEY`            | `Super+G`                                              |
+| `SCUFRIS_STT_ENDPOINT`              | `http://127.0.0.1:10300/v1/audio/transcriptions`       |
+| `SCUFRIS_TTS_ENDPOINT`              | `http://127.0.0.1:10300/v1/audio/speech`               |
+| `SCUFRIS_STAGING_AI_TOOLS_API`      | `external`                                             |
+| `SCUFRIS_STAGING_GATEWAY_PORT`      | `10441`                                                |
+| `SCUFRIS_STAGING_EXTERNAL_SURFACES` | `auto`                                                 |
 
 A named frontend instead uses
 `$SCUFRIS_STAGING_ROOT/frontends/NAME/{state,data}` and

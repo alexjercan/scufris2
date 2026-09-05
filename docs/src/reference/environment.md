@@ -43,14 +43,15 @@ exact socket variable -> SCUFRIS_RUNTIME_DIR/NAME -> XDG_RUNTIME_DIR/scufris/NAM
 
 ## Background service and gateway
 
-| Variable                       | Consumer          | Meaning and default                                                                                                    |
-| ------------------------------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `SCUFRIS_SERVICE_AGENT`        | `scufris-service` | Absolute agent launcher. Default: first `scufris` on `PATH`.                                                           |
-| `SCUFRIS_SERVICE_SESSION_DIR`  | `scufris-service` | Absolute Pi session directory. Default: `$XDG_DATA_HOME/scufris/sessions`, then `$HOME/.local/share/scufris/sessions`. |
-| `SCUFRIS_GATEWAY_LISTEN`       | surface gateway   | Loopback listen address. Default: `127.0.0.1:10440`. CLI `--listen` is equivalent.                                     |
-| `SCUFRIS_GATEWAY_TOKEN_FILE`   | surface gateway   | Absolute private token file. Required unless `--token-file` is passed.                                                 |
-| `SCUFRIS_GATEWAY_AI_TOOLS_API` | surface gateway   | Loopback inference API base URL. Default: `http://127.0.0.1:10300`. CLI `--ai-tools-api` is equivalent.                |
-| `SCUFRIS_GATEWAY_DOCS`         | surface gateway   | Boolean Swagger/OpenAPI switch. Disabled by default; the staging runner sets `1`. Do not enable in production.         |
+| Variable                            | Consumer          | Meaning and default                                                                                                             |
+| ----------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `SCUFRIS_SERVICE_AGENT`             | `scufris-service` | Absolute agent launcher. Default: first `scufris` on `PATH`.                                                                    |
+| `SCUFRIS_SERVICE_SESSION_DIR`       | `scufris-service` | Absolute Pi session directory. Default: `$XDG_DATA_HOME/scufris/sessions`, then `$HOME/.local/share/scufris/sessions`.          |
+| `SCUFRIS_SERVICE_CONVERSATION_FILE` | `scufris-service` | Absolute canonical replay snapshot. Default: `$XDG_DATA_HOME/scufris/conversation.json`, then `$HOME/.local/share/scufris/...`. |
+| `SCUFRIS_GATEWAY_LISTEN`            | surface gateway   | Loopback listen address. Default: `127.0.0.1:10440`. CLI `--listen` is equivalent.                                              |
+| `SCUFRIS_GATEWAY_TOKEN_FILE`        | surface gateway   | Absolute private token file. Required unless `--token-file` is passed.                                                          |
+| `SCUFRIS_GATEWAY_AI_TOOLS_API`      | surface gateway   | Loopback inference API base URL. Default: `http://127.0.0.1:10300`. CLI `--ai-tools-api` is equivalent.                         |
+| `SCUFRIS_GATEWAY_DOCS`              | surface gateway   | Boolean Swagger/OpenAPI switch. Disabled by default; the staging runner sets `1`. Do not enable in production.                  |
 
 ## Desktop surface
 
@@ -112,16 +113,17 @@ endpoint, and speech command overrides.
 
 Do not normally set these yourself.
 
-| Variable                          | Meaning                                                |
-| --------------------------------- | ------------------------------------------------------ |
-| `SCUFRIS_STAGING_FRONTEND`        | Current named frontend profile.                        |
-| `SCUFRIS_DESKTOP_SURFACE_NAME`    | Same profile, used in surface registration.            |
-| `SCUFRIS_RUNTIME_DIR`             | `$XDG_RUNTIME_DIR/scufris-staging`.                    |
-| `SCUFRIS_PROJECT_ROOTS`           | JSON array containing the seeded staging project root. |
-| `SCUFRIS_SERVICE_AGENT`           | Working-tree `scripts/scufris-agent`.                  |
-| `PI_CODING_AGENT_DIR`             | Isolated staging Pi settings and shared auth location. |
-| `XDG_STATE_HOME`, `XDG_DATA_HOME` | Staging backend or named frontend directories.         |
-| `SCUFRIS_DESKTOP_COMMAND_SOCKET`  | Per-frontend local command socket.                     |
+| Variable                            | Meaning                                                |
+| ----------------------------------- | ------------------------------------------------------ |
+| `SCUFRIS_STAGING_FRONTEND`          | Current named frontend profile.                        |
+| `SCUFRIS_DESKTOP_SURFACE_NAME`      | Same profile, used in surface registration.            |
+| `SCUFRIS_RUNTIME_DIR`               | `$XDG_RUNTIME_DIR/scufris-staging`.                    |
+| `SCUFRIS_PROJECT_ROOTS`             | JSON array containing the seeded staging project root. |
+| `SCUFRIS_SERVICE_AGENT`             | Working-tree `scripts/scufris-agent`.                  |
+| `SCUFRIS_SERVICE_CONVERSATION_FILE` | Isolated backend canonical replay snapshot.            |
+| `PI_CODING_AGENT_DIR`               | Isolated staging Pi settings and shared auth location. |
+| `XDG_STATE_HOME`, `XDG_DATA_HOME`   | Staging backend or named frontend directories.         |
+| `SCUFRIS_DESKTOP_COMMAND_SOCKET`    | Per-frontend local command socket.                     |
 
 ## Worker-private variables
 

@@ -1,7 +1,7 @@
 //! Canonical protocol v5 service state.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     io::BufRead,
     path::PathBuf,
     sync::{
@@ -13,9 +13,9 @@ use std::{
 };
 
 use scufris_control::service::{
-    AgentRequestBody, AgentResponse, AgentResponseBody, AgentState, CONVERSATION_ENTRIES,
-    ConversationMessage, ConversationRole, MAX_DETAIL_BYTES, ScufrisState, SurfaceRegistration,
-    SurfaceResponse, SurfaceResponseBody, UNPROMPTED_SURFACE, WidgetCall, WidgetDefinition,
+    AgentRequestBody, AgentResponse, AgentResponseBody, AgentState, ConversationMessage,
+    ConversationRole, MAX_DETAIL_BYTES, ScufrisState, SurfaceRegistration, SurfaceResponse,
+    SurfaceResponseBody, UNPROMPTED_SURFACE, WidgetCall, WidgetDefinition,
 };
 use serde_json::Value;
 use tracing::{debug, error, info, warn};
@@ -24,6 +24,7 @@ use crate::{
     agent::{Agent, described},
     attachment::AttachmentStore,
     config::Config,
+    conversation::ConversationHistory,
     rpc::{self, Command, DialogAnswer, Event, SessionState},
 };
 
@@ -73,7 +74,7 @@ struct Inner {
     surface_by_connection: HashMap<u64, (String, u64)>,
     next_surface_generation: u64,
     agent: Option<AgentConnection>,
-    conversation: VecDeque<ConversationMessage>,
+    conversation: ConversationHistory,
     associated_surface: Option<String>,
     session_file: Option<PathBuf>,
     stopping: bool,
@@ -158,10 +159,9 @@ impl Inner {
     }
 
     fn record(&mut self, message: ConversationMessage) {
-        if self.conversation.len() == CONVERSATION_ENTRIES {
-            self.conversation.pop_front();
+        if let Err(error) = self.conversation.record(message.clone()) {
+            warn!(%error, "the canonical conversation could not be stored");
         }
-        self.conversation.push_back(message.clone());
         self.broadcast(message.into());
     }
 
@@ -179,6 +179,7 @@ pub struct Service {
 
 impl Service {
     pub fn new(config: Config, attachments: Arc<AttachmentStore>) -> Arc<Self> {
+        let conversation = ConversationHistory::open(config.conversation_file.clone());
         Arc::new(Self {
             config,
             attachments,
@@ -196,7 +197,7 @@ impl Service {
                 surface_by_connection: HashMap::new(),
                 next_surface_generation: 0,
                 agent: None,
-                conversation: VecDeque::new(),
+                conversation,
                 associated_surface: None,
                 session_file: None,
                 stopping: false,
@@ -243,7 +244,7 @@ impl Service {
             "surface registration accepted"
         );
         // Replay, state, and ready are queued while the same lock excludes broadcasts.
-        for message in inner.conversation.clone() {
+        for message in inner.conversation.messages().cloned() {
             let _ = outbox.try_send(SurfaceResponse::new(message.into()));
         }
         let (state, detail) = inner.state();
@@ -799,17 +800,25 @@ mod tests {
         mpsc::{Receiver, sync_channel},
     };
 
+    use scufris_control::service::CONVERSATION_ENTRIES;
+
     static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
 
-    fn service() -> Arc<Service> {
+    fn test_runtime() -> PathBuf {
         let runtime = std::env::temp_dir().join(format!(
             "scufris-v5-service-{}-{}",
             std::process::id(),
             NEXT_TEST.fetch_add(1, Ordering::Relaxed)
         ));
-        let config = Config::test(runtime);
+        let _ = std::fs::remove_dir_all(&runtime);
+        runtime
+    }
+    fn service_at(config: Config) -> Arc<Service> {
         let attachments = AttachmentStore::open(config.attachment_dir.clone()).unwrap();
         Service::new(config, attachments)
+    }
+    fn service() -> Arc<Service> {
+        service_at(Config::test(test_runtime()))
     }
     fn surface(
         service: &Arc<Service>,
@@ -867,6 +876,58 @@ mod tests {
         assert!(matches!(replay[0], SurfaceResponseBody::Message { .. }));
         assert!(matches!(replay[1], SurfaceResponseBody::State { .. }));
         assert!(matches!(replay[2], SurfaceResponseBody::Ready { .. }));
+    }
+
+    #[test]
+    fn restart_and_reconnect_replay_each_persisted_message_once() {
+        let runtime = test_runtime();
+        let config = Config::test(runtime.clone());
+        let service = service_at(config.clone());
+        let (_, original) = surface(&service, 1, "one");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        service.surface_message(1, "m-1".into(), "survives".into(), vec![]);
+        agent_in.recv().unwrap();
+        assert_eq!(
+            drain(&original)
+                .iter()
+                .filter(|body| matches!(body, SurfaceResponseBody::Message { .. }))
+                .count(),
+            1
+        );
+        drop(service);
+
+        let restored = service_at(config);
+        for (connection, expected_generation) in [(2, 1), (3, 2)] {
+            let (outbox, replay) = sync_channel(256);
+            let generation = restored.register_surface(
+                connection,
+                SurfaceRegistration {
+                    id: "one".into(),
+                    name: "one".into(),
+                    widgets: vec![],
+                },
+                outbox,
+            );
+            assert_eq!(generation, expected_generation);
+            let replay = drain(&replay);
+            assert_eq!(
+                replay
+                    .iter()
+                    .filter(|body| matches!(body, SurfaceResponseBody::Message { .. }))
+                    .count(),
+                1
+            );
+            assert!(matches!(
+                &replay[0],
+                SurfaceResponseBody::Message { text, .. } if text == "survives"
+            ));
+            assert!(matches!(replay[1], SurfaceResponseBody::State { .. }));
+            assert!(matches!(replay[2], SurfaceResponseBody::Ready { .. }));
+        }
+        drop(restored);
+        std::fs::remove_dir_all(runtime).unwrap();
     }
 
     #[test]
@@ -946,9 +1007,9 @@ mod tests {
             agent_in.recv().unwrap();
             while inbox.try_recv().is_ok() {}
         }
-        let held = service.lock().conversation.clone();
+        let held: Vec<_> = service.lock().conversation.messages().cloned().collect();
         assert_eq!(held.len(), CONVERSATION_ENTRIES);
-        assert_eq!(held.front().unwrap().text, "line 5");
+        assert_eq!(held.first().unwrap().text, "line 5");
     }
 
     #[test]

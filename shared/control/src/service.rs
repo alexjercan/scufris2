@@ -527,7 +527,11 @@ fn validate_registration(surface: &SurfaceRegistration) -> Result<(), MessageErr
     text(&surface.name, MAX_SURFACE_NAME_BYTES, "surface name", false)?;
     widgets(&surface.widgets)
 }
-fn validate_conversation(message: &ConversationMessage) -> Result<(), MessageError> {
+/// Validates one canonical conversation message independently of its channel.
+///
+/// Durable replay uses the same bounds as a live surface response, so a state
+/// file cannot restore a message no surface would accept.
+pub fn validate_conversation_message(message: &ConversationMessage) -> Result<(), MessageError> {
     id(&message.surface, "surface id")?;
     text(&message.text, MAX_TEXT_BYTES, "message text", false)?;
     if let Some(details) = &message.details {
@@ -560,7 +564,7 @@ fn validate_surface_response(message: &SurfaceResponse) -> Result<(), MessageErr
             details,
             widgets,
             attachments,
-        } => validate_conversation(&ConversationMessage {
+        } => validate_conversation_message(&ConversationMessage {
             role: *role,
             surface: surface.clone(),
             text: text.clone(),

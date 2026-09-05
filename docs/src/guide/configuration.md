@@ -32,6 +32,7 @@ programs.scufris
 │   ├── enable
 │   ├── package
 │   ├── sessionDirectory
+│   ├── conversationFile
 │   ├── serviceName                  (read-only)
 │   └── remoteSurface
 │       ├── enable
@@ -56,30 +57,31 @@ programs.scufris
 
 ## Options by task
 
-| Task                                              | Option                                     | Default                                 |
-| ------------------------------------------------- | ------------------------------------------ | --------------------------------------- |
-| Install the agent                                 | `enable`                                   | `false`                                 |
-| Select Pi                                         | `agent.piPackage`                          | pinned `llm-agents` Pi                  |
-| Find projects                                     | `agent.projectRoots`                       | `~/personal`, `~/work`, `~/third-party` |
-| Replace the complete launcher                     | `agent.package`                            | module-rendered launcher                |
-| Run the conversation owner                        | `service.enable`                           | `false`                                 |
-| Store its session                                 | `service.sessionDirectory`                 | `$XDG_DATA_HOME/scufris/sessions`       |
-| Run the gateway and private Tailscale Serve route | `service.remoteSurface.enable`             | `false`                                 |
-| Select gateway port                               | `service.remoteSurface.port`               | `10440`                                 |
-| Read gateway secret                               | `service.remoteSurface.tokenFile`          | `null`; required when enabled           |
-| Run the Linux surface                             | `desktop.enable`                           | `false`; requires service               |
-| Select shared inference host                      | `aiToolsApi.baseUrl`                       | provider URL or `127.0.0.1:10300`       |
-| Override the desktop inference host               | `desktop.aiToolsApi.baseUrl`               | shared inference host                   |
-| Let Scufris manage the API                        | `aiToolsApi.enable`                        | `false`                                 |
-| Enable local speech                               | `desktop.speech.enable`                    | `false`                                 |
-| Select speech request                             | `desktop.speech.model`, `.voice`           | `piper-1`, `en_US-lessac-medium`        |
-| Select STT request                                | `desktop.transcription.model`, `.language` | `whisper-1`, `auto`                     |
-| Open/talk key                                     | `desktop.popupKey`                         | `Super+D`                               |
-| Hide/cancel key                                   | `desktop.backgroundKey`                    | derived `Super+Escape`                  |
-| Abort key                                         | `desktop.abortKey`                         | derived `Super+Delete`                  |
-| Add terminal menu action                          | `desktop.terminalCommand`                  | `null`                                  |
-| Locate the journal                                | `desktop.widgets.denPath`                  | `null`                                  |
-| Locate food data                                  | `desktop.widgets.macrosDatabase`           | `null`                                  |
+| Task                                              | Option                                     | Default                                    |
+| ------------------------------------------------- | ------------------------------------------ | ------------------------------------------ |
+| Install the agent                                 | `enable`                                   | `false`                                    |
+| Select Pi                                         | `agent.piPackage`                          | pinned `llm-agents` Pi                     |
+| Find projects                                     | `agent.projectRoots`                       | `~/personal`, `~/work`, `~/third-party`    |
+| Replace the complete launcher                     | `agent.package`                            | module-rendered launcher                   |
+| Run the conversation owner                        | `service.enable`                           | `false`                                    |
+| Store its Pi session                              | `service.sessionDirectory`                 | `$XDG_DATA_HOME/scufris/sessions`          |
+| Store canonical surface replay                    | `service.conversationFile`                 | `$XDG_DATA_HOME/scufris/conversation.json` |
+| Run the gateway and private Tailscale Serve route | `service.remoteSurface.enable`             | `false`                                    |
+| Select gateway port                               | `service.remoteSurface.port`               | `10440`                                    |
+| Read gateway secret                               | `service.remoteSurface.tokenFile`          | `null`; required when enabled              |
+| Run the Linux surface                             | `desktop.enable`                           | `false`; requires service                  |
+| Select shared inference host                      | `aiToolsApi.baseUrl`                       | provider URL or `127.0.0.1:10300`          |
+| Override the desktop inference host               | `desktop.aiToolsApi.baseUrl`               | shared inference host                      |
+| Let Scufris manage the API                        | `aiToolsApi.enable`                        | `false`                                    |
+| Enable local speech                               | `desktop.speech.enable`                    | `false`                                    |
+| Select speech request                             | `desktop.speech.model`, `.voice`           | `piper-1`, `en_US-lessac-medium`           |
+| Select STT request                                | `desktop.transcription.model`, `.language` | `whisper-1`, `auto`                        |
+| Open/talk key                                     | `desktop.popupKey`                         | `Super+D`                                  |
+| Hide/cancel key                                   | `desktop.backgroundKey`                    | derived `Super+Escape`                     |
+| Abort key                                         | `desktop.abortKey`                         | derived `Super+Delete`                     |
+| Add terminal menu action                          | `desktop.terminalCommand`                  | `null`                                     |
+| Locate the journal                                | `desktop.widgets.denPath`                  | `null`                                     |
+| Locate food data                                  | `desktop.widgets.macrosDatabase`           | `null`                                     |
 
 Package options (`ctlPackage`, `service.package`, and `desktop.package`) use the
 matching package from the pinned Scufris flake. Override them only when composing
@@ -119,6 +121,7 @@ programs.scufris = {
   service = {
     enable = true;
     sessionDirectory = "${config.xdg.dataHome}/scufris/sessions";
+    conversationFile = "${config.xdg.dataHome}/scufris/conversation.json";
   };
 
   desktop = {

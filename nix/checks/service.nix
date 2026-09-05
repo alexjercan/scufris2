@@ -46,10 +46,11 @@ in
       done
 
       ${service}/bin/scufris-service --help | grep -F 'Usage: scufris-service'
-      # The agent and the session directory are options as well as variables,
-      # so one run can be pointed somewhere else from a terminal.
+      # The agent and both durable conversation paths are options as well as
+      # variables, so one run can be pointed somewhere else from a terminal.
       ${service}/bin/scufris-service --help | grep -F 'SCUFRIS_SERVICE_AGENT'
       ${service}/bin/scufris-service --help | grep -F 'SCUFRIS_SERVICE_SESSION_DIR'
+      ${service}/bin/scufris-service --help | grep -F 'SCUFRIS_SERVICE_CONVERSATION_FILE'
       ! ${service}/bin/scufris-service --nonsense
       ${service}/bin/scufris-surface-gateway --help | grep -F 'Usage: scufris-surface-gateway'
       ${service}/bin/scufris-surface-gateway --help | grep -F 'SCUFRIS_GATEWAY_TOKEN_FILE'
@@ -99,6 +100,7 @@ in
     assert lib.elem pkgs.tailscale serviceHome.config.home.packages;
     assert lib.elem "SCUFRIS_SERVICE_AGENT=${lib.getExe testAgent}" serviceUnit.Service.Environment;
     assert lib.elem "SCUFRIS_SERVICE_SESSION_DIR=/home/scufris-test/.local/share/scufris/sessions" serviceUnit.Service.Environment;
+    assert lib.elem "SCUFRIS_SERVICE_CONVERSATION_FILE=/home/scufris-test/.local/share/scufris/conversation.json" serviceUnit.Service.Environment;
     # The client belongs to whoever enabled a half of Scufris, and it is one
     # package so enabling both halves does not collide.
     assert lib.elem ctl serviceHome.config.home.packages;

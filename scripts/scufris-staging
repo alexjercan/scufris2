@@ -223,6 +223,7 @@ export SCUFRIS_RUNTIME_DIR="$runtime_dir"
 export PI_CODING_AGENT_DIR="$pi_agent"
 export SCUFRIS_PROJECT_ROOTS="[\"$projects\"]"
 export SCUFRIS_SERVICE_AGENT="$root/scripts/scufris-agent"
+export SCUFRIS_SERVICE_CONVERSATION_FILE="$staging/data/scufris/conversation.json"
 # API metadata is public only inside the isolated staging gateway. Functional
 # routes still require the bearer token.
 export SCUFRIS_GATEWAY_DOCS=1
@@ -265,6 +266,7 @@ scufris-staging: the staging environment
   PI_CODING_AGENT_DIR=$PI_CODING_AGENT_DIR
   SCUFRIS_PROJECT_ROOTS=$SCUFRIS_PROJECT_ROOTS
   SCUFRIS_SERVICE_AGENT=$SCUFRIS_SERVICE_AGENT
+  SCUFRIS_SERVICE_CONVERSATION_FILE=$SCUFRIS_SERVICE_CONVERSATION_FILE
   SCUFRIS_STT_ENDPOINT=$SCUFRIS_STT_ENDPOINT
   SCUFRIS_TTS_ENDPOINT=$SCUFRIS_TTS_ENDPOINT
   ai_tools_api=$ai_tools_mode

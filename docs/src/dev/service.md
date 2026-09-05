@@ -10,7 +10,7 @@ terminal -> control.sock ------+
 local HTTP -> content.sock ----+
 ```
 
-`scufris-service` owns the Pi RPC process, canonical user-facing state, and the
+`scufris-service` owns the Pi RPC process, canonical user-facing state, the
 latest 200 conversation messages, and managed attachment content. It exposes
 three protocol-v5 sockets and one private HTTP socket:
 
@@ -43,9 +43,23 @@ There is no control watch, abort, debug, event stream, or prompt command.
 
 ## Replay and broadcast
 
-The service keeps the latest 200 canonical `surface.message` entries. Every
-accepted user message and every final assistant response is broadcast to every
-registered surface.
+The service keeps the latest 200 canonical `surface.message` entries. It
+atomically snapshots them at `$XDG_DATA_HOME/scufris/conversation.json` before
+each live broadcast. The file is mode 0600 in a mode-0700 directory and has an
+explicit format version. A completed snapshot therefore survives a service
+restart or Home Manager switch independently of Pi's session JSONL. An I/O
+error never exposes a partial snapshot: the service logs it, keeps the current
+in-memory replay, and retries the complete snapshot on the next message.
+
+A malformed snapshot is moved to `conversation.json.corrupt`; a snapshot from
+an unsupported format version is moved to `conversation.json.incompatible`.
+Neither prevents startup. Exact repeated internal sequence records are
+collapsed during recovery, but equal messages with distinct sequence records
+remain distinct conversation turns. Only the latest 200 restored entries are
+retained and written back in canonical form.
+
+Every accepted user message and every final assistant response is broadcast to
+every registered surface.
 
 Registration queues these under one lock:
 

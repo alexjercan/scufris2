@@ -163,8 +163,18 @@ in {
         default = "${config.xdg.dataHome}/scufris/sessions";
         defaultText = lib.literalExpression "\"\${config.xdg.dataHome}/scufris/sessions\"";
         description = ''
-          Absolute directory the service keeps its Pi conversation in. The
+          Absolute directory where the service keeps the Pi model session. The
           service is its only owner.
+        '';
+      };
+
+      conversationFile = lib.mkOption {
+        type = lib.types.strMatching "/.*";
+        default = "${config.xdg.dataHome}/scufris/conversation.json";
+        defaultText = lib.literalExpression "\"\${config.xdg.dataHome}/scufris/conversation.json\"";
+        description = ''
+          Absolute file where the service keeps its bounded canonical surface
+          replay. Its parent is private service-owned data.
         '';
       };
 
@@ -383,6 +393,7 @@ in {
           Environment = [
             "SCUFRIS_SERVICE_AGENT=${lib.getExe agentCfg.package}"
             "SCUFRIS_SERVICE_SESSION_DIR=${serviceCfg.sessionDirectory}"
+            "SCUFRIS_SERVICE_CONVERSATION_FILE=${serviceCfg.conversationFile}"
           ];
           # The service restarts its own agent, so it going down is a fault of
           # the service itself and the conversation is on disk either way.

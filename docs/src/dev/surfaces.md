@@ -111,6 +111,16 @@ optional widget calls, and zero to eight immutable attachment descriptors. Each
 descriptor contains the opaque ID, display name, media type, and size. The
 `surface` field is the stable ID associated with that turn.
 
+`text` is literal plain prose on every surface. Markdown delimiters in it stay
+literal, while safe bare HTTP and HTTPS URLs can become native links. Only
+`details` is Markdown. Current desktop and iPhone surfaces support paragraphs,
+emphasis, strong text, inline and fenced code, headings, ordered and unordered
+lists, block quotes, thematic rules, Markdown links, and bare URL autolinks.
+They render no response HTML or remote media. Only credential-free HTTP and
+HTTPS destinations with a host are actionable. Each surface applies semantic
+hierarchy, selection, link focus, and code scrolling in its native UI with the
+shared Gruber palette.
+
 A conversation view follows the newest message only while the reader is within
 24 points of the end of it. A reader who has scrolled away keeps that position
 when messages arrive and is offered a down-arrow control back to the end,

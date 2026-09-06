@@ -14,6 +14,7 @@ mod command;
 mod config;
 mod conversation;
 mod display;
+mod external;
 mod focus;
 mod form;
 mod hud;
@@ -463,6 +464,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             hud_attach,
             hud_detach,
             hud_open_attachment,
+            hud_open_link,
             hud_save_attachment,
             hud_close,
             hud_toggle
@@ -992,6 +994,12 @@ async fn hud_open_attachment(
             Err(error)
         }
     }
+}
+
+/// Opens one safe conversation link in the system browser.
+#[tauri::command]
+fn hud_open_link(url: String) -> Result<(), String> {
+    external::open(&url)
 }
 
 /// Saves one canonical attachment to a destination chosen by the person.

@@ -15,8 +15,22 @@ interface TauriEventModule {
   ): Promise<unknown>;
 }
 
+interface ScufrisMarkup {
+  renderPlain(
+    parent: HTMLElement,
+    source: string,
+    open: (url: string) => void,
+  ): void;
+  renderDetails(
+    parent: HTMLElement,
+    source: string,
+    open: (url: string) => void,
+  ): void;
+}
+
 interface Window {
   __TAURI__: { core: TauriCore; event: TauriEventModule };
+  scufrisMarkup: ScufrisMarkup;
 }
 
 // The payload shapes are owned by the Rust side (app.rs); the casts at the

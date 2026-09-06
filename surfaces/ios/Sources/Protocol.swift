@@ -3,6 +3,15 @@ import Foundation
 let scufrisProtocolVersion = 5
 let scufrisMaximumMessageBytes = 64 * 1024
 let scufrisMaximumTextBytes = 8 * 1024
+let scufrisMaximumDetailsBytes = 32 * 1024
+
+func conversationDetailsAreValid(_ details: String?) -> Bool {
+    guard let details else { return true }
+    return !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        && details.utf8.count <= scufrisMaximumDetailsBytes
+        && !details.contains("\0")
+        && !details.contains("\r")
+}
 
 struct SurfaceRegistration: Encodable {
     let id: String

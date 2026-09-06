@@ -7,7 +7,9 @@ committed.
 The application connects to the authenticated protocol-v5 surface gateway over
 `wss://`, stores its URL, bearer token, and stable surface identity in the iOS
 Keychain, replays the canonical conversation, and submits text with optional
-managed attachment IDs.
+managed attachment IDs. Response `text` stays literal plain prose with safe web
+URL autolinks. Optional `details` uses native selectable Markdown blocks and
+safe native links. No response HTML or remote web view is rendered.
 
 The document and photo controls upload one selected object through the
 authenticated HTTPS gateway. The composer holds up to eight canonical

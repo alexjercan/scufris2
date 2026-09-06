@@ -11,6 +11,7 @@
   "include": [
     "orb-engine.d.ts",
     "tauri.d.ts",
+    "markdown.ts",
     "pill.ts",
     "textbox.ts",
     "hud.ts",

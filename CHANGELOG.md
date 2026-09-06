@@ -9,6 +9,13 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Changed
+
+- Final-response details now render as selectable Markdown on desktop and
+  iPhone, with Gruber hierarchy and code styling. Safe web links are distinct
+  and open natively; raw HTML and unsafe URL schemes remain inert. Required
+  short response text stays literal plain prose, with safe bare URL autolinks.
+
 ## [2.1.6] - 2026-09-06
 
 ### Fixed

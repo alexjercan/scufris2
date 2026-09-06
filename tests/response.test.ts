@@ -8,8 +8,12 @@ import response, {
 } from "../agent/extensions/scufris/response.ts";
 import { AGENT_RESPONSE_EVENT } from "../agent/extensions/scufris/service/client.ts";
 
-test("plain response text is bounded prose", () => {
+test("plain response text is bounded literal prose", () => {
   assert.equal(plainProse("  All tests passed.  "), "All tests passed.");
+  assert.equal(
+    plainProse("**Accidental Markdown** and `code` stay literal."),
+    "**Accidental Markdown** and `code` stay literal.",
+  );
   assert.equal(plainProse(""), undefined);
   assert.equal(plainProse("x".repeat(9 * 1024)), undefined);
 });
@@ -80,9 +84,14 @@ test("the final response tool emits one atomic response", async () => {
   }
 });
 
-test("the policy requires atomic details and widgets", () => {
-  assert.match(finalResponsePolicy, /mandatory short plain prose/);
-  assert.match(finalResponsePolicy, /optional Markdown/);
+test("the policy keeps Markdown out of text and in atomic details", () => {
+  assert.match(finalResponsePolicy, /mandatory short literal plain prose/);
+  assert.match(finalResponsePolicy, /do not put Markdown headings, lists/);
+  assert.match(finalResponsePolicy, /code fences, inline code/);
+  assert.match(
+    finalResponsePolicy,
+    /formatted explanation in optional Markdown details/,
+  );
   assert.match(finalResponsePolicy, /optional stored attachment IDs/);
   assert.match(finalResponsePolicy, /optional best-effort presentation calls/);
 });

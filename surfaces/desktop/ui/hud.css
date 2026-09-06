@@ -334,11 +334,132 @@ body {
 .details {
   grid-column: 2;
   min-width: 0;
-  margin: 0;
-  color: var(--muted);
+  color: var(--fg);
   font: inherit;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.details > * + * {
+  margin-top: 9px;
+}
+
+.details p {
+  white-space: pre-wrap;
+}
+
+.details h1,
+.details h2,
+.details h3,
+.details h4,
+.details h5,
+.details h6 {
+  color: var(--fg-strong);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.details h1 {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+  color: var(--wisteria);
+  font-size: 1.18em;
+}
+
+.details h2 {
+  color: var(--wisteria);
+  font-size: 1.1em;
+}
+
+.details h3 {
+  color: var(--quartz);
+  font-size: 1.04em;
+}
+
+.details h4,
+.details h5,
+.details h6 {
+  color: var(--quartz);
+  font-size: 1em;
+}
+
+.details ul,
+.details ol {
+  padding-left: 24px;
+}
+
+.details li + li {
+  margin-top: 3px;
+}
+
+.details li::marker {
+  color: var(--quartz);
+  font-weight: 700;
+}
+
+.details blockquote {
+  padding: 4px 0 4px 11px;
+  border-left: 2px solid var(--niagara);
+  color: var(--muted);
+}
+
+.details blockquote > * + * {
+  margin-top: 7px;
+}
+
+.details hr {
+  height: 1px;
+  border: 0;
+  background: var(--line);
+}
+
+.inline-code,
+.code-block {
+  background: #161616;
+  color: var(--yellow);
+}
+
+.inline-code {
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  font: inherit;
+  white-space: break-spaces;
+}
+
+.code-block {
+  max-width: 100%;
+  border-left: 2px solid var(--quartz);
+  padding: 9px 11px;
+  overflow-x: auto;
+  font: inherit;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.code-block code {
+  font: inherit;
+}
+
+.what a,
+.details a {
+  color: var(--niagara);
+  text-decoration: underline;
+  text-decoration-color: var(--quartz);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.what a:hover,
+.details a:hover {
+  color: var(--yellow);
+  text-decoration-color: var(--yellow);
+}
+
+.what a:focus-visible,
+.details a:focus-visible {
+  color: var(--yellow);
+  outline: 1px solid var(--yellow);
+  outline-offset: 2px;
 }
 
 /* Scufris is what the person opened this window to read, so it is the brighter

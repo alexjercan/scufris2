@@ -8,6 +8,7 @@ fn main() {
     println!("cargo:rerun-if-changed=ui/textbox.css");
     println!("cargo:rerun-if-changed=ui/textbox.html");
     println!("cargo:rerun-if-changed=ui/hud.ts");
+    println!("cargo:rerun-if-changed=ui/markdown.ts");
     println!("cargo:rerun-if-changed=ui/hud.css");
     println!("cargo:rerun-if-changed=ui/hud.html");
     println!("cargo:rerun-if-changed=ui/latest.svg");

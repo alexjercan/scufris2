@@ -775,6 +775,44 @@ mod tests {
     }
 
     #[test]
+    fn canonical_details_are_optional_bounded_markdown_data() {
+        let message = ConversationMessage {
+            role: ConversationRole::Assistant,
+            surface: "desk".into(),
+            text: "Literal **plain** text.".into(),
+            details: Some(
+                "# Result\n\n- **Passed**\n- [Report](https://example.com/report)\n\n```rs\nlet answer = 42;\n```"
+                    .into(),
+            ),
+            widgets: None,
+            attachments: vec![],
+        };
+        assert!(validate_conversation_message(&message).is_ok());
+        assert!(
+            validate_conversation_message(&ConversationMessage {
+                details: None,
+                ..message.clone()
+            })
+            .is_ok()
+        );
+        for malformed in [
+            String::new(),
+            "  \n".into(),
+            "bad\rline".into(),
+            "bad\0line".into(),
+            "x".repeat(MAX_DETAILS_BYTES + 1),
+        ] {
+            assert!(
+                validate_conversation_message(&ConversationMessage {
+                    details: Some(malformed),
+                    ..message.clone()
+                })
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
     fn bounded_atomic_response_round_trips() {
         let response = AgentRequest::new(AgentRequestBody::Response {
             text: "Done.".into(),

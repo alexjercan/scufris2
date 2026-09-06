@@ -602,6 +602,9 @@ final class ConversationStore: NSObject, ObservableObject {
             else {
                 throw ProtocolFailure.invalidMessage("conversation text is outside its bounds")
             }
+            guard conversationDetailsAreValid(message.details) else {
+                throw ProtocolFailure.invalidMessage("conversation details are outside their bounds")
+            }
             let attachments = message.attachments ?? []
             guard attachments.count <= 8,
                   attachments.allSatisfy(\.isProtocolValid),

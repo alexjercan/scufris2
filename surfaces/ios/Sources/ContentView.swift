@@ -736,7 +736,6 @@ private struct ConversationRow: View {
     // reader's own text size. The markers around them do not: they are
     // furniture, and one that grew would take the column the words start at.
     @ScaledMetric(relativeTo: .body) private var textSize: CGFloat = 13
-    @ScaledMetric(relativeTo: .footnote) private var detailSize: CGFloat = 11
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -755,16 +754,20 @@ private struct ConversationRow: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 9) {
-                Text(entry.text)
+                Text(ConversationMarkup.plain(entry.text))
                     .font(.system(size: textSize, design: .monospaced))
                     .foregroundStyle(
                         entry.role == .assistant
                             ? ScufrisPalette.foregroundStrong
                             : ScufrisPalette.foreground
                     )
+                    .tint(ScufrisPalette.niagara)
                     .lineSpacing(4)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .environment(\.openURL, OpenURLAction { url in
+                        ConversationLink.safe(url) == nil ? .discarded : .systemAction
+                    })
                     .accessibilityLabel(
                         entry.role == .user
                             ? "You said: \(entry.text)"
@@ -786,11 +789,7 @@ private struct ConversationRow: View {
 
                 if let details = entry.details, !details.isEmpty {
                     DisclosureGroup {
-                        Text(details)
-                            .font(.system(size: detailSize, design: .monospaced))
-                            .foregroundStyle(ScufrisPalette.foreground)
-                            .lineSpacing(3)
-                            .textSelection(.enabled)
+                        MarkdownDetails(details)
                             .padding(.top, 4)
                     } label: {
                         Text("DETAILS")
@@ -1182,7 +1181,7 @@ enum SurfaceVisualState: String, Equatable {
     }
 }
 
-private enum ScufrisPalette {
+enum ScufrisPalette {
     static let background = Color(red: 16 / 255, green: 16 / 255, blue: 16 / 255)
     static let line = Color(red: 51 / 255, green: 48 / 255, blue: 46 / 255)
     static let lineStrong = Color(red: 82 / 255, green: 73 / 255, blue: 78 / 255)

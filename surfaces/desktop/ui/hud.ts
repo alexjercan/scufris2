@@ -6,9 +6,10 @@
 // line means and src/hud.rs decides what the window does. What arrives here is
 // lines to draw and a notice to show; what leaves is Enter and Escape.
 //
-// The lines it draws are text. Not markdown, not tool calls, not thinking - the
-// service's conversation projection is what was said. The one transient
-// `thinking...` row is presentation of service state and never enters history.
+// Required response text is literal plain prose. Details alone are safe
+// Markdown. Both can make bare HTTP and HTTPS URLs actionable, but neither can
+// create executable HTML. The one transient `thinking...` row is presentation
+// of service state and never enters history.
 //
 // Wrapped in a block: the pages are separate classic scripts in one tsc
 // project, so a name at the top level of one is a name in the others' global
@@ -125,6 +126,13 @@
     return button;
   };
 
+  const openLink = (url: string): void => {
+    void invoke("hud_open_link", { url }).catch(() => {
+      notice.dataset["tone"] = "trouble";
+      notice.textContent = "The link could not be opened.";
+    });
+  };
+
   // ---------- following the newest line ----------
 
   /** True while the person is reading the bottom of the conversation. */
@@ -213,7 +221,7 @@
 
     const what = document.createElement("span");
     what.className = "what";
-    what.textContent = entry.text;
+    window.scufrisMarkup.renderPlain(what, entry.text, openLink);
     line.append(who, what);
     if (entry.attachments && entry.attachments.length > 0) {
       const attachments = document.createElement("span");
@@ -258,9 +266,10 @@
       line.append(attachments);
     }
     if (entry.details) {
-      const details = document.createElement("pre");
+      const details = document.createElement("div");
       details.className = "details";
-      details.textContent = entry.details;
+      details.setAttribute("aria-label", "Response details");
+      window.scufrisMarkup.renderDetails(details, entry.details, openLink);
       line.append(details);
     }
     return line;

@@ -9,7 +9,7 @@ export const RESPONSE_ENTRY = "scufris-response-v5";
 export const maxDetailBytes = 32 * 1024;
 export const maxResponseBytes = 8 * 1024;
 export const finalResponsePolicy =
-  "Use scufris_final_response for every final answer. Put mandatory short plain prose in text, optional Markdown in details, optional stored attachment IDs in attachments, and optional best-effort presentation calls in widgets. Call it as the only tool in the final tool batch. Do not write assistant text before or after it.";
+  "Use scufris_final_response for every final answer. Put mandatory short literal plain prose in text: do not put Markdown headings, lists, emphasis, code fences, inline code, or Markdown links there. Put any formatted explanation in optional Markdown details. Put optional stored attachment IDs in attachments and optional best-effort presentation calls in widgets. Call scufris_final_response as the only tool in the final tool batch. Do not write assistant text before or after it.";
 
 export interface ResponseEntry extends AtomicResponse {
   version: 5;
@@ -134,9 +134,18 @@ export default function response(pi: ExtensionAPI): void {
       renderShell: "self",
       parameters: Type.Object(
         {
-          text: Type.String({ minLength: 1, maxLength: maxResponseBytes }),
+          text: Type.String({
+            minLength: 1,
+            maxLength: maxResponseBytes,
+            description: "Short literal plain prose. Do not use Markdown.",
+          }),
           details: Type.Optional(
-            Type.String({ minLength: 1, maxLength: maxDetailBytes }),
+            Type.String({
+              minLength: 1,
+              maxLength: maxDetailBytes,
+              description:
+                "Optional Markdown explanation and structured detail.",
+            }),
           ),
           attachments: Type.Optional(
             Type.Array(Type.String({ minLength: 1, maxLength: 64 }), {

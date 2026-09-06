@@ -22,6 +22,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { URL as NodeURL } from "node:url";
 import { createContext, runInContext } from "node:vm";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
@@ -31,6 +32,7 @@ interface Compiled {
   pill: string;
   textbox: string;
   hud: string;
+  markdown: string;
   form: string;
   engine: string;
 }
@@ -52,6 +54,7 @@ function pages(): Compiled {
       pill: readFileSync(join(ui, "dist", "pill.js"), "utf8"),
       textbox: readFileSync(join(ui, "dist", "textbox.js"), "utf8"),
       hud: readFileSync(join(ui, "dist", "hud.js"), "utf8"),
+      markdown: readFileSync(join(ui, "dist", "markdown.js"), "utf8"),
       form: readFileSync(join(ui, "dist", "form.js"), "utf8"),
       engine: readFileSync(join(ui, "orb-engine.js"), "utf8"),
     };
@@ -122,7 +125,9 @@ class Stub {
   parent: Stub | null = null;
 
   get textContent(): string {
-    return this.content;
+    return (
+      this.content + this.children.map((child) => child.textContent).join("")
+    );
   }
 
   set textContent(value: string) {
@@ -357,12 +362,20 @@ function run(page: Page, ids: string[], scripts: string[]): void {
       error: () => {},
     },
     navigator: {},
+    URL: NodeURL,
     document: Object.assign(page.document, {
       getElementById: (id: string): Stub | null =>
         page.elements.get(id) ?? null,
       createElement: (tag: string): Stub => {
         const node = new Stub();
         node.tagName = tag.toUpperCase();
+        node.page = page;
+        return node;
+      },
+      createTextNode: (text: string): Stub => {
+        const node = new Stub();
+        node.tagName = "#TEXT";
+        node.content = text;
         node.page = page;
         return node;
       },
@@ -503,7 +516,7 @@ function hud(taken = true, lines: Record<string, string>[] = []): Page {
   page.add("attach", "BUTTON");
   page.add("latest", "BUTTON");
   page.add("fresh", "P");
-  run(page, [], [pages().hud]);
+  run(page, [], [pages().markdown, pages().hud]);
   return page;
 }
 
@@ -882,6 +895,16 @@ test("every state paints an orb at the size the frame is built for", () => {
 
 // ---------- the conversation window ----------
 
+/** Every descendant with one tag, in document order. */
+function descendants(node: Stub, tagName: string): Stub[] {
+  const matching: Stub[] = [];
+  for (const child of node.children) {
+    if (child.tagName === tagName.toUpperCase()) matching.push(child);
+    matching.push(...descendants(child, tagName));
+  }
+  return matching;
+}
+
 /** Presses one key on the conversation page, answering whether it was taken. */
 function tap(page: Page, key: string, shiftKey = false): boolean {
   let prevented = false;
@@ -927,6 +950,113 @@ test("the conversation window draws every line it is handed, and who said it", a
     added.children.map((part) => part.content),
     ["oracle", "mind the step"],
   );
+});
+
+test("plain response text stays literal and autolinks only safe bare web URLs", async () => {
+  const source =
+    "# literal **strong** `code` https://example.com/report. javascript:https://bad.test file:///etc/passwd https://user:secret@example.com/";
+  const page = hud(true, [{ ...line("assistant", source), details: "" }]);
+  await settle();
+
+  const what = page.element("lines").children[0]?.children[1];
+  assert.ok(what !== undefined);
+  assert.equal(what.textContent, source);
+  assert.deepEqual(
+    descendants(what, "a").map((anchor) => anchor.getAttribute("href")),
+    ["https://example.com/report"],
+  );
+  for (const tag of ["h1", "strong", "em", "code", "pre", "ul"]) {
+    assert.equal(descendants(what, tag).length, 0, `${tag} escaped plain text`);
+  }
+
+  descendants(what, "a")[0]?.dispatch("click", { preventDefault: () => {} });
+  await settle();
+  assert.equal(
+    page.lastCall("hud_open_link")["url"],
+    "https://example.com/report",
+  );
+});
+
+test("details render the supported Markdown as semantic inert DOM", async () => {
+  const details = `## Result
+
+A **strong** and *careful* paragraph with \`inline\` code, [docs](https://example.com/docs), and https://example.org/plain.
+
+- one
+- two
+
+3. third
+4. fourth
+
+> quoted **text**
+
+---
+
+\`\`\`ts
+const answer = "<script>";
+\`\`\`
+
+<script src="https://evil.test/a.js">alert(1)</script>
+
+[unsafe](javascript:alert(1)) [local](file:///etc/passwd)`;
+  const page = hud(true, [
+    { ...line("assistant", "Rendered below."), details },
+  ]);
+  await settle();
+
+  const rendered = page.element("lines").children[0]?.children[2];
+  assert.ok(rendered !== undefined);
+  assert.equal(rendered.className, "details");
+  for (const tag of [
+    "h2",
+    "p",
+    "strong",
+    "em",
+    "code",
+    "ul",
+    "ol",
+    "blockquote",
+    "hr",
+    "pre",
+  ]) {
+    assert.ok(descendants(rendered, tag).length > 0, `details have no ${tag}`);
+  }
+  assert.equal(descendants(rendered, "script").length, 0);
+  assert.equal(descendants(rendered, "img").length, 0);
+  assert.match(
+    rendered.textContent,
+    /<script src="https:\/\/evil\.test\/a\.js">/,
+  );
+  assert.match(rendered.textContent, /unsafe local/);
+
+  const links = descendants(rendered, "a");
+  assert.deepEqual(
+    links.map((anchor) => anchor.getAttribute("href")),
+    ["https://example.com/docs", "https://example.org/plain"],
+  );
+  links[0]?.dispatch("click", { preventDefault: () => {} });
+  await settle();
+  assert.equal(
+    page.lastCall("hud_open_link")["url"],
+    "https://example.com/docs",
+  );
+});
+
+test("absent and malformed details leave the plain response intact", async () => {
+  const page = hud(true, [
+    line("assistant", "No details."),
+    {
+      ...line("assistant", "Malformed details."),
+      details: "[unfinished **strong",
+    },
+  ]);
+  await settle();
+
+  const lines = page.element("lines").children;
+  assert.equal(lines[0]?.children.length, 2);
+  assert.equal(lines[0]?.children[1]?.textContent, "No details.");
+  assert.equal(lines[1]?.children[2]?.textContent, "[unfinished **strong");
+  assert.equal(descendants(lines[1]!, "strong").length, 0);
 });
 
 test("managed attachments are selected, rendered inline, saved, and removed by id", async () => {
@@ -1448,6 +1578,22 @@ test("every part of a message begins in the same column", () => {
     rule(source, '.line[data-run="continued"]::before'),
     /left:\s*calc\(var\(--gutter\) \+ var\(--step\)\)/,
   );
+});
+
+test("Markdown hierarchy, links, and code use the existing Gruber grammar", () => {
+  const source = readFileSync(join(ui, "hud.css"), "utf8");
+  const links = rule(source, ".what a,\n.details a");
+  assert.match(links, /color:\s*var\(--niagara\)/);
+  assert.match(links, /text-decoration:\s*underline/);
+  assert.match(
+    rule(source, ".what a:focus-visible,\n.details a:focus-visible"),
+    /var\(--yellow\)/,
+  );
+  const code = rule(source, ".inline-code,\n.code-block");
+  assert.match(code, /background:\s*#161616/);
+  assert.match(code, /color:\s*var\(--yellow\)/);
+  assert.match(source, /\.code-block\s*\{[^}]*overflow-x:\s*auto/);
+  assert.match(rule(source, ".details h1"), /color:\s*var\(--wisteria\)/);
 });
 
 test("the way back is drawn over the conversation and can be hidden", () => {

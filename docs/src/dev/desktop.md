@@ -31,8 +31,19 @@ sockets for a coordinated staging run.
 ## Conversation window
 
 The HUD stores at most 200 canonical `surface.message` entries. It displays the
-LLM-style role, plain text, and optional Markdown details. It retains widget
-call metadata as part of each message but does not execute calls from replay.
+LLM-style role, literal plain `text`, and optional Markdown `details`. Markdown
+punctuation in `text` stays visible; only bare HTTP and HTTPS URLs become links.
+Details render paragraphs, emphasis, strong text, inline and fenced code,
+headings, ordered and unordered lists, block quotes, thematic rules, Markdown
+links, and bare URL autolinks. It retains widget call metadata as part of each
+message but does not execute calls from replay.
+
+Both fields are untrusted. The renderer creates semantic elements and text nodes
+instead of injecting HTML. Raw HTML stays inert text. Only credential-free HTTP
+and HTTPS URLs with a host can be opened, and the Rust command repeats that
+validation before it passes a URL to packaged `xdg-open`. Links use the existing
+Gruber Niagara color, underline, and yellow focus state. Code, hierarchy, quotes,
+and rules use the existing Gruber tokens.
 
 Typing sends `surface.message { id, text, attachments }`. The `+` control opens
 a native file picker. The desktop gives the selected local path only to the

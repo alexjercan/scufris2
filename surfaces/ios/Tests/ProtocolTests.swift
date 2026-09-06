@@ -194,6 +194,7 @@ struct ProtocolTests {
             #"{"v":5,"type":"surface.message","role":"user","surface":"ios","text":"Hello."}"#.utf8
         )
         let textOnly = try JSONDecoder().decode(IncomingConversationMessage.self, from: omitted)
+        #expect(textOnly.details == nil)
         #expect(textOnly.attachments == nil)
     }
 }

@@ -350,7 +350,10 @@ mod tests {
             },
             surface: format!("surface-{}", index % 3),
             text: format!("message {index}"),
-            details: (index == 1).then(|| "## Durable details".into()),
+            details: (index == 1).then(|| {
+                "## Durable details\n\n- **Passed** with `code`.\n- [Report](https://example.com/report)"
+                    .into()
+            }),
             widgets: (index == 1).then(|| {
                 vec![WidgetCall {
                     id: "widget-1".into(),

@@ -9,12 +9,14 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [2.1.7] - 2026-09-07
+
 ### Changed
 
-- Final-response details now render as selectable Markdown on desktop and
-  iPhone, with Gruber hierarchy and code styling. Safe web links are distinct
-  and open natively; raw HTML and unsafe URL schemes remain inert. Required
-  short response text stays literal plain prose, with safe bare URL autolinks.
+- Desktop and iPhone final-response `details` now render full selectable
+  Markdown with Gruber styling. Required `text` stays literal, with only safe
+  bare HTTP(S) URLs autolinked. Raw HTML, unsafe URL schemes, and other unsafe
+  content remain inert.
 
 ## [2.1.6] - 2026-09-06
 
@@ -591,7 +593,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.1.6...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.1.7...HEAD
+[2.1.7]: https://github.com/alexjercan/scufris2/compare/v2.1.6...v2.1.7
 [2.1.6]: https://github.com/alexjercan/scufris2/compare/v2.1.5...v2.1.6
 [2.1.5]: https://github.com/alexjercan/scufris2/compare/v2.1.4...v2.1.5
 [2.1.4]: https://github.com/alexjercan/scufris2/compare/v2.1.3...v2.1.4

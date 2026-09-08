@@ -177,6 +177,13 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   documentation always said they were. On the way out, backends that ignore
   SIGTERM are now actually killed rather than left running until the machine is
   rebooted.
+- A worker that never reached its harness now says so. `scufris-jobs launch`
+  runs inside the tmux pane, and everything it could refuse before the harness
+  started - a missing executable, a workspace that moved - printed into a pane
+  nobody watches and exited. The job stayed `running` with nothing after
+  `worker starting`, so the foreground read it as a worker still thinking and
+  the only way out was noticing by hand and restarting it. Such a launch now
+  publishes a `failed` event with the reason.
 
 ## [2.3.0] - 2026-09-08
 

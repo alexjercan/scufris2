@@ -2282,6 +2282,22 @@ with (directory / 'status').open('a') as stream:
             (directory / "report.md").write_text(report)
         return directory
 
+    def sprout_job(self, job_id: str, feature: str) -> Path:
+        return self.fixture_job(
+            job_id,
+            {
+                "project": "projects/nova-protocol",
+                "project_root": str(self.project),
+                "project_root_device": self.project.stat().st_dev,
+                "project_root_inode": self.project.stat().st_ino,
+                "context_fingerprint": hashlib.sha256(b"context").hexdigest(),
+                "workspace": "sprout",
+                "feature": feature,
+                "working_directory": str(self.project),
+                "landing_branch": "master",
+            },
+        )
+
     def merged_feature_commit(self) -> str:
         self.git("checkout", "-q", "-b", "feature-work")
         (self.project / "RESULT.md").write_text("feature work\n")
@@ -2457,20 +2473,7 @@ with (directory / 'status').open('a') as stream:
             "exit 0\n",
         )
         job_id = "aa0000000009"
-        self.fixture_job(
-            job_id,
-            {
-                "project": "projects/nova-protocol",
-                "project_root": str(self.project),
-                "project_root_device": self.project.stat().st_dev,
-                "project_root_inode": self.project.stat().st_ino,
-                "context_fingerprint": hashlib.sha256(b"context").hexdigest(),
-                "workspace": "sprout",
-                "feature": "unmerged-work",
-                "working_directory": str(self.project),
-                "landing_branch": "master",
-            },
-        )
+        self.sprout_job(job_id, "unmerged-work")
         refused = self.call(
             "stop", {"job_id": job_id, "remove_workspace": True}, check=False
         )
@@ -2487,6 +2490,41 @@ with (directory / 'status').open('a') as stream:
         )["result"]
         self.assertEqual(abandoned["state"], "stopped")
         self.assertIn("rm unmerged-work --force", recorded.read_text())
+        self.assert_archived(job_id)
+
+    def test_stop_withholds_force_from_a_sprout_that_does_not_know_it(self) -> None:
+        # Sprout ships separately, so a machine can still hold the version that
+        # deletes without asking. Handing that one `--force` would fail every
+        # abandon on an unknown argument, and the probe exists to prevent it.
+        recorded = self.root / "sprout-argv.log"
+        self.fake_program(
+            "sprout",
+            "#!/bin/sh\n"
+            f'printf "%s\\n" "$*" >> {recorded}\n'
+            'case "$1 $2" in\n'
+            '  "rm --help") echo "usage: sprout rm <feature>"; exit 0;;\n'
+            "esac\n"
+            'case "$1" in\n'
+            f'  show) printf "%s\\n" "{self.project}"; exit 0;;\n'
+            "  rm)\n"
+            '    for argument in "$@"; do\n'
+            '      if [ "$argument" = "--force" ]; then\n'
+            '        echo "sprout: unexpected argument --force" >&2\n'
+            "        exit 1\n"
+            "      fi\n"
+            "    done\n"
+            "    exit 0;;\n"
+            "esac\n"
+            "exit 0\n",
+        )
+        job_id = "aa0000000011"
+        self.sprout_job(job_id, "old-sprout-work")
+        stopped = self.call(
+            "stop", {"job_id": job_id, "remove_workspace": True, "abandon": True}
+        )["result"]
+        self.assertEqual(stopped["state"], "stopped")
+        self.assertIn("rm old-sprout-work", recorded.read_text())
+        self.assertNotIn("--force", recorded.read_text())
         self.assert_archived(job_id)
 
     def test_stop_refuses_abandon_without_removal(self) -> None:

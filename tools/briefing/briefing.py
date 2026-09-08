@@ -231,13 +231,22 @@ def resolve(date: str, profile: str | None = None, *, undelivered: bool = False)
     return DEFAULT_PROFILE
 
 
-def previous_finished(date: str, profile: str) -> str | None:
-    """When this profile last finished a run, over the runs that are kept.
+def previous_started(date: str, profile: str) -> str | None:
+    """When this profile last began a run, over the runs that are kept.
 
     A source is told this so it can report on a night, a week or whatever its
     own schedule turned out to be, with no window setting anywhere. The runs
     kept on disk are the record, so a profile that has never run says so rather
     than leaving a model to invent a period.
+
+    The start and not the finish, because the start is what the last briefing
+    actually covered. Its sources were asked at about that moment and reported
+    the world as they found it then, so a collection that took half an hour
+    would leave everything inside that half hour after what was said and before
+    what this run is told to look at. Measuring from the start overlaps
+    instead, and a job mentioned in two briefings is better than one mentioned
+    in neither. It also gives a run that crashed while collecting a usable
+    moment, which is the one it asked its sources at.
 
     Read before the run being collected writes its own manifest: a date and a
     profile name one directory, so a second collection on one day would
@@ -259,9 +268,9 @@ def previous_finished(date: str, profile: str) -> str | None:
             manifest = read_manifest(day, profile)
         except Refused:
             continue
-        finished = manifest.get("finished")
-        if isinstance(finished, str) and finished:
-            return finished
+        started = manifest.get("started")
+        if isinstance(started, str) and started:
+            return started
     return None
 
 
@@ -332,7 +341,7 @@ def declared_sources(
     return result["sources"], result["diagnostics"]
 
 
-def since_last_run(profile: str, finished: str | None) -> str:
+def since_last_run(profile: str, since: str | None) -> str:
     """What the source is told about the last time this profile ran.
 
     A fact, not an instruction. The guidance below it is what says what to
@@ -342,21 +351,22 @@ def since_last_run(profile: str, finished: str | None) -> str:
     source reports on a week and a morning source on a night with no window
     setting anywhere.
     """
-    if finished is None:
+    if since is None:
         return (
             f"No earlier {profile} briefing was kept on this machine, so there "
             "is no previous run to measure against. Report where things stand "
             "now, and do not invent a period you cannot measure."
         )
     return (
-        f"The last {profile} briefing finished at {finished}. Where the "
-        "guidance below asks what changed and names no window of its own, that "
-        "is the moment to measure from. Where it names its own window, keep it."
+        f"The last {profile} briefing asked its sources at {since}, so anything "
+        "after that moment is what it did not cover. Where the guidance below "
+        "asks what changed and names no window of its own, that is the moment "
+        "to measure from. Where it names its own window, keep it."
     )
 
 
 def contribution_prompt(
-    source: dict[str, Any], profile: str, date: str, finished: str | None = None
+    source: dict[str, Any], profile: str, date: str, since: str | None = None
 ) -> str:
     """What one source is asked.
 
@@ -379,7 +389,7 @@ anything, unless the guidance below names it, and then only what it names.
 
 ## Since
 
-{since_last_run(profile, finished)}
+{since_last_run(profile, since)}
 
 ## Guidance
 
@@ -667,7 +677,7 @@ def ask(
     profile: str,
     date: str,
     deadline: float,
-    finished: str | None = None,
+    since: str | None = None,
 ) -> dict[str, Any]:
     """Run one source and read what it answered.
 
@@ -683,9 +693,7 @@ def ask(
     """
     if deadline <= 0:
         return failed_contribution(source, "the run was out of time before this source")
-    first = attempt(
-        source, contribution_prompt(source, profile, date, finished), deadline
-    )
+    first = attempt(source, contribution_prompt(source, profile, date, since), deadline)
     if first.contribution is not None:
         return contributed(source, first.contribution, first.seconds)
     left = deadline - first.seconds
@@ -820,7 +828,7 @@ def collect(
     # Read before this run writes its own manifest over the last one: a date
     # and a profile name one directory. Every source is told the same moment,
     # so a run is one window and not one for each source.
-    finished = previous_finished(date, profile)
+    since = previous_started(date, profile)
     directory = run_dir(date, profile)
     (directory / "contributions").mkdir(parents=True, exist_ok=True)
     directory.parent.chmod(0o700)
@@ -844,7 +852,7 @@ def collect(
     def bounded(source: dict[str, Any]) -> dict[str, Any]:
         left = run_deadline - (time.monotonic() - clock)
         try:
-            return ask(source, profile, date, min(source_deadline, left), finished)
+            return ask(source, profile, date, min(source_deadline, left), since)
         except Exception as trouble:  # noqa: BLE001
             # The last line between one source and the whole morning. `ask`
             # answers rather than raises, so reaching here means a way to fail
@@ -1093,5 +1101,8 @@ def wake(date: str, profile: str, *, ctl: str | None = None) -> dict[str, Any]:
     except OSError as trouble:
         return {**answer, "reason": f"{command[0]} could not be run: {trouble}"}
     if done.returncode != 0:
-        return {**answer, "reason": done.stderr.strip() or f"{command[0]} exited {done.returncode}"}
+        return {
+            **answer,
+            "reason": done.stderr.strip() or f"{command[0]} exited {done.returncode}",
+        }
     return {**answer, "woken": True}

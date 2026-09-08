@@ -670,7 +670,8 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         # A named file that is not there is a refusal; the default path being
         # absent is a machine that declared none.
         refused = self.call(
-            "briefings", {"profile": "morning", "config": "/nonexistent/typo.toml"},
+            "briefings",
+            {"profile": "morning", "config": "/nonexistent/typo.toml"},
             check=False,
         )
         self.assertFalse(refused["ok"])
@@ -730,7 +731,10 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
 
         # The live listing cannot see it, by design.
         self.assertEqual(
-            {job["job_id"] for job in json.loads(self.cli("all", "--json").stdout)["jobs"]},
+            {
+                job["job_id"]
+                for job in json.loads(self.cli("all", "--json").stdout)["jobs"]
+            },
             {live, old},
         )
         listed = self.call("history", {"since": "2026-09-08T00:00:00Z"})["result"]

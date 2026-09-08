@@ -449,9 +449,7 @@ class Run(unittest.TestCase):
             )
         ]
 
-    def declare(
-        self, name: str, harness: str = "pi", *profiles: str
-    ) -> Path:
+    def declare(self, name: str, harness: str = "pi", *profiles: str) -> Path:
         """A project that declares one briefing for each profile named."""
         return self.project(
             name,
@@ -593,26 +591,41 @@ class Run(unittest.TestCase):
     def test_the_first_run_of_a_profile_invents_no_window(self) -> None:
         self.declare("the-den")
         briefing.collect("2026-08-31", "morning")
-        self.assertIn(
-            "No earlier morning briefing was kept", self.prompt.read_text()
-        )
+        self.assertIn("No earlier morning briefing was kept", self.prompt.read_text())
 
-    def test_a_source_is_told_when_its_profile_last_finished(self) -> None:
+    def test_a_source_is_told_when_its_profile_last_began(self) -> None:
         self.declare("the-den", "pi", "morning", "evening")
         first = briefing.collect("2026-08-31", "morning")
-        self.assertIsNotNone(first["finished"])
+        self.assertIsNotNone(first["started"])
         # A profile's watermark is its own: an evening that never ran has none
         # of the morning's.
         briefing.collect("2026-08-31", "evening")
-        self.assertIn(
-            "No earlier evening briefing was kept", self.prompt.read_text()
-        )
+        self.assertIn("No earlier evening briefing was kept", self.prompt.read_text())
         briefing.collect("2026-09-01", "morning")
         said = self.prompt.read_text()
-        self.assertIn(f"The last morning briefing finished at {first['finished']}", said)
+        # The start and not the finish. The last run's sources were asked at
+        # about its start, so a collection that took half an hour would leave
+        # that half hour reported by neither briefing.
+        self.assertIn(
+            f"The last morning briefing asked its sources at {first['started']}", said
+        )
         # A fact, not an instruction: guidance that names its own window keeps
         # it, which is what every source written before this said.
         self.assertIn("Where it names its own window, keep it.", said)
+
+    def test_the_watermark_is_the_start_even_when_a_run_never_finished(self) -> None:
+        # A run left collecting by a crash still asked its sources. The moment
+        # it asked them is the one the next run measures from; a finish it
+        # never reached would leave that run's window open forever.
+        self.declare("the-den", "pi", "morning")
+        first = briefing.collect("2026-08-31", "morning")
+        manifest = briefing.read_manifest("2026-08-31", "morning")
+        briefing.write_manifest({**manifest, "state": "collecting", "finished": None})
+        briefing.collect("2026-09-01", "morning")
+        self.assertIn(
+            f"The last morning briefing asked its sources at {first['started']}",
+            self.prompt.read_text(),
+        )
 
     def test_only_a_project_that_declares_the_profile_is_asked(self) -> None:
         self.declare("the-den")
@@ -812,7 +825,9 @@ class Run(unittest.TestCase):
         ):
             manifest = briefing.collect("2026-08-31", "morning")
         self.assertEqual(manifest["state"], "collected")
-        self.assertFalse((briefing.run_dir("2026-08-31", "morning") / "briefing.html").exists())
+        self.assertFalse(
+            (briefing.run_dir("2026-08-31", "morning") / "briefing.html").exists()
+        )
         said = " ".join(item["diagnostic"] for item in manifest["diagnostics"])
         self.assertIn("the page could not be rendered", said)
         kept = json.loads(
@@ -858,9 +873,9 @@ class Run(unittest.TestCase):
         self.assertEqual(manifest["sources"], [])
         self.assertEqual(manifest["state"], "collected")
         self.assertFalse(briefing.delivered("2026-08-31", "morning"))
-        rendered = (briefing.run_dir("2026-08-31", "morning") / "briefing.html").read_text(
-            encoding="utf-8"
-        )
+        rendered = (
+            briefing.run_dir("2026-08-31", "morning") / "briefing.html"
+        ).read_text(encoding="utf-8")
         self.assertIn("No project declared this briefing.", rendered)
 
     def test_a_broken_project_configuration_is_carried_as_a_diagnostic(self) -> None:
@@ -875,9 +890,9 @@ class Run(unittest.TestCase):
         # by the collection and not by anything a model chooses to do next.
         self.declare("the-den")
         briefing.collect("2026-08-31", "morning")
-        rendered = (briefing.run_dir("2026-08-31", "morning") / "briefing.html").read_text(
-            encoding="utf-8"
-        )
+        rendered = (
+            briefing.run_dir("2026-08-31", "morning") / "briefing.html"
+        ).read_text(encoding="utf-8")
         self.assertIn("The Den", rendered)
         self.assertIn("call the dentist", rendered)
         self.assertIn("no prose yet", rendered)
@@ -964,7 +979,9 @@ class Run(unittest.TestCase):
         briefing.collect("2026-08-31", "morning")
         briefing.publish("2026-08-31", "morning", "Good morning.")
         self.assertEqual(briefing.resolve("2026-08-31"), "morning")
-        self.assertEqual(briefing.read_run("2026-08-31", "morning")["prose"], "Good morning.\n")
+        self.assertEqual(
+            briefing.read_run("2026-08-31", "morning")["prose"], "Good morning.\n"
+        )
         # A date nothing ran on answers with the default, so the refusal a
         # caller reads is about the missing run and not about a missing name.
         self.assertEqual(briefing.resolve("2026-08-30"), "morning")

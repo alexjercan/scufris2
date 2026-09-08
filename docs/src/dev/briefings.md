@@ -97,9 +97,17 @@ is one way to have one, and writing the same TOML by hand is another.
 
 ### Since the last run
 
-Every source is told when its own profile last finished, read from the runs
+Every source is told when its own profile last began a run, read from the runs
 still on disk. A weekly source then reports on a week and a morning source on a
 night, and no source, project or machine, carries a window setting.
+
+The start and not the finish. The last run's sources were asked at about its
+start and reported the world as they found it then, so measuring from its
+finish would leave everything that happened during the collection after what
+that briefing said and before what this one is told to look at. Measuring from
+the start overlaps instead, and a job named in two briefings is better than one
+named in neither. It also gives a run that crashed while collecting a usable
+moment: the one it asked its sources at.
 
 It is given as a fact and not as an instruction. Guidance that names its own
 window - yesterday's macros, the last three sessions, the last twelve commits -

@@ -81,12 +81,14 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - Stopping a job with `remove_workspace` now keeps a branch that was never
   merged. Deleting one needs an explicit `abandon`, so unlanded work is no
   longer lost to a cleanup.
-- Every briefing source is told when its own profile last finished, read from
-  the runs on disk. A weekly source reports on a week and a morning source on a
-  night, with no window setting anywhere. It is a fact and not an instruction:
-  guidance that names its own window keeps it, and the first run of a profile
-  says there was no previous one rather than leaving a model to invent a
-  period.
+- Every briefing source is told when its own profile last began a run, read
+  from the runs on disk. A weekly source reports on a week and a morning source
+  on a night, with no window setting anywhere. The start and not the finish:
+  the last run's sources were asked at about its start, so measuring from its
+  finish would leave everything that happened during a collection reported by
+  neither briefing. It is a fact and not an instruction: guidance that names
+  its own window keeps it, and the first run of a profile says there was no
+  previous one rather than leaving a model to invent a period.
 
 ### Removed
 

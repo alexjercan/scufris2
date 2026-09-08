@@ -1,6 +1,6 @@
 # End a briefing with a numbered list of things Alex can start
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 85
 - TAGS: workflow
 

@@ -1659,11 +1659,7 @@ def validate_execution_cwd(job: dict[str, Any]) -> None:
 def worker_report_extension(helper: Path | None = None) -> Path:
     resource_root = (helper or Path(__file__)).resolve().parents[2]
     candidates = (
-        resource_root
-        / "extensions"
-        / "scufris"
-        / "workflow"
-        / "worker-report.ts",
+        resource_root / "extensions" / "scufris" / "workflow" / "worker-report.ts",
         resource_root
         / "agent"
         / "extensions"
@@ -1705,6 +1701,37 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
         or not secrets.compare_digest(capability_hash(capability), expected_launch)
     ):
         raise JobError("launch capability does not authorize this generation")
+    # Past the capability check, so only the pane reaches this. Preparation can
+    # still refuse - a missing executable, a working directory that moved - and
+    # it refuses into a pane nobody is watching. Without an event the job stays
+    # `running` with nothing after `worker starting`, which the foreground reads
+    # as a worker still thinking, so noticing was Alex's job and a restart was
+    # the only way out.
+    try:
+        executable, argv, env, capture_review = prepare_harness(job_id, job, auth)
+    except Exception as trouble:  # noqa: BLE001 - the pane is the last reader
+        report_launch_failure(job_id, str(trouble))
+        raise
+    completed = subprocess.run(
+        [executable, *argv[1:]],
+        env=env,
+        check=False,
+        stdout=subprocess.PIPE if capture_review else None,
+        stderr=subprocess.PIPE if capture_review else None,
+    )
+    publish_harness_completion(
+        job_id,
+        job["generation"],
+        completed,
+        capture_review=capture_review,
+    )
+    raise SystemExit(completed.returncode)
+
+
+def prepare_harness(
+    job_id: str, job: dict[str, Any], auth: dict[str, Any]
+) -> tuple[str, list[str], dict[str, str], bool]:
+    """Settle everything the harness needs before it is started in this pane."""
     validate_execution_cwd(job)
     directory = job_dir(job_id)
     # Generation 1 opens the pinned prompt. Every later generation restores the
@@ -1805,20 +1832,40 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
     executable = shutil.which(argv[0], path=env.get("PATH"))
     if executable is None:
         raise JobError(f"harness executable not found: {argv[0]}")
-    completed = subprocess.run(
-        [executable, *argv[1:]],
-        env=env,
-        check=False,
-        stdout=subprocess.PIPE if capture_review else None,
-        stderr=subprocess.PIPE if capture_review else None,
-    )
-    publish_harness_completion(
-        job_id,
-        job["generation"],
-        completed,
-        capture_review=capture_review,
-    )
-    raise SystemExit(completed.returncode)
+    return executable, argv, env, capture_review
+
+
+def report_launch_failure(job_id: str, reason: str) -> None:
+    """Say that a worker never started, from inside the pane where it did not.
+
+    `launch` runs in the tmux pane. Everything it can refuse before the harness
+    is running - a missing executable, a working directory that moved, a
+    capability that no longer authorizes this generation - printed to a pane
+    nobody is watching and exited. The job stayed `running` with no event after
+    `worker starting`, so the foreground read it as a worker still thinking and
+    the only way out was noticing by hand.
+    """
+    try:
+        with workflow_lock():
+            job = load_job(job_id)
+            if job["execution_state"] is None:
+                return
+            latest = latest_event(job_id, job)
+            if (
+                latest is not None
+                and latest["generation"] == job["generation"]
+                and latest["event"] in TERMINAL_EVENTS
+            ):
+                return
+            write_report(
+                job_id,
+                "failed",
+                "worker harness did not start",
+                f"The worker could not be started in its pane: {reason}",
+                expected_generation=job["generation"],
+            )
+    except (JobError, OSError) as trouble:
+        print(f"scufris-jobs: {trouble}", file=sys.stderr)
 
 
 def execution_snapshot(job: dict[str, Any]) -> dict[str, Any] | None:

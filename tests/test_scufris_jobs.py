@@ -1702,6 +1702,66 @@ print(f'# Claude independent review generation {generation}\\n\\nNo findings.')
             shutil.rmtree(self.project)
             original.rename(self.project)
 
+    def test_a_launch_that_never_reaches_the_harness_says_so(self) -> None:
+        job_id = "1a2b3c4d5e60"
+        self.call(
+            "spawn",
+            {
+                "job_id": job_id,
+                "instructions": "Refuse before the harness runs.",
+                "owner_session": "launch-failure-owner",
+            },
+        )
+        self.jobs.append(job_id)
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
+        self.wait_for(directory / "status", "done: report complete")
+
+        jobs_module = load_jobs_module()
+        capability = "e" * 64
+        token = "d" * 64
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            record = jobs_module.load_job(job_id)
+            generation = record["generation"] + 1
+            jobs_module.store_job(
+                {
+                    **record,
+                    "generation": generation,
+                    "state": "working",
+                    "summary": "worker starting",
+                    "execution_state": "creating",
+                    "tmux_session_name": jobs_module.execution_session_name(
+                        job_id, generation, token
+                    ),
+                    "tmux_session_id": None,
+                    "tmux_window_id": None,
+                    "tmux_pane_id": None,
+                    "execution_token": token,
+                }
+            )
+            auth = jobs_module.load_report_auth(job_id)
+            auth["generation"] = generation
+            auth["launch_capability_hash"] = jobs_module.capability_hash(capability)
+            jobs_module.atomic_write(
+                directory / ".report-auth.json",
+                json.dumps(auth, sort_keys=True).encode(),
+                0o400,
+            )
+            # The pane runs somewhere the workspace no longer is, so the launch
+            # refuses before it starts anything.
+            with self.assertRaisesRegex(
+                jobs_module.JobError, "execution working directory identity changed"
+            ):
+                jobs_module.launch(job_id, capability)
+        self.assertIn(
+            '{"generation":2,"event":"failed",'
+            '"summary":"worker harness did not start"}',
+            (directory / "status").read_text(),
+        )
+        self.assertIn(
+            "execution working directory identity changed",
+            (directory / "report.md").read_text(),
+        )
+
     def test_claude_review_creation_recovery_captures_terminal_report(self) -> None:
         claude_review = """#!/usr/bin/env python3
 import json

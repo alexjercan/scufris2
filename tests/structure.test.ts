@@ -62,6 +62,18 @@ test("package loads only capability-owned Scufris extensions", async () => {
   assert.doesNotMatch(orchestration, /while \(readingEvents\)/);
   assert.match(orchestration, /watch\(job\.status_file/);
   assert.match(orchestration, /eventReadController\?\.abort\(\)/);
+  // A failed drain strands every event the pass had not read. The status
+  // watcher never fires again for a worker that already finished, so the
+  // retry is the settle that ends the turn the failure wakes. That is how a
+  // retry exists here without a clock, and the assertion above still holds.
+  assert.match(orchestration, /reportDrainFailure\(message\)/);
+  assert.match(
+    orchestration,
+    /if \(eventStranded && !shuttingDown\) void readEvents\(\)/,
+  );
+  // `hasUI` is false under the service, so a notification alone reported a
+  // stranded drain to nobody.
+  assert.match(orchestration, /id: EVENT_DRAIN_NOTICE/);
   await access(
     join(
       root,

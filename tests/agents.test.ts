@@ -16,6 +16,7 @@ import {
   PLANNOTATOR_REVIEW_TOOL,
   QUICK_REVIEW_TOOL,
   resolveWakeCommand,
+  restoredAttentionNotice,
   TERMINAL_OWNERSHIP_STATES,
   toolBatchAllowsAction,
   wakeModeFromEntries,
@@ -313,6 +314,36 @@ test("worker notices are identified and clear on ordinary progress", () => {
     workerAttentionSignal(job as never, { type: "done", value: "complete" }),
     { id: "abcdef123456", state: "clear", detail: "" },
   );
+});
+
+test("a recovered job raises its own notice again", () => {
+  // The service keeps notices in memory. After a restart the tray is empty,
+  // and the terminal event that raised the notice was acknowledged before the
+  // restart, so it is never redelivered. Without this the tray was silent
+  // about a job that was still blocked.
+  const job = { job_id: "abcdef123456", project: "personal/scufris2" };
+  assert.deepEqual(
+    restoredAttentionNotice({ ...job, state: "blocked", summary: "needs me" }),
+    {
+      id: "abcdef123456",
+      state: "attention",
+      detail: "Job abcdef123456 is blocked: needs me",
+    },
+  );
+  assert.deepEqual(
+    restoredAttentionNotice({ ...job, state: "failed", summary: "crashed" }),
+    {
+      id: "abcdef123456",
+      state: "error",
+      detail: "Job abcdef123456 failed: crashed",
+    },
+  );
+  // A job that needs nothing must not paint the tray on every restart.
+  for (const state of ["working", "done", "landed", "stopped", "suspended"])
+    assert.equal(
+      restoredAttentionNotice({ ...job, state, summary: "fine" }),
+      undefined,
+    );
 });
 
 test("orchestration delivers exact worker wakes and quiet progress by mode", () => {

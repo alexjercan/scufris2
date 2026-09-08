@@ -36,6 +36,12 @@ export const TERMINAL_OWNERSHIP_STATES: ReadonlySet<string> = new Set([
   "stopped",
   "landed",
 ]);
+// A notice key for the event drain itself. Job notices are keyed by job ID, and
+// a job ID is twelve hex characters, so this cannot collide with one.
+export const EVENT_DRAIN_NOTICE = "scufris:event-drain";
+// A drain failure wakes so the strand is reported and a settle follows. The cap
+// is what stops an error whose text changes every pass from waking forever.
+const MAX_DRAIN_WAKES = 3;
 export const QUICK_REVIEW_TOOL = "scufris_job_quick_review";
 export const PLANNOTATOR_REVIEW_TOOL = "scufris_job_plannotator_review";
 export const FINAL_RESPONSE_TOOL = "scufris_final_response";
@@ -229,6 +235,20 @@ export function workerAttentionSignal(
     };
   }
   return { id: job.job_id, state: "clear", detail: "" };
+}
+
+/**
+ * The notice a recovered job has to raise again for itself.
+ *
+ * The service holds notices in memory, so a restart starts with an empty tray.
+ * A recovered job's terminal event was acknowledged before the restart and is
+ * never redelivered, so nothing else would ever raise it.
+ */
+export function restoredAttentionNotice(
+  job: WorkerEventTarget & { state: string; summary: string },
+): AttentionNoticeSignal | undefined {
+  if (job.state !== "blocked" && job.state !== "failed") return undefined;
+  return workerAttentionSignal(job, { type: job.state, value: job.summary });
 }
 
 export function deliverWorkerEvent(
@@ -646,6 +666,8 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   let shuttingDown = false;
   let extensionContext: ExtensionContext | undefined;
   let eventError: string | undefined;
+  let eventStranded = false;
+  let drainWakes = 0;
   let wakeMode: WakeMode = "minimal";
   const acknowledgmentGate = registerForegroundAcknowledgmentLifecycle(pi);
 
@@ -677,6 +699,49 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     },
   });
 
+  // A failed pass strands every event it had not read yet, and the two triggers
+  // that call the drain again - the status watcher and session start - never
+  // fire for a worker that already finished, so the strand used to be
+  // permanent. `hasUI` is false under the service, which is how Scufris
+  // actually runs, so the notification reported it to nobody either.
+  //
+  // The wake is what produces a turn, and the settle that ends that turn is the
+  // retry. That keeps the retry tied to activity instead of to a clock, which
+  // the foreground does not own.
+  const reportDrainFailure = (message: string) => {
+    eventStranded = true;
+    if (message === eventError) return;
+    if (extensionContext?.hasUI) extensionContext.ui.notify(message, "error");
+    pi.events.emit(ATTENTION_NOTICE_EVENT, {
+      id: EVENT_DRAIN_NOTICE,
+      state: "error",
+      detail: `Scufris cannot read worker events: ${message}`,
+    } satisfies AttentionNoticeSignal);
+    if (drainWakes >= MAX_DRAIN_WAKES) return;
+    drainWakes += 1;
+    pi.sendMessage(
+      {
+        customType: "scufris-job-event",
+        content: `Reading delegated worker events failed: ${message}. Progress from every owned job is unreadable until it succeeds, so a finished job may not have reported. Tell the user plainly that you have lost sight of the workers and what they can check, then call scufris_final_response. Do not retry the read yourself; it retries when this turn ends.`,
+        display: true,
+        details: { drain_error: message },
+      },
+      { deliverAs: "followUp", triggerTurn: true },
+    );
+  };
+
+  const drainRecovered = () => {
+    eventError = undefined;
+    if (!eventStranded) return;
+    eventStranded = false;
+    drainWakes = 0;
+    pi.events.emit(ATTENTION_NOTICE_EVENT, {
+      id: EVENT_DRAIN_NOTICE,
+      state: "clear",
+      detail: "",
+    } satisfies AttentionNoticeSignal);
+  };
+
   const readEvents = async () => {
     if (shuttingDown || !extensionContext) return;
     if (readingEvents) {
@@ -693,6 +758,8 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         if (owned.length === 0) {
           if (extensionContext.hasUI)
             extensionContext.ui.setStatus("scufris", undefined);
+          // Nothing left to strand: a drain that reads no job cannot lose one.
+          drainRecovered();
           return;
         }
         const result = await runHelper<EventResult>(
@@ -774,12 +841,11 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
               ? `${running} delegated job${running === 1 ? "" : "s"}`
               : undefined,
           );
-        eventError = undefined;
+        drainRecovered();
       } while (readAgain && !shuttingDown);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!shuttingDown && message !== eventError && extensionContext.hasUI)
-        extensionContext.ui.notify(message, "error");
+      if (!shuttingDown) reportDrainFailure(message);
       eventError = message;
     } finally {
       if (eventReadController === controller) eventReadController = undefined;
@@ -818,8 +884,23 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     );
   };
 
+  // Landing or stopping a job that had failed or blocked is exactly the act of
+  // attending to it. Dropping the job without clearing its notice left the tray
+  // red for a job that no longer exists, with nothing able to clear it.
   const forgetRemovedJobs = (removed: readonly string[]) => {
-    for (const removedJob of removed) jobs.delete(removedJob);
+    for (const removedJob of removed) {
+      jobs.delete(removedJob);
+      pi.events.emit(ATTENTION_NOTICE_EVENT, {
+        id: removedJob,
+        state: "clear",
+        detail: "",
+      } satisfies AttentionNoticeSignal);
+    }
+  };
+
+  const restoreAttentionNotice = (job: OwnedJob) => {
+    const notice = restoredAttentionNotice(job);
+    if (notice) pi.events.emit(ATTENTION_NOTICE_EVENT, notice);
   };
 
   pi.registerTool(
@@ -1445,6 +1526,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       for (const recovered of result.jobs) {
         const job: OwnedJob = { ...recovered };
         jobs.set(job.job_id, job);
+        restoreAttentionNotice(job);
         if (job.window_alive) watchJob(job);
       }
       await readEvents();
@@ -1459,6 +1541,13 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
 
   pi.on("session_tree", (_event, ctx) => {
     wakeMode = restoredWakeMode(ctx);
+  });
+
+  // The retry for a stranded drain. A settle follows every turn, including the
+  // turn the drain failure itself woke, so the read is attempted again without
+  // the foreground holding a clock.
+  pi.on("agent_settled", () => {
+    if (eventStranded && !shuttingDown) void readEvents();
   });
 
   pi.on("session_shutdown", async (_event, context) => {

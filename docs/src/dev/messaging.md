@@ -51,6 +51,20 @@ event IDs from the session entries and acknowledges them without a second
 wake. Terminal and blocked events that were never delivered wake exactly
 once after restart.
 
+A failed `events` read strands every event that pass had not reached. The two
+triggers that call the drain again, the status watcher and session start, never
+fire for a worker that already finished, so the retry is the settle at the end
+of the next turn, and the failure itself wakes to produce one. The strand also
+raises a durable notice under `scufris:event-drain`, because `hasUI` is false
+under the service and a notification alone reported it to nobody. A successful
+drain clears the notice and the wake budget.
+
+A job removed by `scufris_job_land` or `scufris_job_stop` clears its own notice:
+attending to a failed job is exactly what landing or stopping it is, and the
+job no longer exists to clear it later. A job recovered at session start with a
+`blocked` or `failed` state raises its notice again, because its terminal event
+was acknowledged before the restart and is never redelivered.
+
 `/wake` selects the wake mode. In `minimal` (default), `working` events show
 only a notification; `blocked`, `done`, and `failed` trigger turns. In `all`,
 `working` events also trigger turns. Runtime failures always notify and wake.

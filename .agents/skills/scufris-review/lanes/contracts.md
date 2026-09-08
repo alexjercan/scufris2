@@ -8,11 +8,11 @@ checks, and the documents that describe them.
 
 Grep both sides of every pair the change touches:
 
-- Protocol: version 3 is implemented twice.
+- Protocol: version 6 is implemented twice.
   `shared/control/src/service.rs` is the service and every native client, and
   `agent/extensions/scufris/service/protocol.ts` is the
   agent; `SERVICE_VERSION` lives in both, as do
-  `MAX_TRANSCRIPT_TEXT_BYTES` and `MAX_MESSAGE_BYTES`. A message shape,
+  `MAX_TEXT_BYTES` and `MAX_MESSAGE_BYTES`. A message shape,
   a role name, a refusal code, or a cap changed on one side only is a
   broken pair, and `tests/service.test.ts` is the TS side's own guard.
   Every stable refusal code belongs in the `refusal` module; one

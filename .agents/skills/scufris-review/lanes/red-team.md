@@ -27,7 +27,7 @@ each attempt, state the sequence, what should happen, and what does.
   `Failed`; a double Super+D faster than the entrance; the hotkey
   during the tween; Escape repeated (the `dismissed` flag) and then an
   activation.
-- Caps: a transcript at exactly `MAX_TRANSCRIPT_TEXT_BYTES`, one byte
+- Caps: a transcript at exactly `MAX_TEXT_BYTES`, one byte
   over, one that straddles the boundary mid-codepoint, a protocol line
   at `MAX_MESSAGE_BYTES`. Bytes, not characters - both sides measure
   the same way. Read the constants; do not trust a remembered number.

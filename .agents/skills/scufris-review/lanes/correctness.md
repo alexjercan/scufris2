@@ -6,7 +6,7 @@ would catch it being wrong.
 ## Look for
 
 - The edge the change does not handle: an empty transcript, a
-  transcript at `MAX_TRANSCRIPT_TEXT_BYTES`, a line at
+  transcript at `MAX_TEXT_BYTES`, a line at
   `MAX_MESSAGE_BYTES`, a zero-length name, a state the `(Phase, Event)`
   table in `state.rs` drops on the floor or handles twice. Take the
   numbers from the constants rather than from memory; both have moved.

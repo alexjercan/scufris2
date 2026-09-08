@@ -1,6 +1,6 @@
 # Declare briefing sources for the machine in a user-level config file
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 90
 - TAGS: workflow
 

@@ -85,7 +85,7 @@ surface.abort {id} -> surface.aborted {id}
 
 ## Messages a client sends
 
-All messages include `"v": 5`. Surface submissions carry only managed
+All messages include `"v": 6`. Surface submissions carry only managed
 attachment IDs. The service resolves them into canonical descriptors before a
 message reaches the agent, another surface, or replay.
 

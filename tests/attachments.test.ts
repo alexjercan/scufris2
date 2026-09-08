@@ -152,6 +152,9 @@ test("the content client rejects service errors and invalid descriptors safely",
     await invalid.close();
   }
 
+  // The content API returned 422 for an oversized import until the store grew
+  // its own `TooLarge`, so this stubbed the one answer the server could not
+  // send and the size message was unreachable from the tool.
   const tooLarge = await listen((_request, response) => {
     response.writeHead(413, { "content-type": "application/json" });
     response.end(

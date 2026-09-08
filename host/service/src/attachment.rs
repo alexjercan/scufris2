@@ -77,8 +77,11 @@ impl AttachmentStore {
         media_type: String,
         bytes: &[u8],
     ) -> Result<AttachmentDescriptor, StoreError> {
-        if bytes.is_empty() || bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+        if bytes.is_empty() {
             return Err(StoreError::Invalid("attachment bytes"));
+        }
+        if bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+            return Err(StoreError::TooLarge);
         }
         self.put_reader(name, media_type, bytes.len() as u64, bytes)
     }
@@ -95,8 +98,15 @@ impl AttachmentStore {
         if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
             return Err(StoreError::Invalid("attachment path"));
         }
-        if metadata.len() == 0 || metadata.len() > MAX_ATTACHMENT_BYTES {
+        if metadata.len() == 0 {
             return Err(StoreError::Invalid("attachment bytes"));
+        }
+        // `TooLarge` is the only error that reaches the picker and the model as
+        // a size. Reported as `Invalid`, a 20 MB screen recording told Alex to
+        // "choose a readable regular file", and the 16 MiB message that both
+        // clients already carry was unreachable.
+        if metadata.len() > MAX_ATTACHMENT_BYTES {
+            return Err(StoreError::TooLarge);
         }
         let name = path
             .file_name()
@@ -133,12 +143,20 @@ impl AttachmentStore {
             .map_err(|_| StoreError::Invalid("attachment descriptor"))?;
 
         let mut index = self.lock();
-        if index.records.len() >= MAX_OBJECTS
-            || index
-                .bytes
-                .checked_add(size)
-                .is_none_or(|total| total > MAX_TOTAL_BYTES)
-        {
+        let full = |index: &Index| {
+            index.records.len() >= MAX_OBJECTS
+                || index
+                    .bytes
+                    .checked_add(size)
+                    .is_none_or(|total| total > MAX_TOTAL_BYTES)
+        };
+        // Expiry is worth its cost only when the quota is what would refuse
+        // this put, and a store that is full of expired records has to be able
+        // to clear itself without a restart.
+        if full(&index) {
+            self.expire(&mut index, created_at);
+        }
+        if full(&index) {
             return Err(StoreError::Quota);
         }
         let object = self.object_path(&descriptor.id);
@@ -193,6 +211,26 @@ impl AttachmentStore {
             .collect())
     }
 
+    /// The descriptor for a HEAD, checked against the object on disk.
+    ///
+    /// `resolve` answers from the index alone. A record whose object is gone or
+    /// truncated answered HEAD with 200 and a full `Content-Length` and GET
+    /// with 500, so a surface that probes before a ranged fetch was told the
+    /// bytes were there and then failed on every range.
+    pub fn stat(&self, id: &str) -> Result<AttachmentDescriptor, StoreError> {
+        let descriptor = self
+            .lock()
+            .records
+            .get(id)
+            .map(|record| record.descriptor.clone())
+            .ok_or(StoreError::NotFound)?;
+        let object = fs::symlink_metadata(self.object_path(id))?;
+        if !object.file_type().is_file() || object.len() != descriptor.size {
+            return Err(StoreError::Corrupt);
+        }
+        Ok(descriptor)
+    }
+
     pub fn read(&self, id: &str) -> Result<(AttachmentDescriptor, Vec<u8>), StoreError> {
         let descriptor = self
             .lock()
@@ -207,40 +245,100 @@ impl AttachmentStore {
         Ok((descriptor, bytes))
     }
 
+    /// Reads one metadata entry, or names why it cannot be trusted.
+    fn read_record(&self, entry: &fs::DirEntry) -> Result<Record, &'static str> {
+        if !entry.file_type().map_err(|_| "unreadable entry")?.is_file() {
+            return Err("not a regular file");
+        }
+        let bytes = fs::read(entry.path()).map_err(|_| "unreadable record")?;
+        let record: Record = serde_json::from_slice(&bytes).map_err(|_| "unreadable metadata")?;
+        validate_attachment_descriptor(&record.descriptor).map_err(|_| "invalid descriptor")?;
+        if entry.file_name() != format!("{}.json", record.descriptor.id).as_str() {
+            return Err("misnamed record");
+        }
+        let object = fs::symlink_metadata(self.object_path(&record.descriptor.id))
+            .map_err(|_| "missing object")?;
+        if !object.file_type().is_file()
+            || object.file_type().is_symlink()
+            || object.len() != record.descriptor.size
+        {
+            return Err("object does not match its record");
+        }
+        Ok(record)
+    }
+
+    /// Removes both halves of one record.
+    ///
+    /// Metadata first, deliberately. An object with no record is swept at the
+    /// next start, but a record with no object used to be fatal, so an
+    /// interruption between the two deletions must leave the harmless half.
+    fn discard(&self, id: &str) {
+        let _ = fs::remove_file(self.metadata.join(format!("{id}.json")));
+        let _ = fs::remove_file(self.object_path(id));
+    }
+
+    /// Drops every record past its retention.
+    ///
+    /// Retention used to be consulted only here, and only at startup, so a
+    /// service that runs for weeks reached the quota and stayed there: every
+    /// upload was refused until someone restarted it, and nothing said so.
+    fn expire(&self, index: &mut Index, current: u64) {
+        let expired: Vec<String> = index
+            .records
+            .values()
+            .filter(|record| {
+                let retention = if record.referenced {
+                    REFERENCED_RETENTION
+                } else {
+                    UNREFERENCED_RETENTION
+                };
+                current.saturating_sub(record.created_at) > retention.as_secs()
+            })
+            .map(|record| record.descriptor.id.clone())
+            .collect();
+        for id in expired {
+            let Some(record) = index.records.remove(&id) else {
+                continue;
+            };
+            index.bytes = index.bytes.saturating_sub(record.descriptor.size);
+            self.discard(&id);
+            info!(attachment = id, "expired attachment removed");
+        }
+    }
+
+    /// Reads the durable store into the index, dropping what it cannot trust.
+    ///
+    /// Every rejection here is a reason to drop one record, never a reason to
+    /// refuse to start. `main` turns this error into a failed exit and the unit
+    /// restarts on failure, so one orphaned metadata file used to take the
+    /// conversation, the surfaces, and the control socket down for good, with
+    /// `the attachment store would not open` as the only symptom.
     fn load(&self) -> Result<(), StoreError> {
         let current = now()?;
         let mut index = self.lock();
+        let mut unindexed: Vec<String> = Vec::new();
         for entry in fs::read_dir(&self.metadata)? {
             let entry = entry?;
-            if !entry.file_type()?.is_file() {
-                return Err(StoreError::Corrupt);
-            }
+            let path = entry.path();
             if entry.file_name().to_string_lossy().starts_with('.') {
-                fs::remove_file(entry.path())?;
+                let _ = fs::remove_file(&path);
                 continue;
             }
-            let record: Record = serde_json::from_slice(&fs::read(entry.path())?)?;
-            validate_attachment_descriptor(&record.descriptor).map_err(|_| StoreError::Corrupt)?;
-            let expected_name = format!("{}.json", record.descriptor.id);
-            if entry.file_name() != expected_name.as_str() {
-                return Err(StoreError::Corrupt);
-            }
-            let object = self.object_path(&record.descriptor.id);
-            let object_metadata = fs::symlink_metadata(&object)?;
-            if !object_metadata.file_type().is_file()
-                || object_metadata.file_type().is_symlink()
-                || object_metadata.len() != record.descriptor.size
-            {
-                return Err(StoreError::Corrupt);
-            }
+            let record = match self.read_record(&entry) {
+                Ok(record) => record,
+                Err(reason) => {
+                    warn!(record = %path.display(), reason, "attachment record dropped");
+                    let _ = fs::remove_file(&path);
+                    continue;
+                }
+            };
             let retention = if record.referenced {
                 REFERENCED_RETENTION
             } else {
                 UNREFERENCED_RETENTION
             };
             if current.saturating_sub(record.created_at) > retention.as_secs() {
-                fs::remove_file(object)?;
-                fs::remove_file(entry.path())?;
+                self.discard(&record.descriptor.id);
                 continue;
             }
             if index.records.len() >= MAX_OBJECTS
@@ -249,20 +347,30 @@ impl AttachmentStore {
                     .checked_add(record.descriptor.size)
                     .is_none_or(|total| total > MAX_TOTAL_BYTES)
             {
-                return Err(StoreError::Quota);
+                // A full store still opens. Refusing to start over an
+                // attachment quota took the whole assistant down until the
+                // oldest record aged out.
+                unindexed.push(record.descriptor.id);
+                continue;
             }
             index.bytes += record.descriptor.size;
             index.records.insert(record.descriptor.id.clone(), record);
         }
+        if !unindexed.is_empty() {
+            warn!(
+                records = unindexed.len(),
+                "the attachment store is full; these records were not indexed"
+            );
+        }
         for entry in fs::read_dir(&self.objects)? {
             let entry = entry?;
-            if !entry.file_type()?.is_file() {
-                return Err(StoreError::Corrupt);
-            }
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') || !index.records.contains_key(&name) {
-                fs::remove_file(entry.path())?;
+            // An object whose record exists but did not fit stays on disk, so
+            // the quota does not silently delete what it declined to index.
+            if index.records.contains_key(&name) || unindexed.contains(&name) {
+                continue;
             }
+            let _ = fs::remove_file(entry.path());
         }
         info!(root = %self.root.display(), attachments = index.records.len(), bytes = index.bytes, "attachment store opened");
         Ok(())
@@ -274,10 +382,19 @@ impl AttachmentStore {
             .metadata
             .join(format!(".{}.json.tmp", record.descriptor.id));
         let encoded = serde_json::to_vec(record)?;
-        let mut file = private_file(&temporary)?;
-        file.write_all(&encoded)?;
-        file.sync_all()?;
-        fs::rename(temporary, final_path)?;
+        // `private_file` is `create_new`, so a temporary left behind by a
+        // failed write made every later write for this id fail with EEXIST.
+        // One full disk during `resolve` made an intact attachment permanently
+        // unusable, reported as "the attachment is unavailable" every time.
+        let result = private_file(&temporary).and_then(|mut file| {
+            file.write_all(&encoded)?;
+            file.sync_all()?;
+            fs::rename(&temporary, &final_path)
+        });
+        if let Err(error) = result {
+            let _ = fs::remove_file(&temporary);
+            return Err(error.into());
+        }
         Ok(())
     }
 
@@ -292,14 +409,29 @@ impl AttachmentStore {
 
 fn write_bounded(path: &Path, reader: &mut impl Read, expected: u64) -> Result<(), StoreError> {
     let mut file = private_file(path)?;
-    let copied = io::copy(&mut reader.take(MAX_ATTACHMENT_BYTES + 1), &mut file)?;
-    if copied != expected || copied == 0 || copied > MAX_ATTACHMENT_BYTES {
-        drop(file);
-        let _ = fs::remove_file(path);
-        return Err(StoreError::Invalid("attachment bytes"));
+    // Every failure removes the temporary. An id is fresh per put, so a leak
+    // here cost disk rather than correctness, but it leaked on the one path
+    // that fails most: a short read from the source file.
+    let result = io::copy(&mut reader.take(MAX_ATTACHMENT_BYTES + 1), &mut file).and_then(
+        |copied| {
+            if copied != expected || copied == 0 || copied > MAX_ATTACHMENT_BYTES {
+                return Ok(None);
+            }
+            file.sync_all().map(|()| Some(()))
+        },
+    );
+    drop(file);
+    match result {
+        Ok(Some(())) => Ok(()),
+        Ok(None) => {
+            let _ = fs::remove_file(path);
+            Err(StoreError::Invalid("attachment bytes"))
+        }
+        Err(error) => {
+            let _ = fs::remove_file(path);
+            Err(error.into())
+        }
     }
-    file.sync_all()?;
-    Ok(())
 }
 
 fn private_file(path: &Path) -> io::Result<File> {
@@ -342,6 +474,8 @@ pub enum StoreError {
     NotFound,
     #[error("attachment exceeds its byte bound")]
     TooLarge,
+    #[error("attachment body did not arrive")]
+    Incomplete,
     #[error("attachment quota exceeded")]
     Quota,
     #[error("attachment store is corrupt")]
@@ -395,6 +529,11 @@ impl IntoResponse for ApiError {
                 "attachment_too_large",
                 "The attachment is too large.",
             ),
+            StoreError::Incomplete => (
+                StatusCode::BAD_REQUEST,
+                "attachment_incomplete",
+                "The attachment did not finish uploading.",
+            ),
             StoreError::NotFound => (
                 StatusCode::NOT_FOUND,
                 "attachment_not_found",
@@ -437,7 +576,16 @@ async fn upload(
     body: Result<Bytes, BytesRejection>,
 ) -> Result<Json<AttachmentDescriptor>, ApiError> {
     let Query(query) = query.map_err(|_| ApiError(StoreError::Invalid("upload query")))?;
-    let body = body.map_err(|_| ApiError(StoreError::TooLarge))?;
+    // 413 only for a length limit. Anything else while buffering is a body
+    // that never arrived, and reporting that as "too large" made Alex shrink a
+    // photo whose upload his phone had simply dropped.
+    let body = body.map_err(|rejection| {
+        ApiError(if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            StoreError::TooLarge
+        } else {
+            StoreError::Incomplete
+        })
+    })?;
     let media_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -493,8 +641,7 @@ async fn head(
     State(store): State<Arc<AttachmentStore>>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<Response, ApiError> {
-    let mut descriptors = store.resolve(&[id], false).map_err(ApiError)?;
-    let descriptor = descriptors.remove(0);
+    let descriptor = store.stat(&id).map_err(ApiError)?;
     response(
         &descriptor,
         StatusCode::OK,
@@ -710,10 +857,128 @@ mod tests {
             .unwrap()
             .set_len(MAX_ATTACHMENT_BYTES + 1)
             .unwrap();
+        // Size is the one rejection both clients can explain, and reporting it
+        // as `Invalid` told Alex to choose a readable regular file instead.
         assert!(matches!(
             store.import(&large, "application/pdf".into()),
+            Err(StoreError::TooLarge)
+        ));
+        assert!(matches!(
+            store.put("empty.pdf".into(), "application/pdf".into(), b""),
             Err(StoreError::Invalid(_))
         ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn one_inconsistent_record_costs_that_record_and_not_the_service() {
+        // `main` turns an `open` failure into a failed exit that the unit
+        // restarts, so a store that refused to open took the conversation, the
+        // surfaces, and the control socket down permanently.
+        let root = root("quarantine");
+        let _ = fs::remove_dir_all(&root);
+        let store = AttachmentStore::open(root.clone()).unwrap();
+        let kept = store
+            .put("kept.png".into(), "image/png".into(), b"kept")
+            .unwrap();
+        let orphan = store
+            .put("orphan.png".into(), "image/png".into(), b"orphan")
+            .unwrap();
+        let truncated = store
+            .put("short.png".into(), "image/png".into(), b"truncated")
+            .unwrap();
+        // Exactly what an interrupted expiry pass leaves behind.
+        fs::remove_file(store.object_path(&orphan.id)).unwrap();
+        fs::write(store.object_path(&truncated.id), b"cut").unwrap();
+        fs::write(store.metadata.join("att_garbage.json"), b"not json").unwrap();
+        fs::write(store.metadata.join("att_misnamed.json"), b"{}").unwrap();
+        drop(store);
+
+        let reopened = AttachmentStore::open(root.clone()).unwrap();
+        assert_eq!(reopened.read(&kept.id).unwrap().1, b"kept");
+        for lost in [&orphan.id, &truncated.id] {
+            assert!(matches!(
+                reopened.resolve(std::slice::from_ref(lost), false),
+                Err(StoreError::NotFound)
+            ));
+            assert!(!reopened.metadata.join(format!("{lost}.json")).exists());
+        }
+        assert!(!reopened.metadata.join("att_garbage.json").exists());
+        assert_eq!(reopened.lock().records.len(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_full_store_expires_rather_than_refusing_every_upload() {
+        // Retention used to run only at startup, so a service that runs for
+        // weeks reached the quota and stayed there until someone restarted it.
+        let root = root("quota");
+        let _ = fs::remove_dir_all(&root);
+        let store = AttachmentStore::open(root.clone()).unwrap();
+        let stale = store
+            .put("stale.png".into(), "image/png".into(), b"stale")
+            .unwrap();
+        {
+            let mut index = store.lock();
+            let record = index.records.get_mut(&stale.id).unwrap();
+            record.created_at = now().unwrap() - UNREFERENCED_RETENTION.as_secs() - 1;
+            store.write_record(record).unwrap();
+            // Stand in for a store at MAX_OBJECTS without writing 512 files.
+            index.bytes = MAX_TOTAL_BYTES;
+        }
+        let fresh = store
+            .put("fresh.png".into(), "image/png".into(), b"fresh")
+            .unwrap();
+        assert_eq!(store.read(&fresh.id).unwrap().1, b"fresh");
+        assert!(matches!(
+            store.resolve(std::slice::from_ref(&stale.id), false),
+            Err(StoreError::NotFound)
+        ));
+        assert!(!store.object_path(&stale.id).exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_failed_record_write_does_not_wedge_that_attachment() {
+        // `private_file` is `create_new`, so a leftover temporary made every
+        // later write for the id fail with EEXIST and the attachment read as
+        // permanently unavailable.
+        let root = root("temporary");
+        let _ = fs::remove_dir_all(&root);
+        let store = AttachmentStore::open(root.clone()).unwrap();
+        let descriptor = store
+            .put("note.txt".into(), "text/plain".into(), b"note")
+            .unwrap();
+        let temporary = store.metadata.join(format!(".{}.json.tmp", descriptor.id));
+        fs::write(&temporary, b"leftover").unwrap();
+        assert!(matches!(
+            store.resolve(std::slice::from_ref(&descriptor.id), true),
+            Err(StoreError::Io(_))
+        ));
+        assert!(!temporary.exists());
+        // The retry succeeds because the failure cleaned up after itself.
+        assert!(
+            store
+                .resolve(std::slice::from_ref(&descriptor.id), true)
+                .is_ok()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn head_and_get_agree_about_a_missing_object() {
+        let root = root("stat");
+        let _ = fs::remove_dir_all(&root);
+        let store = AttachmentStore::open(root.clone()).unwrap();
+        let descriptor = store
+            .put("clip.mp4".into(), "video/mp4".into(), b"clip")
+            .unwrap();
+        assert_eq!(store.stat(&descriptor.id).unwrap(), descriptor);
+        fs::write(store.object_path(&descriptor.id), b"c").unwrap();
+        assert!(matches!(store.stat(&descriptor.id), Err(StoreError::Corrupt)));
+        assert!(matches!(store.read(&descriptor.id), Err(StoreError::Corrupt)));
+        fs::remove_file(store.object_path(&descriptor.id)).unwrap();
+        assert!(store.stat(&descriptor.id).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -471,13 +471,12 @@ async fn upload_attachment(
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .ok_or_else(invalid_attachment)?;
-    let body = body.map_err(|_| {
-        ApiError::new(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "attachment_too_large",
-            "The attachment is too large.",
-        )
-    })?;
+    let body = body.map_err(rejected_upload)?;
+    // The content API validates the media type and refuses any parameter, so
+    // `text/plain; charset=utf-8` - what many clients attach by default - came
+    // back as "the attachment is invalid" with nothing naming the parameter.
+    // The audio route already strips them one function away.
+    let content_type = content_type.split(';').next().unwrap_or_default().trim();
     let upstream = state
         .content_client
         .post("http://localhost/attachments")
@@ -611,6 +610,27 @@ fn invalid_attachment() -> ApiError {
     )
 }
 
+/// Separates an upload that was too large from one that never arrived.
+///
+/// `BytesRejection` is 413 for a length limit and 400 for anything else while
+/// buffering, which includes the client disconnecting mid-body. Collapsing both
+/// into 413 told Alex his photo was too large when his phone had simply left
+/// Wi-Fi, so he resized a file that was never over the bound.
+fn rejected_upload(rejection: BytesRejection) -> ApiError {
+    if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        return ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "attachment_too_large",
+            "The attachment is too large.",
+        );
+    }
+    ApiError::new(
+        StatusCode::BAD_REQUEST,
+        "attachment_incomplete",
+        "The attachment did not finish uploading.",
+    )
+}
+
 fn attachment_unavailable() -> ApiError {
     ApiError::new(
         StatusCode::BAD_GATEWAY,
@@ -656,12 +676,20 @@ async fn transcribe(
             "Send a mono PCM WAV recording.",
         ));
     }
-    let audio = body.map_err(|_| {
-        ApiError::new(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "audio_too_large",
-            "The recording is too large.",
-        )
+    let audio = body.map_err(|rejection| {
+        if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            ApiError::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "audio_too_large",
+                "The recording is too large.",
+            )
+        } else {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "audio_incomplete",
+                "The recording did not finish uploading.",
+            )
+        }
     })?;
     validate_wav(&audio)?;
 
@@ -1240,6 +1268,21 @@ mod tests {
         assert_eq!(upload.status(), StatusCode::OK);
         let upload = to_bytes(upload.into_body(), 4096).await.unwrap();
         assert!(upload.starts_with(br#"{"id":"att_test""#));
+
+        // The upstream handler asserts a bare `text/plain`, so this passing is
+        // the strip. The content API refuses a media type with any parameter,
+        // and `charset=utf-8` is what most clients attach to a text body.
+        let parameterised = router(state.clone(), false)
+            .oneshot(
+                Request::post("/attachments?name=notes.txt")
+                    .header(header::AUTHORIZATION, "Bearer test-token")
+                    .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+                    .body(Body::from("abc"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(parameterised.status(), StatusCode::OK);
 
         let oversized = router(state.clone(), false)
             .oneshot(

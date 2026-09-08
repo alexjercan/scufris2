@@ -78,6 +78,8 @@ function safeFailure(status: number | undefined, body: Buffer): Error {
     );
   if (status === 507 || code === "attachment_quota")
     return new Error("Attachment storage is full.");
+  if (code === "attachment_incomplete")
+    return new Error("The attachment did not finish uploading.");
   return new Error("Attachment storage is unavailable.");
 }
 

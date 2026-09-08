@@ -1,8 +1,8 @@
 # Package scufris-jobs so a briefing source can call it by name
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 75
-- TAGS: workflow,packaging
+- TAGS: workflow, packaging
 
 ## Goal
 

@@ -7,6 +7,8 @@ import test from "node:test";
 import {
   decodeAgentResponse,
   encodeAgentRequest,
+  MAX_DETAIL_BYTES,
+  stateDetail,
   surfacePrompt,
   takeLines,
 } from "../agent/extensions/scufris/service/protocol.ts";
@@ -22,6 +24,64 @@ const widget = {
   description: "Show a summary <safely>.",
   input_schema: { type: "object", properties: { passed: { type: "integer" } } },
 };
+
+test("the encoder holds the host's content rules so a violation is not a teardown", () => {
+  // shared/control/src/service.rs `text()` refuses NUL, CR, and a value that
+  // trims to empty. The host answers an invalid submission by closing the
+  // agent connection without a refusal, so anything this side lets through
+  // costs the answer in flight and says nothing. These have to match.
+  const response = (details: string) =>
+    encodeAgentRequest({
+      v: 6,
+      type: "agent.response",
+      text: "Done.",
+      details,
+    });
+  assert.throws(() => response("bad\rline"), /details is invalid/);
+  assert.throws(() => response("bad\0line"), /details is invalid/);
+  assert.throws(() => response("   "), /details is invalid/);
+  assert.throws(
+    () =>
+      encodeAgentRequest({
+        v: 6,
+        type: "agent.response",
+        text: "one\rtwo",
+      }),
+    /text is invalid/,
+  );
+  // A state detail was never validated at all, and one carriage return from a
+  // worker's captured output was enough to close the channel.
+  const state = (detail: string) =>
+    encodeAgentRequest({
+      v: 6,
+      type: "agent.state",
+      state: "failed",
+      detail,
+    });
+  assert.throws(() => state("job\rfailed"), /detail is invalid/);
+  assert.throws(() => state("x".repeat(MAX_DETAIL_BYTES + 1)), /invalid/);
+  // Empty is the cleared state and stays legal.
+  assert.ok(state(""));
+});
+
+test("a state detail is clamped rather than lost", () => {
+  assert.equal(stateDetail("job\rfailed\0here"), "job failed here");
+  const long = stateDetail("x".repeat(MAX_DETAIL_BYTES * 2));
+  assert.equal(Buffer.byteLength(long, "utf8"), MAX_DETAIL_BYTES);
+  // A cut that splits a codepoint must not leave a replacement character
+  // behind, or the clamped detail is refused for a different reason.
+  const wide = stateDetail("é".repeat(MAX_DETAIL_BYTES));
+  assert.ok(Buffer.byteLength(wide, "utf8") <= MAX_DETAIL_BYTES);
+  assert.doesNotMatch(wide, /�/);
+  assert.ok(
+    encodeAgentRequest({
+      v: 6,
+      type: "agent.state",
+      state: "failed",
+      detail: stateDetail(`${"x".repeat(MAX_DETAIL_BYTES * 2)}\rmore`),
+    }),
+  );
+});
 
 test("agent v6 messages are bounded and channel-specific", () => {
   assert.equal(

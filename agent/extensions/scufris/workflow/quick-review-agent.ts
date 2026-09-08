@@ -151,6 +151,16 @@ export async function startQuickReviewAgent(
     child.once("exit", (code) => {
       if (!completionSettled && !closeRequested)
         fail(errorDetail(stderr, code));
+      // A close before the agent said `ready` still has to settle `ready`.
+      // `closeRequested` suppresses the failure above so an intentional close
+      // is not reported as a crash, and the caller is parked on `await ready`
+      // with a process that has already gone: nothing else can ever settle it,
+      // and Pi awaits `execute` without racing the abort signal, so the whole
+      // agent loop stops. Pressing the interrupt key is what wedged it.
+      if (!readySettled) {
+        readySettled = true;
+        rejectReady(new Error("Quick Review agent was cancelled"));
+      }
       resolve();
     });
   });

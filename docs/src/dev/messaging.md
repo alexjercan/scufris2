@@ -64,21 +64,24 @@ to answer with one atomic final response.
 Meaningful workflow actions are serialized against everything else:
 
 - `scufris_job_spawn`, `scufris_job_send`, `scufris_job_stop`,
-  `scufris_job_land`, and `scufris_job_plannotator_review` must each be the only
-  tool in their tool batch, as must `scufris_final_response`.
-- After a successful action, `scufris_job_inspect` and `scufris_job_list` are
-  blocked with an explanatory reason until the final response completes or the
-  run settles. Nothing else is: a request often names more than one thing to
-  start, and an instruction can arrive while the first is still starting. The
-  gate forbids watching the job it just acted on, which is the only foreground
-  behaviour that costs Alex a turn he cannot interrupt.
+  `scufris_job_land`, `scufris_job_quick_review`, and
+  `scufris_job_plannotator_review` must each be the only tool in their tool
+  batch, as must `scufris_final_response`.
+- After a successful action, `scufris_job_inspect` is blocked for the job that
+  action named, with an explanatory reason, until the final response completes
+  or the run settles. Nothing else is blocked. A request often names more than
+  one thing to start, an instruction can arrive while the first is still
+  starting, and a question about a different job is not watching this one.
+  `scufris_job_list` reads the in-memory map and cannot wait, so it is not
+  blocked either.
 - A separate `tool_call` guard blocks foreground bash commands that execute
   `sleep` or `wait` at any position in a pipeline or list. Foreground Scufris
-  never waits for workers; filesystem notifications start later turns.
+  never waits for workers; filesystem notifications start later turns. This
+  guard, not the gate, is what prevents a foreground poll loop; it runs whether
+  or not an acknowledgment is pending.
 
-The gate emits its state on the shared `scufris:acknowledgment-state` event so
-the response module can suppress plain assistant text while an
-acknowledgment is pending.
+The gate emits its state on the shared `scufris:acknowledgment-state` event.
+Nothing consumes it today.
 
 ## Final response shaping
 

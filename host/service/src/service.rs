@@ -480,16 +480,28 @@ impl Service {
                         .get(surface)
                         .map(|held| (surface.clone(), held.registration.widgets.clone()))
                 });
-                let widgets = if owner.is_some() { widgets } else { None };
-                if let Some((_, definitions)) = &owner
-                    && let Some(calls) = &widgets
-                    && let Err(detail) = validate_calls(calls, definitions)
-                {
+                let mut widgets = if owner.is_some() { widgets } else { None };
+                // A widget call is best-effort presentation and an attachment
+                // is not the answer either, so neither is worth the words. The
+                // agent is told what was wrong, because a mistake it can fix
+                // should be visible somewhere; but the prose is recorded, and
+                // it reaches the person who asked. Refusing the whole response
+                // threw the answer away over a widget name, and no screen said
+                // so - the turn had already ended on the agent's side, nothing
+                // reads this refusal and retries, and Alex was left looking at
+                // his own question with nothing under it.
+                let invalid = match (&owner, &widgets) {
+                    (Some((_, definitions)), Some(calls)) => {
+                        validate_calls(calls, definitions).err()
+                    }
+                    _ => None,
+                };
+                if let Some(detail) = invalid {
                     inner.send_agent(AgentResponseBody::Rejected {
                         code: "invalid_widgets".into(),
                         detail,
                     });
-                    return;
+                    widgets = None;
                 }
                 let descriptors = match self.attachments.resolve(&attachments, true) {
                     Ok(descriptors) => descriptors,
@@ -498,11 +510,11 @@ impl Service {
                             code: "attachments_unavailable".into(),
                             detail: "One or more attachments are unavailable.".into(),
                         });
-                        return;
+                        Vec::new()
                     }
                 };
-                // The answer closes the turn. A refusal above does not: the
-                // agent may correct it and answer the same owner again.
+                // The answer closes the turn, whatever had to be dropped from
+                // it to get here.
                 inner.associated_surface = None;
                 inner.record(ConversationMessage {
                     role: ConversationRole::Assistant,
@@ -1121,6 +1133,95 @@ mod tests {
             },
         );
         assert!(drain(&inbox).iter().any(|body| matches!(body, SurfaceResponseBody::Message { role: ConversationRole::Assistant, surface, details: Some(_), widgets: Some(_), .. } if surface == "one")));
+    }
+
+    #[test]
+    fn an_unknown_widget_costs_the_call_and_not_the_answer() {
+        // The model names a widget the surface never registered. The prose is
+        // the answer to a question Alex asked and is sitting in front of; the
+        // widget is presentation. Only the widget is lost, and the agent is
+        // told which one.
+        let service = service();
+        let (outbox, inbox) = sync_channel(256);
+        service.register_surface(
+            1,
+            SurfaceRegistration {
+                id: "one".into(),
+                name: "One".into(),
+                widgets: vec![WidgetDefinition {
+                    name: "summary".into(),
+                    description: "Summary".into(),
+                    input_schema: serde_json::json!({"type":"object"}),
+                }],
+            },
+            outbox,
+        );
+        while inbox.try_recv().is_ok() {}
+        let (agent_out, agent_in) = sync_channel(8);
+        service.register_agent(10, agent_out);
+        agent_in.recv().unwrap();
+        service.surface_message(1, "m-1".into(), "test".into(), vec![]);
+        agent_in.recv().unwrap();
+        service.agent_request(
+            10,
+            AgentRequestBody::Response {
+                text: "Passed.".into(),
+                details: None,
+                widgets: Some(vec![WidgetCall {
+                    id: "w-1".into(),
+                    name: "summary-panel".into(),
+                    arguments: serde_json::json!({}),
+                }]),
+                attachments: vec![],
+            },
+        );
+        assert!(drain(&inbox).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Message {
+                role: ConversationRole::Assistant,
+                surface,
+                text,
+                widgets: None,
+                ..
+            } if surface == "one" && text == "Passed."
+        )));
+        assert!(matches!(
+            agent_in.recv().unwrap().body,
+            AgentResponseBody::Rejected { ref code, .. } if code == "invalid_widgets"
+        ));
+    }
+
+    #[test]
+    fn an_expired_attachment_costs_the_file_and_not_the_answer() {
+        let service = service();
+        let (_, one) = surface(&service, 1, "one");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        service.surface_message(1, "m-1".into(), "start".into(), vec![]);
+        agent_in.recv().unwrap();
+        service.agent_request(
+            10,
+            AgentRequestBody::Response {
+                text: "Here it is.".into(),
+                details: None,
+                widgets: None,
+                attachments: vec!["gone".into()],
+            },
+        );
+        assert!(drain(&one).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Message {
+                role: ConversationRole::Assistant,
+                text,
+                attachments,
+                ..
+            } if text == "Here it is." && attachments.is_empty()
+        )));
+        assert!(matches!(
+            agent_in.recv().unwrap().body,
+            AgentResponseBody::Rejected { ref code, .. } if code == "attachments_unavailable"
+        ));
     }
 
     #[test]

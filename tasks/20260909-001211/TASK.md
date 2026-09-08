@@ -32,16 +32,16 @@ Two reviewer agents at a time, over eight components. Every agent reads
 `.agents/skills/scufris-review/lanes/reviewer.md` and the run brief. Agents
 are read-only; adjudication happens in the session that dispatched them.
 
-| G   | Component                              | Paths                                                              |
-| --- | -------------------------------------- | ------------------------------------------------------------------ |
-| G1  | Agent extension                        | `agent/extensions/scufris/**`, `agent/skills/**`                   |
-| G2  | Host service and control protocol      | `host/service/src/*.rs`, `shared/control/**`                        |
-| G3  | Surface gateway, attachments, content  | `host/service/src/bin/**`, `attachment.rs`, service attachments     |
-| G4  | Briefings                              | `tools/briefing/**`, `agent/extensions/scufris/briefing/**`         |
-| G5  | Jobs helper                            | `tools/jobs/scufris-jobs`                                           |
-| G6  | Desktop core                           | `surfaces/desktop/src/*.rs`                                         |
-| G7  | Desktop widgets, UI, den               | `surfaces/desktop/{src/widgets,ui,widgets,shell,backends}`, `tools/den` |
-| G8  | End to end and deployment              | cross-cutting seams; `nix/**`, `flake.nix`, `RELEASE.md`, CI        |
+| G   | Component                             | Paths                                                                   |
+| --- | ------------------------------------- | ----------------------------------------------------------------------- |
+| G1  | Agent extension                       | `agent/extensions/scufris/**`, `agent/skills/**`                        |
+| G2  | Host service and control protocol     | `host/service/src/*.rs`, `shared/control/**`                            |
+| G3  | Surface gateway, attachments, content | `host/service/src/bin/**`, `attachment.rs`, service attachments         |
+| G4  | Briefings                             | `tools/briefing/**`, `agent/extensions/scufris/briefing/**`             |
+| G5  | Jobs helper                           | `tools/jobs/scufris-jobs`                                               |
+| G6  | Desktop core                          | `surfaces/desktop/src/*.rs`                                             |
+| G7  | Desktop widgets, UI, den              | `surfaces/desktop/{src/widgets,ui,widgets,shell,backends}`, `tools/den` |
+| G8  | End to end and deployment             | cross-cutting seams; `nix/**`, `flake.nix`, `RELEASE.md`, CI            |
 
 G8 is not a directory. It follows whole paths across components: a surface
 message from keypress to spoken answer, a briefing from timer to published

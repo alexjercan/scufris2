@@ -4,6 +4,7 @@ import {
   SERVICE_VERSION,
   decodeAgentResponse,
   encodeAgentRequest,
+  stateDetail,
   surfacePrompt,
   takeLines,
   type AgentRequest,
@@ -40,6 +41,8 @@ export interface AgentClientOptions {
   wake: (wake: AgentWake) => void;
   abort: () => void;
   busy: () => boolean;
+  /** Called on every completed handshake, including a reconnect. */
+  connected?: () => void;
   log?: (message: string, level: "info" | "error") => void;
 }
 
@@ -78,11 +81,23 @@ export class AgentClient {
   }
 
   state(state: "failed" | "blocked" | "clear", detail: string): void {
-    this.tell({ v: SERVICE_VERSION, type: "agent.state", state, detail });
+    this.tell({
+      v: SERVICE_VERSION,
+      type: "agent.state",
+      state,
+      detail: stateDetail(detail),
+    });
   }
 
   private tell(message: AgentRequest): void {
-    if (!this.ready || !this.socket?.writable) return;
+    if (!this.ready || !this.socket?.writable) {
+      // An answer produced while the socket is between reconnects has nowhere
+      // to go, and the turn that made it has already ended. Saying so is all
+      // that is left: silence here is indistinguishable from an answer Alex
+      // simply never received.
+      this.log(`${message.type} was not sent: the channel is down`, "error");
+      return;
+    }
     try {
       this.socket.write(encodeAgentRequest(message));
     } catch (error) {
@@ -126,6 +141,10 @@ export class AgentClient {
         if (message.type === "agent.ready") {
           this.ready = true;
           this.backoff = MIN_BACKOFF_MS;
+          // The host keeps no state for an agent that went away, and anything
+          // sent while the socket was down was dropped. A fresh connection is
+          // the only chance to say again that a job is still blocked.
+          this.options.connected?.();
         } else if (message.type === "agent.message") {
           this.options.sendUserMessage(
             surfacePrompt(message.text, message.widgets, message.attachments),

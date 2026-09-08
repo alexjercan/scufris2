@@ -29,6 +29,44 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Fixed
 
+- Cancelling a Quick Review while it starts no longer wedges Scufris. The
+  helper's cancel path set the flag that suppresses its own crash report, and
+  the exit handler then declined to settle the promise the caller was parked
+  on, so `ready` could never resolve for a process that had already gone. Pi
+  awaits a tool without racing the interrupt signal, so the whole agent loop
+  stopped and only killing Pi recovered it: pressing the interrupt key was
+  what wedged it. A close before the agent is ready now settles as a
+  cancellation.
+- An answer is no longer thrown away because of what was attached to it. A
+  widget call naming a widget the surface never registered, or an attachment
+  id whose file had expired, refused the whole response - the prose, the
+  details and everything else went with it. The turn had already ended on the
+  agent's side, nothing reads that refusal and retries, and no screen said
+  anything, so Alex was left looking at his own question with nothing under
+  it. The offending call or attachment is dropped and the answer is recorded.
+  The agent is still told what was wrong, because a mistake it can fix should
+  be visible somewhere; but a widget is presentation and an attachment is not
+  the answer, and neither is worth the words. This is what the documents
+  already promised: both call widgets best-effort.
+- The agent no longer sends the host a message the host will refuse. The
+  encoder checked length alone, while the host also rejects NUL, carriage
+  return, and a value that trims to empty - and it answers an invalid
+  submission by closing the agent connection without a refusal. One carriage
+  return from a worker's captured output, in a state detail that was never
+  validated at all, was enough to drop the answer in flight and tear down the
+  channel with nothing but a journal line. The encoder now holds the host's
+  rules, and a state detail is clamped to fit rather than lost, so a long
+  error message still reaches the surfaces trimmed.
+- A response the agent cannot send is reported instead of vanishing. The
+  channel dropped it silently whenever the socket was between reconnects, and
+  the attention state was never republished afterwards, so a job that failed
+  while the socket was down left every surface reading clear until some other
+  job changed it. State is now republished on every completed handshake.
+- After an action, only `scufris_job_inspect` on the job that action named is
+  blocked, rather than inspecting any job and listing the fleet. "Steer this
+  one and tell me what the reviewer on that one found" was one request that
+  lost its second half, and `scufris_job_list` reads memory and cannot wait,
+  so refusing it only cost "start that job and show me what's running".
 - Scufris starts everything a request asks for, rather than stopping after the
   first action. A successful spawn, steering, stop, landing, or review armed a
   gate that blocked every tool except the final response, so a second thing

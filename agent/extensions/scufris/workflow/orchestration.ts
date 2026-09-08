@@ -47,13 +47,17 @@ export const ACKNOWLEDGED_ACTION_TOOLS: ReadonlySet<string> = new Set([
   QUICK_REVIEW_TOOL,
   PLANNOTATOR_REVIEW_TOOL,
 ]);
-// Watching a job it just started is the one thing the foreground must not do,
+// Watching the job it just started is the one thing the foreground must not do,
 // because a job answers on its own schedule and a turn spent waiting is a turn
 // Alex cannot reach. Everything else is work he may have asked for, so the gate
 // names what it forbids rather than permitting one tool and refusing the rest.
+//
+// `scufris_job_list` is not here: it reads the in-memory map and cannot wait on
+// anything, so refusing it only cost him "start that job and show me what's
+// running". The refusal is scoped to the job just acted on for the same reason
+// - asking about a different job is not watching this one.
 export const JOB_OBSERVATION_TOOLS: ReadonlySet<string> = new Set([
   "scufris_job_inspect",
-  "scufris_job_list",
 ]);
 export const literalDelegationPolicy = `Scufris delegates literally. A project context is a menu of agent types, not a workflow to run.
 
@@ -290,21 +294,27 @@ export function toolBatchAllowsAction(
 
 export class ForegroundAcknowledgmentGate {
   private pendingAction: string | undefined;
+  private pendingJob: string | undefined;
   private readonly onChange: (action?: string) => void;
 
   constructor(onChange: (action?: string) => void = () => {}) {
     this.onChange = onChange;
   }
 
-  markSuccessfulAction(toolName: string): void {
+  markSuccessfulAction(toolName: string, jobId?: string): void {
     if (!ACKNOWLEDGED_ACTION_TOOLS.has(toolName)) return;
     this.pendingAction = toolName;
+    this.pendingJob = jobId;
     this.onChange(toolName);
   }
 
-  blockReason(toolName: string): string | undefined {
+  blockReason(toolName: string, jobId?: string): string | undefined {
     if (!this.pendingAction || !JOB_OBSERVATION_TOOLS.has(toolName)) return;
-    return `After ${this.pendingAction}, do not watch the job you just acted on. It reports through filesystem notifications, which start their own turn. Start anything else the request asked for, then acknowledge with ${FINAL_RESPONSE_TOOL}.`;
+    // A question about another job is not watching this one. Without the id
+    // the gate cannot tell them apart, so it refuses - the pending job is the
+    // likely subject when nothing says otherwise.
+    if (jobId !== undefined && jobId !== this.pendingJob) return;
+    return `After ${this.pendingAction} on ${this.pendingJob ?? "that job"}, do not watch it. It reports through filesystem notifications, which start their own turn. Start anything else the request asked for, then acknowledge with ${FINAL_RESPONSE_TOOL}.`;
   }
 
   completeFinalResponse(isError: boolean): void {
@@ -317,8 +327,14 @@ export class ForegroundAcknowledgmentGate {
 
   reset(): void {
     this.pendingAction = undefined;
+    this.pendingJob = undefined;
     this.onChange();
   }
+}
+
+function jobIdOf(input: unknown): string | undefined {
+  const value = (input as { job_id?: unknown } | undefined)?.job_id;
+  return typeof value === "string" ? value : undefined;
 }
 
 function currentToolBatch(context: ExtensionContext): string[] {
@@ -362,7 +378,7 @@ export function registerForegroundAcknowledgmentLifecycle(
           "Meaningful workflow actions and scufris_final_response must each be the only tool in their tool batch.",
       };
     }
-    const reason = gate.blockReason(event.toolName);
+    const reason = gate.blockReason(event.toolName, jobIdOf(event.input));
     if (reason) return { block: true, reason };
   });
 
@@ -1013,7 +1029,10 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         };
         jobs.set(job.job_id, job);
         watchJob(job);
-        acknowledgmentGate.markSuccessfulAction("scufris_job_spawn");
+        acknowledgmentGate.markSuccessfulAction(
+          "scufris_job_spawn",
+          job.job_id,
+        );
         return toolResult({
           ...publicResult,
           ...(resolved ? { context_id: resolved.context_id } : {}),
@@ -1075,7 +1094,10 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             );
           },
         });
-        acknowledgmentGate.markSuccessfulAction(PLANNOTATOR_REVIEW_TOOL);
+        acknowledgmentGate.markSuccessfulAction(
+          PLANNOTATOR_REVIEW_TOOL,
+          job.job_id,
+        );
         return toolResult({
           job_id: job.job_id,
           request_id: requestId,
@@ -1184,7 +1206,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
               wakeMode,
             );
           });
-        acknowledgmentGate.markSuccessfulAction(QUICK_REVIEW_TOOL);
+        acknowledgmentGate.markSuccessfulAction(QUICK_REVIEW_TOOL, job.job_id);
         return toolResult({
           job_id: job.job_id,
           state: "quick-review-opened",
@@ -1226,7 +1248,10 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           120_000,
         );
         forgetRemovedJobs(result.removed_jobs);
-        acknowledgmentGate.markSuccessfulAction("scufris_job_land");
+        acknowledgmentGate.markSuccessfulAction(
+          "scufris_job_land",
+          params.job_id,
+        );
         return toolResult(result);
       },
     }),
@@ -1323,7 +1348,10 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           restarted: boolean;
         }>("send", params, signal, 20_000);
         applySteerResult(job, result, () => watchJob(job));
-        acknowledgmentGate.markSuccessfulAction("scufris_job_send");
+        acknowledgmentGate.markSuccessfulAction(
+          "scufris_job_send",
+          params.job_id,
+        );
         return toolResult(result);
       },
     }),
@@ -1365,7 +1393,10 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           120_000,
         );
         forgetRemovedJobs(result.removed_jobs);
-        acknowledgmentGate.markSuccessfulAction("scufris_job_stop");
+        acknowledgmentGate.markSuccessfulAction(
+          "scufris_job_stop",
+          params.job_id,
+        );
         return toolResult(result);
       },
     }),

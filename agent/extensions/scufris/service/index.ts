@@ -90,6 +90,7 @@ export default function service(pi: ExtensionAPI): void {
     client = new AgentClient({
       socketPath,
       busy: () => context?.isIdle() === false,
+      connected: publishState,
       abort: () => context?.abort(),
       sendUserMessage: (message, busy) => {
         if (busy) pi.sendUserMessage(message, { deliverAs: "steer" });

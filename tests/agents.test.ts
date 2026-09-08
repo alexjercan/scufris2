@@ -54,10 +54,7 @@ test("foreground action policy starts everything and watches nothing", () => {
   assert.match(foregroundActionPolicy, /a request dropped/);
   assert.match(foregroundActionPolicy, /Never watch what you started/);
   assert.match(foregroundActionPolicy, /Do not use a canned acknowledgment/);
-  assert.deepEqual([...JOB_OBSERVATION_TOOLS].sort(), [
-    "scufris_job_inspect",
-    "scufris_job_list",
-  ]);
+  assert.deepEqual([...JOB_OBSERVATION_TOOLS], ["scufris_job_inspect"]);
   assert.deepEqual([...ACKNOWLEDGED_ACTION_TOOLS].sort(), [
     "scufris_job_land",
     "scufris_job_plannotator_review",
@@ -81,10 +78,21 @@ test("foreground action policy starts everything and watches nothing", () => {
 
   const gate = new ForegroundAcknowledgmentGate();
   for (const action of ["scufris_job_spawn", "scufris_job_send"]) {
-    gate.markSuccessfulAction(action);
+    gate.markSuccessfulAction(action, "a1b2c3d4e5f6");
     // Watching the job it just started is the whole of what is refused.
+    assert.match(
+      gate.blockReason("scufris_job_inspect", "a1b2c3d4e5f6") ?? "",
+      /do not watch it/,
+    );
     assert.match(gate.blockReason("scufris_job_inspect") ?? "", /do not watch/);
-    assert.match(gate.blockReason("scufris_job_list") ?? "", /do not watch/);
+    // A different job is a different question. "Steer this one and tell me what
+    // the reviewer on that one found" is one request, not a poll.
+    assert.equal(
+      gate.blockReason("scufris_job_inspect", "9f8e7d6c5b4a"),
+      undefined,
+    );
+    // The fleet list reads memory and cannot wait, so it was never the risk.
+    assert.equal(gate.blockReason("scufris_job_list"), undefined);
     // Everything else is work the request may have asked for, including a
     // second job and an instruction that arrived while this one was starting.
     assert.equal(gate.blockReason("scufris_job_spawn"), undefined);

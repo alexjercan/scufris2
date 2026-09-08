@@ -8,6 +8,7 @@ export const CONTENT_FILE_NAME = "content.sock";
 export const MAX_IDENTIFIER_LENGTH = 64;
 export const MAX_TEXT_BYTES = 8 * 1024;
 export const MAX_DETAILS_BYTES = 32 * 1024;
+export const MAX_DETAIL_BYTES = 4 * 1024;
 export const MAX_WIDGETS = 32;
 export const MAX_WIDGET_ARGUMENTS_BYTES = 16 * 1024;
 export const MAX_ATTACHMENTS = 8;
@@ -81,11 +82,24 @@ export class ProtocolError extends Error {
 }
 
 const identifier = /^[A-Za-z0-9._-]{1,64}$/;
-function bounded(value: unknown, maximum: number, field: string): string {
+// The host's `text()` in shared/control/src/service.rs is the authority, and
+// these are its rules. A value this side lets through and the host refuses is
+// not a refusal Alex ever sees: the host breaks the agent connection on an
+// invalid submission, so the answer in flight is lost and the channel simply
+// reconnects. Refusing here turns that into a ProtocolError that `tell()`
+// catches and reports.
+function bounded(
+  value: unknown,
+  maximum: number,
+  field: string,
+  allowEmpty = false,
+): string {
   if (
     typeof value !== "string" ||
-    value.length === 0 ||
-    Buffer.byteLength(value, "utf8") > maximum
+    (!allowEmpty && value.trim().length === 0) ||
+    Buffer.byteLength(value, "utf8") > maximum ||
+    value.includes("\0") ||
+    value.includes("\r")
   )
     throw new ProtocolError(`${field} is invalid`, `invalid_${field}`);
   return value;
@@ -153,6 +167,25 @@ function safeStringify(value: unknown): string {
   return line;
 }
 
+/**
+ * Clamps a state detail to what the host accepts instead of losing it.
+ *
+ * A detail is built from a caught error message or a worker's captured output,
+ * so its length and its control characters are not ours to choose. Refusing the
+ * whole state would leave the surfaces reading `clear` while a job is failed,
+ * which is the wrong half to keep.
+ */
+export function stateDetail(value: string): string {
+  const clean = value.replace(/[\0\r]/g, " ");
+  const bytes = Buffer.from(clean, "utf8");
+  if (bytes.length <= MAX_DETAIL_BYTES) return clean;
+  // Cutting bytes can split a codepoint; the tail decodes to U+FFFD.
+  return bytes
+    .subarray(0, MAX_DETAIL_BYTES)
+    .toString("utf8")
+    .replace(/�+$/, "");
+}
+
 export function encodeAgentRequest(message: AgentRequest): string {
   if (message.type === "agent.response") {
     bounded(message.text, MAX_TEXT_BYTES, "text");
@@ -182,6 +215,12 @@ export function encodeAgentRequest(message: AgentRequest): string {
         );
     }
   }
+  // A state detail is built from a caught error message, which is neither
+  // length-bounded nor stripped of control characters at its source. It went
+  // to the wire unchecked, and one carriage return from a worker's captured
+  // output was enough to close the channel.
+  if (message.type === "agent.state")
+    bounded(message.detail, MAX_DETAIL_BYTES, "detail", true);
   const line = `${safeStringify(message)}\n`;
   if (Buffer.byteLength(line, "utf8") > MAX_MESSAGE_BYTES)
     throw new ProtocolError("message is too large", "message_too_large");

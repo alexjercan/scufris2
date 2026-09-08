@@ -12,6 +12,7 @@
   ctl,
   pi,
   projectRoots,
+  keepDays,
 }: let
   inherit (pkgs) lib;
   quoted = lib.escapeShellArg name;
@@ -35,9 +36,29 @@ in
       if [[ -z "''${SCUFRIS_PROJECT_ROOTS+x}" ]]; then
         export SCUFRIS_PROJECT_ROOTS=${lib.escapeShellArg (builtins.toJSON projectRoots)}
       fi
+      # Every bound the profile sets, and only when the environment is silent:
+      # a run started by hand with one of these already set is asking for that
+      # number, and the schedule is not the place to argue.
       if [[ -z "''${SCUFRIS_BRIEFING_DEADLINE+x}" ]]; then
         export SCUFRIS_BRIEFING_DEADLINE=${toString profile.deadline}
       fi
+      if [[ -z "''${SCUFRIS_BRIEFING_SOURCE_DEADLINE+x}" ]]; then
+        export SCUFRIS_BRIEFING_SOURCE_DEADLINE=${toString profile.sourceDeadline}
+      fi
+      if [[ -z "''${SCUFRIS_BRIEFING_MAX_OFFERS+x}" ]]; then
+        export SCUFRIS_BRIEFING_MAX_OFFERS=${toString profile.maxOffers}
+      fi
+      if [[ -z "''${SCUFRIS_BRIEFING_MAX_BODY+x}" ]]; then
+        export SCUFRIS_BRIEFING_MAX_BODY=${toString profile.maxBody}
+      fi
+      if [[ -z "''${SCUFRIS_BRIEFING_KEEP_DAYS+x}" ]]; then
+        export SCUFRIS_BRIEFING_KEEP_DAYS=${toString keepDays}
+      fi
+      ${lib.optionalString (profile.parallel != null) ''
+        if [[ -z "''${SCUFRIS_BRIEFING_PARALLEL+x}" ]]; then
+          export SCUFRIS_BRIEFING_PARALLEL=${toString profile.parallel}
+        fi
+      ''}
       # The run on disk is the durable half. It is written before anything is
       # said, so a wake nobody is there to take costs the delivery and not the
       # briefing: the run stays gathered and the next session that opens reads

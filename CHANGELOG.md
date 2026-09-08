@@ -11,6 +11,23 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Added
 
+- A briefing source declares a `policy` saying what it may do: `read`, the
+  default, reports and cannot change anything; `review` adds the subagents and
+  the commands a review panel needs and still cannot write; `repair` adds the
+  edit tools. It is a name rather than a tool list because the flags belong to
+  the harness and the same guidance should run under either one. A policy the
+  reader does not know is refused by name, because a source that meant `repair`
+  and wrote `repairs` would otherwise run as a reader and report that it fixed
+  nothing.
+- A profile sets the bounds its own briefing needs, rather than inheriting one
+  set written for a morning: `sourceDeadline` for how long one source may take,
+  `parallel` for how many run at once, `maxOffers` and `maxBody` for how much
+  one may report. The briefing-wide `keepDays` sets how many days are kept.
+  A source is held to `sourceDeadline` or to whatever is left of `deadline`,
+  whichever is smaller, so a profile that wants a long source raises both.
+  Anything unreadable reads as the default: a briefing that refuses to run over
+  a typo in a unit file is worse than one held to its own numbers.
+
 - A briefing ends with a numbered list of things to do next. Each source may
   offer at most three, each a short label saying what to do and a detail saying
   what and why, and collection merges them across sources into one list

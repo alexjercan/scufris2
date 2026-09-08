@@ -78,7 +78,7 @@ MAX_OFFER_LABEL = 60
 MAX_OFFER_DETAIL = 400
 MAX_OUTPUT = 512 * 1024
 MAX_PROSE = 64 * 1024
-KEEP_RUNS = 30
+KEEP_DAYS = 30
 
 SOURCE_DEADLINE = 900.0
 RUN_DEADLINE = 1800.0
@@ -91,13 +91,30 @@ REPAIR_FLOOR = 45.0
 REPAIR_THINKING = "low"
 MAX_QUOTED = 32 * 1024
 
-# A source reads its project and reports. The edit tools are off because
-# nothing here asks for a change, not because this is a sandbox: a source that
-# runs a refresh command runs it with the owner's own hands, exactly as the
-# review workspace does. The project's guidance is what keeps it honest.
+# What a source may do, as a name rather than a tool list. The flags belong to
+# the harness and the same guidance should be able to run under either one, so
+# a source declares the intent and this maps it.
+#
+# `read` is what a source gets unless it says otherwise, and it is the
+# tightest: an allowlist, no subagents, and no skills or slash commands. It is
+# not a sandbox. A source that runs a refresh command runs it with the owner's
+# own hands, exactly as the review workspace does, and the project's guidance
+# is what keeps it honest.
+#
+# `review` opens the harness up and keeps only the edit tools shut. That is
+# what a review panel needs: it dispatches read-only lanes and adjudicates
+# them, changing nothing. A source cannot reach its own review skill under
+# `read`, because a skill is invoked as a command.
+#
+# `repair` shuts nothing. A source that reviews the day and fixes what it
+# found is asking for this, and it is the one step where a briefing writes.
+POLICIES = ("read", "review", "repair")
+DEFAULT_POLICY = "read"
+
 PI_TOOLS = "read,grep,find,ls,bash"
+PI_DENIED_TOOLS = "edit,write"
 CLAUDE_TOOLS = "Read,Glob,Grep,Bash"
-CLAUDE_DENIED_TOOLS = "Edit,Write,NotebookEdit,Task"
+CLAUDE_DENIED_TOOLS = "Edit,Write,NotebookEdit"
 
 JOBS_HELPER = Path(__file__).resolve().parents[1] / "jobs" / "scufris-jobs"
 
@@ -378,7 +395,8 @@ def contribution_prompt(
     this program's business because it is what the page reads.
     """
     facts = MAX_FACTS
-    offers = MAX_OFFERS
+    offers = max_offers()
+    body = max_body()
     return f"""# Scufris {profile} briefing for {date}
 
 You are one source in the {profile} briefing. Report on this source only, from
@@ -422,7 +440,7 @@ Reply with exactly one fenced `json` block and nothing outside it:
 - `facts` is at most {facts} entries, each a measured value with a label of at
   most {MAX_LABEL} characters and a value of at most {MAX_VALUE} characters.
   Leave it empty rather than filling it with prose.
-- `body` is Markdown of at most {MAX_BODY} characters: headings, paragraphs,
+- `body` is Markdown of at most {body} characters: headings, paragraphs,
   lists, links, and fenced code. Keep it to what a person reads over coffee.
 - `offers` is at most {offers} things the owner could do next about what you
   found, each a `label` of at most {MAX_OFFER_LABEL} characters saying what to
@@ -451,6 +469,8 @@ def repair_prompt(
         if len(answer) > MAX_QUOTED
         else ""
     )
+    offers = max_offers()
+    body = max_body()
     return f"""# Scufris {profile} briefing: your answer could not be read
 
 You reported on {source["project"]} and the report was rejected:
@@ -480,10 +500,10 @@ If a value is too long, shorten that value; do not go and measure it again.
   sentence of at most {MAX_HEADLINE} characters.
 - `facts` is at most {MAX_FACTS} entries, each with a label of at most
   {MAX_LABEL} characters and a value of at most {MAX_VALUE} characters.
-- `body` is Markdown of at most {MAX_BODY} characters, carried as one JSON
+- `body` is Markdown of at most {body} characters, carried as one JSON
   string. Escape every quotation mark and newline inside it. Fenced code
   inside the body is fine.
-- `offers` is at most {MAX_OFFERS} entries, each with a label of at most
+- `offers` is at most {offers} entries, each with a label of at most
   {MAX_OFFER_LABEL} characters and a detail of at most {MAX_OFFER_DETAIL}
   characters. Keep the ones you already wrote.
 
@@ -507,9 +527,10 @@ def harness_argv(
     it cannot answer is the same as a refusal. `claude` is given
     `bypassPermissions` to match `pi --approve`: under `dontAsk` its shell
     runs sandboxed, and a source that needed `gh` or `python3` reported the
-    denial instead of the data. What a source may reach is decided by the tool
-    list and by its own guidance, not by a sandbox it cannot see.
+    denial instead of the data. What a source may reach is decided by the
+    policy it declared and by its own guidance, not by a sandbox it cannot see.
     """
+    policy = declared_policy(source)
     if source["harness"] == "pi":
         return [
             "pi",
@@ -521,7 +542,7 @@ def harness_argv(
             source["model"],
             "--thinking",
             source["thinking"] if tools else REPAIR_THINKING,
-            *(["--tools", PI_TOOLS] if tools else ["--no-tools"]),
+            *(pi_policy_argv(policy) if tools else ["--no-tools"]),
             prompt,
         ]
     return [
@@ -533,11 +554,59 @@ def harness_argv(
         source["thinking"] if tools else REPAIR_THINKING,
         "--permission-mode",
         "bypassPermissions",
-        "--tools",
-        CLAUDE_TOOLS if tools else "",
-        *(["--disallowed-tools", CLAUDE_DENIED_TOOLS] if tools else []),
-        "--disable-slash-commands",
+        *(
+            claude_policy_argv(policy)
+            if tools
+            else ["--tools", "", "--disable-slash-commands"]
+        ),
         prompt,
+    ]
+
+
+def declared_policy(source: dict[str, Any]) -> str:
+    """What this source said it may do, or the tightest thing it could mean.
+
+    The reader refuses an unknown name by then, so reaching here with one means
+    a source record built some other way. It reads as `read`: the failure of a
+    policy nobody recognises has to be the narrow rights, never the wide ones.
+    """
+    said = source.get("policy")
+    return said if said in POLICIES else DEFAULT_POLICY
+
+
+def pi_policy_argv(policy: str) -> list[str]:
+    """`pi` flags for a policy.
+
+    `read` is an allowlist and names what may run. The two wider steps are
+    denylists instead: a review panel reaches for whatever its skill needs, and
+    naming that here would mean this file guessing at another project's tools
+    and quietly starving the ones it did not think of.
+    """
+    if policy == "repair":
+        return []
+    if policy == "review":
+        return ["--exclude-tools", PI_DENIED_TOOLS]
+    return ["--tools", PI_TOOLS, "--no-skills"]
+
+
+def claude_policy_argv(policy: str) -> list[str]:
+    """`claude` flags for a policy.
+
+    `Task` is denied under `read` and allowed above it, because the review
+    lanes both projects' review skills dispatch are subagents. Slash commands
+    go with it: a skill is invoked as a command, so a policy that allows the
+    lanes and forbids the command allows nothing.
+    """
+    if policy == "repair":
+        return []
+    if policy == "review":
+        return ["--disallowed-tools", CLAUDE_DENIED_TOOLS]
+    return [
+        "--tools",
+        CLAUDE_TOOLS,
+        "--disallowed-tools",
+        f"{CLAUDE_DENIED_TOOLS},Task",
+        "--disable-slash-commands",
     ]
 
 
@@ -594,8 +663,9 @@ def parse_offers(raw: Any) -> list[dict[str, str]]:
     step too and no prompt to give. Whoever acts on one writes the words for it
     then, knowing it was picked.
     """
-    if not isinstance(raw, list) or len(raw) > MAX_OFFERS:
-        raise Unusable(f"offers must be a list of at most {MAX_OFFERS} entries")
+    allowed = max_offers()
+    if not isinstance(raw, list) or len(raw) > allowed:
+        raise Unusable(f"offers must be a list of at most {allowed} entries")
     offers = []
     for offer in raw:
         if not isinstance(offer, dict) or set(offer) - {"label", "detail"}:
@@ -667,8 +737,9 @@ def parse_contribution(text: str) -> dict[str, Any]:
     body = found.get("body", "")
     if not isinstance(body, str):
         raise Unusable("body must be Markdown text")
-    if len(body) > MAX_BODY:
-        raise Unusable(f"body is longer than {MAX_BODY} characters")
+    allowed = max_body()
+    if len(body) > allowed:
+        raise Unusable(f"body is longer than {allowed} characters")
     return {
         "title": short(found.get("title"), MAX_TITLE, "title"),
         "status": status,
@@ -936,7 +1007,17 @@ def collect(
                 source, f"the runner could not ask this source: {trouble!r}"
             )
 
-    with ThreadPoolExecutor(max_workers=len(sources)) as pool:
+    # Every source at once unless a profile caps it. A morning of six cheap
+    # reports wants no cap; a night of two agents that each fan out into review
+    # lanes is already wide at the moment a group is under review, and a third
+    # project declaring the profile should not quietly make it wider.
+    #
+    # The cap is on sources and not on what a source starts. What a source
+    # spawns is its harness's business and this cannot see it.
+    workers = min(
+        len(sources), environment_int("SCUFRIS_BRIEFING_PARALLEL", len(sources))
+    )
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         contributions = list(pool.map(bounded, sources))
     return finish(manifest, contributions)
 
@@ -1026,12 +1107,53 @@ def environment_seconds(name: str, fallback: float) -> float:
     return seconds if seconds > 0 else fallback
 
 
-def prune(keep: int = KEEP_RUNS) -> None:
-    """Keep the last runs and drop what is older.
+def environment_int(name: str, fallback: int) -> int:
+    """A whole number the environment may raise, or the built-in bound.
+
+    Unset, unreadable and zero all mean the fallback. A profile that wants a
+    longer night says so; anything a deployment gets wrong reads as if it had
+    said nothing, because a briefing that refuses to run over a typo in a unit
+    file is worse than one held to its defaults.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return fallback
+    try:
+        value = int(raw)
+    except ValueError:
+        return fallback
+    return value if value > 0 else fallback
+
+
+def max_offers() -> int:
+    """How many offers one source may make.
+
+    Read where it is used rather than captured at import, because the number is
+    stated in the prompt the source is given and checked against the answer it
+    sends back. Both have to be the same number, and a profile sets it.
+    """
+    return environment_int("SCUFRIS_BRIEFING_MAX_OFFERS", MAX_OFFERS)
+
+
+def max_body() -> int:
+    """How long a contribution body may be, for the same reason."""
+    return environment_int("SCUFRIS_BRIEFING_MAX_BODY", MAX_BODY)
+
+
+def prune(keep: int | None = None) -> None:
+    """Keep the last days and drop what is older.
 
     A briefing is read on the morning it is for, and once in a while a few days
     back. Nothing here is a record worth keeping a year of.
+
+    Days, not runs: a date directory holds every profile that ran that day, so
+    a machine with a morning and a nightly keeps the same span of history as
+    one with a morning alone. What the number has to outlast is
+    `previous_started`, which reads back through the kept days to say when this
+    profile last ran.
     """
+    if keep is None:
+        keep = environment_int("SCUFRIS_BRIEFING_KEEP_DAYS", KEEP_DAYS)
     root = state_root()
     if not root.is_dir():
         return

@@ -81,13 +81,26 @@ this is a sandbox" (`briefing.py:94-97`).
 
 ### What is configured
 
-- `nix.dotfiles` gets `profiles.nightly = { schedule = "23:00"; deadline =
-  28800; sourceDeadline = 28800; }`, next to `profiles.morning.schedule =
-  "08:00"`. That is the whole of the schedule, and it is the only place 23:00
-  is written.
+- `nix.dotfiles` gets a `nightly` profile next to
+  `profiles.morning.schedule = "08:00"`, carrying the schedule and the bounds
+  the night needs. That is the only place 23:00 is written.
 - `scufris2` and `nova-protocol` each get `[briefings.nightly]` in their own
   `.scufris.toml`, carrying the method as guidance. A repository that wants no
   night declares no source and costs the schedule nothing.
+
+### Landed
+
+Both items above are built, and four more that were approved with them: a
+profile now sets `sourceDeadline`, `parallel`, `maxOffers` and `maxBody`, and
+the briefing sets `keepDays`. A source declares `policy` as one of `read`,
+`review` or `repair`. `review` was not in the original plan and is the useful
+middle: a review panel needs subagents and the command that starts them, and
+still writes nothing.
+
+What is left is the guidance. `nix.dotfiles` schedules `nightly` at 23:00 and
+nova declares a source for it, but that source is still `read` on the default
+bounds: fifteen minutes, no review skill, no repair. Promoting it is the rest
+of this task.
 
 ### What the guidance says
 

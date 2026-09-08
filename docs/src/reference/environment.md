@@ -28,13 +28,22 @@ worker wrapper -> private per-execution environment
 | ---------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `SCUFRIS_BRIEFING_DEADLINE`        | briefing helper | Seconds the whole run may take before it publishes with what came back. Default: `1800`.                           |
 | `SCUFRIS_BRIEFING_SOURCE_DEADLINE` | briefing helper | Seconds one source may take before it is recorded as failed. Default: `900`.                                       |
+| `SCUFRIS_BRIEFING_PARALLEL`        | briefing helper | Sources that may run at once. Default: every source at once.                                                       |
+| `SCUFRIS_BRIEFING_MAX_OFFERS`      | briefing helper | Things one source may offer as worth doing next. Default: `3`.                                                     |
+| `SCUFRIS_BRIEFING_MAX_BODY`        | briefing helper | Characters of Markdown one source's body may carry. Default: `16384`.                                              |
+| `SCUFRIS_BRIEFING_KEEP_DAYS`       | briefing helper | Days of briefings kept on disk. Default: `30`.                                                                     |
 | `SCUFRIS_CTL`                      | briefing helper | Control client a wake is carried by. Default: `scufris-ctl` on `PATH`.                                             |
 | `SCUFRIS_CONFIG`                   | jobs helper     | User-level file the machine's own briefing sources are read from. Default: `$XDG_CONFIG_HOME/scufris/config.toml`. |
 
+Anything unreadable in these reads as the default. A briefing that refuses to
+run over a typo in a unit file is worse than one held to its own numbers.
+
 When a briefing happens is a systemd timer and not a variable. Each profile in
 `programs.scufris.agent.briefing.profiles` renders its own
-`scufris-briefing-<profile>.timer`, which sets
-`SCUFRIS_BRIEFING_DEADLINE` from that profile's own `deadline`.
+`scufris-briefing-<profile>.timer`, which sets every variable above from that
+profile's own options, and `SCUFRIS_BRIEFING_KEEP_DAYS` from the
+briefing-wide `keepDays`. Each is set only when the environment is silent, so
+a run started by hand with one of them already set keeps that number.
 
 A run is written under
 `$XDG_STATE_HOME/scufris/briefings/<local date>/<profile>/`. Only sources

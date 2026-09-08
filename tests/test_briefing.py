@@ -65,6 +65,21 @@ with pathlib.Path(os.environ["BRIEFING_WHERE"]).open("a") as stream:
 print(pathlib.Path(os.environ["BRIEFING_ANSWER"]).read_text())
 """
 
+#: Marks when it starts and when it stops, so two sources running at once can
+#: be told apart from two running one after the other.
+OVERLAPPING = """#!/usr/bin/env python3
+import os
+import pathlib
+import time
+where = pathlib.Path(os.environ["BRIEFING_WHERE"])
+with where.open("a") as stream:
+    stream.write("in\\n")
+time.sleep(0.4)
+with where.open("a") as stream:
+    stream.write("out\\n")
+print(pathlib.Path(os.environ["BRIEFING_ANSWER"]).read_text())
+"""
+
 #: Writes bytes that are not text at all.
 BINARY = """#!/usr/bin/env python3
 import sys
@@ -1192,6 +1207,37 @@ class Run(unittest.TestCase):
         kept = sorted(path.name for path in root.iterdir())
         self.assertEqual(kept, ["2026-08-06", "2026-08-07", "2026-08-08", "not-a-run"])
 
+    def test_a_deployment_may_keep_more_days(self) -> None:
+        # A source is told when its profile last ran, and that is read back
+        # through the days still kept. A profile that runs weekly is told
+        # nothing true unless the days outlast it.
+        root = briefing.state_root()
+        root.mkdir(parents=True)
+        for day in range(1, 9):
+            (root / f"2026-08-0{day}" / "nightly").mkdir(parents=True)
+            (root / f"2026-08-0{day}" / "nightly" / "manifest.json").write_text("{}")
+        with mock.patch.dict(os.environ, {"SCUFRIS_BRIEFING_KEEP_DAYS": "6"}):
+            briefing.prune()
+        self.assertEqual(len(list(root.iterdir())), 6)
+
+    def test_a_profile_may_cap_how_many_sources_run_at_once(self) -> None:
+        # Two agents that each fan out into review lanes are already wide at
+        # the moment a group is under review. A third project declaring the
+        # profile should not quietly widen the night.
+        self.declare("aaa", "pi", "nightly")
+        self.declare("bbb", "pi", "nightly")
+        self.harness(OVERLAPPING)
+        with mock.patch.dict(os.environ, {"SCUFRIS_BRIEFING_PARALLEL": "1"}):
+            briefing.collect(profile="nightly")
+        self.assertEqual(self.where.read_text().split(), ["in", "out", "in", "out"])
+
+    def test_every_source_runs_at_once_when_nothing_caps_them(self) -> None:
+        self.declare("aaa", "pi", "morning")
+        self.declare("bbb", "pi", "morning")
+        self.harness(OVERLAPPING)
+        briefing.collect()
+        self.assertEqual(self.where.read_text().split(), ["in", "in", "out", "out"])
+
 
 class Page(unittest.TestCase):
     def run_of(self, *contributions: dict, prose: str | None = None) -> dict:
@@ -1448,6 +1494,185 @@ class OffersPage(unittest.TestCase):
         self.assertIn("<em>ends</em>", drawn)
         self.assertIn("&lt;b&gt;deprecated&lt;/b&gt;", drawn)
         self.assertNotIn("<b>", drawn)
+
+
+class Policy(unittest.TestCase):
+    """What a source declared it may do, as flags for its harness."""
+
+    def argv(self, harness: str, policy: str | None = None, **rest: object):
+        source = {
+            "project": "personal/nova-protocol",
+            "root": "/tmp",
+            "harness": harness,
+            "model": "opus",
+            "thinking": "high",
+            **({} if policy is None else {"policy": policy}),
+            **rest,
+        }
+        return briefing.harness_argv(source, "the prompt")
+
+    def flag(self, argv: list[str], name: str) -> str | None:
+        return argv[argv.index(name) + 1] if name in argv else None
+
+    def test_a_source_that_declares_nothing_reads(self) -> None:
+        # The default has to be the narrow rights. A source written before
+        # policies existed says nothing, and it must keep the tools it had.
+        for harness in ("pi", "claude"):
+            with self.subTest(harness=harness):
+                self.assertEqual(self.argv(harness), self.argv(harness, "read"))
+
+    def test_reading_denies_the_edit_tools_and_the_lanes(self) -> None:
+        claude = self.argv("claude", "read")
+        denied = set(self.flag(claude, "--disallowed-tools").split(","))
+        self.assertEqual(denied, {"Edit", "Write", "NotebookEdit", "Task"})
+        self.assertIn("--disable-slash-commands", claude)
+        allowed = set(self.flag(claude, "--tools").split(","))
+        self.assertEqual(allowed & {"Edit", "Write", "Task"}, set())
+
+        pi = self.argv("pi", "read")
+        self.assertIn("--no-skills", pi)
+        tools = set(self.flag(pi, "--tools").split(","))
+        self.assertEqual(tools & {"edit", "write"}, set())
+
+    def test_reviewing_keeps_the_lanes_and_shuts_the_edit_tools(self) -> None:
+        # A review panel dispatches read-only lanes and adjudicates them. It
+        # needs subagents and it needs the command that starts it, and it
+        # still must not be able to change anything.
+        claude = self.argv("claude", "review")
+        denied = set(self.flag(claude, "--disallowed-tools").split(","))
+        self.assertEqual(denied, {"Edit", "Write", "NotebookEdit"})
+        self.assertNotIn("Task", denied)
+        self.assertNotIn("--disable-slash-commands", claude)
+
+        pi = self.argv("pi", "review")
+        self.assertNotIn("--no-skills", pi)
+        self.assertEqual(set(self.flag(pi, "--exclude-tools").split(",")), {"edit", "write"})
+
+    def test_reviewing_names_what_is_forbidden_and_not_what_is_allowed(self) -> None:
+        # A skill reaches for whatever it needs. An allowlist here would mean
+        # this file guessing at another project's tools and starving the ones
+        # it did not think of.
+        for harness in ("pi", "claude"):
+            with self.subTest(harness=harness):
+                self.assertIsNone(self.flag(self.argv(harness, "review"), "--tools"))
+
+    def test_repairing_shuts_nothing(self) -> None:
+        for harness in ("pi", "claude"):
+            with self.subTest(harness=harness):
+                argv = self.argv(harness, "repair")
+                for flag in (
+                    "--tools",
+                    "--disallowed-tools",
+                    "--exclude-tools",
+                    "--no-skills",
+                    "--disable-slash-commands",
+                ):
+                    self.assertNotIn(flag, argv)
+                self.assertEqual(argv[-1], "the prompt")
+
+    def test_a_policy_nobody_recognises_reads(self) -> None:
+        # The reader refuses an unknown name, so reaching here with one means a
+        # source record built some other way. Failing to the narrow rights is
+        # the only safe direction.
+        self.assertEqual(self.argv("claude", "repairs"), self.argv("claude", "read"))
+
+    def test_the_second_asking_carries_no_tools_whatever_the_policy(self) -> None:
+        # The repair reads nothing and runs nothing: it is given the source's
+        # own answer back. A `repair` policy does not make it able to write.
+        for policy in briefing.POLICIES:
+            with self.subTest(policy=policy):
+                source = {
+                    "project": "personal/nova-protocol",
+                    "root": "/tmp",
+                    "harness": "pi",
+                    "model": "opus",
+                    "thinking": "high",
+                    "policy": policy,
+                }
+                argv = briefing.harness_argv(source, "again", tools=False)
+                self.assertIn("--no-tools", argv)
+                claude = briefing.harness_argv(
+                    {**source, "harness": "claude"}, "again", tools=False
+                )
+                self.assertEqual(self.flag(claude, "--tools"), "")
+                self.assertIn("--disable-slash-commands", claude)
+
+
+class Bounds(unittest.TestCase):
+    """The limits a profile may raise, in the prompt and in the answer."""
+
+    def source(self) -> dict[str, object]:
+        return {
+            "project": "personal/nova-protocol",
+            "root": "/home/x/nova",
+            "description": "Review today.",
+            "guidance": "Read the day's commits.",
+            "harness": "claude",
+            "model": "opus",
+            "thinking": "high",
+        }
+
+    def test_the_offer_bound_is_the_same_number_in_both_places(self) -> None:
+        # Stated in the prompt and checked against the answer. A source told
+        # it may make eight and refused at four would be refused for obeying.
+        with mock.patch.dict(os.environ, {"SCUFRIS_BRIEFING_MAX_OFFERS": "8"}):
+            prompt = briefing.contribution_prompt(self.source(), "nightly", "2026-09-08")
+            self.assertIn("at most 8 things", prompt)
+            offers = [{"label": f"Fix {n}", "detail": "why"} for n in range(8)]
+            self.assertEqual(len(briefing.parse_offers(offers)), 8)
+
+    def test_the_raised_offer_bound_still_ends(self) -> None:
+        with mock.patch.dict(os.environ, {"SCUFRIS_BRIEFING_MAX_OFFERS": "8"}):
+            offers = [{"label": f"Fix {n}", "detail": "why"} for n in range(9)]
+            with self.assertRaises(briefing.Unusable) as refused:
+                briefing.parse_offers(offers)
+        self.assertIn("at most 8", str(refused.exception))
+
+    def test_the_default_offer_bound_holds_when_nothing_is_set(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SCUFRIS_BRIEFING_MAX_OFFERS", None)
+            with self.assertRaises(briefing.Unusable):
+                briefing.parse_offers(
+                    [{"label": f"Fix {n}", "detail": "why"} for n in range(4)]
+                )
+
+    def test_the_body_bound_is_the_same_number_in_both_places(self) -> None:
+        with mock.patch.dict(os.environ, {"SCUFRIS_BRIEFING_MAX_BODY": "40000"}):
+            prompt = briefing.contribution_prompt(self.source(), "nightly", "2026-09-08")
+            self.assertIn("at most 40000 characters", prompt)
+            envelope = {
+                "title": "Nova",
+                "status": "ok",
+                "headline": "The day is reviewed.",
+                "facts": [],
+                "body": "x" * 20_000,
+            }
+            parsed = briefing.parse_contribution(
+                f"```json\n{json.dumps(envelope)}\n```"
+            )
+            self.assertEqual(len(parsed["body"]), 20_000)
+
+    def test_a_body_over_the_raised_bound_is_still_refused(self) -> None:
+        envelope = {
+            "title": "Nova",
+            "status": "ok",
+            "headline": "The day is reviewed.",
+            "facts": [],
+            "body": "x" * 20_000,
+        }
+        with self.assertRaises(briefing.Unusable) as refused:
+            briefing.parse_contribution(f"```json\n{json.dumps(envelope)}\n```")
+        self.assertIn("longer than 16384", str(refused.exception))
+
+    def test_an_unreadable_bound_reads_as_the_default(self) -> None:
+        # A typo in a unit file must not stop the morning. It reads as if the
+        # deployment had said nothing.
+        for said in ("", "eight", "-3", "0"):
+            with self.subTest(said=said):
+                with mock.patch.dict(
+                    os.environ, {"SCUFRIS_BRIEFING_MAX_OFFERS": said}
+                ):
+                    self.assertEqual(briefing.max_offers(), briefing.MAX_OFFERS)
 
 
 if __name__ == "__main__":

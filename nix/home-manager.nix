@@ -58,6 +58,7 @@
       ctl = cfg.ctlPackage;
       pi = agentCfg.piPackage;
       projectRoots = agentCfg.projectRoots;
+      inherit (briefingCfg) keepDays;
     };
   briefingProfileName = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
   # The helper reads a TOML path and does not know Nix exists. This is one way
@@ -176,6 +177,67 @@ in {
                   halfway by systemd.
                 '';
               };
+
+              sourceDeadline = lib.mkOption {
+                type = lib.types.ints.positive;
+                default = 900;
+                example = 28800;
+                description = ''
+                  Seconds one source may take before it is recorded as failed.
+                  A source is held to this or to whatever is left of
+                  `deadline`, whichever is smaller, so raising this alone
+                  changes nothing: a profile that wants a long source raises
+                  both.
+
+                  The default suits a briefing whose sources report what they
+                  read. A profile whose sources do work, such as a nightly
+                  review, is the reason this is not fixed.
+                '';
+              };
+
+              parallel = lib.mkOption {
+                type = lib.types.nullOr lib.types.ints.positive;
+                default = null;
+                example = 2;
+                description = ''
+                  How many sources may run at once. Null runs every source at
+                  once, which is what a morning of cheap reports wants.
+
+                  Set it for a profile whose sources are expensive, so that a
+                  project declaring the profile later cannot quietly widen the
+                  run. This counts sources and not what a source starts: what
+                  a source spawns belongs to its harness and is not visible
+                  here.
+                '';
+              };
+
+              maxOffers = lib.mkOption {
+                type = lib.types.ints.positive;
+                default = 3;
+                example = 8;
+                description = ''
+                  How many things one source may offer as worth doing next.
+                  The number is stated in the prompt the source is given and
+                  checked against the answer it sends back, so it is the same
+                  number in both places.
+
+                  Three suits a summary. A profile whose sources review
+                  something and come back with a list of findings is the
+                  reason this is not fixed.
+                '';
+              };
+
+              maxBody = lib.mkOption {
+                type = lib.types.ints.positive;
+                default = 16384;
+                example = 65536;
+                description = ''
+                  Characters of Markdown one source's body may carry. An
+                  answer over the limit is rejected whole and asked again, so
+                  this is a real bound on what a source can report and not a
+                  trim.
+                '';
+              };
             };
           });
           default = {morning.schedule = "08:00";};
@@ -273,6 +335,22 @@ in {
             The file this renders is briefings-only, and the helper reads it as
             a path. Home Manager is one way to produce it; anyone else writes
             the same TOML by hand.
+          '';
+        };
+
+        keepDays = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = 30;
+          example = 90;
+          description = ''
+            Days of briefings kept on disk. A day holds every profile that ran
+            that day, so this is the same span of history whether one profile
+            runs or several.
+
+            It is not only disk. A source is told when this profile last ran,
+            and that is read back through the days still kept, so a profile
+            that runs less often than this keeps the days needs a larger
+            number to be told anything true.
           '';
         };
       };

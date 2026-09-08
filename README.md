@@ -82,6 +82,53 @@ programs.scufris = {
 };
 ```
 
+Briefings run on their own systemd timers. Nix owns when each one happens and
+what it may spend; each project owns what is in it.
+
+```nix
+programs.scufris.agent.briefing = {
+  profiles = {
+    morning.schedule = "08:00";
+
+    nightly = {
+      schedule = "23:00";
+      deadline = 28800; # seconds for the whole run
+      sourceDeadline = 28800; # seconds for one source, held to the smaller
+      parallel = 2; # sources at once, however many declare the profile
+      maxOffers = 8; # things one source may say are worth doing next
+      maxBody = 65536; # characters of Markdown one source may report
+    };
+  };
+
+  keepDays = 30; # days of briefings kept on disk
+
+  # Sources with no checkout to belong to, such as one reporting what the jobs
+  # helper measured. A project declares its own in its own file.
+  sources.morning.jobs = {
+    description = "What Scufris did overnight.";
+    keywords = {harness = "pi"; thinking = "medium";};
+    guidance = ''...''; # what this source is asked to read and report
+  };
+};
+```
+
+A project declares its briefings in its own `.scufris.toml`, so a checkout still
+works for someone whose machine has none of this:
+
+```toml
+[briefings.morning]
+description = "Report CI on master and where the project stands."
+keywords = { harness = "claude", model = "Opus", thinking = "medium" }
+guidance = """..."""  # what to read, what to report, what not to touch
+
+[briefings.nightly]
+description = "Review the day's commits and fix what is worth fixing."
+# policy is what this source may do: read (the default, reports only),
+# review (may also run a review panel), repair (may also change files)
+keywords = { harness = "claude", model = "Opus", policy = "repair" }
+guidance = """..."""
+```
+
 The module supplies the `scufris-ctl`, service, remote surface gateway,
 Tailscale client, agent launcher, and desktop packages from the pinned flake.
 Enabling `remoteSurface` starts both the loopback gateway and a declaratively

@@ -215,11 +215,41 @@ the API and writes the two data files it just read, under a stated cap on how
 many reads that may cost. What a source may spend is the project's decision,
 written where the rest of that project's intent lives.
 
-Every source starts at once. Each is bounded on its own at 900 seconds, and the
-whole run at 1800; both move with `SCUFRIS_BRIEFING_SOURCE_DEADLINE` and
-`SCUFRIS_BRIEFING_DEADLINE`. A second asking is bounded at 300 by
-`SCUFRIS_BRIEFING_REPAIR_DEADLINE`, never past what its source has left. One project that hangs costs the run its own
-deadline and nothing else.
+Every source starts at once unless the profile caps it with `parallel`. Each is
+bounded on its own at 900 seconds, and the whole run at 1800; both move with
+`SCUFRIS_BRIEFING_SOURCE_DEADLINE` and `SCUFRIS_BRIEFING_DEADLINE`, which the
+profile's `sourceDeadline` and `deadline` set. A source is held to whichever is
+smaller, so raising one alone changes nothing. A second asking is bounded at 300
+by `SCUFRIS_BRIEFING_REPAIR_DEADLINE`, never past what its source has left. One
+project that hangs costs the run its own deadline and nothing else.
+
+## What a source may do
+
+A source declares a `policy` in its keywords. It is a name and not a tool list,
+because the flags belong to the harness and the same guidance should run under
+either one.
+
+| Policy   | Edit tools | Subagents and commands | For                                |
+| -------- | ---------- | ---------------------- | ---------------------------------- |
+| `read`   | no         | no                     | a source that reports what it read |
+| `review` | no         | yes                    | a source that runs a review panel  |
+| `repair` | yes        | yes                    | a source that fixes what it found  |
+
+`read` is the default, and a source that says nothing gets it. It is an
+allowlist; the two wider steps are denylists, because a review skill reaches for
+whatever it needs and an allowlist here would be this program guessing at
+another project's tools.
+
+`review` exists because a review panel dispatches read-only lanes and
+adjudicates them. It needs subagents, and it needs the command that starts it: a
+skill is invoked as a command, so a policy that allowed the lanes and forbade
+the command would allow nothing. It still cannot change anything.
+
+None of this is a sandbox. A source runs with the owner's own hands, exactly as
+the review workspace does, and the project's guidance is what keeps it honest.
+A policy the reader does not know is refused by name rather than narrowed to
+`read`, because a source that meant `repair` and wrote `repairs` would otherwise
+run every night as a reader and report that it fixed nothing.
 
 ## The run directory
 

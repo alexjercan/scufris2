@@ -39,6 +39,11 @@ LOGICAL_STATES = {*EVENTS, "suspended"}
 TERMINAL_EVENTS = {"blocked", "done", "failed"}
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 WORKSPACES = {"temporary", "project", "sprout", "review"}
+#: What a briefing source may do. The names are the reader's half of the
+#: contract; the briefing helper owns which flags each one becomes, because
+#: those belong to the harness and not to the file somebody wrote.
+BRIEFING_POLICIES = ("read", "review", "repair")
+BRIEFING_DEFAULT_POLICY = "read"
 PI_REVIEW_TOOLS = "read,grep,find,ls,scufris_report"
 CLAUDE_REVIEW_TOOLS = "Read,Glob,Grep"
 CLAUDE_DENIED_REVIEW_TOOLS = "Bash,Edit,Write,NotebookEdit,Task,WebFetch,WebSearch"
@@ -626,7 +631,26 @@ def briefing_entry(
         "harness": harness,
         "model": model,
         "thinking": thinking,
+        "policy": briefing_policy(scope, keywords.get("policy")),
     }
+
+
+def briefing_policy(scope: str, named: Any) -> str:
+    """What a source declared it may do, refused here when it is not a policy.
+
+    Refused rather than narrowed. A source that meant `repair` and wrote
+    `repairs` would otherwise run every night as a reader, report that it fixed
+    nothing, and look like a source with nothing to say. A named policy this
+    does not know is a mistake somebody has to see.
+    """
+    if named is None:
+        return BRIEFING_DEFAULT_POLICY
+    if named not in BRIEFING_POLICIES:
+        allowed = ", ".join(BRIEFING_POLICIES)
+        raise ValueError(
+            f"{scope} has an unknown policy {named!r}: use one of {allowed}"
+        )
+    return named
 
 
 def config_home() -> Path:

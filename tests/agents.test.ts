@@ -10,6 +10,7 @@ import {
   foregroundActionPolicy,
   ForegroundAcknowledgmentGate,
   foregroundCommandWaits,
+  JOB_OBSERVATION_TOOLS,
   literalDelegationPolicy,
   parseWorkerEvent,
   PLANNOTATOR_REVIEW_TOOL,
@@ -45,9 +46,18 @@ test("worker events use only the replacement protocol", () => {
   });
 });
 
-test("foreground action policy requires one natural final acknowledgment", () => {
-  assert.match(foregroundActionPolicy, /only permitted follow-up/);
+test("foreground action policy starts everything and watches nothing", () => {
+  assert.match(foregroundActionPolicy, /Start everything the request asks for/);
+  // The failure this sentence exists for: Alex asked for a job and then said
+  // "open the brief" while it was starting, and got "I still need to open
+  // today's brief in a separate action" instead of the brief.
+  assert.match(foregroundActionPolicy, /a request dropped/);
+  assert.match(foregroundActionPolicy, /Never watch what you started/);
   assert.match(foregroundActionPolicy, /Do not use a canned acknowledgment/);
+  assert.deepEqual([...JOB_OBSERVATION_TOOLS].sort(), [
+    "scufris_job_inspect",
+    "scufris_job_list",
+  ]);
   assert.deepEqual([...ACKNOWLEDGED_ACTION_TOOLS].sort(), [
     "scufris_job_land",
     "scufris_job_plannotator_review",
@@ -72,12 +82,21 @@ test("foreground action policy requires one natural final acknowledgment", () =>
   const gate = new ForegroundAcknowledgmentGate();
   for (const action of ["scufris_job_spawn", "scufris_job_send"]) {
     gate.markSuccessfulAction(action);
-    assert.match(gate.blockReason("read") ?? "", /only permitted follow-up/);
-    assert.equal(gate.blockReason(FINAL_RESPONSE_TOOL), undefined);
-    gate.completeFinalResponse(true);
-    assert.match(gate.blockReason("bash") ?? "", /only permitted follow-up/);
-    gate.completeFinalResponse(false);
+    // Watching the job it just started is the whole of what is refused.
+    assert.match(gate.blockReason("scufris_job_inspect") ?? "", /do not watch/);
+    assert.match(gate.blockReason("scufris_job_list") ?? "", /do not watch/);
+    // Everything else is work the request may have asked for, including a
+    // second job and an instruction that arrived while this one was starting.
+    assert.equal(gate.blockReason("scufris_job_spawn"), undefined);
+    assert.equal(gate.blockReason("scufris_briefing_open"), undefined);
     assert.equal(gate.blockReason("read"), undefined);
+    assert.equal(gate.blockReason("bash"), undefined);
+    assert.equal(gate.blockReason(FINAL_RESPONSE_TOOL), undefined);
+    // A refused acknowledgment leaves the job unwatched; only a good one clears.
+    gate.completeFinalResponse(true);
+    assert.match(gate.blockReason("scufris_job_inspect") ?? "", /do not watch/);
+    gate.completeFinalResponse(false);
+    assert.equal(gate.blockReason("scufris_job_inspect"), undefined);
   }
 });
 

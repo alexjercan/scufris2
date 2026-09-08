@@ -47,6 +47,14 @@ export const ACKNOWLEDGED_ACTION_TOOLS: ReadonlySet<string> = new Set([
   QUICK_REVIEW_TOOL,
   PLANNOTATOR_REVIEW_TOOL,
 ]);
+// Watching a job it just started is the one thing the foreground must not do,
+// because a job answers on its own schedule and a turn spent waiting is a turn
+// Alex cannot reach. Everything else is work he may have asked for, so the gate
+// names what it forbids rather than permitting one tool and refusing the rest.
+export const JOB_OBSERVATION_TOOLS: ReadonlySet<string> = new Set([
+  "scufris_job_inspect",
+  "scufris_job_list",
+]);
 export const literalDelegationPolicy = `Scufris delegates literally. A project context is a menu of agent types, not a workflow to run.
 
 Before planning every new project job, call scufris_project_context with an
@@ -69,7 +77,7 @@ and its report, then tell the user what happened. A done event never selects
 review, steering, landing, or shutdown by itself. Never queue follow-on work of
 your own.`;
 
-export const foregroundActionPolicy = `Call each meaningful workflow action as the only tool in its tool batch. After a successful spawn, steering, stop, landing, or review-opening action, call scufris_final_response next as the only permitted follow-up. Give one short natural acknowledgment of what happened, then end. After spawn or steering, do not sleep, wait, poll, inspect, or do any other work before that final response. If an action tool fails, do not claim success; use scufris_final_response for one concise explanation and the next safe step. Do not use a canned acknowledgment.`;
+export const foregroundActionPolicy = `Call each meaningful workflow action as the only tool in its tool batch. Start everything the request asks for, one action to a batch, including an instruction that arrives while you are already working: an answer that states an intention instead of taking the action is a request dropped, because nothing carries it into a later turn. Never watch what you started. After a spawn, steering, stop, landing, or review-opening action, do not sleep, wait, poll, or inspect that job; it reports through filesystem notifications, which start their own turn. When nothing the request asked for is left to start, call scufris_final_response as the only tool in its batch and acknowledge in one short natural sentence everything that happened. If an action tool fails, do not claim success; use scufris_final_response for one concise explanation and the next safe step. Do not use a canned acknowledgment.`;
 
 export type WorkerEventType = "working" | "blocked" | "done" | "failed";
 export type WakeMode = "minimal" | "all";
@@ -295,8 +303,8 @@ export class ForegroundAcknowledgmentGate {
   }
 
   blockReason(toolName: string): string | undefined {
-    if (!this.pendingAction || toolName === FINAL_RESPONSE_TOOL) return;
-    return `After ${this.pendingAction}, the only permitted follow-up is scufris_final_response. Do not wait, poll, inspect, or do more work.`;
+    if (!this.pendingAction || !JOB_OBSERVATION_TOOLS.has(toolName)) return;
+    return `After ${this.pendingAction}, do not watch the job you just acted on. It reports through filesystem notifications, which start their own turn. Start anything else the request asked for, then acknowledge with ${FINAL_RESPONSE_TOOL}.`;
   }
 
   completeFinalResponse(isError: boolean): void {

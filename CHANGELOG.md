@@ -29,6 +29,21 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Fixed
 
+- Scufris starts everything a request asks for, rather than stopping after the
+  first action. A successful spawn, steering, stop, landing, or review armed a
+  gate that blocked every tool except the final response, so a second thing
+  named in the same message - or an instruction typed while the first was still
+  starting - could only be answered with an intention, and there is no later
+  turn for an intention to be finished in. Asked to run a production job and
+  then, moments later, to open the brief, Scufris started the job and answered
+  "I still need to open today's brief in a separate action"; opening it took a
+  second message. The gate now refuses `scufris_job_inspect` and
+  `scufris_job_list` alone, which is the behaviour it was built to prevent: a
+  foreground turn spent watching a job that reports on its own schedule and
+  cannot be hurried. Shell `sleep` and `wait` are refused exactly as before, by
+  a separate guard that never depended on the gate. One tool batch still holds
+  one meaningful action, and a turn still ends with one acknowledgment; a turn
+  may now hold as many batches as the request has things to start.
 - An answer whose surface has disconnected reaches the screens that are still
   connected, rather than reaching nobody. The response association named
   whichever surface had spoken most recently and was never cleared, so one

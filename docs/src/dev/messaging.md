@@ -66,9 +66,12 @@ Meaningful workflow actions are serialized against everything else:
 - `scufris_job_spawn`, `scufris_job_send`, `scufris_job_stop`,
   `scufris_job_land`, and `scufris_job_plannotator_review` must each be the only
   tool in their tool batch, as must `scufris_final_response`.
-- After a successful action, the only permitted follow-up is one
-  `scufris_final_response` call. Every other tool is blocked with an
-  explanatory reason until the final response completes or the run settles.
+- After a successful action, `scufris_job_inspect` and `scufris_job_list` are
+  blocked with an explanatory reason until the final response completes or the
+  run settles. Nothing else is: a request often names more than one thing to
+  start, and an instruction can arrive while the first is still starting. The
+  gate forbids watching the job it just acted on, which is the only foreground
+  behaviour that costs Alex a turn he cannot interrupt.
 - A separate `tool_call` guard blocks foreground bash commands that execute
   `sleep` or `wait` at any position in a pipeline or list. Foreground Scufris
   never waits for workers; filesystem notifications start later turns.

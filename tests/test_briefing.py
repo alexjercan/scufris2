@@ -1196,6 +1196,29 @@ class Run(unittest.TestCase):
             {"date": "2026-08-31", "profile": "morning", "sources": 1},
         )
 
+    def test_a_run_where_every_source_failed_still_reaches_the_conversation(
+        self,
+    ) -> None:
+        # One source failing out of five was reported. Five out of five used to
+        # be silence: `wake` refused the state, `pending` left it out, and the
+        # unit exited 0, so the briefing simply did not arrive.
+        self.declare("the-den")
+        self.harness("#!/usr/bin/env python3\nraise SystemExit(1)\n")
+        manifest = briefing.collect("2026-08-31", "morning")
+        self.assertEqual(manifest["state"], "failed")
+        kept = self.root / "woken.json"
+        self.control(
+            "#!/usr/bin/env python3\n"
+            "import json, pathlib, sys\n"
+            f"pathlib.Path({str(kept)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+        )
+        answer = briefing.wake("2026-08-31", "morning")
+        self.assertTrue(answer["woken"], answer)
+        said = json.loads(kept.read_text())[1]
+        self.assertIn("did not collect", said)
+        self.assertIn("the-den", said)
+        self.assertIn("Claim nothing about what they would have said", said)
+
     def test_a_refused_wake_leaves_the_run_gathered_for_later(self) -> None:
         # Losing a gathered briefing because the agent happened to be down is
         # the failure this must not have. The run is the durable half; the
@@ -1572,6 +1595,37 @@ class Bounds(unittest.TestCase):
                 briefing.parse_offers(
                     [{"label": f"Fix {n}", "detail": "why"} for n in range(4)]
                 )
+
+    def test_a_repair_is_shown_everything_it_is_asked_to_keep(self) -> None:
+        # The repair is handed its own answer and told to keep every finding.
+        # A fixed 32 KiB quote against a raised body bound cut the answer and
+        # asked for all of it anyway, so the last third of a nightly report
+        # went missing while the run recorded `ok`.
+        with mock.patch.dict(os.environ, {"SCUFRIS_BRIEFING_MAX_BODY": "65536"}):
+            answer = "x" * 60_000
+            prompt = briefing.repair_prompt(
+                self.source(), "nightly", "status is invalid", answer
+            )
+            self.assertIn(answer, prompt)
+            self.assertNotIn("too long to quote back", prompt)
+            # It still ends. An answer past the budget is cut, and the cut says
+            # not to invent what is missing.
+            cut = briefing.repair_prompt(
+                self.source(), "nightly", "status", "y" * 200_000
+            )
+            self.assertIn("too long to quote back", cut)
+            self.assertIn("do not invent the rest", cut)
+
+    def test_a_source_is_told_it_gets_one_turn(self) -> None:
+        # `harness_argv` builds `--print`, which ends the process when the
+        # model's turn ends. A source once dispatched its lanes and ended the
+        # turn saying it would wait for them; they died with the process and
+        # 1676 seconds produced nothing. The prompt states every other property
+        # of the harness a source must respect.
+        prompt = briefing.contribution_prompt(self.source(), "nightly", "2026-09-08")
+        self.assertIn("exactly one turn", prompt)
+        self.assertIn("dies with it", prompt)
+        self.assertIn("never end a turn intending to continue", prompt)
 
     def test_the_body_bound_is_the_same_number_in_both_places(self) -> None:
         with mock.patch.dict(os.environ, {"SCUFRIS_BRIEFING_MAX_BODY": "40000"}):

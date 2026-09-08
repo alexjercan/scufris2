@@ -196,10 +196,15 @@ One bounded headless run in the source's own root, not a job:
 | steerable | yes                  | no              |
 | session   | restored by ID       | none            |
 
-`pi --print --approve` or `claude --print --permission-mode bypassPermissions`,
-with the edit tools off. That is an intent boundary and not a sandbox: a source
-that runs a refresh command runs it with the owner's own hands, exactly as a
-review workspace does. The project's guidance is what keeps it honest.
+`pi --print --approve` or `claude --print --permission-mode bypassPermissions`.
+That is an intent boundary and not a sandbox: a source that runs a refresh
+command runs it with the owner's own hands, exactly as a review workspace does.
+The project's guidance is what keeps it honest.
+
+Each source gets exactly one turn. `--print` ends the process when the model's
+turn ends, so anything a source dispatched and did not wait for dies with it.
+`contribution_prompt` states that, because `harness_argv` is what makes it
+true.
 
 Both harnesses answer without asking on purpose. Nobody is watching a source
 run, so a question it cannot ask is a refusal. Under `claude`'s `dontAsk` the

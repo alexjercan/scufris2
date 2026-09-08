@@ -152,11 +152,55 @@ export default function briefing(pi: ExtensionAPI): void {
    * is one read at session start and never repeats.
    */
   const readWhatIsWaiting = async (): Promise<void> => {
-    try {
-      for (const run of await pending(localDate(new Date()))) wake(run);
-    } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
-    }
+    // Yesterday as well as today. A nightly collects at 23:00, and if nothing
+    // was connected its run is pending under yesterday's date by the time the
+    // next session opens. Reading one date lost every such run, which is every
+    // nightly, and the docs promised the opposite.
+    const now = new Date();
+    const earlier = new Date(now);
+    earlier.setDate(earlier.getDate() - 1);
+    // Both reads start before this yields. Session start hands the read off
+    // rather than holding the session open, so anything read after the first
+    // await is read against whatever the environment has become by then.
+    //
+    // The catch is per date: the helper refuses a date it has never seen, and
+    // most sessions open on exactly one such date, so letting that refusal
+    // escape would hide whichever date did have a run waiting.
+    const found = await Promise.all(
+      [localDate(earlier), localDate(now)].map(async (date) => {
+        try {
+          return await pending(date);
+        } catch (error) {
+          notify(
+            error instanceof Error ? error.message : String(error),
+            "error",
+          );
+          return [];
+        }
+      }),
+    );
+    for (const runs of found) for (const run of runs) wake(run);
+  };
+
+  /** Report a collection that failed after the tool already returned.
+   *
+   * `scufris_briefing_run` answers `started: true` and collects detached, so
+   * every later failure had only `notify`, and `hasUI` is false under the
+   * service. Alex was told the briefing was coming and then waited for
+   * nothing.
+   */
+  const reportRunFailure = (profile: string, reason: string) => {
+    if (stopped) return;
+    notify(reason, "error");
+    pi.sendMessage(
+      {
+        customType: BRIEFING_WAKE,
+        content: `The ${profile} briefing you were asked to collect did not arrive: ${reason}. Tell the user plainly what failed, claim nothing about what the sources would have said, then call scufris_final_response. Do not collect it again unless he asks.`,
+        display: true,
+        details: { profile, error: reason },
+      },
+      { deliverAs: "followUp", triggerTurn: true },
+    );
   };
 
   pi.registerTool(
@@ -185,7 +229,7 @@ export default function briefing(pi: ExtensionAPI): void {
         running = true;
         void (async () => {
           try {
-            await runHelper<Manifest>(
+            const manifest = await runHelper<Manifest>(
               ["collect", "--date", date, "--profile", wanted, "--json"],
               { timeoutMs: collectTimeout() },
             );
@@ -197,10 +241,17 @@ export default function briefing(pi: ExtensionAPI): void {
               (run) => run.profile === wanted,
             );
             if (waiting) wake(waiting);
+            // A run nothing declared stays silent; a run where every source
+            // failed does not. Alex asked for this one and is waiting on it.
+            else if (manifest.state === "failed")
+              reportRunFailure(
+                wanted,
+                `every source failed (${manifest.sources.map((source) => source.project).join(", ")})`,
+              );
           } catch (error) {
-            notify(
+            reportRunFailure(
+              wanted,
               error instanceof Error ? error.message : String(error),
-              "error",
             );
           } finally {
             running = false;

@@ -166,6 +166,32 @@ test("a session that opens on a gathered run asks for the writing once", async (
   }
 });
 
+test("a nightly gathered before midnight is still asked for in the morning", async () => {
+  // The nightly timer collects at 23:00. If nothing was connected, its run is
+  // pending under yesterday's date by the time the next session opens, and
+  // reading only today lost it for good: `collected_runs` is per-date, so
+  // nothing else would ever have found it either.
+  const state = room();
+  const now = new Date();
+  const earlier = new Date(now);
+  earlier.setDate(earlier.getDate() - 1);
+  const yesterday = localDate(earlier);
+  run(state, yesterday, "nightly", { state: "collected" });
+  const opened = session(state);
+  try {
+    await opened.start(1);
+    assert.equal(opened.sent.length, 1);
+    assert.deepEqual(opened.sent[0]!.details, {
+      date: yesterday,
+      profile: "nightly",
+      sources: 1,
+    });
+  } finally {
+    opened.shutdown();
+    rmSync(state, { recursive: true, force: true });
+  }
+});
+
 test("a session that opens on a delivered run asks for nothing", async () => {
   const state = room();
   const today = localDate(new Date());

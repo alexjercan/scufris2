@@ -89,6 +89,10 @@ RUN_DEADLINE = 1800.0
 REPAIR_DEADLINE = 300.0
 REPAIR_FLOOR = 45.0
 REPAIR_THINKING = "low"
+#: The floor for what a repair is shown of its own answer. The real budget
+#: follows `max_body()`, because quoting less than a source is allowed to write
+#: and then asking it to keep every finding is how a repair loses the last
+#: third of a report and still records `ok`.
 MAX_QUOTED = 32 * 1024
 
 JOBS_HELPER = Path(__file__).resolve().parents[1] / "jobs" / "scufris-jobs"
@@ -377,6 +381,13 @@ def contribution_prompt(
 You are one source in the {profile} briefing. Report on this source only, from
 data you read during this run.
 
+You get exactly one turn. This process ends when you stop writing, and anything
+you started and did not wait for dies with it: a delegated agent, a background
+command, a review lane. The envelope below is the only answer anyone will ever
+see from you, so never end a turn intending to continue. A partial report that
+names what you did not reach is a good answer; an answer that says you will
+finish later is nothing at all.
+
 You have every tool this harness has, including the ones that write. Nothing is
 withheld from you and nothing is watching. What you may do is what the guidance
 below tells you to do, and nothing else: change no file, stage nothing, commit
@@ -443,14 +454,18 @@ def repair_prompt(
     nothing, and gathers nothing: it is given the source's own words and the
     one reason they could not be used, and it may change only that.
     """
-    quoted = answer[:MAX_QUOTED]
-    cut = (
-        "\n\n(The rest of your answer was too long to quote back.)"
-        if len(answer) > MAX_QUOTED
-        else ""
-    )
     offers = max_offers()
     body = max_body()
+    # An envelope is JSON around a body, so the answer is always larger than
+    # the body bound. Twice it is the smallest budget that holds one.
+    budget = max(MAX_QUOTED, body * 2)
+    quoted = answer[:budget]
+    cut = (
+        "\n\n(The rest of your answer was too long to quote back. Keep only "
+        "what you can see here; do not invent the rest.)"
+        if len(answer) > budget
+        else ""
+    )
     return f"""# Scufris {profile} briefing: your answer could not be read
 
 You reported on {source["project"]} and the report was rejected:
@@ -1227,6 +1242,24 @@ def offers_instruction(manifest: dict[str, Any]) -> str:
     )
 
 
+def failure_message(manifest: dict[str, Any]) -> str:
+    """What the foreground is told when a run gathered nothing.
+
+    A run where every source failed used to reach nobody: `wake` refused any
+    state but `collected`, `pending` left it out, and the unit exited 0. The
+    briefing simply did not arrive, and noticing that was Alex's job. One
+    source failing out of five was reported; five out of five was silence.
+    """
+    named = ", ".join(item["project"] for item in manifest["sources"])
+    return (
+        f"The {manifest['profile']} briefing for {manifest['date']} did not "
+        f"collect: every source failed ({named}). Tell the user plainly that "
+        "there is no briefing this time and name the sources that could not "
+        "answer. Claim nothing about what they would have said. Then call "
+        "scufris_final_response; do not collect it again unless he asks."
+    )
+
+
 def wake(date: str, profile: str, *, ctl: str | None = None) -> dict[str, Any]:
     """Carry one gathered run to the foreground conversation.
 
@@ -1237,14 +1270,19 @@ def wake(date: str, profile: str, *, ctl: str | None = None) -> dict[str, Any]:
     """
     manifest = read_manifest(date, profile)
     answer = {"date": date, "profile": profile, "woken": False, "reason": ""}
-    if manifest["state"] != "collected":
+    # A failed run is delivered too. It is the one state where the absence of
+    # a briefing is itself the news, and refusing to carry it made a total
+    # failure quieter than a partial one.
+    if manifest["state"] not in ("collected", "failed"):
         return {**answer, "reason": f"the run is {manifest['state']}"}
     if not manifest["sources"]:
         return {**answer, "reason": "no project declared this briefing"}
     command = [
         ctl or os.environ.get("SCUFRIS_CTL") or CTL,
         "wake",
-        wake_message(manifest),
+        failure_message(manifest)
+        if manifest["state"] == "failed"
+        else wake_message(manifest),
         "--custom-type",
         BRIEFING_WAKE,
         "--details",

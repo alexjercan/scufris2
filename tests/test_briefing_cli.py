@@ -79,14 +79,33 @@ class Command(unittest.TestCase):
             'guidance = "Read the journal and report today."\n',
             encoding="utf-8",
         )
+        self.home = self.root / "home"
+        self.home.mkdir()
         self.env = {
             **os.environ,
             "PATH": f"{self.bin}:{os.environ['PATH']}",
+            # The machine's own sources are under the fixture, so a real
+            # ~/.config/scufris/config.toml never reaches a test.
+            "HOME": str(self.home),
             "XDG_STATE_HOME": str(self.root / "state"),
+            "XDG_CONFIG_HOME": str(self.root / "config"),
             "SCUFRIS_PROJECT_ROOTS": json.dumps([str(self.projects)]),
             "BRIEFING_ANSWER": str(self.answer),
             "BRIEFING_OPENED": str(self.opened),
         }
+        self.env.pop("SCUFRIS_CONFIG", None)
+
+    def machine(self, name: str) -> Path:
+        """A file declaring one source for the machine, named after itself."""
+        path = self.root / f"{name}.toml"
+        path.write_text(
+            f"[briefings.morning.{name}]\n"
+            f'description = "Report {name}."\n'
+            'keywords = { harness = "pi" }\n'
+            f'guidance = "Read {name}."\n',
+            encoding="utf-8",
+        )
+        return path
 
     def run_briefing(
         self, *arguments: str, stdin: str = ""
@@ -123,6 +142,34 @@ class Command(unittest.TestCase):
             ["projects/the-den"],
         )
         self.assertEqual(self.answered("sources", "--profile", "weekly")["sources"], [])
+
+    def test_the_flag_names_a_configuration_and_wins_over_the_variable(self) -> None:
+        # Guidance is prose tuned over several runs, so pointing one collection
+        # at another file has to be one word on the command line.
+        self.env["SCUFRIS_CONFIG"] = str(self.machine("variable"))
+        self.assertEqual(
+            [item["project"] for item in self.answered("sources")["sources"]],
+            ["@variable", "projects/the-den"],
+        )
+        named = self.machine("flag")
+        self.assertEqual(
+            [
+                item["project"]
+                for item in self.answered("sources", "--config", str(named))["sources"]
+            ],
+            ["@flag", "projects/the-den"],
+        )
+
+    def test_a_configuration_that_is_not_there_is_refused_by_name(self) -> None:
+        done = self.run_briefing("sources", "--config", str(self.root / "typo.toml"))
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("typo.toml", done.stderr)
+        # The default path being absent is a machine with no sources of its
+        # own, which is the ordinary case and not a refusal.
+        self.assertEqual(
+            [item["project"] for item in self.answered("sources")["sources"]],
+            ["projects/the-den"],
+        )
 
     def test_a_run_is_collected_shown_published_and_opened(self) -> None:
         collected = self.answered("collect")

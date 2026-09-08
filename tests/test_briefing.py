@@ -55,6 +55,16 @@ if said.startswith("#sleep"):
 print(said)
 """
 
+#: Reports where it was run from, so a source's working directory is checked
+#: against what it was told rather than against what it said.
+LOCATING = """#!/usr/bin/env python3
+import os
+import pathlib
+with pathlib.Path(os.environ["BRIEFING_WHERE"]).open("a") as stream:
+    stream.write(os.getcwd() + "\\n")
+print(pathlib.Path(os.environ["BRIEFING_ANSWER"]).read_text())
+"""
+
 #: Writes bytes that are not text at all.
 BINARY = """#!/usr/bin/env python3
 import sys
@@ -206,13 +216,28 @@ class Envelope(unittest.TestCase):
         # The page lays out a sentence. A harness message can be a paragraph,
         # so the runner's own headline is bounded like any other.
         entry = briefing.failed_contribution(
-            {"project": "personal/seedzero", "harness": "claude", "model": "opus"},
+            {
+                "project": "personal/seedzero",
+                "slug": "personal-seedzero",
+                "harness": "claude",
+                "model": "opus",
+            },
             "the harness exited 1:\n" + "detail " * 200,
         )
         self.assertEqual(len(entry["headline"]), briefing.MAX_HEADLINE)
         self.assertNotIn("\n", entry["headline"])
         self.assertEqual(entry["status"], "failed")
         self.assertEqual(entry["slug"], "personal-seedzero")
+
+    def test_a_slug_that_is_not_one_path_component_never_names_a_file(self) -> None:
+        # The reader hands the slug over and this is what writes a file with
+        # it. Anything that is not one component is refused a name of its own.
+        for named in ("../escape", "with/slash", "", ".hidden"):
+            with self.subTest(slug=named):
+                entry = briefing.failed_contribution(
+                    {"project": "personal/seedzero", "slug": named}, "no"
+                )
+                self.assertEqual(entry["slug"], "unknown")
 
     def test_a_source_missing_its_own_fields_can_still_be_named(self) -> None:
         # This is what a failure is recorded with, so it must not be the thing
@@ -265,7 +290,7 @@ class Command(unittest.TestCase):
     def test_a_source_is_asked_once_and_keeps_nothing(self) -> None:
         source = {
             "project": "personal/the-den",
-            "project_root": "/tmp",
+            "root": "/tmp",
             "harness": "pi",
             "model": "openai-codex/gpt-5.6-sol",
             "thinking": "medium",
@@ -282,7 +307,7 @@ class Command(unittest.TestCase):
         argv = briefing.harness_argv(
             {
                 "project": "personal/seedzero",
-                "project_root": "/tmp",
+                "root": "/tmp",
                 "harness": "claude",
                 "model": "opus",
                 "thinking": "high",
@@ -301,7 +326,7 @@ class Command(unittest.TestCase):
         # and `python3` denied instead of reporting their project.
         source = {
             "project": "personal/seedzero",
-            "project_root": "/tmp",
+            "root": "/tmp",
             "harness": "claude",
             "model": "opus",
             "thinking": "high",
@@ -315,7 +340,7 @@ class Command(unittest.TestCase):
         prompt = briefing.contribution_prompt(
             {
                 "project": "personal/the-den",
-                "project_root": "/home/x/the-den",
+                "root": "/home/x/the-den",
                 "description": "Report yesterday.",
                 "guidance": "Run scufris-den restant.",
                 "harness": "pi",
@@ -355,6 +380,12 @@ class Run(unittest.TestCase):
         self.projects = self.root / "projects"
         self.answer = self.root / "answer.txt"
         self.prompt = self.root / "prompt.txt"
+        self.where = self.root / "where.txt"
+        # The machine's own sources and the home a source with no root runs in
+        # are both under the fixture, so no test reads the developer's own.
+        self.config = self.root / "config"
+        self.home = self.root / "home"
+        self.home.mkdir()
         self.answer.write_text(
             f"```json\n{json.dumps(ENVELOPE)}\n```\n", encoding="utf-8"
         )
@@ -362,14 +393,18 @@ class Run(unittest.TestCase):
             os.environ,
             {
                 "PATH": f"{self.bin}:{os.environ['PATH']}",
+                "HOME": str(self.home),
                 "XDG_STATE_HOME": str(self.root / "state"),
+                "XDG_CONFIG_HOME": str(self.config),
                 "SCUFRIS_PROJECT_ROOTS": json.dumps([str(self.projects)]),
                 "BRIEFING_ANSWER": str(self.answer),
                 "BRIEFING_PROMPT": str(self.prompt),
+                "BRIEFING_WHERE": str(self.where),
             },
         )
         self.environment.start()
         self.addCleanup(self.environment.stop)
+        os.environ.pop("SCUFRIS_CONFIG", None)
         self.harness(ANSWERING)
 
     def harness(self, program: str) -> None:
@@ -429,12 +464,155 @@ class Run(unittest.TestCase):
             ),
         )
 
+    def machine(self, text: str, name: str = "config.toml") -> Path:
+        """The user-level file the machine declares its own sources in."""
+        path = self.config / "scufris" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    @staticmethod
+    def section(name: str, guidance: str, root: str | None = None) -> str:
+        placed = f'root = "{root}"\n' if root is not None else ""
+        return (
+            f"[briefings.morning.{name}]\n"
+            f'description = "Report {name}."\n'
+            'keywords = { harness = "pi" }\n'
+            f'guidance = "{guidance}"\n'
+            f"{placed}"
+        )
+
     def control(self, program: str) -> Path:
         """A stand-in for scufris-ctl, which the wake carries the words to."""
         executable = self.bin / "scufris-ctl"
         executable.write_text(program, encoding="utf-8")
         executable.chmod(0o755)
         return executable
+
+    def test_a_source_the_machine_declares_contributes_with_no_project(self) -> None:
+        # A jobs source has no checkout to belong to. It is an ordinary source
+        # declared in one user-level file, and nothing else about it differs.
+        self.machine(self.section("jobs", "Read the job history."))
+        manifest = briefing.collect("2026-08-31", "morning")
+        self.assertEqual([item["project"] for item in manifest["sources"]], ["@jobs"])
+        self.assertEqual(manifest["state"], "collected")
+        self.assertIn("Read the job history.", self.prompt.read_text())
+        kept = json.loads(
+            (
+                briefing.run_dir("2026-08-31", "morning")
+                / "contributions"
+                / "@jobs.json"
+            ).read_text()
+        )
+        self.assertEqual(kept["body"], ENVELOPE["body"].strip())
+
+    def test_a_machine_source_can_never_take_a_project_contribution_file(
+        self,
+    ) -> None:
+        # The reader assigns the slug and namespaces the machine's own, so a
+        # section named for a project cannot be written into that project's
+        # file. The collision is not expressible rather than merely noticed.
+        self.declare("the-den")
+        self.machine(
+            self.section("jobs", "Read the job history.")
+            + self.section("projects-the-den", "Take the den's file.")
+        )
+        manifest = briefing.collect("2026-08-31", "morning")
+        self.assertEqual(
+            [item["slug"] for item in manifest["sources"]],
+            ["@jobs", "@projects-the-den", "projects-the-den"],
+        )
+        kept = sorted(
+            path.name
+            for path in (
+                briefing.run_dir("2026-08-31", "morning") / "contributions"
+            ).iterdir()
+        )
+        self.assertEqual(
+            kept, ["@jobs.json", "@projects-the-den.json", "projects-the-den.json"]
+        )
+
+    def test_a_machine_source_runs_in_home_unless_it_names_a_root(self) -> None:
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        self.machine(
+            self.section("jobs", "Read the job history.")
+            + self.section("den", "Read the journal.", root=str(elsewhere))
+        )
+        self.harness(LOCATING)
+        briefing.collect("2026-08-31", "morning")
+        self.assertEqual(
+            sorted(self.where.read_text().split()),
+            sorted([str(elsewhere.resolve()), str(self.home.resolve())]),
+        )
+
+    def test_a_configuration_somebody_named_and_is_not_there_is_refused(self) -> None:
+        # A typed path that quietly reports no sources is a morning discovered
+        # too late. A default path that is absent is a machine with none.
+        typo = self.root / "typo.toml"
+        with self.assertRaises(briefing.Refused) as caught:
+            briefing.declared_sources("morning", str(typo))
+        self.assertIn("typo.toml", str(caught.exception))
+        self.assertEqual(briefing.declared_sources("morning"), ([], []))
+
+    def test_a_named_configuration_is_read_instead_of_the_default(self) -> None:
+        self.machine(self.section("jobs", "Read the job history."))
+        other = self.root / "other.toml"
+        other.write_text(self.section("named", "Read the named file."), "utf-8")
+        sources, _ = briefing.declared_sources("morning", str(other))
+        self.assertEqual([item["project"] for item in sources], ["@named"])
+
+    def test_a_malformed_user_file_costs_the_user_file_and_nothing_else(self) -> None:
+        self.declare("the-den")
+        path = self.machine("this is not = toml [\n")
+        manifest = briefing.collect("2026-08-31", "morning")
+        self.assertEqual(
+            [item["project"] for item in manifest["sources"]], ["projects/the-den"]
+        )
+        self.assertEqual(len(manifest["diagnostics"]), 1)
+        diagnostic = manifest["diagnostics"][0]
+        self.assertEqual(diagnostic["project"], str(path.resolve()))
+        self.assertIn("ignored", diagnostic["diagnostic"])
+
+    def test_the_user_file_declares_briefings_and_nothing_else(self) -> None:
+        # A checkout has to work for someone whose machine has none of this,
+        # so agents and conventions stay where the project keeps them.
+        self.declare("the-den")
+        self.machine(
+            self.section("jobs", "Read the job history.")
+            + '[agents.work]\ndescription = "Implement a change."\n'
+        )
+        manifest = briefing.collect("2026-08-31", "morning")
+        self.assertEqual(
+            [item["project"] for item in manifest["sources"]], ["projects/the-den"]
+        )
+        self.assertIn(
+            "briefings and nothing else", manifest["diagnostics"][0]["diagnostic"]
+        )
+
+    def test_the_first_run_of_a_profile_invents_no_window(self) -> None:
+        self.declare("the-den")
+        briefing.collect("2026-08-31", "morning")
+        self.assertIn(
+            "No earlier morning briefing was kept", self.prompt.read_text()
+        )
+
+    def test_a_source_is_told_when_its_profile_last_finished(self) -> None:
+        self.declare("the-den", "pi", "morning", "evening")
+        first = briefing.collect("2026-08-31", "morning")
+        self.assertIsNotNone(first["finished"])
+        # A profile's watermark is its own: an evening that never ran has none
+        # of the morning's.
+        briefing.collect("2026-08-31", "evening")
+        self.assertIn(
+            "No earlier evening briefing was kept", self.prompt.read_text()
+        )
+        briefing.collect("2026-09-01", "morning")
+        said = self.prompt.read_text()
+        self.assertIn(f"The last morning briefing finished at {first['finished']}", said)
+        # A fact, not an instruction: guidance that names its own window keeps
+        # it, which is what every source written before this said.
+        self.assertIn("Where it names its own window, keep it.", said)
 
     def test_only_a_project_that_declares_the_profile_is_asked(self) -> None:
         self.declare("the-den")
@@ -533,7 +711,7 @@ class Run(unittest.TestCase):
         argv = briefing.harness_argv(
             {
                 "project": "personal/seedzero",
-                "project_root": "/tmp",
+                "root": "/tmp",
                 "harness": "pi",
                 "model": "opus",
                 "thinking": "high",
@@ -546,7 +724,7 @@ class Run(unittest.TestCase):
         claude = briefing.harness_argv(
             {
                 "project": "personal/seedzero",
-                "project_root": "/tmp",
+                "root": "/tmp",
                 "harness": "claude",
                 "model": "opus",
                 "thinking": "high",

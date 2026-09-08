@@ -26,6 +26,7 @@ programs.scufris
 │   ├── piPackage
 │   ├── projectRoots
 │   ├── briefing.profiles.<name>.{schedule,persistent,deadline}
+│   ├── briefing.sources.<profile>.<name>.{description,guidance,keywords,root}
 │   └── package
 ├── aiToolsApi.{enable,baseUrl}
 ├── service
@@ -63,6 +64,7 @@ programs.scufris
 | Select Pi                                         | `agent.piPackage`                          | pinned `llm-agents` Pi                     |
 | Find projects                                     | `agent.projectRoots`                       | `~/personal`, `~/work`, `~/third-party`    |
 | Schedule briefings                                | `agent.briefing.profiles`                  | `{ morning.schedule = "08:00"; }`          |
+| Declare briefing sources for the machine          | `agent.briefing.sources`                   | `{}`                                       |
 | Replace the complete launcher                     | `agent.package`                            | module-rendered launcher                   |
 | Run the conversation owner                        | `service.enable`                           | `false`                                    |
 | Store its Pi session                              | `service.sessionDirectory`                 | `$XDG_DATA_HOME/scufris/sessions`          |
@@ -112,6 +114,19 @@ programs.scufris = {
   agent = {
     piPackage = config.programs.agents.pi.finalPackage;
     projectRoots = ["~/personal" "~/work"];
+    briefing = {
+      profiles.morning.schedule = "07:30";
+      # A source with no checkout to belong to. Projects declare their own in
+      # their own `.scufris.toml`; this file is briefings and nothing else.
+      sources.morning.jobs = {
+        description = "What Scufris did overnight.";
+        keywords = {
+          harness = "pi";
+          thinking = "medium";
+        };
+        guidance = "Read what the jobs helper measured and report it.";
+      };
+    };
   };
 
   aiToolsApi = {

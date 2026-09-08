@@ -59,6 +59,20 @@
       projectRoots = agentCfg.projectRoots;
     };
   briefingProfileName = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
+  # The helper reads a TOML path and does not know Nix exists. This is one way
+  # to produce that file: a typed option so a malformed entry fails the build
+  # instead of costing a morning. Anyone not on NixOS writes the same file by
+  # hand, and the reader cannot tell the difference.
+  briefingFormat = pkgs.formats.toml {};
+  briefingScalar = lib.types.oneOf [lib.types.bool lib.types.int lib.types.float lib.types.str];
+  # A null says nothing was set and TOML has no null, so an unset key renders
+  # as an absent one rather than as a value the reader would have to refuse.
+  briefingSourceAttrs = source: lib.filterAttrs (name: value: name != "_module" && value != null && value != {}) source;
+  briefingSources =
+    lib.mapAttrs
+    (_: profile: lib.mapAttrs (_: briefingSourceAttrs) profile)
+    briefingCfg.sources;
+  briefingConfigFile = briefingFormat.generate "scufris-config.toml" {briefings = briefingSources;};
   # The frontend owns the speaker, so the synthesiser is bound here and handed
   # to the companion. A deployment with no speech hands it nothing and the
   # companion stays silent.
@@ -186,6 +200,78 @@ in {
 
             `{}` schedules none, and the tools still collect one when asked.
             Timers are systemd's, so nothing is scheduled off Linux.
+          '';
+        };
+
+        sources = lib.mkOption {
+          type = lib.types.attrsOf (lib.types.attrsOf (lib.types.submodule {
+            freeformType = briefingFormat.type;
+            options = {
+              description = lib.mkOption {
+                type = lib.types.str;
+                example = "What Scufris did overnight.";
+                description = ''
+                  One short printable line saying what this source reports.
+                '';
+              };
+
+              guidance = lib.mkOption {
+                type = lib.types.lines;
+                description = ''
+                  What the source is asked. Nobody chooses a briefing source,
+                  so this is required: it is the whole of what the source is
+                  told to look at and report.
+                '';
+              };
+
+              keywords = lib.mkOption {
+                type = lib.types.attrsOf (lib.types.either briefingScalar (lib.types.listOf briefingScalar));
+                default = {};
+                example = lib.literalExpression ''{harness = "pi"; thinking = "medium";}'';
+                description = ''
+                  How the source is run, and anything else it should carry.
+                  `harness`, `model` and `thinking` choose the adapter; every
+                  value stays a flat scalar or a list of them, because the
+                  source is given each one back verbatim.
+                '';
+              };
+
+              root = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                example = "/home/you/personal";
+                description = ''
+                  Where the source runs. Unset, it runs in the home directory,
+                  which is what anything reading XDG state wants.
+                '';
+              };
+            };
+          }));
+          default = {};
+          example = lib.literalExpression ''
+            {
+              morning.jobs = {
+                description = "What Scufris did overnight.";
+                keywords = {harness = "pi"; thinking = "medium";};
+                guidance = "Read what the helper measured and report it.";
+              };
+            }
+          '';
+          description = ''
+            Briefing sources declared for the machine rather than for any
+            project, written to `$XDG_CONFIG_HOME/scufris/config.toml`. The
+            attribute path is `<profile>.<name>`: a source with no checkout to
+            belong to, such as one reporting what the jobs helper measured.
+
+            An ordinary source in every other way. It answers the same
+            envelope, is held to the same deadlines, and is repaired and laid
+            out the same. A project keeps declaring its own briefing in its own
+            `.scufris.toml`, because a checkout has to work for someone whose
+            machine has none of this.
+
+            The file this renders is briefings-only, and the helper reads it as
+            a path. Home Manager is one way to produce it; anyone else writes
+            the same TOML by hand.
           '';
         };
       };
@@ -421,6 +507,23 @@ in {
     }
     (lib.mkIf cfg.enable {
       home.packages = [agentCfg.package];
+    })
+    # One file for the sources that belong to the machine and not to any
+    # checkout. It is generated so a malformed entry fails the build rather
+    # than the morning; the helper only ever sees a TOML path.
+    (lib.mkIf (cfg.enable && briefingCfg.sources != {}) {
+      assertions = [
+        {
+          assertion = lib.all (name: builtins.match briefingProfileName name != null) (lib.attrNames briefingCfg.sources);
+          message = "programs.scufris.agent.briefing.sources profile names are letters, digits, dashes and underscores";
+        }
+        {
+          assertion = lib.all (profile: lib.all (name: builtins.match briefingProfileName name != null) (lib.attrNames profile)) (lib.attrValues briefingCfg.sources);
+          message = "programs.scufris.agent.briefing.sources names are letters, digits, dashes and underscores: the reader namespaces each one into a contribution file name";
+        }
+      ];
+
+      xdg.configFile."scufris/config.toml".source = briefingConfigFile;
     })
     # A briefing is collected out of process and delivered over the control
     # socket, so the schedule needs neither a session nor an agent. The user

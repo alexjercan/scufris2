@@ -586,17 +586,21 @@ def render_context(project: str, source: Path) -> dict[str, Any]:
         }
 
 
-def briefing_entry(scope: str, entry: Any) -> dict[str, Any]:
+def briefing_entry(
+    scope: str, entry: Any, *, extra: frozenset[str] = frozenset()
+) -> dict[str, Any]:
     # A briefing source is described the way an agent is, because the person
     # writing it should not have to learn a second shape. What differs is that
     # nobody chooses it: it is asked on a schedule, so its guidance is what the
     # source is asked and is required rather than optional.
-    if not isinstance(entry, dict) or set(entry) - {
-        "description",
-        "keywords",
-        "guidance",
-    }:
-        raise ValueError(f"{scope} accepts only description, keywords and guidance")
+    #
+    # A source declared for the machine is the same entry with one more key,
+    # validated here rather than by a second parser: what a source is, is one
+    # question and a second answer to it would drift.
+    allowed = {"description", "keywords", "guidance"} | set(extra)
+    if not isinstance(entry, dict) or set(entry) - allowed:
+        named = ", ".join(sorted(allowed - {"guidance"})) + " and guidance"
+        raise ValueError(f"{scope} accepts only {named}")
     description = entry.get("description")
     if (
         not isinstance(description, str)
@@ -625,10 +629,125 @@ def briefing_entry(scope: str, entry: Any) -> dict[str, Any]:
     }
 
 
-def briefing_sources(profile: str) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Every project that declares this profile, and why any were passed over."""
+def config_home() -> Path:
+    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / "scufris"
+
+
+def user_config_path(named: Any) -> tuple[Path, bool]:
+    """The user-level configuration file, and whether somebody named it.
+
+    A file somebody named and is not there is a refusal: `--config typo.toml`
+    quietly reporting no sources is a morning discovered too late. The default
+    path being absent is not, because a machine that declared none is the
+    ordinary case.
+    """
+    if named is None:
+        named = os.environ.get("SCUFRIS_CONFIG")
+    if named is None:
+        return config_home() / "config.toml", False
+    if not isinstance(named, str) or not named.strip():
+        raise JobError("configuration path must be a nonempty path")
+    return expanded(named), True
+
+
+def source_slug(identity: str) -> str:
+    """One path component naming a source, for the file its answer is kept in.
+
+    The reader assigns this and nothing downstream derives it again. A project
+    identity is a relative path of `PROJECT_ID` segments, so it can never carry
+    the prefix a machine-level source is named with, and a section called
+    `scufris2` cannot take the `scufris2` project's contribution file.
+    """
+    return identity.replace("/", "-")
+
+
+#: What a source declared for the machine is called. `@` is outside PROJECT_ID,
+#: so no project can be named one and no slug can collide with one.
+USER_SOURCE_MARK = "@"
+
+
+def user_briefing_sources(
+    profile: str, named: Any
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Sources declared for the machine rather than for any project.
+
+    A jobs source has no project to belong to. Rather than a second kind of
+    source the helper runs itself, one file declares ordinary sources that are
+    not tied to a checkout, and everything else about them is the same.
+
+    The file is briefings-only. A project keeps its own conventions and agents
+    even where that repeats another project, because a checkout has to work for
+    someone whose machine has none of this.
+    """
+    path, demanded = user_config_path(named)
+    try:
+        # Read the way a project file is read. Home Manager writes this one as
+        # a symlink into the store, so a reader that refused a link would
+        # refuse the ordinary way of having one.
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        if demanded:
+            raise JobError(f"no configuration file at {path}") from None
+        return [], []
+    except OSError as error:
+        if demanded:
+            raise JobError(f"unreadable configuration file: {error}") from None
+        return [], [{"project": str(path), "diagnostic": f"ignored: {error}"}]
     sources: list[dict[str, Any]] = []
-    diagnostics: list[dict[str, str]] = []
+    try:
+        document = tomllib.loads(raw.decode("utf-8"))
+        if set(document) - {"briefings"}:
+            raise ValueError("this file declares briefings and nothing else")
+        declared = document.get("briefings", {})
+        if not isinstance(declared, dict):
+            raise ValueError("briefings must be a table")
+        entries = declared.get(profile, {})
+        if not isinstance(entries, dict):
+            raise ValueError(f"briefings.{profile} must be a table of named sources")
+        for name in sorted(entries):
+            if not simple_identifier(name):
+                raise ValueError("briefing source names must be simple identifiers")
+            scope = f"briefing {profile}.{name}"
+            entry = entries[name]
+            root = entry.get("root") if isinstance(entry, dict) else None
+            if root is not None and (not isinstance(root, str) or not root.strip()):
+                raise ValueError(f"{scope} root must be a path")
+            identity = f"{USER_SOURCE_MARK}{name}"
+            sources.append(
+                {
+                    **briefing_entry(scope, entry, extra=frozenset({"root"})),
+                    "project": identity,
+                    "slug": source_slug(identity),
+                    # A source with no project runs where the machine's own
+                    # state is, which is what anything reading XDG state wants.
+                    "root": str(Path.home() if root is None else expanded(root)),
+                    "profile": profile,
+                }
+            )
+    except (
+        TypeError,
+        UnicodeError,
+        tomllib.TOMLDecodeError,
+        ValueError,
+    ) as error:
+        # A malformed user file costs the user file and nothing else. Every
+        # project still contributes, and the reason is one diagnostic naming
+        # the file it is in.
+        return [], [{"project": str(path), "diagnostic": f"ignored: {error}"}]
+    return sources, []
+
+
+def briefing_sources(
+    profile: str, config: Any = None
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Every source that declares this profile, and why any were passed over.
+
+    A source is a project that declares the profile in its own `.scufris.toml`,
+    or a section the machine declares for itself. Both are read here, because
+    what a source is, is one question with one answer.
+    """
+    sources, diagnostics = user_briefing_sources(profile, config)
     for project, root in sorted(discover_projects().items()):
         source = root / ".scufris.toml"
         if not source.is_file():
@@ -643,10 +762,11 @@ def briefing_sources(profile: str) -> tuple[list[dict[str, Any]], list[dict[str,
                 continue
             sources.append(
                 {
-                    "project": project,
-                    "project_root": str(root),
-                    "profile": profile,
                     **briefing_entry(f"briefing {profile}", entry),
+                    "project": project,
+                    "slug": source_slug(project),
+                    "root": str(root),
+                    "profile": profile,
                 }
             )
         except (
@@ -663,11 +783,11 @@ def briefing_sources(profile: str) -> tuple[list[dict[str, Any]], list[dict[str,
 
 
 def briefings(request: dict[str, Any]) -> dict[str, Any]:
-    validate_request(request, {"profile"})
+    validate_request(request, {"profile"}, {"config"})
     profile = request["profile"]
     if not simple_identifier(profile):
         raise JobError("invalid briefing profile")
-    sources, diagnostics = briefing_sources(profile)
+    sources, diagnostics = briefing_sources(profile, request.get("config"))
     return {"profile": profile, "sources": sources, "diagnostics": diagnostics}
 
 
@@ -2544,25 +2664,134 @@ def secure_rmtree(path: Path) -> None:
     fsync_directory(path.parent)
 
 
-def all_job_records() -> list[dict[str, Any]]:
-    root = jobs_root()
+def job_directory_names(root: Path) -> list[str]:
+    """Every job directory under one root, refusing one that is not a directory."""
     try:
         canonical_path(root)
     except JobError:
         if not root.exists():
             return []
         raise
-    records: list[dict[str, Any]] = []
+    names: list[str] = []
     with os.scandir(root) as entries:
         for entry in entries:
             if not JOB_ID.fullmatch(entry.name):
                 continue
             if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
                 raise JobError(f"unsafe job directory: {entry.name}")
-            record = load_job(entry.name, archived=True)
-            if record["archived_at"] is None:
-                records.append(record)
+            names.append(entry.name)
+    return names
+
+
+def all_job_records() -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for name in job_directory_names(jobs_root()):
+        record = load_job(name, archived=True)
+        if record["archived_at"] is None:
+            records.append(record)
     return records
+
+
+def every_job_record() -> list[dict[str, Any]]:
+    """Every record on disk, the archived ones included.
+
+    `all_job_records` answers about work that is still live, and archiving is
+    what happens to a workflow that finished. Reading history means reading the
+    archive, so this is the only listing that does.
+    """
+    names = {*job_directory_names(jobs_root()), *job_directory_names(archive_root())}
+    records: list[dict[str, Any]] = []
+    for name in sorted(names):
+        # One record nobody can read is one job missing from a listing, not a
+        # listing nobody gets. A briefing source is reading a morning, not
+        # repairing state.
+        with contextlib.suppress(JobError, OSError):
+            records.append(load_job(name, archived=True))
+    return records
+
+
+def moment(value: Any) -> dt.datetime | None:
+    """One recorded timestamp, or nothing when it cannot be read."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.astimezone()
+    return parsed.astimezone(dt.timezone.utc)
+
+
+HISTORY_FIELDS = (
+    "job_id",
+    "root_job",
+    "parent_job",
+    "workflow_id",
+    "project",
+    "project_root",
+    "workspace",
+    "feature",
+    "landing_branch",
+    "harness",
+    "model",
+    "state",
+    "summary",
+    "created_at",
+    "archived_at",
+)
+
+#: How many records one listing answers with. A morning reads a night, not a
+#: year, and an unbounded listing is an unbounded prompt.
+MAX_HISTORY = 200
+
+
+def history(request: dict[str, Any]) -> dict[str, Any]:
+    """Job records since a timestamp, archived ones included, with receipts.
+
+    Nothing else can answer what landed. A job that finished was archived, and
+    every other listing skips the archive; the receipt beside it is what was
+    measured about it, so a source can report what happened without judging it.
+    """
+    validate_request(request, set(), {"since", "limit"})
+    since = request.get("since")
+    cutoff = None
+    if since is not None:
+        cutoff = moment(since)
+        if cutoff is None:
+            raise JobError("since must be an ISO 8601 timestamp")
+    limit = request.get("limit", MAX_HISTORY)
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
+        raise JobError("limit must be a whole number of records")
+    listed: list[dict[str, Any]] = []
+    for record in every_job_record():
+        stamps = [
+            value
+            for value in (moment(record["created_at"]), moment(record["archived_at"]))
+            if value is not None
+        ]
+        # A record whose timestamps cannot be read is listed rather than
+        # hidden: a job left out of a morning is worse than one listed twice.
+        if cutoff is not None and stamps and max(stamps) < cutoff:
+            continue
+        receipts = stored_receipts(record["job_id"])
+        listed.append(
+            {
+                **{key: record[key] for key in HISTORY_FIELDS},
+                "archived": record["archived_at"] is not None,
+                "receipt": receipts[-1] if receipts else None,
+                "receipt_count": len(receipts),
+            }
+        )
+    listed.sort(key=lambda item: (str(item["created_at"] or ""), item["job_id"]))
+    return {
+        "since": since,
+        "jobs": listed[-limit:],
+        "listed": len(listed),
+    }
 
 
 def workflow_records(selected: dict[str, Any]) -> list[dict[str, Any]]:
@@ -3569,6 +3798,7 @@ def main() -> int:
         "failure": failure,
         "send": send,
         "inspect": inspect,
+        "history": history,
         "receipt": receipt,
         "quick-review-target": quick_review_target,
         "review-target": review_target,

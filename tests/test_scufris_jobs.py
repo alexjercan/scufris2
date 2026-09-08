@@ -178,9 +178,13 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
                 "PATH": f"{self.bin}:{self.env['PATH']}",
                 "XDG_STATE_HOME": str(self.root / "state"),
                 "TMUX_TMPDIR": str(self.root / "tmux"),
+                "XDG_CONFIG_HOME": str(self.root / "config"),
                 "SCUFRIS_PROJECT_ROOTS": json.dumps([str(self.projects)]),
             }
         )
+        # The machine's own briefing sources are read from here, so a real
+        # ~/.config/scufris/config.toml never reaches a test.
+        self.env.pop("SCUFRIS_CONFIG", None)
         (self.root / "tmux").mkdir()
         self.jobs: list[str] = []
         self.trusted_capabilities: dict[str, str] = {}
@@ -628,6 +632,132 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
             self.assertFalse(unsupported["configured"])
             self.assertIn("unsupported adapter", unsupported["diagnostic"])
 
+    def test_the_machines_own_sources_are_read_beside_the_projects(self) -> None:
+        # A source with no project is declared once for the machine. It is an
+        # ordinary entry: the same reader validates it, and its slug is
+        # namespaced so a section named for a project cannot take that
+        # project's contribution file.
+        menu = (self.project / ".scufris.toml").read_text()
+        (self.project / ".scufris.toml").write_text(
+            menu + "\n[briefings.morning]\n"
+            'description = "Report the project."\n'
+            'guidance = "Read the project."\n'
+        )
+        config = self.root / "config" / "scufris" / "config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_text(
+            "[briefings.morning.jobs]\n"
+            'description = "What Scufris did overnight."\n'
+            'keywords = { harness = "pi", thinking = "medium" }\n'
+            'guidance = "Read the job history."\n'
+            "[briefings.morning.projects-nova-protocol]\n"
+            'description = "Named for a project."\n'
+            f'guidance = "Run in a named root."\nroot = "{self.root}"\n'
+        )
+        listed = self.call("briefings", {"profile": "morning"})["result"]
+        self.assertEqual(listed["diagnostics"], [])
+        self.assertEqual(
+            [item["slug"] for item in listed["sources"]],
+            ["@jobs", "@projects-nova-protocol", "projects-nova-protocol"],
+        )
+        machine = listed["sources"][0]
+        self.assertEqual(machine["project"], "@jobs")
+        self.assertEqual(machine["guidance"], "Read the job history.")
+        # No root of its own means the machine's own home.
+        self.assertEqual(machine["root"], str(Path.home()))
+        self.assertEqual(listed["sources"][1]["root"], str(self.root.resolve()))
+
+        # A named file that is not there is a refusal; the default path being
+        # absent is a machine that declared none.
+        refused = self.call(
+            "briefings", {"profile": "morning", "config": "/nonexistent/typo.toml"},
+            check=False,
+        )
+        self.assertFalse(refused["ok"])
+        self.assertIn("typo.toml", refused["error"])
+
+        # A malformed user file costs the user file and nothing else.
+        config.write_text("this is not = toml [\n")
+        broken = self.call("briefings", {"profile": "morning"})["result"]
+        self.assertEqual(
+            [item["project"] for item in broken["sources"]], ["projects/nova-protocol"]
+        )
+        self.assertEqual(len(broken["diagnostics"]), 1)
+        self.assertEqual(broken["diagnostics"][0]["project"], str(config))
+
+    def test_the_history_listing_answers_for_jobs_no_other_listing_can(self) -> None:
+        # Archiving is what happens to a workflow that finished, and every
+        # other listing skips the archive. Nothing could answer what landed.
+        live = "aa0000000001"
+        self.fixture_job(live, {"created_at": "2026-09-08T05:00:00Z"})
+        old = "cc0000000003"
+        self.fixture_job(old, {"created_at": "2026-08-01T09:00:00Z"})
+        landed = "bb0000000002"
+        directory = self.fixture_job(
+            landed,
+            {
+                "created_at": "2026-09-07T10:00:00Z",
+                "archived_at": "2026-09-08T06:30:00Z",
+                "state": "done",
+                "summary": "the change landed",
+            },
+        )
+        (directory / "receipts.jsonl").write_text(
+            json.dumps(
+                {
+                    "job_id": landed,
+                    "measured_at": "2026-09-08T06:29:00Z",
+                    "trigger": "cleanup",
+                    "facts": {"landed": True, "pushed": False},
+                    "claims": [
+                        {
+                            "claim": "pushed",
+                            "said": "I pushed the branch.",
+                            "field": "pushed",
+                            "measured": False,
+                            "verdict": "claimed, not verified",
+                        }
+                    ],
+                    "sentences": ["pushed: claimed, not verified"],
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        archive = self.root / "state" / "scufris" / "jobs" / "_archive"
+        archive.mkdir(parents=True)
+        directory.rename(archive / landed)
+
+        # The live listing cannot see it, by design.
+        self.assertEqual(
+            {job["job_id"] for job in json.loads(self.cli("all", "--json").stdout)["jobs"]},
+            {live, old},
+        )
+        listed = self.call("history", {"since": "2026-09-08T00:00:00Z"})["result"]
+        self.assertEqual([job["job_id"] for job in listed["jobs"]], [landed, live])
+        recorded = listed["jobs"][0]
+        self.assertTrue(recorded["archived"])
+        self.assertEqual(recorded["receipt_count"], 1)
+        self.assertEqual(
+            recorded["receipt"]["sentences"], ["pushed: claimed, not verified"]
+        )
+        # Without a window it answers for everything on disk.
+        self.assertEqual(
+            {job["job_id"] for job in self.call("history", {})["result"]["jobs"]},
+            {live, old, landed},
+        )
+        # A window that is not a moment is refused rather than ignored.
+        refused = self.call("history", {"since": "last night"}, check=False)
+        self.assertFalse(refused["ok"])
+        self.assertIn("ISO 8601", refused["error"])
+
+        # A source reads it through the same command a person does.
+        rows = self.cli("history", "--since", "2026-09-08T00:00:00Z").stdout
+        self.assertIn(landed, rows)
+        self.assertIn("pushed: claimed, not verified", rows)
+        self.assertIn("archived", rows)
+        self.assertNotIn(old, rows)
+
     def test_a_briefing_source_is_listed_but_never_offered_as_an_agent(self) -> None:
         menu = (self.project / ".scufris.toml").read_text()
         (self.project / ".scufris.toml").write_text(
@@ -644,7 +774,8 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         self.assertEqual(len(listed["sources"]), 1)
         source = listed["sources"][0]
         self.assertEqual(source["project"], "projects/nova-protocol")
-        self.assertEqual(source["project_root"], str(self.project))
+        self.assertEqual(source["root"], str(self.project))
+        self.assertEqual(source["slug"], "projects-nova-protocol")
         self.assertEqual(source["harness"], "claude")
         self.assertEqual(source["model"], "opus")
         self.assertEqual(source["thinking"], "high")

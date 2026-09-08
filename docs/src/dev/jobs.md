@@ -259,6 +259,15 @@ Cleanup is workflow-scoped and archival:
   after a refusal; the rest of a durable cleanup intent stays immutable.
 - `land`, `stop`, and `inspect` all return a receipt.
 
+`history` is the one listing that reads the archive. Every other listing
+answers about work that is still live, and archiving is what happens to a
+workflow that finished, so nothing else could answer what landed. It takes an
+optional ISO 8601 `since` and returns each record with its newest receipt and
+receipt count; `scufris-jobs history --since <moment>` is the same listing on
+the command line, and a briefing source declared for the machine reads it with
+`--json`. A `since` that is not a moment is refused rather than ignored, and a
+record whose own timestamps cannot be read is listed rather than hidden.
+
 ## Recovery
 
 At foreground `session_start`, `recover` reconciles every job owned by that

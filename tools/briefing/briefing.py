@@ -9,10 +9,11 @@ readings of one artifact, so neither can say something the other does not.
 The date and the profile together name a run, so a morning and an evening on
 one day are two runs and never one that overwrites the other.
 
-A source is a project that declares `[briefings.<profile>]` in its own
-`.scufris.toml`. Nothing here knows what any of them report. The project owns
-the guidance, the paths, and the meaning; this owns the deadline, the shape of
-the answer, and the record.
+A source declares `[briefings.<profile>]`: a project does it in its own
+`.scufris.toml`, and the machine does it for itself in one user-level file, for
+anything that belongs to no checkout. Nothing here knows what any of them
+report. The source owns the guidance, the paths, and the meaning; this owns the
+deadline, the shape of the answer, and the record.
 
 A source answers with one JSON envelope carrying a Markdown body. Free Markdown
 would read well and lay out badly: the page needs a title, a status, and a
@@ -42,6 +43,10 @@ import page
 
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PROFILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+
+#: A contribution is kept in a file named for its source, so a slug the reader
+#: hands over is held to one path component before it becomes one.
+SLUG = re.compile(r"^[@A-Za-z0-9][@A-Za-z0-9_.-]*$")
 
 #: The profile a caller that names none is asking about.
 DEFAULT_PROFILE = "morning"
@@ -226,9 +231,38 @@ def resolve(date: str, profile: str | None = None, *, undelivered: bool = False)
     return DEFAULT_PROFILE
 
 
-def slug(project: str) -> str:
-    """A project ID as one path component."""
-    return project.replace("/", "-")
+def previous_finished(date: str, profile: str) -> str | None:
+    """When this profile last finished a run, over the runs that are kept.
+
+    A source is told this so it can report on a night, a week or whatever its
+    own schedule turned out to be, with no window setting anywhere. The runs
+    kept on disk are the record, so a profile that has never run says so rather
+    than leaving a model to invent a period.
+
+    Read before the run being collected writes its own manifest: a date and a
+    profile name one directory, so a second collection on one day would
+    otherwise read back what it is about to replace.
+    """
+    root = state_root()
+    if not root.is_dir():
+        return None
+    days = sorted(
+        (
+            path.name
+            for path in root.iterdir()
+            if path.is_dir() and DATE.fullmatch(path.name) and path.name <= date
+        ),
+        reverse=True,
+    )
+    for day in days:
+        try:
+            manifest = read_manifest(day, profile)
+        except Refused:
+            continue
+        finished = manifest.get("finished")
+        if isinstance(finished, str) and finished:
+            return finished
+    return None
 
 
 def atomic_write(path: Path, data: str) -> None:
@@ -266,15 +300,22 @@ def write_manifest(manifest: dict[str, Any]) -> None:
     )
 
 
-def declared_sources(profile: str) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Ask the jobs helper which projects declare this profile.
+def declared_sources(
+    profile: str, config: str | None = None
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Ask the jobs helper which sources declare this profile.
 
-    Project discovery and `.scufris.toml` belong to one reader. A second
-    implementation of either would be a second answer to what a project is.
+    Project discovery, `.scufris.toml` and the user-level file belong to one
+    reader. A second implementation of any of them would be a second answer to
+    what a source is. `config` names another user-level file; without one the
+    reader resolves `SCUFRIS_CONFIG` and then its own default path.
     """
+    request: dict[str, Any] = {"profile": profile}
+    if config is not None:
+        request["config"] = config
     done = subprocess.run(
         [sys.executable, str(JOBS_HELPER), "briefings"],
-        input=json.dumps({"profile": profile}),
+        input=json.dumps(request),
         text=True,
         capture_output=True,
         check=False,
@@ -291,25 +332,54 @@ def declared_sources(profile: str) -> tuple[list[dict[str, Any]], list[dict[str,
     return result["sources"], result["diagnostics"]
 
 
-def contribution_prompt(source: dict[str, Any], profile: str, date: str) -> str:
+def since_last_run(profile: str, finished: str | None) -> str:
+    """What the source is told about the last time this profile ran.
+
+    A fact, not an instruction. The guidance below it is what says what to
+    read, and a source whose project names its own window - yesterday, the last
+    three sessions, the last twelve commits - keeps that window. This only
+    answers "since when" for a source that asks the question, so a weekly
+    source reports on a week and a morning source on a night with no window
+    setting anywhere.
+    """
+    if finished is None:
+        return (
+            f"No earlier {profile} briefing was kept on this machine, so there "
+            "is no previous run to measure against. Report where things stand "
+            "now, and do not invent a period you cannot measure."
+        )
+    return (
+        f"The last {profile} briefing finished at {finished}. Where the "
+        "guidance below asks what changed and names no window of its own, that "
+        "is the moment to measure from. Where it names its own window, keep it."
+    )
+
+
+def contribution_prompt(
+    source: dict[str, Any], profile: str, date: str, finished: str | None = None
+) -> str:
     """What one source is asked.
 
-    The project's own guidance is the middle of this and the only part that
-    says what to look at. Everything around it is the shape of the answer,
-    which is this program's business because it is what the page reads.
+    The source's own guidance is the middle of this and the only part that says
+    what to look at. Everything around it is the shape of the answer, which is
+    this program's business because it is what the page reads.
     """
     facts = MAX_FACTS
     return f"""# Scufris {profile} briefing for {date}
 
-You are one source in the {profile} briefing. Report on this project only, from
-data you read in it during this run. Change nothing and run nothing that costs
+You are one source in the {profile} briefing. Report on this source only, from
+data you read during this run. Change nothing and run nothing that costs
 anything, unless the guidance below names it, and then only what it names.
 
 ## Source
 
-{source["project"]}, at {source["project_root"]}.
+{source["project"]}, at {source["root"]}.
 
 {source["description"]}
+
+## Since
+
+{since_last_run(profile, finished)}
 
 ## Guidance
 
@@ -555,7 +625,7 @@ def attempt(
     try:
         done = subprocess.run(
             harness_argv(source, prompt, tools=tools),
-            cwd=source["project_root"],
+            cwd=source["root"],
             text=True,
             errors="replace",
             capture_output=True,
@@ -593,7 +663,11 @@ def attempt(
 
 
 def ask(
-    source: dict[str, Any], profile: str, date: str, deadline: float
+    source: dict[str, Any],
+    profile: str,
+    date: str,
+    deadline: float,
+    finished: str | None = None,
 ) -> dict[str, Any]:
     """Run one source and read what it answered.
 
@@ -609,7 +683,9 @@ def ask(
     """
     if deadline <= 0:
         return failed_contribution(source, "the run was out of time before this source")
-    first = attempt(source, contribution_prompt(source, profile, date), deadline)
+    first = attempt(
+        source, contribution_prompt(source, profile, date, finished), deadline
+    )
     if first.contribution is not None:
         return contributed(source, first.contribution, first.seconds)
     left = deadline - first.seconds
@@ -652,11 +728,18 @@ def stamp(source: dict[str, Any]) -> dict[str, Any]:
 
     Read rather than indexed. This is also what a failure is recorded with, so
     a source that reached here malformed must still be nameable.
+
+    The slug is the reader's and is not derived again here. A section the
+    machine declares called `scufris2` would otherwise be written into the
+    `scufris2` project's contribution file; the reader namespaces one of them,
+    so the collision is not expressible rather than merely noticed. Anything
+    that is not one safe path component is refused a name of its own, because
+    this is used as a file name.
     """
-    project = str(source.get("project") or "unknown")
+    named = str(source.get("slug") or "")
     return {
-        "project": project,
-        "slug": slug(project),
+        "project": str(source.get("project") or "unknown"),
+        "slug": named if SLUG.fullmatch(named) else "unknown",
         "harness": str(source.get("harness") or ""),
         "model": str(source.get("model") or ""),
     }
@@ -711,6 +794,7 @@ def collect(
     date: str | None = None,
     profile: str = DEFAULT_PROFILE,
     *,
+    config: str | None = None,
     source_deadline: float | None = None,
     run_deadline: float | None = None,
 ) -> dict[str, Any]:
@@ -732,7 +816,11 @@ def collect(
         if run_deadline is None
         else run_deadline
     )
-    sources, diagnostics = declared_sources(profile)
+    sources, diagnostics = declared_sources(profile, config)
+    # Read before this run writes its own manifest over the last one: a date
+    # and a profile name one directory. Every source is told the same moment,
+    # so a run is one window and not one for each source.
+    finished = previous_finished(date, profile)
     directory = run_dir(date, profile)
     (directory / "contributions").mkdir(parents=True, exist_ok=True)
     directory.parent.chmod(0o700)
@@ -756,7 +844,7 @@ def collect(
     def bounded(source: dict[str, Any]) -> dict[str, Any]:
         left = run_deadline - (time.monotonic() - clock)
         try:
-            return ask(source, profile, date, min(source_deadline, left))
+            return ask(source, profile, date, min(source_deadline, left), finished)
         except Exception as trouble:  # noqa: BLE001
             # The last line between one source and the whole morning. `ask`
             # answers rather than raises, so reaching here means a way to fail

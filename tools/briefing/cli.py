@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """The briefing on the command line.
 
-One run of this asks every project that declares a briefing, keeps what they
+One run of this asks every source that declares a briefing, keeps what they
 said, and leaves a page beside it. The agent drives it through tools; a systemd
 timer drives it on a schedule; a person drives it here, which is also how it is
 tested.
 
     scufris-briefing sources
+    scufris-briefing sources --config ./config.toml
     scufris-briefing collect --profile morning
     scufris-briefing wake --profile morning
     scufris-briefing pending --json
@@ -19,7 +20,8 @@ together. `--date` names another day; without it, today where the machine is.
 `--profile` names another briefing; without it, the one run for the day that is
 waiting to be written up. Two of those are two briefings and are never guessed
 between, so a wake can neither publish into another profile's run nor into one
-that was already delivered.
+that was already delivered. `--config` names another user-level file to read
+the machine's own sources from.
 """
 
 from __future__ import annotations
@@ -58,6 +60,15 @@ def shared() -> argparse.ArgumentParser:
         help="the control client a wake is carried by; the default is scufris-ctl",
     )
     common.add_argument(
+        "--config",
+        default=argparse.SUPPRESS,
+        help=(
+            "the user-level file the machine's own sources are declared in; "
+            "the default is SCUFRIS_CONFIG, then "
+            "$XDG_CONFIG_HOME/scufris/config.toml"
+        ),
+    )
+    common.add_argument(
         "--json", action="store_true", default=argparse.SUPPRESS, help="answer as JSON"
     )
     return common
@@ -73,7 +84,7 @@ def parser() -> argparse.ArgumentParser:
     )
     commands = top.add_subparsers(dest="command", required=True)
     commands.add_parser(
-        "sources", parents=[common], help="the projects that declare this briefing"
+        "sources", parents=[common], help="the sources that declare this briefing"
     )
     commands.add_parser(
         "collect", parents=[common], help="ask every source and keep what it said"
@@ -115,8 +126,18 @@ def named_profile(options: argparse.Namespace) -> str | None:
 
 
 def wanted_profile(options: argparse.Namespace) -> str:
-    """The profile a collection asks the projects for."""
+    """The profile a collection asks the sources for."""
     return named_profile(options) or briefing.DEFAULT_PROFILE
+
+
+def named_config(options: argparse.Namespace) -> str | None:
+    """The user-level file the caller named, or nothing when it named none.
+
+    The flag wins over `SCUFRIS_CONFIG`, which the reader resolves itself.
+    Guidance is prose tuned over several runs, so pointing one collection at
+    another file has to be one word on the command line.
+    """
+    return getattr(options, "config", None) or None
 
 
 def wanted_run(
@@ -146,7 +167,7 @@ def source_lines(sources: list[dict], diagnostics: list[dict]) -> list[str]:
         for item in sources
     ]
     lines.extend(f"{item['project']}: {item['diagnostic']}" for item in diagnostics)
-    return lines or ["no project declares this briefing"]
+    return lines or ["no source declares this briefing"]
 
 
 def wake_line(result: dict) -> str:
@@ -169,14 +190,20 @@ def main(argv: list[str] | None = None) -> int:
     options = parser().parse_args(argv)
     try:
         if options.command == "sources":
-            sources, diagnostics = briefing.declared_sources(wanted_profile(options))
+            sources, diagnostics = briefing.declared_sources(
+                wanted_profile(options), named_config(options)
+            )
             say(
                 options,
                 {"sources": sources, "diagnostics": diagnostics},
                 source_lines(sources, diagnostics),
             )
         elif options.command == "collect":
-            manifest = briefing.collect(wanted_date(options), wanted_profile(options))
+            manifest = briefing.collect(
+                wanted_date(options),
+                wanted_profile(options),
+                config=named_config(options),
+            )
             say(options, manifest, run_lines({"manifest": manifest}))
         elif options.command == "wake":
             date, profile = wanted_run(options)

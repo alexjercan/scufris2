@@ -24,11 +24,12 @@ worker wrapper -> private per-execution environment
 
 ## Briefings
 
-| Variable                           | Consumer        | Meaning and default                                                                      |
-| ---------------------------------- | --------------- | ---------------------------------------------------------------------------------------- |
-| `SCUFRIS_BRIEFING_DEADLINE`        | briefing helper | Seconds the whole run may take before it publishes with what came back. Default: `1800`. |
-| `SCUFRIS_BRIEFING_SOURCE_DEADLINE` | briefing helper | Seconds one source may take before it is recorded as failed. Default: `900`.             |
-| `SCUFRIS_CTL`                      | briefing helper | Control client a wake is carried by. Default: `scufris-ctl` on `PATH`.                   |
+| Variable                           | Consumer        | Meaning and default                                                                                                |
+| ---------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `SCUFRIS_BRIEFING_DEADLINE`        | briefing helper | Seconds the whole run may take before it publishes with what came back. Default: `1800`.                           |
+| `SCUFRIS_BRIEFING_SOURCE_DEADLINE` | briefing helper | Seconds one source may take before it is recorded as failed. Default: `900`.                                       |
+| `SCUFRIS_CTL`                      | briefing helper | Control client a wake is carried by. Default: `scufris-ctl` on `PATH`.                                             |
+| `SCUFRIS_CONFIG`                   | jobs helper     | User-level file the machine's own briefing sources are read from. Default: `$XDG_CONFIG_HOME/scufris/config.toml`. |
 
 When a briefing happens is a systemd timer and not a variable. Each profile in
 `programs.scufris.agent.briefing.profiles` renders its own
@@ -36,9 +37,13 @@ When a briefing happens is a systemd timer and not a variable. Each profile in
 `SCUFRIS_BRIEFING_DEADLINE` from that profile's own `deadline`.
 
 A run is written under
-`$XDG_STATE_HOME/scufris/briefings/<local date>/<profile>/`. Only projects
-declaring the profile in their own `.scufris.toml` contribute, so a schedule
-costs nothing until one does.
+`$XDG_STATE_HOME/scufris/briefings/<local date>/<profile>/`. Only sources
+declaring the profile contribute - a project in its own `.scufris.toml`, or the
+machine in its own file - so a schedule costs nothing until one does.
+
+`SCUFRIS_CONFIG` and `scufris-briefing --config` both name that file, and the
+flag wins. A file either of them names and is not there is a refusal; the
+default path being absent is a machine that declared no sources of its own.
 
 Socket precedence:
 

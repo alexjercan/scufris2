@@ -19,8 +19,8 @@ one day are two runs and neither can write over the other.
 
 ## What a source is
 
-A source is a Git project under `SCUFRIS_PROJECT_ROOTS` that declares a
-briefing in its own `.scufris.toml`:
+A source declares `[briefings.<profile>]`. A Git project under
+`SCUFRIS_PROJECT_ROOTS` does it in its own `.scufris.toml`:
 
 ```toml
 [briefings.morning]
@@ -46,6 +46,66 @@ renders conventions and agents only, because a briefing rendered beside the
 agents would read as one more agent a request could name. Each table has its own
 reader, so a mistake in a briefing costs the project its briefing and not its
 agents.
+
+### Sources the machine declares
+
+Not everything worth reporting belongs to a checkout. What Scufris did
+overnight is read out of the job records and the receipts beside them, and no
+project owns those. The machine declares such a source for itself, in
+`$XDG_CONFIG_HOME/scufris/config.toml`:
+
+```toml
+[briefings.morning.jobs]
+description = "What Scufris did overnight."
+keywords = { harness = "pi", thinking = "medium" }
+root = "/home/you/personal"
+guidance = """
+Run `scufris-jobs history --since <the moment above> --json`. Quote what the
+receipt says; do not judge whether the work is done.
+"""
+```
+
+`[briefings.<profile>.<name>]`. The name is required here, because there is no
+project name to take one from. The entry is validated by the same reader that
+validates a project's, so a source is one thing to learn and not two, and an
+optional `root` says where it runs. Without one it runs in the home directory,
+which is what anything reading XDG state wants.
+
+This is not a built-in kind of source. It is asked the same question, held to
+the same deadlines, repaired the same way, and laid out on the same page. The
+first one reports the jobs, and the next needs nothing built.
+
+The file is briefings-only, and a file that declares anything else is refused
+whole. Conventions and agents stay in the project that declares them, because
+a checkout has to work for someone whose machine has none of this.
+
+A source the machine declares is named `@<name>`, and that name is also the
+file its answer is kept in. A project ID cannot start with `@`, so a machine
+section called `scufris2` cannot take the `scufris2` project's contribution:
+the reader assigns every slug, and the collision is not expressible rather
+than checked for.
+
+`--config` and `SCUFRIS_CONFIG` name another file, the flag winning over the
+variable. A file somebody named and is not there is a refusal, because
+`--config typo.toml` quietly reporting no sources is a morning discovered too
+late. The default path being absent is not: that is a machine that declared
+none. A file that is there and is malformed costs itself and nothing else -
+one diagnostic naming it, and every project still contributes.
+
+The helper reads a path. Home Manager generating this file from a typed option
+is one way to have one, and writing the same TOML by hand is another.
+
+### Since the last run
+
+Every source is told when its own profile last finished, read from the runs
+still on disk. A weekly source then reports on a week and a morning source on a
+night, and no source, project or machine, carries a window setting.
+
+It is given as a fact and not as an instruction. Guidance that names its own
+window - yesterday's macros, the last three sessions, the last twelve commits -
+keeps it; the moment answers "since when" only for a source that asked the
+question. A profile that has never run says so, rather than leaving a model to
+invent a period it cannot measure.
 
 ## What a source answers
 
@@ -99,7 +159,7 @@ collected run standing, with the reason kept in the manifest.
 
 ## How a source runs
 
-One bounded headless run in the project root, not a job:
+One bounded headless run in the source's own root, not a job:
 
 |           | job                  | briefing source |
 | --------- | -------------------- | --------------- |
@@ -179,9 +239,9 @@ also refuses to choose between two.
 
 ## The schedule
 
-Nix owns when a briefing happens; each project's `.scufris.toml` owns what is
-in it. `programs.scufris.agent.briefing.profiles` is an attribute set of
-profile name to a schedule:
+Nix owns when a briefing happens; each source owns what is in it.
+`programs.scufris.agent.briefing.profiles` is an attribute set of profile name
+to a schedule:
 
 ```nix
 programs.scufris.agent.briefing.profiles = {
@@ -213,9 +273,17 @@ time sets `persistent = false`.
 `{}` schedules nothing, and the tools still collect a briefing when asked.
 Timers are systemd's, so nothing is scheduled off Linux.
 
-A briefing no project declared is not an event. The run is recorded and the
-foreground is never woken, so a schedule costs nothing until a project asks for
+A briefing nothing declared is not an event. The run is recorded and the
+foreground is never woken, so a schedule costs nothing until a source asks for
 something.
+
+`programs.scufris.agent.briefing.sources` is the sibling option that renders
+`$XDG_CONFIG_HOME/scufris/config.toml` with `pkgs.formats.toml`. It is a
+sibling and never a key inside a profile, because `profiles` carries the
+timer's shape and nothing else. Build-time validation is the whole reason to
+generate the file, so the known keys are declared over a freeform type: a
+missing `guidance` or a nested keyword fails the build, and a key the reader
+learns before the module does still renders.
 
 ## Writing and delivery
 
@@ -281,6 +349,7 @@ The same program, for whoever is not the agent:
 
 ```bash
 scufris-briefing sources --profile morning
+scufris-briefing sources --config ./config.toml
 scufris-briefing collect --profile morning
 scufris-briefing wake --profile morning
 scufris-briefing pending --json
@@ -289,9 +358,10 @@ scufris-briefing publish < prose.md
 scufris-briefing open --date 2026-08-30 --profile morning
 ```
 
-Every subcommand takes `--profile`. `wake` is what the timer runs after a
-collection: it carries the run to the conversation and reports rather than
-fails when nothing is listening. `pending` is what an opening session reads.
+Every subcommand takes `--profile` and `--config`. `wake` is what the timer
+runs after a collection: it carries the run to the conversation and reports
+rather than fails when nothing is listening. `pending` is what an opening
+session reads.
 
 `tools/briefing/page.py` renders and asks nothing: given a finished run it
 writes the same page a year from now. Everything a source wrote is escaped

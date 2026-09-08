@@ -30,6 +30,25 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   with `agent_unavailable` instead of being dropped. The verb lives on the
   local control socket only and is unreachable from the remote surface
   gateway.
+- Briefing sources declared for the machine, in one user-level file at
+  `$XDG_CONFIG_HOME/scufris/config.toml`. Its `[briefings.<profile>.<name>]`
+  sections are sources that belong to no checkout, such as one reporting what
+  Scufris did overnight. They are ordinary sources: the same entry, the same
+  reader, the same envelope, deadlines, repair and page. An optional `root`
+  says where one runs; without it, the home directory. The file is
+  briefings-only, and a project keeps declaring its own briefing in its own
+  `.scufris.toml`. `programs.scufris.agent.briefing.sources` generates the file
+  from a typed option, so a malformed entry fails the build; the helper reads a
+  TOML path and anyone else writes the same file by hand.
+- `scufris-briefing --config` and `SCUFRIS_CONFIG` name another user-level
+  file, the flag winning. A file either of them names and is not there is a
+  refusal; the default path being absent is a machine with no sources of its
+  own. A malformed file costs itself only: one diagnostic naming it, and every
+  project still contributes.
+- `scufris-jobs history --since <moment>` lists job records including archived
+  ones, each with the receipt measured about it. Every other listing skips the
+  archive and archiving is what happens to a workflow that finished, so nothing
+  could answer what landed.
 - Job receipts: measured git, remote, and CI facts for one job, appended to
   `receipts.jsonl` and returned by `land`, `stop`, and `inspect`. Scufris
   measures on every terminal event, so a completion claim about landing,
@@ -59,6 +78,12 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - Stopping a job with `remove_workspace` now keeps a branch that was never
   merged. Deleting one needs an explicit `abandon`, so unlanded work is no
   longer lost to a cleanup.
+- Every briefing source is told when its own profile last finished, read from
+  the runs on disk. A weekly source reports on a week and a morning source on a
+  night, with no window setting anywhere. It is a fact and not an instruction:
+  guidance that names its own window keeps it, and the first run of a profile
+  says there was no previous one rather than leaving a model to invent a
+  period.
 
 ### Removed
 

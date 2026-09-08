@@ -1,5 +1,6 @@
 # The schedule is systemd's. Each profile gets its own timer and its own run,
-# and a schedule that is not one fails the build.
+# and a schedule that is not one fails the build. The machine's own sources are
+# generated from a typed option, so a malformed entry fails the build too.
 {
   pkgs,
   homes,
@@ -7,6 +8,38 @@
 }: let
   inherit (pkgs) lib;
   inherit (homes) mkHome;
+  declared = mkHome {
+    settings.agent.briefing.sources = {
+      morning.jobs = {
+        description = "What Scufris did overnight.";
+        keywords = {
+          harness = "pi";
+          thinking = "medium";
+        };
+        guidance = "Read what the helper measured.";
+      };
+      morning.den = {
+        description = "Report the journal.";
+        guidance = "Read the journal.";
+        root = "/home/scufris-test/personal/the-den";
+      };
+      weekly.jobs = {
+        description = "Report the week.";
+        guidance = "Read the week.";
+      };
+    };
+  };
+  configured = "${declared.activationPackage}/home-files/.config/scufris/config.toml";
+  bare = "${(mkHome {}).activationPackage}/home-files/.config";
+  # Whether one set of sources can be rendered at all. The reason to generate
+  # the file is that a mistake in it fails the build rather than the morning,
+  # so a malformed entry must be caught here and not by the reader at dawn.
+  renders = sources:
+    (builtins.tryEval (builtins.seq
+      (mkHome {settings.agent.briefing.sources = sources;})
+      .config.xdg.configFile."scufris/config.toml".source
+      true))
+    .success;
   scheduled = mkHome {
     settings.agent.briefing.profiles = {
       morning.schedule = "07:30";
@@ -21,7 +54,61 @@
   units = "${scheduled.activationPackage}/home-files/.config/systemd/user";
   none = "${quiet.activationPackage}/home-files/.config/systemd/user";
 in
-  lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+  {
+    # `[briefings.<profile>.<name>]` is what the helper reads, and it reads a
+    # path: Home Manager is one way to produce this file and hand-writing it is
+    # another.
+    briefing-sources-file = pkgs.runCommand "scufris-briefing-sources-check" {} ''
+      grep -Fx '[briefings.morning.jobs]' ${configured}
+      grep -Fx '[briefings.morning.den]' ${configured}
+      grep -Fx '[briefings.weekly.jobs]' ${configured}
+      grep -Fx 'description = "What Scufris did overnight."' ${configured}
+      grep -Fx 'root = "/home/scufris-test/personal/the-den"' ${configured}
+      grep -Fx '[briefings.morning.jobs.keywords]' ${configured}
+      grep -Fx 'harness = "pi"' ${configured}
+      # A source that named no root says nothing about one. TOML has no null,
+      # and the reader answers an absent root with the home directory.
+      ! grep -F 'root =' ${configured} | grep -Fv 'the-den'
+      # Briefings and nothing else. Agents and conventions stay in the project
+      # that declares them.
+      ! grep -F '[agents' ${configured}
+      touch "$out"
+    '';
+
+    # Declaring none writes no file, and the helper reads a machine with none
+    # as a machine that declared none rather than as a mistake.
+    briefing-no-sources = pkgs.runCommand "scufris-briefing-no-sources-check" {} ''
+      ! test -e ${bare}/scufris/config.toml
+      touch "$out"
+    '';
+
+    briefing-sources-are-typed = assert renders {
+      morning.jobs = {
+        description = "Report it.";
+        guidance = "Read it.";
+      };
+    };
+    # Guidance is what a source is asked, so a source without one is not one.
+    assert !(renders {morning.jobs.description = "Report it.";});
+    # A keyword is given back to the source verbatim, so it stays flat.
+    assert !(renders {
+      morning.jobs = {
+        description = "Report it.";
+        guidance = "Read it.";
+        keywords.model = {nested = 1;};
+      };
+    });
+    # A root is one path.
+    assert !(renders {
+      morning.jobs = {
+        description = "Report it.";
+        guidance = "Read it.";
+        root = 12;
+      };
+    });
+      pkgs.runCommand "scufris-briefing-source-types-check" {} ''touch "$out"'';
+  }
+  // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
     # A schedule is validated with the same command the build uses. systemd
     # accepts none of crontab's syntax, which is the mistake a person carrying
     # a cron job over makes first.

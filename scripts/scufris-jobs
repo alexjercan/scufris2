@@ -40,6 +40,33 @@ def helper_path() -> Path:
     return Path(__file__).resolve().parents[1] / "tools" / "jobs" / "scufris-jobs"
 
 
+def helper_call(command: str, request: dict[str, Any], about: str) -> dict[str, Any]:
+    try:
+        completed = subprocess.run(
+            [str(helper_path()), command],
+            input=json.dumps(request),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise CliError(f"cannot {about}: {error}") from error
+    try:
+        envelope = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise CliError(f"cannot {about}: invalid helper response") from error
+    if not isinstance(envelope, dict):
+        raise CliError(f"cannot {about}: invalid helper response")
+    if completed.returncode != 0 or not envelope.get("ok"):
+        message = envelope.get("error", "the helper refused")
+        raise CliError(f"cannot {about}: {message}")
+    result = envelope.get("result")
+    if not isinstance(result, dict):
+        raise CliError(f"cannot {about}: invalid helper result")
+    return result
+
+
 def inspect(job_id: str, *, full: bool = False) -> dict[str, Any]:
     request: dict[str, Any] = {"job_id": job_id}
     if full:
@@ -50,32 +77,22 @@ def inspect(job_id: str, *, full: bool = False) -> dict[str, Any]:
                 "include_prompt": True,
             }
         )
-    try:
-        completed = subprocess.run(
-            [str(helper_path()), "inspect"],
-            input=json.dumps(request),
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=15,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise CliError(f"cannot inspect job {job_id}: {error}") from error
-    try:
-        envelope = json.loads(completed.stdout)
-    except json.JSONDecodeError as error:
-        raise CliError(
-            f"cannot inspect job {job_id}: invalid helper response"
-        ) from error
-    if not isinstance(envelope, dict):
-        raise CliError(f"cannot inspect job {job_id}: invalid helper response")
-    if completed.returncode != 0 or not envelope.get("ok"):
-        message = envelope.get("error", "inspection failed")
-        raise CliError(f"cannot inspect job {job_id}: {message}")
-    result = envelope.get("result")
-    if not isinstance(result, dict):
-        raise CliError(f"cannot inspect job {job_id}: invalid helper result")
-    return result
+    return helper_call("inspect", request, f"inspect job {job_id}")
+
+
+def history(since: str | None, limit: int | None) -> dict[str, Any]:
+    """Every job record since a timestamp, archived ones included.
+
+    The archive is where a finished workflow goes, so every other listing here
+    is about work that is still live. This is the one that answers what landed,
+    and each record carries the receipt that was measured about it.
+    """
+    request: dict[str, Any] = {}
+    if since is not None:
+        request["since"] = since
+    if limit is not None:
+        request["limit"] = limit
+    return helper_call("history", request, "read the job history")
 
 
 def scan_job_ids(root: Path) -> list[str]:
@@ -218,6 +235,68 @@ def print_table(jobs: list[dict[str, Any]]) -> None:
         print(table_row(job))
 
 
+HISTORY_FIELDS = (
+    ("CREATED", 20),
+    ("ID", 12),
+    ("STATE", 10),
+    ("PLACE", 8),
+    ("PROJECT", 20),
+    ("WORKSPACE", 9),
+    ("RECEIPT", 40),
+)
+
+
+def receipt_line(job: dict[str, Any]) -> str:
+    """What the receipt says about this job, in its own words.
+
+    Measured, never judged. `sentences` is what the receipt already decided to
+    say, so nothing here rewrites it.
+    """
+    receipt = job.get("receipt")
+    if not isinstance(receipt, dict):
+        return "(none measured)"
+    sentences = receipt.get("sentences")
+    if isinstance(sentences, list) and sentences:
+        return "; ".join(str(item) for item in sentences)
+    facts = receipt.get("facts")
+    if isinstance(facts, dict) and facts.get("landed") is True:
+        return "landed"
+    return "measured, nothing to flag"
+
+
+def history_row(job: dict[str, Any]) -> str:
+    values = (
+        job.get("created_at") or "-",
+        job.get("job_id", "unknown"),
+        job.get("state") or "unknown",
+        "archived" if job.get("archived") else "live",
+        job.get("project") or "general",
+        job.get("workspace") or "unknown",
+        receipt_line(job),
+    )
+    cells = [
+        padded(value, width)
+        for value, (_, width) in zip(values, HISTORY_FIELDS, strict=True)
+    ]
+    return "  ".join(cells).rstrip()
+
+
+def print_history(result: dict[str, Any]) -> None:
+    jobs = result.get("jobs")
+    jobs = jobs if isinstance(jobs, list) else []
+    if not jobs:
+        print("No Scufris jobs in that window.")
+        return
+    print(
+        "Columns: CREATED; ID=job ID; STATE=latest event; PLACE=live or "
+        "archived; PROJECT; WORKSPACE; RECEIPT=what was measured."
+    )
+    print("  ".join(f"{name:<{width}}" for name, width in HISTORY_FIELDS).rstrip())
+    print("  ".join("-" * width for _, width in HISTORY_FIELDS).rstrip())
+    for job in jobs:
+        print(history_row(job))
+
+
 def print_field(label: str, value: Any) -> None:
     print(f"{label}: {clean_text(value)}")
 
@@ -324,16 +403,28 @@ def parser() -> argparse.ArgumentParser:
             "alias for backward compatibility. Cleanup archives a job instead of "
             "deleting it; use --archived to include archived jobs in the list. ID "
             "prefixes are accepted when unique and always resolve archived jobs "
-            "too. Human table output is stable and identical in terminals and "
-            "pipes."
+            "too. Use 'history' with --since for what happened in a window, "
+            "archived jobs included, each with the receipt measured about it. "
+            "Human table output is stable and identical in terminals and pipes."
         ),
     )
-    result.add_argument("command", nargs="?", metavar="all|ID")
+    result.add_argument("command", nargs="?", metavar="all|history|ID")
     result.add_argument(
         "--all", action="store_true", dest="all_flag", help="list every stored job"
     )
     result.add_argument(
         "--archived", action="store_true", help="include archived jobs in the list"
+    )
+    result.add_argument(
+        "--since",
+        metavar="TIMESTAMP",
+        help="history only: an ISO 8601 moment to list jobs from",
+    )
+    result.add_argument(
+        "--limit",
+        type=int,
+        metavar="N",
+        help="history only: keep at most this many of the newest records",
     )
     result.add_argument("--json", action="store_true", help="print structured JSON")
     return result
@@ -352,10 +443,22 @@ def main() -> int:
     arguments = argument_parser.parse_args()
     if arguments.all_flag and arguments.command not in (None, "all"):
         argument_parser.error("--all cannot be used with a job ID")
+    reading_history = arguments.command == "history"
     list_all = arguments.all_flag or arguments.command in (None, "all")
     if arguments.archived and not list_all:
         argument_parser.error("--archived cannot be used with a job ID")
+    if (arguments.since is not None or arguments.limit is not None) and not (
+        reading_history
+    ):
+        argument_parser.error("--since and --limit belong to history")
     try:
+        if reading_history:
+            result = history(arguments.since, arguments.limit)
+            if arguments.json:
+                print(json.dumps(result, indent=2, sort_keys=True))
+            else:
+                print_history(result)
+            return 0
         if list_all:
             jobs = all_jobs(archived=arguments.archived)
             if arguments.json:

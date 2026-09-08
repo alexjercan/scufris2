@@ -1,6 +1,6 @@
 # Dogfood the nightly profile with a read-only review in nova-protocol
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 60
 - TAGS: workflow
 
@@ -42,3 +42,14 @@ should not be built inside the feature it tests.
 - One night where the source has nothing to report and the briefing says so
   without inventing a candidate.
 - The run stays inside its deadline.
+
+## Superseded
+
+Replaced by `20260908-184224`, which does the review as a job and lets the
+morning report it.
+
+A briefing source cannot do this. It is bounded at 900 seconds and it reports
+rather than repairs, so a nightly review declared as a source could only ever
+name candidates it was not allowed to act on. The night's work belongs to a
+job that can run for hours and commit; the morning belongs to a source that
+reads what the job wrote.

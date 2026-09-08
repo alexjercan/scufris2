@@ -1,6 +1,6 @@
 # Run briefing profiles on systemd timers with profile-keyed run directories
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 95
 - TAGS: workflow
 

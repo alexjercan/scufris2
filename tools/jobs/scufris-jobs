@@ -48,9 +48,18 @@ MAX_JOB_RECORD = 64 * 1024
 MAX_STATUS_DETAIL = 256 * 1024
 MAX_REPORT_DETAIL = 512 * 1024
 MAX_EVENT_LINE = 4096
+# A summary is copied into the job record, and the record refuses one over 500
+# bytes. Accepting a longer one anywhere - at `report`, in a status line, or
+# from `parse_event` - wrote a line that then made `events` and `recover` fail
+# for every job in the poll, permanently, because the cursor never advanced
+# past it. One bound, measured in bytes, at every door.
+MAX_SUMMARY = 500
 MAX_EVENT_BATCH = 1024 * 1024
 MAX_REPORT_ENTRY = MAX_REPORT_DETAIL + MAX_EVENT_LINE + 5
 MAX_REPORT_FILE = 2 * 1024 * 1024
+#: Room held back for the marker a trimmed report carries. The marker's length
+#: depends on how many entries went, which is only known after the trim.
+REPORT_TRIM_RESERVE = 256
 MAX_RECEIPTS_FILE = 256 * 1024
 # A receipt is measured inside a foreground wake, so every git and `gh` call
 # gets a short leash rather than the helper's ordinary 120 second default.
@@ -1412,7 +1421,7 @@ def validate_job_record(value: Any, job_id: str) -> dict[str, Any]:
         ("workflow_id", 64),
         ("working_directory", 4096),
         ("model", 200),
-        ("summary", 500),
+        ("summary", MAX_SUMMARY),
     ):
         if not valid_record_text(value.get(field), maximum):
             raise JobError("job record is invalid")
@@ -2018,7 +2027,7 @@ def parse_event(line: str) -> dict[str, Any] | None:
         or value.get("event") not in EVENTS
         or not isinstance(value.get("summary"), str)
         or not value["summary"].strip()
-        or len(value["summary"].encode("utf-8")) > MAX_EVENT_LINE
+        or len(value["summary"].encode("utf-8")) > MAX_SUMMARY
         or any(ord(character) < 32 for character in value["summary"])
     ):
         return None
@@ -2105,6 +2114,42 @@ def read_bounded_artifact(path: Path, maximum: int) -> bytes:
         os.close(descriptor)
 
 
+def report_entries(current: bytes) -> list[bytes]:
+    """The report file split back into the whole entries it was written from.
+
+    Every entry begins `# `, and `write_report` joins them with one newline, so
+    joining what this returns with a newline gives back exactly what went in.
+    """
+    if not current:
+        return []
+    pieces = current.split(b"\n# ")
+    return [pieces[0]] + [b"# " + piece for piece in pieces[1:]]
+
+
+def trimmed_report(current: bytes, entry: bytes) -> bytes:
+    """The newest whole entries that fit, under a marker naming what went.
+
+    Replacing the file with the single new entry discarded every earlier
+    finding and said nothing, while the worker prompt tells a restarted
+    execution to read this file for what the last one left it. A resumed worker
+    now keeps the history that fits and sees how much of it is missing.
+    """
+    older = report_entries(current)
+    kept: list[bytes] = []
+    size = len(entry) + REPORT_TRIM_RESERVE
+    for piece in reversed(older):
+        if size + 1 + len(piece) > MAX_REPORT_FILE:
+            break
+        kept.append(piece)
+        size += 1 + len(piece)
+    dropped = len(older) - len(kept)
+    marker = b"# report trimmed\n\n" + (
+        f"{dropped} older {'entry' if dropped == 1 else 'entries'} dropped to "
+        "keep this file under its bound. What they said is gone.\n"
+    ).encode("utf-8")
+    return b"\n".join([marker, *reversed(kept), entry])
+
+
 def write_report(
     job_id: str,
     event: str,
@@ -2123,6 +2168,7 @@ def write_report(
     if (
         event not in EVENTS
         or not summary.strip()
+        or len(summary.encode("utf-8")) > MAX_SUMMARY
         or len(encoded_display) > MAX_EVENT_LINE
         or any(ord(character) < 32 for character in summary)
     ):
@@ -2147,7 +2193,7 @@ def write_report(
         current = read_bounded_artifact(directory / "report.md", MAX_REPORT_FILE)
         updated = current + (b"\n" if current else b"") + entry
         if len(updated) > MAX_REPORT_FILE:
-            updated = entry
+            updated = trimmed_report(current, entry)
         temporary_fd = os.open(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -2551,9 +2597,17 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
         f"g{event['generation']} {event['event']}: {event['summary']}"
         for event in parsed_events[-100:]
     ]
-    if parsed_events:
-        result["state"] = parsed_events[-1]["event"]
-        result["summary"] = parsed_events[-1]["summary"]
+    # This generation only. `send` bumps the generation and sets the record to
+    # `working`, but the status file still ends with the previous round's
+    # `done`, so a steered worker was reported as finished with the old result
+    # in the STATE and SUMMARY columns and to the model. The record is the
+    # answer whenever this generation has said nothing yet.
+    current = [
+        event for event in parsed_events if event["generation"] == job["generation"]
+    ]
+    if current:
+        result["state"] = current[-1]["event"]
+        result["summary"] = current[-1]["summary"]
     for enabled, name, key in (
         (request.get("include_report", False), "report.md", "report"),
         (
@@ -3487,7 +3541,14 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
     root = load_job(selected["root_job"])
     if root["workspace"] != "sprout":
         raise JobError("landing requires a Sprout workflow root")
-    if root["cleanup"] is None:
+    # The intent is durable so a landing interrupted halfway can only be
+    # finished, never restarted with different words. It is written after the
+    # dry run below rather than here: a landing the guard refuses has changed
+    # nothing, and recording the intent first left a workflow that could not be
+    # landed with a different subject, could not be stopped at all, and had no
+    # exit but editing the record by hand.
+    undecided = root["cleanup"] is None
+    if undecided:
         cwd = validate_workspace_identity(root)
         revision = run(["git", "rev-parse", "HEAD"], cwd=cwd).stdout.decode().strip()
         intent = {
@@ -3498,19 +3559,30 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
             # Landing merges first, so removal never meets an unmerged branch.
             "abandon": False,
         }
-        root = {**root, "cleanup": intent}
-        store_job(root)
     else:
         intent = root["cleanup"]
         if (
             intent["action"] != "land"
-            or intent["subject"] != subject
             or intent["remove_workspace"] != remove_workspace
             or not isinstance(intent["revision"], str)
         ):
             raise JobError("a different cleanup operation is already durable")
+        if intent["subject"] != subject:
+            raise JobError(
+                "this landing is already durable under the subject "
+                f"{intent['subject']!r}; finish it with those exact words"
+            )
         revision = intent["revision"]
-    stop_workflow_executions(workflow_records(root))
+
+    def decide() -> dict[str, Any]:
+        """Make the intent durable, once, before anything it guards runs."""
+        nonlocal root, undecided
+        if undecided:
+            root = {**root, "cleanup": intent}
+            store_job(root)
+            undecided = False
+        return root
+
     project_root = canonical_path(Path(root["project_root"]))
     branch = root["landing_branch"]
     already_landed = (
@@ -3531,7 +3603,14 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
         already_landed = feature_tree == branch_tree
     if not already_landed:
         validate_workspace_identity(root)
+        # This guard reads the project checkout, not the workers, so it runs
+        # before either is touched. Alex having edits on master, or a commit
+        # the sprout does not have, is the ordinary reason it refuses; that
+        # refusal now leaves the panes alive and the workflow steerable.
         sprout(["land", root["feature"], "--dry-run", "-m", subject], project_root)
+    root = decide()
+    stop_workflow_executions(workflow_records(root))
+    if not already_landed:
         sprout(["land", root["feature"], "-m", subject], project_root)
         landed_revision = (
             run(["git", "rev-parse", f"refs/heads/{branch}"], cwd=project_root)
@@ -3602,13 +3681,17 @@ def stop(request: dict[str, Any]) -> dict[str, Any]:
         and {
             **durable,
             "abandon": abandon,
+            "remove_workspace": remove_workspace,
         }
         != intent
     ):
         raise JobError("a different cleanup operation is already durable")
     # A refused removal leaves a durable stop intent behind. Re-deciding
-    # `abandon` after seeing why the branch was kept is the intended next
-    # step, so only the rest of the intent is held immutable.
+    # `abandon` and `remove_workspace` after seeing why the branch or the
+    # worktree was kept is the intended next step: a stop that could only ever
+    # be retried with the words that already failed is a workflow with no exit.
+    # The action itself stays immutable, so a land halfway through is finished
+    # rather than replaced.
     root = {**root, "cleanup": intent}
     store_job(root)
     # Measured before cleanup. A stop that removes the workspace destroys the
@@ -3747,6 +3830,11 @@ def recover(request: dict[str, Any]) -> dict[str, Any]:
 def suspend_owner(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(request, {"owner_session"})
     owner = request["owner_session"]
+    # `recover` and `orphans` both check this. Without it a value that is not a
+    # string matched no record, suspended nothing, and answered with an empty
+    # list: a shutdown that left every worker pane running, reported as clean.
+    if not valid_record_text(owner, 512):
+        raise JobError("owner_session is invalid")
     errors: list[str] = []
     suspended: list[str] = []
     for job in all_job_records():
@@ -3844,4 +3932,16 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except JobError as error:
         print(json.dumps({"ok": False, "error": str(error)}, sort_keys=True))
+        raise SystemExit(1)
+    # The caller reads one envelope on stdout. Anything that escaped as a
+    # traceback reached the model as "Invalid Scufris helper response", which
+    # names neither the job nor what failed - `sprout` not being installed, a
+    # subprocess passing its 120 second leash, undecodable output.
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError) as error:
+        print(
+            json.dumps(
+                {"ok": False, "error": f"{type(error).__name__}: {error}"},
+                sort_keys=True,
+            )
+        )
         raise SystemExit(1)

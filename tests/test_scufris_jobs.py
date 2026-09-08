@@ -113,6 +113,77 @@ class WorkerResourcePathTest(unittest.TestCase):
                 jobs_module.worker_report_extension(helper)
 
 
+class HelperBoundsTest(unittest.TestCase):
+    """The bounds one side of the helper writes and another side reads."""
+
+    def setUp(self) -> None:
+        self.jobs = load_jobs_module()
+
+    def test_a_summary_is_bounded_by_what_the_record_will_hold(self) -> None:
+        # The record refuses a summary over 500 bytes. `parse_event` used to
+        # accept 4096, so `read_events` copied one into the record, `store_job`
+        # raised, and the cursor never advanced past the line: `events` and
+        # `recover` failed for every job in the poll, forever.
+        line = json.dumps(
+            {"generation": 1, "event": "done", "summary": "x" * self.jobs.MAX_SUMMARY}
+        )
+        self.assertIsNotNone(self.jobs.parse_event(line))
+        over = json.dumps(
+            {
+                "generation": 1,
+                "event": "done",
+                "summary": "x" * (self.jobs.MAX_SUMMARY + 1),
+            }
+        )
+        self.assertIsNone(self.jobs.parse_event(over))
+        # Measured in bytes, not code points. A 500-character summary of an em
+        # dash is 1500 bytes and the record refuses it.
+        wide = json.dumps(
+            {"generation": 1, "event": "done", "summary": "—" * 250}
+        )
+        self.assertIsNone(self.jobs.parse_event(wide))
+        # The record holds exactly what the parser admits.
+        self.assertTrue(
+            self.jobs.valid_record_text("x" * self.jobs.MAX_SUMMARY, self.jobs.MAX_SUMMARY)
+        )
+
+    def test_a_trimmed_report_keeps_the_history_that_fits(self) -> None:
+        # The worker prompt tells a restarted execution to read `report.md` for
+        # what the last one left it. Replacing the whole file with the newest
+        # entry discarded every earlier finding and said nothing about it.
+        entries = [
+            b"# working: step " + str(index).encode() + b"\n\nWhat I found.\n"
+            for index in range(4)
+        ]
+        current = b"\n".join(entries)
+        self.assertEqual(self.jobs.report_entries(current), entries)
+        fresh = b"# done: finished\n\nThe last word.\n"
+        trimmed = self.jobs.trimmed_report(current, fresh)
+        self.assertLessEqual(len(trimmed), self.jobs.MAX_REPORT_FILE)
+        self.assertTrue(trimmed.startswith(b"# report trimmed"))
+        self.assertIn(b"0 older entries dropped", trimmed)
+        self.assertTrue(trimmed.endswith(fresh))
+        for entry in entries:
+            self.assertIn(entry, trimmed)
+        # Entries too large to all fit drop the oldest first, and the marker
+        # counts what went rather than leaving it to be guessed.
+        big = b"# working: bulk\n\n" + b"y" * (self.jobs.MAX_REPORT_FILE // 2)
+        cut = self.jobs.trimmed_report(b"\n".join([*entries, big, big]), fresh)
+        self.assertLessEqual(len(cut), self.jobs.MAX_REPORT_FILE)
+        self.assertTrue(cut.endswith(fresh))
+        self.assertIn(big, cut)
+        self.assertNotIn(entries[0], cut)
+        self.assertRegex(cut, rb"[1-9]\d* older entr(y|ies) dropped")
+
+    def test_report_entries_round_trips_the_file_it_reads(self) -> None:
+        self.assertEqual(self.jobs.report_entries(b""), [])
+        for current in (
+            b"# only: one\n\nBody.\n",
+            b"# a: one\n\nBody with a # hash.\n\n# b: two\n\nMore.\n",
+        ):
+            self.assertEqual(b"\n".join(self.jobs.report_entries(current)), current)
+
+
 class ReplacementJobsTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="scufris-jobs-")
@@ -996,8 +1067,15 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
             )
         bounded_report = (directory / "report.md").read_text()
         self.assertLessEqual(len(bounded_report.encode()), 2 * 1024 * 1024)
-        self.assertTrue(bounded_report.startswith("# working: bounded update 4\n"))
-        self.assertNotIn("# working: bounded update 3\n", bounded_report)
+        # The ceiling keeps the newest whole entries rather than replacing the
+        # file with one of them. A restarted execution is told to read this
+        # file for what the last one left it, so what it loses has to be the
+        # oldest, and it has to say so.
+        self.assertTrue(bounded_report.startswith("# report trimmed\n"))
+        self.assertRegex(bounded_report, r"[1-9]\d* older entr(y|ies) dropped")
+        self.assertTrue(bounded_report.endswith("# working: bounded update 4\n\n" + large_detail + "\n"))
+        self.assertIn("# working: bounded update 3\n", bounded_report)
+        self.assertNotIn("# working: bounded update 0\n", bounded_report)
 
         restarted = self.call(
             "send", {"job_id": job_id, "message": "Continue carefully."}
@@ -1025,7 +1103,8 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         self.assertIn(f"Working directory: {directory / 'workspace'}", detail)
         self.assertIn("Tmux pane ID: %", detail)
         self.assertIn("  g1 working: report adapter verified\n", detail)
-        self.assertIn("Report:\n# working: bounded update 4", detail)
+        self.assertIn("Report:\n# report trimmed", detail)
+        self.assertIn("# working: bounded update 4", detail)
         self.assertIn("Prompt:\n# Scufris delegated job", detail)
         json_detail = json.loads(self.cli(job_id, "--json").stdout)
         self.assertEqual(json_detail["job_id"], job_id)
@@ -2208,6 +2287,74 @@ with (directory / 'status').open('a') as stream:
         ]
         self.assertTrue(cleaned["clean"])
         self.assert_archived(job_id)
+
+    @unittest.skipIf(SPROUT is None, "sprout is not installed")
+    def test_a_refused_landing_leaves_the_workflow_landable_and_stoppable(self) -> None:
+        # The land intent is durable so an interrupted merge can only be
+        # finished, never restarted with different words. Writing it before the
+        # Sprout guard ran meant an ordinary refusal - Alex having edits on
+        # master - left a workflow that could not be landed with a different
+        # subject, could not be stopped at all, and had no exit but editing the
+        # record by hand.
+        context = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        job_id = "aa1122334455"
+        self.call(
+            "spawn",
+            {
+                "job_id": job_id,
+                "instructions": "Make a change worth landing.",
+                "owner_session": "refused-land-owner",
+                "project": context["project"],
+                "project_root": context["project_root"],
+                "context_markdown": context["markdown"],
+                "context_fingerprint": context["fingerprint"],
+                "workspace": "sprout",
+                "feature": f"refused-landing-{self.run_token}",
+            },
+        )
+        self.jobs.append(job_id)
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
+        self.wait_for(directory / "status", "done: report complete")
+        worktree = Path(json.loads((directory / "job.json").read_text())["working_directory"])
+        (worktree / "RESULT.md").write_text("worth landing\n")
+        subprocess.run(["git", "add", "RESULT.md"], cwd=worktree, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "Add result"],
+            cwd=worktree,
+            check=True,
+            capture_output=True,
+        )
+        # What `sprout land --dry-run` refuses: the main checkout is dirty.
+        readme = self.project / "README.md"
+        kept = readme.read_text()
+        readme.write_text(kept + "Alex was in the middle of something.\n")
+        refused = self.call(
+            "land", {"job_id": job_id, "subject": "Land the change"}, check=False
+        )
+        self.assertFalse(refused["ok"])
+        record = json.loads((directory / "job.json").read_text())
+        self.assertIsNone(record["cleanup"], "a refused landing recorded an intent")
+        # Every exit is still open: different words, and stopping instead.
+        again = self.call(
+            "land", {"job_id": job_id, "subject": "Different words entirely"},
+            check=False,
+        )
+        self.assertFalse(again["ok"])
+        self.assertNotIn("already durable", again["error"])
+        readme.write_text(kept)
+        # The unmerged branch is refused, which leaves a durable stop intent.
+        # Re-deciding after seeing why is the intended next step: a stop that
+        # could only be retried with the words that already failed would be a
+        # workflow with no exit at all.
+        kept_branch = self.call(
+            "stop", {"job_id": job_id, "remove_workspace": True}, check=False
+        )
+        self.assertFalse(kept_branch["ok"])
+        self.assertIn("not merged", kept_branch["error"])
+        stopped = self.call(
+            "stop", {"job_id": job_id, "remove_workspace": True, "abandon": True}
+        )["result"]
+        self.assertEqual(stopped["state"], "stopped")
 
     def test_workers_share_the_default_server_and_never_kill_it(self) -> None:
         jobs_module = load_jobs_module()

@@ -362,6 +362,7 @@ impl Service {
             );
             return;
         }
+        // This surface opens a turn and owns the answer that closes it.
         inner.associated_surface = Some(surface.clone());
         inner.record(ConversationMessage {
             role: ConversationRole::User,
@@ -394,6 +395,8 @@ impl Service {
             "surface abort received"
         );
         if inner.send_agent(AgentResponseBody::Abort { id: id.clone() }) {
+            // The turn ends here without an answer, so nobody is owed one.
+            inner.associated_surface = None;
             inner.send_surface(&surface, SurfaceResponseBody::Aborted { id });
         } else {
             inner.send_surface(
@@ -462,39 +465,31 @@ impl Service {
                 widgets,
                 attachments,
             } => {
-                // An answer nobody asked for - a morning briefing, a finished
-                // job - can reach a service no surface has spoken to yet. It
-                // is displayed rather than refused, against a surface name no
-                // surface may hold, so every screen shows it and none speaks
-                // it. Presentation belongs to the surface that asked; being
-                // told what happened belongs to all of them.
-                let unprompted = inner.associated_surface.is_none();
-                let surface = inner
-                    .associated_surface
-                    .clone()
-                    .unwrap_or_else(|| UNPROMPTED_SURFACE.to_string());
-                let widgets = if unprompted { None } else { widgets };
-                if !unprompted {
-                    let Some(registration) = inner
+                // An answer belongs to the turn that asked for it. A surface
+                // owns its turn until the answer arrives; an answer nobody
+                // asked for - a morning briefing, a finished job - is recorded
+                // against a surface name no surface may hold, so every screen
+                // shows it and none speaks it. An owner that left before its
+                // answer came is treated the same way, because losing the
+                // answer is the worst of the outcomes available here.
+                // Presentation belongs to the surface that asked; being told
+                // what happened belongs to all of them.
+                let owner = inner.associated_surface.as_ref().and_then(|surface| {
+                    inner
                         .surfaces
-                        .get(&surface)
-                        .map(|held| held.registration.clone())
-                    else {
-                        inner.send_agent(AgentResponseBody::Rejected {
-                            code: "surface_unavailable".into(),
-                            detail: "The associated surface is not connected.".into(),
-                        });
-                        return;
-                    };
-                    if let Some(calls) = &widgets
-                        && let Err(detail) = validate_calls(calls, &registration.widgets)
-                    {
-                        inner.send_agent(AgentResponseBody::Rejected {
-                            code: "invalid_widgets".into(),
-                            detail,
-                        });
-                        return;
-                    }
+                        .get(surface)
+                        .map(|held| (surface.clone(), held.registration.widgets.clone()))
+                });
+                let widgets = if owner.is_some() { widgets } else { None };
+                if let Some((_, definitions)) = &owner
+                    && let Some(calls) = &widgets
+                    && let Err(detail) = validate_calls(calls, definitions)
+                {
+                    inner.send_agent(AgentResponseBody::Rejected {
+                        code: "invalid_widgets".into(),
+                        detail,
+                    });
+                    return;
                 }
                 let descriptors = match self.attachments.resolve(&attachments, true) {
                     Ok(descriptors) => descriptors,
@@ -506,9 +501,14 @@ impl Service {
                         return;
                     }
                 };
+                // The answer closes the turn. A refusal above does not: the
+                // agent may correct it and answer the same owner again.
+                inner.associated_surface = None;
                 inner.record(ConversationMessage {
                     role: ConversationRole::Assistant,
-                    surface,
+                    surface: owner
+                        .map(|(surface, _)| surface)
+                        .unwrap_or_else(|| UNPROMPTED_SURFACE.to_string()),
                     text,
                     details,
                     widgets,
@@ -526,11 +526,14 @@ impl Service {
     ///
     /// A wake is words from outside the agent process, not a turn the owner
     /// took. So nothing here records a conversation entry, nothing is
-    /// broadcast, and the response association is left exactly as it was: an
-    /// answer before any surface has spoken is still attributed to
-    /// `unprompted`, and an answer after one has spoken still belongs to that
-    /// surface. A caller with no agent to reach is told so, because its own
-    /// durable state is the fallback and it has to know it needs one.
+    /// broadcast, and nothing touches the response association: it marks a
+    /// surface turn that is still unanswered, and a wake neither opens one nor
+    /// closes one. An answer that closes an owner's outstanding turn is still
+    /// that surface's, because the owner asked first and is waiting; an answer
+    /// with no turn outstanding - the ordinary case for a briefing, however
+    /// recently a surface spoke - is `unprompted`. A caller with no agent to
+    /// reach is told so, because its own durable state is the fallback and it
+    /// has to know it needs one.
     pub fn control_wake(
         &self,
         id: String,
@@ -1146,6 +1149,127 @@ mod tests {
         }
     }
 
+    #[test]
+    fn an_answer_to_a_surface_that_left_reaches_the_others_unprompted() {
+        // Alex spoke from the phone last night and the phone is gone by
+        // morning. The answer is worth more to the screens that are still here
+        // than a refusal is to the agent.
+        let service = service();
+        let (generation, one) = surface(&service, 1, "one");
+        let (_, two) = surface(&service, 2, "two");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        service.surface_message(1, "m-1".into(), "start".into(), vec![]);
+        agent_in.recv().unwrap();
+        service.unregister_surface(1, generation);
+        while one.try_recv().is_ok() {}
+        service.agent_request(
+            10,
+            AgentRequestBody::Response {
+                text: "Done.".into(),
+                details: None,
+                widgets: None,
+                attachments: vec![],
+            },
+        );
+        assert!(drain(&two).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Message { role: ConversationRole::Assistant, surface, .. }
+                if surface == UNPROMPTED_SURFACE
+        )));
+        // Nothing was refused: the agent hears no more about it.
+        assert!(agent_in.try_recv().is_err());
+    }
+
+    #[test]
+    fn an_answer_to_a_surface_that_left_carries_no_widgets() {
+        // A widget belongs to the surface that asked, and that surface is not
+        // here to draw it, so the answer travels as prose alone.
+        let service = service();
+        let (outbox, one) = sync_channel(256);
+        let generation = service.register_surface(
+            1,
+            SurfaceRegistration {
+                id: "one".into(),
+                name: "One".into(),
+                widgets: vec![WidgetDefinition {
+                    name: "summary".into(),
+                    description: "Summary".into(),
+                    input_schema: serde_json::json!({"type":"object","additionalProperties":false}),
+                }],
+            },
+            outbox,
+        );
+        while one.try_recv().is_ok() {}
+        let (_, two) = surface(&service, 2, "two");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        service.surface_message(1, "m-1".into(), "start".into(), vec![]);
+        agent_in.recv().unwrap();
+        service.unregister_surface(1, generation);
+        service.agent_request(
+            10,
+            AgentRequestBody::Response {
+                text: "Done.".into(),
+                details: None,
+                widgets: Some(vec![WidgetCall {
+                    id: "w-1".into(),
+                    name: "summary".into(),
+                    arguments: serde_json::json!({}),
+                }]),
+                attachments: vec![],
+            },
+        );
+        assert!(drain(&two).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Message { surface, widgets: None, .. }
+                if surface == UNPROMPTED_SURFACE
+        )));
+        assert!(agent_in.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_refused_answer_leaves_the_turn_open_for_a_corrected_one() {
+        // The owner is still waiting: a rejection is not an answer, so the
+        // association it was refused against has to survive it.
+        let service = service();
+        let (_, one) = surface(&service, 1, "one");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        service.surface_message(1, "m-1".into(), "start".into(), vec![]);
+        agent_in.recv().unwrap();
+        service.agent_request(
+            10,
+            AgentRequestBody::Response {
+                text: "Done.".into(),
+                details: None,
+                widgets: None,
+                attachments: vec!["att_missing".into()],
+            },
+        );
+        assert!(matches!(
+            agent_in.recv().unwrap().body,
+            AgentResponseBody::Rejected { code, .. } if code == "attachments_unavailable"
+        ));
+        service.agent_request(
+            10,
+            AgentRequestBody::Response {
+                text: "Done.".into(),
+                details: None,
+                widgets: None,
+                attachments: vec![],
+            },
+        );
+        assert!(drain(&one).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Message { role: ConversationRole::Assistant, surface, .. }
+                if surface == "one"
+        )));
+    }
+
     fn wake(service: &Arc<Service>, id: &str, text: &str) -> ControlResponseBody {
         service.control_wake(id.into(), "scufris-wake".into(), text.into(), None)
     }
@@ -1183,7 +1307,7 @@ mod tests {
     }
 
     #[test]
-    fn a_wake_leaves_the_response_association_alone() {
+    fn a_wake_owns_its_answer_only_when_no_owner_turn_is_open() {
         let service = service();
         let (_, one) = surface(&service, 1, "one");
         let (agent, agent_in) = sync_channel(8);
@@ -1213,7 +1337,8 @@ mod tests {
             SurfaceResponseBody::Message { surface, .. } if surface == UNPROMPTED_SURFACE
         )));
 
-        // The owner speaks, and a later wake does not take that association.
+        // The owner speaks and a wake lands before the answer. The owner asked
+        // first and is waiting, so the answer that arrives is still his.
         service.surface_message(1, "m-1".into(), "hello".into(), vec![]);
         agent_in.recv().unwrap();
         while one.try_recv().is_ok() {}
@@ -1223,6 +1348,16 @@ mod tests {
         assert!(drain(&one).iter().any(|body| matches!(
             body,
             SurfaceResponseBody::Message { surface, .. } if surface == "one"
+        )));
+
+        // That answer closed the turn. Nobody is waiting now, so the next
+        // wake's answer is unprompted however recently the owner spoke.
+        wake(&service, "wake-3", "And later still.");
+        agent_in.recv().unwrap();
+        answer(&service);
+        assert!(drain(&one).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Message { surface, .. } if surface == UNPROMPTED_SURFACE
         )));
     }
 

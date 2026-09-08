@@ -142,15 +142,24 @@ sequenceDiagram
     Note over Service: response associated with A
     B->>Service: steer before response
     Note over Service: response association changes to B
+    Service->>B: response associated with B
+    Note over Service: the turn is closed, nothing is associated
 ```
 
 Every surface displays the response. Only the associated ready surface may
 speak it or execute its live widget calls.
 
-A service that has just started holds no association. An unprompted answer sent
-before the owner's first message is recorded against the reserved surface name
-`unprompted`, so every surface displays it and none of them matches it: nothing
-is spoken and no live widget call runs. No surface may register that name.
+The association covers one turn. It opens on a user message and closes with the
+answer to it, so a service that has just started, and a service whose last turn
+is answered, holds no association at all. An answer with no turn open is
+recorded against the reserved surface name `unprompted`, so every surface
+displays it and none of them matches it: nothing is spoken and no live widget
+call runs. No surface may register that name.
+
+An answer whose surface disconnected before it arrived is recorded the same
+way, widgets stripped, rather than refused. Every proactive answer - a
+briefing, a finished job - reaches the screens that are present, whichever
+surface the owner used last and whether or not it is still connected.
 
 ## Bounds to copy into every client
 

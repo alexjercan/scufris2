@@ -353,23 +353,23 @@ the desk": the service tracks registered surfaces, but no presence field
 reaches the agent, and a graphical session is there whether or not anyone is
 home. Chat reaches every surface; the page opens when it is asked for.
 
-### Before the owner speaks
+### Nobody asked for a briefing
 
-The service associates an answer with the surface that sent the last message,
-and a service that has just started holds no association at all. The morning
-briefing is the ordinary case of that: it is the first thing said after a
-restart, before anyone has typed anything.
+The service associates an answer with the surface that asked for it, for as
+long as that turn is open. A briefing closes no turn: nobody asked for it. So
+it is recorded against the reserved surface name `unprompted`, and every
+surface shows it while none of them matches it: nothing is spoken aloud, and no
+live widget call runs.
 
-Such an answer is displayed rather than refused. It is recorded against the
-reserved surface name `unprompted`, so every surface shows it and none of them
-matches it: nothing is spoken aloud, and no live widget call runs. That is the
-display-only period. Once the owner speaks once, the association is set for the
-life of the service and the ordinary rule applies, so a briefing is spoken by
-the surface the owner last used.
+That holds whether or not the owner has ever spoken, and whichever surface he
+used last. The phone he answered from at midnight neither speaks the morning
+briefing nor swallows it by being switched off, because the turn it opened was
+closed by its own answer hours earlier.
 
 This is not particular to briefings. Every proactive wake shares it, a finished
 job included. `an_unprompted_response_is_shown_by_every_surface_and_spoken_by_none`
-in `host/service/src/service.rs` holds the behavior, and no surface may register
+and `a_wake_owns_its_answer_only_when_no_owner_turn_is_open` in
+`host/service/src/service.rs` hold the behavior, and no surface may register
 that name.
 
 ## Tools

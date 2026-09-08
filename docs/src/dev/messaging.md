@@ -13,10 +13,11 @@ conversation, workflow acknowledgments out of it, and the shaped final
 response to the user.
 
 Two ingress paths carry words into a turn. A `surface.message` is a user turn:
-it is recorded and echoed, and it selects the response association. Everything
-else is a wake. A wake is an extension custom message delivered with
-`deliverAs: "followUp"` and `triggerTurn: true`. It is not a user turn, and it
-leaves the response association alone.
+it is recorded and echoed, and it opens the response association, which the
+answer to that turn closes. Everything else is a wake. A wake is an extension
+custom message delivered with `deliverAs: "followUp"` and `triggerTurn: true`.
+It is not a user turn, and it leaves the response association alone: an answer
+with no user turn open is recorded against `unprompted`.
 
 ## Wakes from outside the agent process
 

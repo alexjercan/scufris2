@@ -87,6 +87,14 @@ The latest accepted surface message selects the response association. A steer
 from another surface changes it. The service records an assistant response with
 that surface ID and broadcasts it to all surfaces.
 
+The association belongs to one turn, not to the session. It opens on an
+accepted surface message and closes when that turn ends: the answer that is
+recorded, or an accepted abort. A refusal is not an answer and leaves it open,
+so the agent may correct the response and still reach the owner. With no turn
+open the next answer is `unprompted`, and so is an answer whose owner
+disconnected before it arrived, widgets stripped. An answer is never refused
+for want of a surface to attribute it to.
+
 ## Unprompted wake ingress
 
 `control.wake` is the only way a process outside the agent reaches the
@@ -100,9 +108,10 @@ A wake is not a user turn:
 
 - it is never recorded in the canonical conversation;
 - it is never echoed to a surface; and
-- it never sets or changes the response association. An answer produced before
-  any surface has spoken is still recorded against `unprompted`; an answer
-  after one has spoken still belongs to that surface.
+- it never sets or changes the response association. It neither opens a turn
+  nor closes one, so an answer that closes an owner's open turn still belongs
+  to that surface, and an answer with no turn open is recorded against
+  `unprompted` however recently a surface spoke.
 
 Wake text is bounded like every other text, and optional wake details are one
 bounded JSON object. With no agent connected the wake is refused with
@@ -119,7 +128,9 @@ and exits non-zero when it did not land. The default custom type is
 The agent emits one `agent.response` with mandatory bounded plain `text`,
 optional bounded Markdown `details`, and optional bounded `widgets` calls. The
 service validates widget names and arguments against the selected surface's
-registration before it records and broadcasts the response.
+registration before it records and broadcasts the response. An answer with no
+selected surface carries no widget calls: a widget belongs to the surface that
+asked, so they are dropped rather than validated.
 
 Widget calls are synchronous response metadata. Only the associated live
 surface executes them. Replay stores but never executes them. Rendering is

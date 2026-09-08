@@ -9,6 +9,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-09-08
+
 ### Added
 
 - `scufris-jobs` is an installed program. A briefing source that reports
@@ -682,7 +684,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.1.7...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/alexjercan/scufris2/compare/v2.1.7...v2.2.0
 [2.1.7]: https://github.com/alexjercan/scufris2/compare/v2.1.6...v2.1.7
 [2.1.6]: https://github.com/alexjercan/scufris2/compare/v2.1.5...v2.1.6
 [2.1.5]: https://github.com/alexjercan/scufris2/compare/v2.1.4...v2.1.5

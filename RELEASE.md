@@ -23,3 +23,4 @@ Use this process for a stable `vX.Y.Z` release.
 6. Confirm `master` is clean and contains the reviewed version commit. Create an annotated tag on that commit: `git tag -a vX.Y.Z -m "Scufris vX.Y.Z"`. Release tags are immutable. Never move, replace, or reuse one.
 7. Push `master` first. Then push only the new tag. The tag starts `.github/workflows/release.yml`.
 8. In GitHub Actions, verify the reusable check job passed, the tag matched the root package version, and the publication job created a source-only GitHub Release with generated notes. Do not add assets; Nix consumers use the tagged source flake.
+9. Verify every workflow the release push started, not only `release`. Pushing `master` also starts `check`, `Documentation`, and `iOS`, and all of them run against the tagged commit. The Swift suite runs in `iOS` and nowhere else: it needs Xcode, so no step above reaches it and CI is its only gate. `gh run list --limit 5` after the push shows every one.

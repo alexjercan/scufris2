@@ -225,6 +225,7 @@ export function deliverWorkerEvent(
   job: WorkerEventTarget,
   event: WorkerEvent,
   mode: WakeMode,
+  receipt?: Receipt | null,
 ): void {
   pi.events.emit(ATTENTION_NOTICE_EVENT, workerAttentionSignal(job, event));
   if (!workerEventWakes(event.type, mode)) {
@@ -233,10 +234,15 @@ export function deliverWorkerEvent(
     return;
   }
   const line = `${event.type}: ${event.value}`;
+  // The receipt is measured, the report is the worker's prose. Naming the
+  // difference here is what stops a claim from being repeated as a fact.
+  const verdict = receipt?.sentences.length
+    ? ` The receipt says: ${receipt.sentences.join("; ")}. Quote those words; do not soften them.`
+    : "";
   pi.sendMessage(
     {
       customType: "scufris-job-event",
-      content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ${line}. Inspect the pinned job context, prompt, report, and state, then tell the user what happened. Start another agent only if the original request named it. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
+      content: `Scufris job ${job.job_id} (${job.project ?? "general"}): ${line}. Inspect the pinned job context, prompt, report, and state, then tell the user what happened. Repeat a git, remote, or CI outcome only when the receipt measured it.${verdict} Start another agent only if the original request named it. After reacting, call scufris_final_response with one short useful acknowledgment before ending this wake turn.`,
       display: true,
       details: {
         job_id: job.job_id,
@@ -245,6 +251,7 @@ export function deliverWorkerEvent(
         event: line,
         event_id: event.id,
         generation: event.generation,
+        receipt: receipt ?? null,
       },
     },
     { deliverAs: "followUp", triggerTurn: true },
@@ -456,8 +463,66 @@ interface EventResult {
   }>;
 }
 
+/** Measured git, remote, and CI facts for one job.
+ *
+ * `false` means measured and false. A fact that could not be measured is null
+ * and its reason sits in `unavailable`, so a failed fetch never reads here as
+ * "not pushed".
+ */
+export interface Receipt {
+  job_id: string;
+  measured_at: string;
+  trigger: string;
+  commit: string | null;
+  facts: Record<string, unknown>;
+  claims: Array<{
+    claim: string;
+    said: string;
+    field: string;
+    measured: unknown;
+    reason: string | null;
+    verdict: string;
+  }>;
+  sentences: string[];
+  unavailable: Record<string, string>;
+}
+
 interface CleanupResult {
   removed_jobs: string[];
+  receipt?: Receipt | null;
+}
+
+/** The events that end an execution and so deserve a measured receipt. */
+const RECEIPT_EVENTS: ReadonlySet<string> = new Set([
+  "done",
+  "blocked",
+  "failed",
+]);
+
+/** Measures one job's receipt for a wake.
+ *
+ * A receipt is evidence, not control flow. If measurement fails the wake still
+ * has to reach the user, so this resolves to null rather than throwing into
+ * the event drain loop.
+ */
+async function measureReceipt(
+  jobId: string,
+  trigger: string,
+  signal?: AbortSignal,
+): Promise<Receipt | null> {
+  try {
+    // Each git and `gh` call inside the helper has its own 15 second leash.
+    // The ceiling here only has to clear the three that touch the network, and
+    // is generous because a discarded measurement loses evidence.
+    return await runHelper<Receipt>(
+      "receipt",
+      { job_id: jobId, trigger },
+      signal,
+      90_000,
+    );
+  } catch {
+    return null;
+  }
 }
 
 export function applySteerResult(
@@ -650,7 +715,20 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             };
             job.state = event.type;
             job.summary = event.value;
-            deliverWorkerEvent(pi, extensionContext, job, event, wakeMode);
+            // Measured before the wake and before any landing or stop, so the
+            // facts are taken while the worktree and branch still exist.
+            const receipt = RECEIPT_EVENTS.has(event.type)
+              ? await measureReceipt(job.job_id, event.type, controller.signal)
+              : null;
+            if (shuttingDown) return;
+            deliverWorkerEvent(
+              pi,
+              extensionContext,
+              job,
+              event,
+              wakeMode,
+              receipt,
+            );
             deliveredEventIds.add(updateEvent.id);
             await runHelper("ack-event", {
               job_id: job.job_id,
@@ -1248,12 +1326,19 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       name: "scufris_job_stop",
       label: "Stop Scufris job",
       description:
-        "Stop and recursively remove one owned workflow and all descendants.",
+        "Stop and recursively remove one owned workflow and all descendants. Removal keeps an unmerged branch unless the user asked to abandon the work.",
       executionMode: "sequential",
       parameters: Type.Object(
         {
           job_id: Type.String({ pattern: "^[a-f0-9]{12}$" }),
           remove_workspace: Type.Optional(Type.Boolean({ default: false })),
+          abandon: Type.Optional(
+            Type.Boolean({
+              default: false,
+              description:
+                "Set only when the user asked to throw the work away. It permits deleting a branch that was never merged.",
+            }),
+          ),
         },
         { additionalProperties: false },
       ),
@@ -1266,9 +1351,10 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           {
             job_id: params.job_id,
             remove_workspace: params.remove_workspace ?? false,
+            abandon: params.abandon ?? false,
           },
           signal,
-          30_000,
+          120_000,
         );
         forgetRemovedJobs(result.removed_jobs);
         acknowledgmentGate.markSuccessfulAction("scufris_job_stop");

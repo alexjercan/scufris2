@@ -191,6 +191,47 @@ change. It returns the exact base and implementation revisions, repository, and
 private state directory used to start the standalone review agent. The agent,
 not the jobs helper, owns walkthrough generation and page questions.
 
+## Receipts
+
+A worker's report is prose. A receipt is measured, so a completion claim can be
+checked instead of believed. Nothing in Scufris pushes, tags, or releases; the
+receipt is how the foreground learns whether anyone else did.
+
+`receipt` measures one job and appends the result to `receipts.jsonl` beside
+the job. The extension measures on every terminal event, before the wake, so
+the facts are taken while the worktree and branch still exist. `land` and
+`stop` measure again for themselves, and `inspect` returns the newest stored
+record without measuring, because listing jobs inspects once per row.
+
+One rule shapes the record: `false` means measured and false. A fact that could
+not be measured is `null` and its reason is recorded in `unavailable`, so a
+failed fetch never reads as "not pushed".
+
+Measured per workspace kind:
+
+- `sprout`: `head`, `dirty`, `landed`, `landed_revision`, `branch_exists`,
+  `worktree_exists`, `remote`, `pushed`, `ahead`, `behind`, `tags_local`,
+  `tags_remote`, and `release_run`.
+- `project`: the same, without the feature branch and worktree facts.
+- `review`: the source job's workspace, because a reviewer shares it and owns
+  no facts of its own. `measured_job` names the job actually measured.
+- `temporary`: no repository, recorded as the reason.
+
+Ancestry answers `landed` and `pushed`, against `refs/heads/<base>` and against
+`refs/remotes/<remote>/<base>` after a fetch. `git rev-list --left-right
+--count` gives `ahead` and `behind`, `git ls-remote --tags` gives the remote
+tags pointing at the revision, and `gh run list --commit` gives the CI run.
+Every call has a 15 second timeout, because the extension runs this inside a
+wake. The fetch updates remote-tracking refs in the real checkout; nothing
+touches the working tree, a local branch, or the index.
+
+`claims` is derived rather than measured, and stays out of `facts` for that
+reason. It matches completed-action wording in the newest report entry against
+the field that would back it. "ready to push" is not a claim that anything was
+pushed. An unbacked claim gets the verdict `claimed, not verified`, and
+`sentences` holds the exact words the foreground repeats, including
+`not landed`.
+
 ## Land, stop, and archive
 
 Cleanup is workflow-scoped and archival:
@@ -211,6 +252,12 @@ Cleanup is workflow-scoped and archival:
   and symlinks. Missing resources count as successful cleanup. Any error
   keeps the root and the remaining records for a retry, and a graph with an
   active cleanup intent cannot be steered or gain reviewers.
+- Removal keeps a branch that was never merged. `sprout rm` refuses one, and
+  only `stop` with both `remove_workspace` and `abandon` supplies the `--force`
+  that overrides it, so unlanded work is never lost to a cleanup. A Sprout that
+  predates the flag is left to its own behavior. `abandon` may be re-decided
+  after a refusal; the rest of a durable cleanup intent stays immutable.
+- `land`, `stop`, and `inspect` all return a receipt.
 
 ## Recovery
 

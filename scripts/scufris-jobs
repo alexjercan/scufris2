@@ -231,6 +231,49 @@ def print_block(label: str, value: Any) -> None:
         print("  (none)")
 
 
+def print_receipt(receipt: Any, count: Any) -> None:
+    """Prints measured facts. `false` is a measurement; a blank is not."""
+    if not isinstance(receipt, dict):
+        print("Receipt: (none measured)")
+        return
+    total = count if isinstance(count, int) else 1
+    print(
+        f"Receipt: measured {clean_text(receipt.get('measured_at'))} "
+        f"on {clean_text(receipt.get('trigger'))} ({total} recorded)"
+    )
+    facts = receipt.get("facts")
+    unavailable = receipt.get("unavailable")
+    unavailable = unavailable if isinstance(unavailable, dict) else {}
+    if isinstance(facts, dict) and facts:
+        for name in sorted(facts):
+            value = facts[name]
+            reason = unavailable.get(name)
+            if value is None and reason:
+                print(f"  {name}: unknown ({clean_text(reason)})")
+            elif isinstance(value, list):
+                print(f"  {name}: {clean_text(', '.join(map(str, value)) or 'none')}")
+            else:
+                print(f"  {name}: {clean_text(json.dumps(value))}")
+    for name in sorted(
+        set(unavailable) - set(facts if isinstance(facts, dict) else {})
+    ):
+        print(f"  {name}: unknown ({clean_text(unavailable[name])})")
+    claims = receipt.get("claims")
+    if isinstance(claims, list) and claims:
+        print("  Claims:")
+        for claim in claims:
+            if not isinstance(claim, dict):
+                continue
+            print(
+                f"    {clean_text(claim.get('claim'))}: "
+                f"{clean_text(claim.get('verdict'))} -- "
+                f'"{clean_text(claim.get("said"))}"'
+            )
+    sentences = receipt.get("sentences")
+    if isinstance(sentences, list) and sentences:
+        print(f"  Say: {clean_text('; '.join(map(str, sentences)))}")
+
+
 def print_detail(job: dict[str, Any]) -> None:
     print_field("Job ID", job.get("job_id"))
     print_field("State", job.get("state"))
@@ -267,6 +310,7 @@ def print_detail(job: dict[str, Any]) -> None:
             print(f"  {clean_text(event)}")
     else:
         print("  (none)")
+    print_receipt(job.get("receipt"), job.get("receipt_count"))
     print_block("Report", job.get("report"))
     print_block("Project context", job.get("project_context"))
     print_block("Prompt", job.get("prompt"))

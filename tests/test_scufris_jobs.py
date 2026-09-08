@@ -2227,6 +2227,275 @@ with (directory / 'status').open('a') as stream:
         )
         self.assertFalse(worktree.exists())
 
+    # ------------------------------------------------------------------
+    # Receipts. A completion claim is checked, not believed, so every test
+    # here asserts the difference between a measured fact and an absent one.
+    # ------------------------------------------------------------------
+
+    def git(self, *arguments: str, cwd: Path | None = None) -> str:
+        result = subprocess.run(
+            ["git", *arguments],
+            cwd=cwd or self.project,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return result.stdout.strip()
+
+    def with_origin(self) -> Path:
+        """Gives the fixture project a real remote it can fetch from."""
+        upstream = self.root / "upstream.git"
+        subprocess.run(
+            ["git", "init", "-q", "-b", "master", "--bare", str(upstream)],
+            check=True,
+            capture_output=True,
+        )
+        self.git("remote", "add", "origin", str(upstream))
+        self.git("push", "-q", "origin", "master")
+        return upstream
+
+    def fake_program(self, name: str, script: str) -> Path:
+        """Installs one program ahead of the real one for this test only."""
+        directory = self.root / "shims"
+        directory.mkdir(exist_ok=True)
+        executable = directory / name
+        executable.write_text(script)
+        executable.chmod(0o755)
+        self.env["PATH"] = f"{directory}:{self.env['PATH']}"
+        return executable
+
+    def project_job(self, job_id: str, report: str = "") -> Path:
+        directory = self.fixture_job(
+            job_id,
+            {
+                "project": "projects/nova-protocol",
+                "project_root": str(self.project),
+                "project_root_device": self.project.stat().st_dev,
+                "project_root_inode": self.project.stat().st_ino,
+                "context_fingerprint": hashlib.sha256(b"context").hexdigest(),
+                "workspace": "project",
+                "working_directory": str(self.project),
+                "landing_branch": "master",
+            },
+        )
+        if report:
+            (directory / "report.md").write_text(report)
+        return directory
+
+    def merged_feature_commit(self) -> str:
+        self.git("checkout", "-q", "-b", "feature-work")
+        (self.project / "RESULT.md").write_text("feature work\n")
+        self.git("add", "RESULT.md")
+        self.git("commit", "-q", "-m", "feature work")
+        self.git("checkout", "-q", "master")
+        self.git("merge", "-q", "--ff", "feature-work")
+        return self.git("rev-parse", "HEAD")
+
+    def test_receipt_contradicts_a_worker_claim_of_push_and_release(self) -> None:
+        self.with_origin()
+        commit = self.merged_feature_commit()
+        self.fake_program("gh", "#!/bin/sh\nprintf '[]\\n'\n")
+        job_id = "aa0000000001"
+        self.project_job(
+            job_id,
+            "# done: shipped\n\nI landed the change, pushed and released it.\n",
+        )
+        value = self.call("receipt", {"job_id": job_id})["result"]
+
+        facts = value["facts"]
+        self.assertEqual(value["commit"], commit)
+        # Landed is true and measured; pushed is false and measured. The
+        # difference between the two is the whole point of the receipt.
+        self.assertIs(facts["landed"], True)
+        self.assertIs(facts["pushed"], False)
+        self.assertIsNone(facts["release_run"])
+        self.assertEqual(facts["ahead"], 1)
+        self.assertEqual(facts["behind"], 0)
+        self.assertEqual(facts["remote"], "origin")
+
+        verdicts = {claim["claim"]: claim["verdict"] for claim in value["claims"]}
+        self.assertEqual(verdicts["pushed"], "claimed, not verified")
+        self.assertEqual(verdicts["released"], "claimed, not verified")
+        self.assertEqual(verdicts["landed"], "verified")
+        self.assertIn("pushed: claimed, not verified", value["sentences"])
+        self.assertNotIn("landed: claimed, not verified", value["sentences"])
+
+        printed = self.cli(job_id).stdout
+        self.assertIn("claimed, not verified", printed)
+        self.assertIn("pushed: false", printed)
+
+    def test_receipt_says_not_landed_in_those_words(self) -> None:
+        self.with_origin()
+        self.git("checkout", "-q", "-b", "feature-unlanded")
+        (self.project / "RESULT.md").write_text("unlanded\n")
+        self.git("add", "RESULT.md")
+        self.git("commit", "-q", "-m", "unlanded work")
+        self.fake_program("gh", "#!/bin/sh\nprintf '[]\\n'\n")
+        job_id = "aa0000000002"
+        self.project_job(job_id, "# done: complete\n\nThe work is finished.\n")
+        value = self.call("receipt", {"job_id": job_id})["result"]
+        self.assertIs(value["facts"]["landed"], False)
+        self.assertIsNone(value["facts"]["landed_revision"])
+        self.assertIn("not landed", value["sentences"])
+        self.assertIn("not landed", self.cli(job_id).stdout)
+
+    def test_unmeasurable_facts_are_null_with_a_reason_never_false(self) -> None:
+        # An unreachable remote must never read as "not pushed". That mistake
+        # would be the exact lie receipts exist to prevent.
+        self.git("remote", "add", "origin", str(self.root / "missing.git"))
+        job_id = "aa0000000003"
+        self.project_job(job_id, "# done: shipped\n\nI pushed the branch.\n")
+        value = self.call("receipt", {"job_id": job_id})["result"]
+        for name in ("pushed", "ahead", "behind", "release_run"):
+            self.assertIsNone(value["facts"][name])
+            self.assertIn(name, value["unavailable"])
+        self.assertIsNot(value["facts"]["pushed"], False)
+        # A git fact that needs no remote is still measured.
+        self.assertIsNotNone(value["facts"]["head"])
+        self.assertIs(value["facts"]["dirty"], False)
+        claim = next(item for item in value["claims"] if item["claim"] == "pushed")
+        self.assertEqual(claim["verdict"], "claimed, not verified")
+        self.assertIsNotNone(claim["reason"])
+
+    def test_receipt_survives_an_unusable_gh_without_losing_git_facts(self) -> None:
+        self.with_origin()
+        self.merged_feature_commit()
+        self.fake_program("gh", "#!/bin/sh\necho 'gh: not authenticated' >&2\nexit 1\n")
+        job_id = "aa0000000004"
+        self.project_job(job_id, "# done: shipped\n\nI released it.\n")
+        value = self.call("receipt", {"job_id": job_id})["result"]
+        self.assertIsNone(value["facts"]["release_run"])
+        self.assertIn("not authenticated", value["unavailable"]["release_run"])
+        self.assertIs(value["facts"]["landed"], True)
+        self.assertIs(value["facts"]["pushed"], False)
+
+    def test_receipt_reports_a_temporary_workspace_as_having_no_repository(
+        self,
+    ) -> None:
+        job_id = "aa0000000005"
+        self.fixture_job(job_id)
+        value = self.call("receipt", {"job_id": job_id})["result"]
+        self.assertEqual(value["workspace"], "temporary")
+        self.assertEqual(value["facts"], {})
+        self.assertIn("repository", value["unavailable"]["workspace"])
+        self.assertEqual(value["sentences"], [])
+
+    def test_a_reviewer_receipt_measures_the_source_workspace(self) -> None:
+        self.with_origin()
+        source_id, reviewer_id = "aa0000000006", "aa0000000007"
+        self.project_job(source_id)
+        self.fixture_job(
+            reviewer_id,
+            {
+                "root_job": source_id,
+                "parent_job": source_id,
+                "review_of": source_id,
+                "project": "projects/nova-protocol",
+                "project_root": str(self.project),
+                "project_root_device": self.project.stat().st_dev,
+                "project_root_inode": self.project.stat().st_ino,
+                "context_fingerprint": hashlib.sha256(b"context").hexdigest(),
+                "workspace": "review",
+                "working_directory": str(self.project),
+                "landing_branch": "master",
+            },
+        )
+        value = self.call("receipt", {"job_id": reviewer_id})["result"]
+        # A reviewer shares the source workspace, so it owns no facts of its own.
+        self.assertEqual(value["measured_job"], source_id)
+        self.assertEqual(value["job_id"], reviewer_id)
+        self.assertIsNotNone(value["facts"]["head"])
+
+    def test_receipt_history_keeps_the_earlier_measurement(self) -> None:
+        self.with_origin()
+        job_id = "aa0000000008"
+        directory = self.project_job(job_id)
+        first = self.call("receipt", {"job_id": job_id, "trigger": "done"})["result"]
+        second = self.call("receipt", {"job_id": job_id, "trigger": "land"})["result"]
+        records = [
+            json.loads(line)
+            for line in (directory / "receipts.jsonl").read_text().splitlines()
+            if line.strip()
+        ]
+        self.assertEqual([record["trigger"] for record in records], ["done", "land"])
+        self.assertEqual(records[0]["measured_at"], first["measured_at"])
+
+        # Inspect reads the newest record and never measures for itself.
+        inspected = self.call("inspect", {"job_id": job_id})["result"]
+        self.assertEqual(inspected["receipt_count"], 2)
+        self.assertEqual(inspected["receipt"]["trigger"], "land")
+        self.assertEqual(inspected["receipt"]["measured_at"], second["measured_at"])
+        self.call("receipt", {"job_id": job_id, "trigger": "nonsense"}, check=False)
+        self.assertEqual(
+            self.call(
+                "receipt", {"job_id": job_id, "trigger": "nonsense"}, check=False
+            )["error"],
+            "invalid receipt trigger",
+        )
+
+    def test_stop_keeps_an_unmerged_branch_unless_the_request_abandons_it(self) -> None:
+        # Sprout owns the refusal and ships separately, so this stands in for
+        # the version that knows `--force` and proves this side passes it only
+        # for an explicit abandon.
+        recorded = self.root / "sprout-argv.log"
+        self.fake_program(
+            "sprout",
+            "#!/bin/sh\n"
+            f'printf "%s\\n" "$*" >> {recorded}\n'
+            'case "$1 $2" in\n'
+            '  "rm --help") echo "usage: sprout rm <feature> [--force]"; exit 0;;\n'
+            "esac\n"
+            'case "$1" in\n'
+            f'  show) printf "%s\\n" "{self.project}"; exit 0;;\n'
+            "  rm)\n"
+            '    for argument in "$@"; do\n'
+            '      if [ "$argument" = "--force" ]; then exit 0; fi\n'
+            "    done\n"
+            '    echo "sprout: refusing to delete unmerged branch" >&2\n'
+            "    exit 1;;\n"
+            "esac\n"
+            "exit 0\n",
+        )
+        job_id = "aa0000000009"
+        self.fixture_job(
+            job_id,
+            {
+                "project": "projects/nova-protocol",
+                "project_root": str(self.project),
+                "project_root_device": self.project.stat().st_dev,
+                "project_root_inode": self.project.stat().st_ino,
+                "context_fingerprint": hashlib.sha256(b"context").hexdigest(),
+                "workspace": "sprout",
+                "feature": "unmerged-work",
+                "working_directory": str(self.project),
+                "landing_branch": "master",
+            },
+        )
+        refused = self.call(
+            "stop", {"job_id": job_id, "remove_workspace": True}, check=False
+        )
+        self.assertFalse(refused["ok"])
+        self.assertIn("unmerged", refused["error"])
+        self.assertTrue(
+            (self.root / "state" / "scufris" / "jobs" / job_id).is_dir(),
+            "a refused removal must keep the job and its branch",
+        )
+        self.assertNotIn("--force", recorded.read_text())
+
+        abandoned = self.call(
+            "stop", {"job_id": job_id, "remove_workspace": True, "abandon": True}
+        )["result"]
+        self.assertEqual(abandoned["state"], "stopped")
+        self.assertIn("rm unmerged-work --force", recorded.read_text())
+        self.assert_archived(job_id)
+
+    def test_stop_refuses_abandon_without_removal(self) -> None:
+        job_id = "aa0000000010"
+        self.fixture_job(job_id)
+        refused = self.call("stop", {"job_id": job_id, "abandon": True}, check=False)
+        self.assertFalse(refused["ok"])
+        self.assertIn("remove_workspace", refused["error"])
+
 
 if __name__ == "__main__":
     unittest.main()

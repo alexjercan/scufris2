@@ -51,6 +51,11 @@ MAX_EVENT_LINE = 4096
 MAX_EVENT_BATCH = 1024 * 1024
 MAX_REPORT_ENTRY = MAX_REPORT_DETAIL + MAX_EVENT_LINE + 5
 MAX_REPORT_FILE = 2 * 1024 * 1024
+MAX_RECEIPTS_FILE = 256 * 1024
+# A receipt is measured inside a foreground wake, so every git and `gh` call
+# gets a short leash rather than the helper's ordinary 120 second default.
+RECEIPT_TIMEOUT = 15
+RECEIPT_TRIGGERS = {*EVENTS, "land", "stop", "request"}
 LEGACY_JOB_FIELDS = {
     "job_id",
     "owner_session",
@@ -1432,9 +1437,11 @@ def validate_job_record(value: Any, job_id: str) -> dict[str, Any]:
     cleanup = value.get("cleanup")
     if cleanup is not None and (
         not isinstance(cleanup, dict)
-        or set(cleanup) != {"action", "subject", "remove_workspace", "revision"}
+        or set(cleanup) - {"abandon"}
+        != {"action", "subject", "remove_workspace", "revision"}
         or cleanup.get("action") not in {"stop", "land"}
         or not isinstance(cleanup.get("remove_workspace"), bool)
+        or not isinstance(cleanup.get("abandon", False), bool)
         or (
             cleanup.get("subject") is not None
             and not valid_record_text(cleanup.get("subject"), 500)
@@ -2410,6 +2417,11 @@ def inspect(request: dict[str, Any]) -> dict[str, Any]:
     }
     result["window_alive"] = pane_alive(job)
     result["review_isolation"] = review_isolation(job["harness"], job["workspace"])
+    # Reads, never measures. `scripts/scufris-jobs` calls inspect once per row,
+    # and a measurement there would mean one network fetch per listed job.
+    records = stored_receipts(job_id)
+    result["receipt"] = records[-1] if records else None
+    result["receipt_count"] = len(records)
     status = read_regular_tail(directory / "status", MAX_STATUS_DETAIL).decode(
         "utf-8", errors="replace"
     )
@@ -2589,7 +2601,7 @@ def graph_depth(record: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> int
     return depth
 
 
-def remove_sprout_workspace(job: dict[str, Any]) -> None:
+def remove_sprout_workspace(job: dict[str, Any], abandon: bool) -> None:
     if job["workspace"] != "sprout":
         return
     workspace = Path(job["working_directory"])
@@ -2613,7 +2625,25 @@ def remove_sprout_workspace(job: dict[str, Any]) -> None:
     shown = shown_result.stdout.decode().strip()
     if canonical_path(Path(shown)) != canonical_path(workspace):
         raise JobError("Sprout feature points at a different workspace")
-    sprout(["rm", job["feature"]], root)
+    # An unmerged branch is unlanded work. `sprout rm` refuses to delete one
+    # without `--force`, and only an explicit abandon supplies it. A sprout
+    # that predates the flag is left to its own behavior rather than handed an
+    # argument it would reject.
+    argv = ["rm", job["feature"]]
+    if abandon and sprout_accepts_force(root):
+        argv.append("--force")
+    sprout(argv, root)
+
+
+def sprout_accepts_force(root: Path) -> bool:
+    """Whether the installed `sprout rm` understands `--force`.
+
+    The refusal to delete unmerged work lives in Sprout, which is packaged
+    separately. Until that version is installed this helper must keep working.
+    """
+    usage = run(["sprout", "rm", "--help"], cwd=root, check=False)
+    text = (usage.stdout + usage.stderr).decode("utf-8", "replace")
+    return "--force" in text
 
 
 def stop_workflow_executions(records: list[dict[str, Any]]) -> None:
@@ -2656,10 +2686,11 @@ def cleanup_workflow(selected: dict[str, Any]) -> dict[str, Any]:
     errors: list[str] = []
     stop_workflow_executions(ordered)
     remove_workspace = selected["cleanup"]["remove_workspace"]
+    abandon = selected["cleanup"].get("abandon", False)
     for record in ordered:
         if record["workspace"] == "sprout" and remove_workspace:
             try:
-                remove_sprout_workspace(record)
+                remove_sprout_workspace(record, abandon)
             except (JobError, subprocess.SubprocessError) as error:
                 errors.append(f"{record['job_id']}: {error}")
     if errors:
@@ -2686,6 +2717,534 @@ def cleanup_workflow(selected: dict[str, Any]) -> dict[str, Any]:
     return {"root_job": root_id, "removed_jobs": removed, "clean": True}
 
 
+# A receipt exists so a completion claim can be checked instead of believed.
+# One rule shapes everything below: `false` means measured and false. A fact
+# that could not be measured is null and its reason is recorded, so a failed
+# fetch never reads as "not pushed".
+
+
+def measured(
+    argv: list[str],
+    cwd: Path,
+    *,
+    accept: tuple[int, ...] = (0,),
+) -> tuple[subprocess.CompletedProcess[bytes] | None, str | None]:
+    """Runs one measurement. Returns the result, or None and a reason."""
+    try:
+        completed = subprocess.run(
+            argv,
+            cwd=cwd,
+            capture_output=True,
+            check=False,
+            timeout=RECEIPT_TIMEOUT,
+        )
+    except FileNotFoundError:
+        return None, f"{argv[0]} is not on PATH"
+    except subprocess.TimeoutExpired:
+        return None, f"{shlex.join(argv)} timed out after {RECEIPT_TIMEOUT}s"
+    except OSError as error:
+        return None, f"{shlex.join(argv)} could not run: {error}"
+    if completed.returncode not in accept:
+        lines = completed.stderr.decode("utf-8", "replace").strip().splitlines()
+        detail = lines[-1].strip() if lines else f"exit status {completed.returncode}"
+        return None, f"{shlex.join(argv)} failed: {detail[:200]}"
+    return completed, None
+
+
+def measured_text(argv: list[str], cwd: Path) -> tuple[str | None, str | None]:
+    completed, reason = measured(argv, cwd)
+    if completed is None:
+        return None, reason
+    return completed.stdout.decode("utf-8", "replace").strip(), None
+
+
+def measured_ancestor(
+    commit: str, ref: str, cwd: Path
+) -> tuple[bool | None, str | None]:
+    # `--is-ancestor` answers with its exit status, so 1 is a measurement and
+    # not a failure.
+    completed, reason = measured(
+        ["git", "merge-base", "--is-ancestor", commit, ref], cwd, accept=(0, 1)
+    )
+    if completed is None:
+        return None, reason
+    return completed.returncode == 0, None
+
+
+def record_fact(
+    facts: dict[str, Any],
+    unavailable: dict[str, str],
+    name: str,
+    value: Any,
+    reason: str | None,
+) -> None:
+    facts[name] = None if reason is not None else value
+    if reason is not None:
+        unavailable[name] = reason
+
+
+def unmeasurable(
+    facts: dict[str, Any],
+    unavailable: dict[str, str],
+    names: tuple[str, ...],
+    reason: str,
+) -> None:
+    for name in names:
+        facts[name] = None
+        unavailable[name] = reason
+
+
+def receipt_subject(job: dict[str, Any]) -> dict[str, Any]:
+    """The job whose workspace a receipt measures.
+
+    A reviewer runs inside the source job's workspace, so it owns no git facts
+    of its own. Follow `review_of` to the job that does.
+    """
+    current = job
+    seen = {job["job_id"]}
+    while current["workspace"] == "review" and current["review_of"] is not None:
+        if current["review_of"] in seen:
+            break
+        seen.add(current["review_of"])
+        try:
+            current = load_job(current["review_of"], archived=True)
+        except JobError:
+            break
+    return current
+
+
+def job_cleanup_revision(subject: dict[str, Any]) -> str | None:
+    """The revision `land` recorded for this workflow, when there is one."""
+    root = subject
+    if subject["root_job"] != subject["job_id"]:
+        try:
+            root = load_job(subject["root_job"], archived=True)
+        except JobError:
+            return None
+    cleanup = root.get("cleanup")
+    if isinstance(cleanup, dict) and isinstance(cleanup.get("revision"), str):
+        return cleanup["revision"]
+    return None
+
+
+def measure_remote(
+    project_root: Path,
+    base: str,
+    commit: str | None,
+    facts: dict[str, Any],
+    unavailable: dict[str, str],
+) -> None:
+    remote_names = ("pushed", "ahead", "behind", "tags_remote", "release_run")
+    listed, reason = measured_text(["git", "remote"], project_root)
+    if listed is None:
+        facts["remote"] = None
+        unavailable["remote"] = reason or "remotes could not be listed"
+        unmeasurable(facts, unavailable, remote_names, unavailable["remote"])
+        return
+    remotes = [name for name in listed.splitlines() if name.strip()]
+    if not remotes:
+        facts["remote"] = None
+        unmeasurable(facts, unavailable, remote_names, "the repository has no remote")
+        return
+    remote = "origin" if "origin" in remotes else remotes[0]
+    facts["remote"] = remote
+
+    # The fetch updates remote-tracking refs in the real checkout. Nothing here
+    # touches the working tree, a local branch, or the index.
+    _, reason = measured(["git", "fetch", "--quiet", remote, base], project_root)
+    if reason is not None:
+        unmeasurable(facts, unavailable, remote_names, reason)
+        return
+
+    tracking = f"refs/remotes/{remote}/{base}"
+    if commit is None:
+        unmeasurable(facts, unavailable, ("pushed",), "there is no revision to measure")
+    else:
+        pushed, reason = measured_ancestor(commit, tracking, project_root)
+        record_fact(facts, unavailable, "pushed", pushed, reason)
+
+    counts, reason = measured_text(
+        [
+            "git",
+            "rev-list",
+            "--left-right",
+            "--count",
+            f"refs/heads/{base}...{tracking}",
+        ],
+        project_root,
+    )
+    fields = counts.split() if counts is not None else []
+    if reason is not None or len(fields) != 2 or not all(f.isdigit() for f in fields):
+        detail = reason or "the ahead and behind counts were unreadable"
+        unmeasurable(facts, unavailable, ("ahead", "behind"), detail)
+    else:
+        facts["ahead"], facts["behind"] = int(fields[0]), int(fields[1])
+
+    measure_remote_tags(project_root, remote, commit, facts, unavailable)
+    measure_release_run(project_root, commit, facts, unavailable)
+
+
+def measure_remote_tags(
+    project_root: Path,
+    remote: str,
+    commit: str | None,
+    facts: dict[str, Any],
+    unavailable: dict[str, str],
+) -> None:
+    if commit is None:
+        unmeasurable(
+            facts, unavailable, ("tags_remote",), "there is no revision to measure"
+        )
+        return
+    listed, reason = measured_text(["git", "ls-remote", "--tags", remote], project_root)
+    if listed is None:
+        unmeasurable(facts, unavailable, ("tags_remote",), reason or "unreadable")
+        return
+    tags: list[str] = []
+    for line in listed.splitlines():
+        parts = line.split("\t")
+        # An annotated tag also lists a peeled `^{}` row holding the commit it
+        # points at, which is the row that matches a landed revision.
+        if len(parts) == 2 and parts[0] == commit:
+            name = parts[1].removeprefix("refs/tags/").removesuffix("^{}")
+            if name and name not in tags:
+                tags.append(name)
+    facts["tags_remote"] = tags
+
+
+def measure_release_run(
+    project_root: Path,
+    commit: str | None,
+    facts: dict[str, Any],
+    unavailable: dict[str, str],
+) -> None:
+    if commit is None:
+        unmeasurable(
+            facts, unavailable, ("release_run",), "there is no revision to measure"
+        )
+        return
+    listed, reason = measured_text(
+        [
+            "gh",
+            "run",
+            "list",
+            "--commit",
+            commit,
+            "--limit",
+            "1",
+            "--json",
+            "status,conclusion,url",
+        ],
+        project_root,
+    )
+    if listed is None:
+        unmeasurable(facts, unavailable, ("release_run",), reason or "unreadable")
+        return
+    try:
+        runs = json.loads(listed or "[]")
+    except json.JSONDecodeError:
+        unmeasurable(
+            facts, unavailable, ("release_run",), "gh returned unreadable JSON"
+        )
+        return
+    if not isinstance(runs, list):
+        unmeasurable(
+            facts, unavailable, ("release_run",), "gh returned unreadable JSON"
+        )
+        return
+    facts["release_run"] = runs[0] if runs and isinstance(runs[0], dict) else None
+
+
+def measure_workspace(subject: dict[str, Any]) -> dict[str, Any]:
+    """Measures every git, remote, and CI fact one job's workspace can answer."""
+    workspace = subject["workspace"]
+    facts: dict[str, Any] = {}
+    unavailable: dict[str, str] = {}
+    context: dict[str, Any] = {
+        "measured_job": subject["job_id"],
+        "workspace": workspace,
+        "project_root": subject["project_root"],
+        "base_branch": subject["landing_branch"],
+        "feature": subject["feature"],
+        "commit": None,
+    }
+    if workspace == "temporary":
+        unavailable["workspace"] = "a temporary workspace has no repository"
+        return {**context, "facts": facts, "unavailable": unavailable}
+    try:
+        project_root = canonical_path(Path(subject["project_root"]))
+    except JobError as error:
+        unavailable["project_root"] = str(error)
+        return {**context, "facts": facts, "unavailable": unavailable}
+    base = subject["landing_branch"]
+
+    # HEAD and cleanliness come from the workspace while it still exists. After
+    # a landing removes the worktree there is nothing left to ask.
+    working = Path(subject["working_directory"])
+    if working.is_dir():
+        head, reason = measured_text(["git", "rev-parse", "HEAD"], working)
+        record_fact(facts, unavailable, "head", head, reason)
+        porcelain, reason = measured_text(["git", "status", "--porcelain"], working)
+        record_fact(facts, unavailable, "dirty", bool(porcelain), reason)
+    else:
+        unmeasurable(
+            facts, unavailable, ("head", "dirty"), "the workspace directory is gone"
+        )
+
+    if workspace == "sprout":
+        feature = subject["feature"]
+        completed, reason = measured(
+            ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{feature}"],
+            project_root,
+            accept=(0, 1),
+        )
+        record_fact(
+            facts,
+            unavailable,
+            "branch_exists",
+            completed is not None and completed.returncode == 0,
+            reason,
+        )
+        listed, reason = measured_text(
+            ["git", "worktree", "list", "--porcelain"], project_root
+        )
+        record_fact(
+            facts,
+            unavailable,
+            "worktree_exists",
+            listed is not None
+            and f"worktree {subject['working_directory']}" in listed.splitlines(),
+            reason,
+        )
+
+    # The revision this receipt is about: what `land` recorded, else the
+    # workspace HEAD, else the feature branch tip.
+    commit = job_cleanup_revision(subject) or facts.get("head")
+    if commit is None and workspace == "sprout" and facts.get("branch_exists"):
+        commit, _ = measured_text(
+            ["git", "rev-parse", f"refs/heads/{subject['feature']}"], project_root
+        )
+    context["commit"] = commit
+
+    if commit is None:
+        unmeasurable(
+            facts,
+            unavailable,
+            ("landed", "tags_local"),
+            "there is no revision to measure",
+        )
+        facts["landed_revision"] = None
+    else:
+        landed, reason = measured_ancestor(commit, f"refs/heads/{base}", project_root)
+        record_fact(facts, unavailable, "landed", landed, reason)
+        facts["landed_revision"] = commit if facts.get("landed") else None
+        tags, reason = measured_text(
+            ["git", "tag", "--points-at", commit], project_root
+        )
+        record_fact(
+            facts,
+            unavailable,
+            "tags_local",
+            [tag for tag in (tags or "").splitlines() if tag.strip()],
+            reason,
+        )
+
+    measure_remote(project_root, base, commit, facts, unavailable)
+    return {**context, "facts": facts, "unavailable": unavailable}
+
+
+# Only completed-action wording counts as a claim. "ready to push" is not a
+# claim that anything was pushed, and past participles are what a completion
+# report actually uses.
+CLAIM_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = (
+    ("landed", "landed", re.compile(r"\b(?:landed|merged)\b", re.IGNORECASE)),
+    ("pushed", "pushed", re.compile(r"\bpushed\b", re.IGNORECASE)),
+    (
+        "released",
+        "release_run",
+        re.compile(
+            r"\breleased\b|\brelease\s+(?:was\s+)?(?:created|published|cut)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    ("tagged", "tags_remote", re.compile(r"\btagged\b", re.IGNORECASE)),
+)
+
+
+def fact_support(value: Any) -> bool | None:
+    """Whether one measured fact backs a claim. None stays unknown."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (list, dict, str)):
+        return bool(value)
+    return bool(value)
+
+
+# A sentence ends at punctuation followed by space, or at a line break. Version
+# numbers such as v9.9.9 must not split the sentence that quotes them.
+SENTENCE_END = re.compile(r"[.!?](?:\s|$)|\n")
+
+
+def claim_context(text: str, start: int, end: int) -> str:
+    left = 0
+    for boundary in SENTENCE_END.finditer(text, 0, start):
+        left = boundary.end()
+    boundary = SENTENCE_END.search(text, end)
+    right = boundary.start() + 1 if boundary is not None else len(text)
+    return " ".join(text[left:right].split())[:200]
+
+
+def latest_report_entry(job_id: str) -> str:
+    """The newest report entry, which is the one that made the claims."""
+    try:
+        raw = read_bounded_artifact(job_dir(job_id) / "report.md", MAX_REPORT_FILE)
+    except JobError:
+        return ""
+    text = raw.decode("utf-8", "replace")
+    index = text.rfind("\n# ")
+    return text[index + 1 :] if index >= 0 else text
+
+
+def claim_checks(
+    job_id: str, facts: dict[str, Any], unavailable: dict[str, str]
+) -> list[dict[str, Any]]:
+    """Compares what the worker said against what was measured.
+
+    Derived, not measured, which is why it stays out of `facts`.
+    """
+    text = latest_report_entry(job_id)
+    claims: list[dict[str, Any]] = []
+    for name, field, pattern in CLAIM_RULES:
+        match = pattern.search(text)
+        if match is None:
+            continue
+        support = fact_support(facts.get(field))
+        claims.append(
+            {
+                "claim": name,
+                "said": claim_context(text, match.start(), match.end()),
+                "field": field,
+                "measured": facts.get(field),
+                "reason": unavailable.get(field),
+                "verdict": "verified" if support else "claimed, not verified",
+            }
+        )
+    return claims
+
+
+def receipt_sentences(facts: dict[str, Any], claims: list[dict[str, Any]]) -> list[str]:
+    """The exact phrases foreground Scufris quotes, so no model writes them."""
+    sentences: list[str] = []
+    if facts.get("landed") is False:
+        sentences.append("not landed")
+    for claim in claims:
+        if claim["verdict"] != "verified":
+            sentences.append(f"{claim['claim']}: {claim['verdict']}")
+    return sentences
+
+
+def build_receipt(job_id: str, trigger: str) -> dict[str, Any]:
+    job = load_job(job_id, archived=True)
+    measurement = measure_workspace(receipt_subject(job))
+    claims = claim_checks(job_id, measurement["facts"], measurement["unavailable"])
+    return {
+        "job_id": job_id,
+        "root_job": job["root_job"],
+        "measured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "trigger": trigger,
+        **measurement,
+        "claims": claims,
+        "sentences": receipt_sentences(measurement["facts"], claims),
+    }
+
+
+def append_receipt(job_id: str, value: dict[str, Any]) -> None:
+    """Appends one record. History is the point: a later measurement must not
+    overwrite the done-time receipt that caught an unbacked claim."""
+    path = job_dir(job_id) / "receipts.jsonl"
+    line = json.dumps(value, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600
+    )
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise JobError("job artifact is not a regular file: receipts.jsonl")
+        write_all(descriptor, line)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    # An append-only file still needs a ceiling. Keep whole newest records.
+    if path.stat().st_size > MAX_RECEIPTS_FILE:
+        tail = path.read_bytes()[-MAX_RECEIPTS_FILE:]
+        _, separator, kept = tail.partition(b"\n")
+        atomic_write(path, kept if separator and kept else line, 0o600)
+
+
+def stored_receipts(job_id: str) -> list[dict[str, Any]]:
+    path = job_dir(job_id) / "receipts.jsonl"
+    if not path.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    for line in (
+        read_bounded_artifact(path, MAX_RECEIPTS_FILE)
+        .decode("utf-8", "replace")
+        .splitlines()
+    ):
+        if not line.strip():
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            records.append(value)
+    return records
+
+
+def latest_receipt(job_id: str) -> dict[str, Any] | None:
+    records = stored_receipts(job_id)
+    return records[-1] if records else None
+
+
+def record_receipt(job_id: str, trigger: str) -> dict[str, Any]:
+    """Measures and stores one receipt. Never raises into a caller that has
+    already changed the world; an unmeasurable receipt is still a receipt."""
+    try:
+        value = build_receipt(job_id, trigger)
+    except (JobError, OSError) as error:
+        value = {
+            "job_id": job_id,
+            "root_job": job_id,
+            "measured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "trigger": trigger,
+            "measured_job": job_id,
+            "workspace": None,
+            "project_root": None,
+            "base_branch": None,
+            "feature": None,
+            "commit": None,
+            "facts": {},
+            "claims": [],
+            "sentences": [],
+            "unavailable": {"receipt": str(error)},
+        }
+    with contextlib.suppress(JobError, OSError):
+        append_receipt(job_id, value)
+    return value
+
+
+def receipt(request: dict[str, Any]) -> dict[str, Any]:
+    validate_request(request, {"job_id"}, {"trigger"})
+    job_id = validate_job_id(request["job_id"])
+    trigger = request.get("trigger", "request")
+    if trigger not in RECEIPT_TRIGGERS:
+        raise JobError("invalid receipt trigger")
+    load_job(job_id, archived=True)
+    return record_receipt(job_id, trigger)
+
+
 def land(request: dict[str, Any]) -> dict[str, Any]:
     validate_request(request, {"job_id", "subject"}, {"remove_workspace"})
     job_id = validate_job_id(request["job_id"])
@@ -2707,6 +3266,8 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
             "subject": subject,
             "remove_workspace": remove_workspace,
             "revision": revision,
+            # Landing merges first, so removal never meets an unmerged branch.
+            "abandon": False,
         }
         root = {**root, "cleanup": intent}
         store_job(root)
@@ -2756,22 +3317,42 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
         "job_id": job_id,
         "landed": True,
         "workspace_removed": remove_workspace,
+        "receipt": record_receipt(job_id, "land"),
         **result,
     }
 
 
 def stop(request: dict[str, Any]) -> dict[str, Any]:
-    validate_request(request, {"job_id"}, {"remove_workspace"})
+    validate_request(request, {"job_id"}, {"remove_workspace", "abandon"})
     job_id = validate_job_id(request["job_id"])
     remove_workspace = request.get("remove_workspace", False)
     if not isinstance(remove_workspace, bool):
         raise JobError("remove_workspace must be true or false")
+    # Abandoning is the caller saying the work is not wanted. Without it an
+    # unmerged branch survives the stop, because unlanded work is not garbage.
+    abandon = request.get("abandon", False)
+    if not isinstance(abandon, bool):
+        raise JobError("abandon must be true or false")
+    if abandon and not remove_workspace:
+        raise JobError("abandon applies only to stop with remove_workspace")
     directory = job_dir(job_id)
     if not directory.exists() and not directory.is_symlink():
-        return {"job_id": job_id, "state": "stopped", "clean": True, "removed_jobs": []}
+        return {
+            "job_id": job_id,
+            "state": "stopped",
+            "clean": True,
+            "removed_jobs": [],
+            "receipt": None,
+        }
     selected = load_job(job_id, archived=True)
     if selected["archived_at"] is not None:
-        return {"job_id": job_id, "state": "stopped", "clean": True, "removed_jobs": []}
+        return {
+            "job_id": job_id,
+            "state": "stopped",
+            "clean": True,
+            "removed_jobs": [],
+            "receipt": latest_receipt(job_id),
+        }
     # Cleanup is workflow scoped. A descendant ID must never silently escalate
     # into stopping its parent's execution and workspace.
     if selected["job_id"] != selected["root_job"]:
@@ -2784,13 +3365,29 @@ def stop(request: dict[str, Any]) -> dict[str, Any]:
         "subject": None,
         "remove_workspace": remove_workspace,
         "revision": None,
+        "abandon": abandon,
     }
-    if root["cleanup"] is not None and root["cleanup"] != intent:
+    durable = root["cleanup"]
+    if (
+        durable is not None
+        and {
+            **durable,
+            "abandon": abandon,
+        }
+        != intent
+    ):
         raise JobError("a different cleanup operation is already durable")
+    # A refused removal leaves a durable stop intent behind. Re-deciding
+    # `abandon` after seeing why the branch was kept is the intended next
+    # step, so only the rest of the intent is held immutable.
     root = {**root, "cleanup": intent}
     store_job(root)
+    # Measured before cleanup. A stop that removes the workspace destroys the
+    # branch and worktree the receipt reports on, so afterwards there is
+    # nothing left to measure and nothing left to show the user.
+    value = record_receipt(job_id, "stop")
     result = cleanup_workflow(root)
-    return {"job_id": job_id, "state": "stopped", **result}
+    return {"job_id": job_id, "state": "stopped", "receipt": value, **result}
 
 
 def rotate_trusted_capability(job: dict[str, Any]) -> str:
@@ -2972,6 +3569,7 @@ def main() -> int:
         "failure": failure,
         "send": send,
         "inspect": inspect,
+        "receipt": receipt,
         "quick-review-target": quick_review_target,
         "review-target": review_target,
         "land": land,

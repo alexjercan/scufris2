@@ -52,6 +52,29 @@ Each worker report is chronological Markdown. Every entry starts with the exact
 status line as a heading and contains evidence for that event. Inspect the full
 report after a wake instead of treating it as only the latest worker snapshot.
 
+## Receipts
+
+A worker's report is prose. A receipt is measured. Say only what the receipt
+measured.
+
+Every terminal event carries a receipt, and `scufris_job_inspect`,
+`scufris_job_land`, and `scufris_job_stop` return one. It holds `facts`, a
+`claims` cross-check against what the worker wrote, and `sentences`, the exact
+words to repeat.
+
+- Quote `sentences` verbatim. Do not soften them, and do not reword them into
+  something that sounds better.
+- `false` is a measurement. `null` with an entry in `unavailable` is not: that
+  fact is unknown, and the reason says why. Never report an unknown as a no.
+- When `landed` is false, the sentence is "not landed". Use those words.
+- When a worker claims a push, a merge, or a release and no field backs it, the
+  words are "claimed, not verified". Report the claim and the verdict together.
+- Never repeat a worker's own claim about pushing, merging, tagging, or
+  releasing as though it happened. Nothing in Scufris pushes or releases.
+
+Landing is still explicit and never implied by `done`. A receipt that says the
+work landed is not permission to land the next one.
+
 Use `scufris_job_inspect` to recover bounded evidence after a wake or context
 compaction. After reacting to a wake, synthesize one useful short response with
 `scufris_final_response`; never end a wake turn with tools only.
@@ -73,7 +96,10 @@ descendant ID is refused. It ends that complete workflow graph, including
 reviewer descendants, and archives their durable records instead of deleting
 them, so each report and conversation stays readable. It removes Sprout
 worktrees only when you pass `remove_workspace`. Call it only when no graph
-result is still needed.
+result is still needed. Removal keeps a branch that was never merged: pass
+`abandon` only when the user has said to throw the work away. If a stop is
+refused because the branch is unmerged, say so and ask, rather than retrying
+with `abandon`.
 
 ## Optional workflow tools
 

@@ -9,6 +9,22 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Added
+
+- Job receipts: measured git, remote, and CI facts for one job, appended to
+  `receipts.jsonl` and returned by `land`, `stop`, and `inspect`. Scufris
+  measures on every terminal event, so a completion claim about landing,
+  pushing, tagging, or releasing is checked instead of repeated. A fact that
+  could not be measured is reported as unknown with its reason, never as a no.
+  An unbacked worker claim is said as "claimed, not verified", and unlanded
+  work is said as "not landed".
+
+### Changed
+
+- Stopping a job with `remove_workspace` now keeps a branch that was never
+  merged. Deleting one needs an explicit `abandon`, so unlanded work is no
+  longer lost to a cleanup.
+
 ## [2.1.7] - 2026-09-07
 
 ### Changed

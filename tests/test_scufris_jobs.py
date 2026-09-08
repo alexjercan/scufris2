@@ -801,42 +801,6 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         self.assertNotIn("morning", context["markdown"])
         self.assertNotIn("Read web/data", context["markdown"])
 
-    def test_a_briefing_source_declares_what_it_may_do(self) -> None:
-        menu = (self.project / ".scufris.toml").read_text()
-        (self.project / ".scufris.toml").write_text(
-            menu + "\n[briefings.morning]\n"
-            'description = "Report the morning."\n'
-            'keywords = { harness = "claude" }\n'
-            'guidance = "Read the project."\n'
-            "\n[briefings.nightly]\n"
-            'description = "Review the day and fix what is worth fixing."\n'
-            'keywords = { harness = "claude", policy = "repair" }\n'
-            'guidance = "Review today\'s commits."\n'
-        )
-        # A source that says nothing gets the narrow rights, and the file is
-        # what raises them.
-        morning = self.call("briefings", {"profile": "morning"})["result"]["sources"]
-        self.assertEqual(morning[0]["policy"], "read")
-        nightly = self.call("briefings", {"profile": "nightly"})["result"]["sources"]
-        self.assertEqual(nightly[0]["policy"], "repair")
-
-    def test_a_policy_nobody_recognises_is_refused_and_not_narrowed(self) -> None:
-        # A source that meant `repair` and wrote `repairs` would otherwise run
-        # every night as a reader and report that it fixed nothing.
-        menu = (self.project / ".scufris.toml").read_text()
-        (self.project / ".scufris.toml").write_text(
-            menu + "\n[briefings.nightly]\n"
-            'description = "Review the day."\n'
-            'keywords = { policy = "repairs" }\n'
-            'guidance = "Review today\'s commits."\n'
-        )
-        listed = self.call("briefings", {"profile": "nightly"})["result"]
-        self.assertEqual(listed["sources"], [])
-        self.assertEqual(len(listed["diagnostics"]), 1)
-        said = listed["diagnostics"][0]["diagnostic"]
-        self.assertIn("unknown policy", said)
-        self.assertIn("read, review, repair", said)
-
     def test_a_broken_briefing_table_costs_the_briefing_and_not_the_menu(self) -> None:
         menu = (self.project / ".scufris.toml").read_text()
         (self.project / ".scufris.toml").write_text(

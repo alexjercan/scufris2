@@ -185,4 +185,54 @@ of this task.
   and a second run record, for something the profile machinery already
   expresses. A job buys a steerable tmux session that nobody is awake to steer.
 - **A read-only nightly source** (`20260908-140011`). Reports candidates it is
-  not allowed to act on, which is half a night.
+  not allowed to act on, which is half a night. **Reversed on 2026-09-08 after
+  the first real night; see below.** The half that was missing was not the
+  fixing, it was the deciding, and Scufris does that in the morning.
+
+## Settled, 2026-09-08, after the first night
+
+The policy ladder is gone. There is one way a source runs: every tool its
+harness has, writing ones included, and its guidance is the whole of what it
+may do. `read` never meant read - `bash` was in that tool list too - so the
+names described an intention while the flags described something else. The
+prompt now says the true thing in as many words, which a model can act on and
+a flag never was.
+
+The nightly reviews and reports. It does not fix. Not because it cannot, but
+because a briefing source is owned by a schedule: it has no job record, no
+tmux pane, no receipts, and nobody awake to see it, steer it or cancel it. Its
+commits would be the only unverifiable ones in the system. So the night
+produces findings, the morning puts them in front of Alex as numbered offers,
+and a fix he picks is spawned as a job in a **sprout** worktree - never on
+master - which is a branch he reads before it lands and a pane he can watch.
+
+### What the first night taught
+
+The 2026-09-08 nightly grouped 24 commits into 9 ranges correctly, chose
+`--play` per group with reasons, and scoped the two oversized groups under the
+2000-line refusal. Then it dispatched G1's lanes and answered with one line of
+prose: "I'll wait for the two remaining G1 lanes." A source is a one-shot
+`--print` run. The process ends when the model stops writing, so the lanes it
+was waiting on died with it. `parse_contribution` refused the prose, the second
+asking fired, and the run was recorded `stale` with 1675.8 seconds spent.
+
+Nova's guidance now opens with the one-turn contract: never stop to wait, every
+lane must have answered before the envelope is written, the envelope is the only
+answer, and a partial report naming the groups it did not reach is a good night.
+
+The append-as-you-go task paid for itself on that same night:
+`nova-protocol/tasks/20260908-230019/TASK.md` holds the whole grouping and a
+MAJOR three lanes found independently, even though the envelope came back
+empty. Keep that instruction first in any nightly guidance.
+
+### Still open
+
+- The one-turn contract is a property of the harness, not of any project, so
+  every source in every profile needs it. It is written in nova's guidance
+  today. It belongs in `contribution_prompt` beside the envelope shape, which
+  is already this program's business.
+- `manifest.json` carries `sources: []` until a run finishes, so a briefing in
+  flight is invisible. Related: `20260908-103406`, the conversation HUD.
+- `attempt` discards all output on `TimeoutExpired`. A source that ran for its
+  whole deadline and wrote a good answer slowly leaves nothing behind.
+- `Linger=no`. A logout mid-night still kills the run.

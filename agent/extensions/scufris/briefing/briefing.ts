@@ -222,6 +222,7 @@ export default function briefing(pi: ExtensionAPI): void {
         "Name the profile you were woken for. Without one this reads the single run for the day that is waiting to be written up, and refuses when two are.",
         "The run carries its offers already numbered. End the briefing with those numbers exactly, and add none of your own.",
         "When Alex picks by number, read the run again and act on the offer that number belongs to. Never act on a number the run does not carry, and never invent a step the list does not have.",
+        "A source only reports. An offer that wants a file changed is a job you spawn with scufris_job_spawn, in a sprout workspace and never on the project itself, so the work is a branch Alex reads before it lands and a job he can see, steer and cancel.",
       ],
       parameters: Type.Object(
         {

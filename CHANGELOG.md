@@ -9,6 +9,24 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Removed
+
+- A briefing source no longer declares a `policy`. Every source runs with every
+  tool its harness has. The ladder read as a guarantee it could not make:
+  `bash` was in the reader's list as well as the repairer's, so `read` never
+  meant read, and the names described an intention while the flags described
+  something else. A source that changes files also has nothing behind it -
+  receipts are attached to jobs, which a request owns and a person can land,
+  and a schedule owns a source. A `policy` still written in a `.scufris.toml`
+  is an unread keyword and costs nothing.
+
+### Changed
+
+- A source is told plainly that it holds every tool, that nothing is withheld
+  from it and nothing is watching, and that its guidance is the whole of its
+  permission. A boundary a model can read is worth more than a flag that
+  suggested one it never had.
+
 ## [2.3.0] - 2026-09-08
 
 ### Added

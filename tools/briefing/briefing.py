@@ -91,31 +91,6 @@ REPAIR_FLOOR = 45.0
 REPAIR_THINKING = "low"
 MAX_QUOTED = 32 * 1024
 
-# What a source may do, as a name rather than a tool list. The flags belong to
-# the harness and the same guidance should be able to run under either one, so
-# a source declares the intent and this maps it.
-#
-# `read` is what a source gets unless it says otherwise, and it is the
-# tightest: an allowlist, no subagents, and no skills or slash commands. It is
-# not a sandbox. A source that runs a refresh command runs it with the owner's
-# own hands, exactly as the review workspace does, and the project's guidance
-# is what keeps it honest.
-#
-# `review` opens the harness up and keeps only the edit tools shut. That is
-# what a review panel needs: it dispatches read-only lanes and adjudicates
-# them, changing nothing. A source cannot reach its own review skill under
-# `read`, because a skill is invoked as a command.
-#
-# `repair` shuts nothing. A source that reviews the day and fixes what it
-# found is asking for this, and it is the one step where a briefing writes.
-POLICIES = ("read", "review", "repair")
-DEFAULT_POLICY = "read"
-
-PI_TOOLS = "read,grep,find,ls,bash"
-PI_DENIED_TOOLS = "edit,write"
-CLAUDE_TOOLS = "Read,Glob,Grep,Bash"
-CLAUDE_DENIED_TOOLS = "Edit,Write,NotebookEdit"
-
 JOBS_HELPER = Path(__file__).resolve().parents[1] / "jobs" / "scufris-jobs"
 
 
@@ -400,8 +375,13 @@ def contribution_prompt(
     return f"""# Scufris {profile} briefing for {date}
 
 You are one source in the {profile} briefing. Report on this source only, from
-data you read during this run. Change nothing and run nothing that costs
-anything, unless the guidance below names it, and then only what it names.
+data you read during this run.
+
+You have every tool this harness has, including the ones that write. Nothing is
+withheld from you and nothing is watching. What you may do is what the guidance
+below tells you to do, and nothing else: change no file, stage nothing, commit
+nothing and run nothing that costs anything unless that guidance names it, and
+then only what it names. Read the guidance as the whole of your permission.
 
 ## Source
 
@@ -519,18 +499,26 @@ def harness_argv(
     """The one-shot command for a source.
 
     Not a job. A job is a tmux pane bound to an owner session that can be
-    steered and landed; a morning source answers once and is gone, so it keeps
-    no session and leaves nothing to recover.
+    steered and landed; a source answers once and is gone, so it keeps no
+    session and leaves nothing to recover.
 
-    Both harnesses run without asking. A source is answering a question this
-    program put to it, in its own project, with nobody watching, so a prompt
-    it cannot answer is the same as a refusal. `claude` is given
-    `bypassPermissions` to match `pi --approve`: under `dontAsk` its shell
-    runs sandboxed, and a source that needed `gh` or `python3` reported the
-    denial instead of the data. What a source may reach is decided by the
-    policy it declared and by its own guidance, not by a sandbox it cannot see.
+    A source runs with the owner's own hands. Every tool the harness has is
+    present, `claude` is given `bypassPermissions` and `pi` is given
+    `--approve`, and nothing here narrows that. A source is answering a
+    question this program put to it, in its own project, with nobody watching,
+    so a prompt it cannot answer is the same as a refusal: under a sandbox,
+    sources that needed `gh` or `python3` reported the denial instead of the
+    data.
+
+    There was a tool allowlist here once, and it was never the thing it looked
+    like. `bash` was always in it, so a source that meant to write could always
+    write, and the list only decided how awkwardly. What a source may do is
+    what its guidance tells it to do. That is stated in the prompt, where the
+    source can read it, rather than implied by flags it cannot see.
+
+    The second asking is the exception, and it is a real one: it is handed the
+    source's own answer to say again correctly, so it is given no tools at all.
     """
-    policy = declared_policy(source)
     if source["harness"] == "pi":
         return [
             "pi",
@@ -542,7 +530,7 @@ def harness_argv(
             source["model"],
             "--thinking",
             source["thinking"] if tools else REPAIR_THINKING,
-            *(pi_policy_argv(policy) if tools else ["--no-tools"]),
+            *([] if tools else ["--no-tools"]),
             prompt,
         ]
     return [
@@ -554,59 +542,8 @@ def harness_argv(
         source["thinking"] if tools else REPAIR_THINKING,
         "--permission-mode",
         "bypassPermissions",
-        *(
-            claude_policy_argv(policy)
-            if tools
-            else ["--tools", "", "--disable-slash-commands"]
-        ),
+        *([] if tools else ["--tools", "", "--disable-slash-commands"]),
         prompt,
-    ]
-
-
-def declared_policy(source: dict[str, Any]) -> str:
-    """What this source said it may do, or the tightest thing it could mean.
-
-    The reader refuses an unknown name by then, so reaching here with one means
-    a source record built some other way. It reads as `read`: the failure of a
-    policy nobody recognises has to be the narrow rights, never the wide ones.
-    """
-    said = source.get("policy")
-    return said if said in POLICIES else DEFAULT_POLICY
-
-
-def pi_policy_argv(policy: str) -> list[str]:
-    """`pi` flags for a policy.
-
-    `read` is an allowlist and names what may run. The two wider steps are
-    denylists instead: a review panel reaches for whatever its skill needs, and
-    naming that here would mean this file guessing at another project's tools
-    and quietly starving the ones it did not think of.
-    """
-    if policy == "repair":
-        return []
-    if policy == "review":
-        return ["--exclude-tools", PI_DENIED_TOOLS]
-    return ["--tools", PI_TOOLS, "--no-skills"]
-
-
-def claude_policy_argv(policy: str) -> list[str]:
-    """`claude` flags for a policy.
-
-    `Task` is denied under `read` and allowed above it, because the review
-    lanes both projects' review skills dispatch are subagents. Slash commands
-    go with it: a skill is invoked as a command, so a policy that allows the
-    lanes and forbids the command allows nothing.
-    """
-    if policy == "repair":
-        return []
-    if policy == "review":
-        return ["--disallowed-tools", CLAUDE_DENIED_TOOLS]
-    return [
-        "--tools",
-        CLAUDE_TOOLS,
-        "--disallowed-tools",
-        f"{CLAUDE_DENIED_TOOLS},Task",
-        "--disable-slash-commands",
     ]
 
 

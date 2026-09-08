@@ -314,26 +314,59 @@ class Command(unittest.TestCase):
         self.assertEqual(argv[0], "pi")
         self.assertIn("--print", argv)
         self.assertIn("--no-session", argv)
+        self.assertIn("--no-extensions", argv)
         self.assertEqual(argv[-1], "the prompt")
-        tools = set(argv[argv.index("--tools") + 1].split(","))
-        self.assertEqual(tools & {"edit", "write"}, set())
 
-    def test_the_claude_harness_is_denied_the_edit_tools(self) -> None:
-        argv = briefing.harness_argv(
-            {
-                "project": "personal/seedzero",
-                "root": "/tmp",
-                "harness": "claude",
-                "model": "opus",
-                "thinking": "high",
-            },
-            "the prompt",
+    def test_a_source_runs_with_every_tool_its_harness_has(self) -> None:
+        # There was an allowlist here and it was never what it looked like:
+        # `bash` was always in it, so a source that meant to write could
+        # always write. What a source may do is what its guidance says, and
+        # that is in the prompt where the source can read it.
+        for harness in ("pi", "claude"):
+            with self.subTest(harness=harness):
+                argv = briefing.harness_argv(
+                    {
+                        "project": "personal/seedzero",
+                        "root": "/tmp",
+                        "harness": harness,
+                        "model": "opus",
+                        "thinking": "high",
+                    },
+                    "the prompt",
+                )
+                for withheld in (
+                    "--tools",
+                    "--disallowed-tools",
+                    "--exclude-tools",
+                    "--no-tools",
+                    "--no-skills",
+                    "--disable-slash-commands",
+                ):
+                    self.assertNotIn(withheld, argv)
+                self.assertEqual(argv[-1], "the prompt")
+
+    def test_the_second_asking_is_still_given_no_tools(self) -> None:
+        # The repair is handed the source's own answer to say again
+        # correctly. It reads nothing and runs nothing, and opening the tools
+        # up for the first asking must not open them here.
+        source = {
+            "project": "personal/seedzero",
+            "root": "/tmp",
+            "harness": "pi",
+            "model": "opus",
+            "thinking": "high",
+        }
+        pi_argv = briefing.harness_argv(source, "again", tools=False)
+        self.assertIn("--no-tools", pi_argv)
+        claude_argv = briefing.harness_argv(
+            {**source, "harness": "claude"}, "again", tools=False
         )
-        self.assertEqual(argv[0], "claude")
-        self.assertIn("--print", argv)
-        denied = set(argv[argv.index("--disallowed-tools") + 1].split(","))
-        self.assertIn("Edit", denied)
-        self.assertIn("Write", denied)
+        self.assertEqual(claude_argv[claude_argv.index("--tools") + 1], "")
+        self.assertIn("--disable-slash-commands", claude_argv)
+        # And it is asked cheaply, whatever the source usually costs.
+        self.assertEqual(
+            claude_argv[claude_argv.index("--effort") + 1], briefing.REPAIR_THINKING
+        )
 
     def test_both_harnesses_answer_without_asking_anyone(self) -> None:
         # Nobody is watching a source run, so a question it cannot ask is a
@@ -369,8 +402,12 @@ class Command(unittest.TestCase):
         self.assertIn("/home/x/the-den", prompt)
         self.assertIn("one fenced `json` block", prompt)
         self.assertIn("Never estimate a number you", prompt)
-        # A source reads unless its own project asked it for something more.
-        self.assertIn("unless the guidance below names it", prompt)
+        # Every tool is present, so the prompt is where the limit lives. A
+        # source is told plainly that its guidance is the whole of what it
+        # may do, because nothing else stops it.
+        self.assertIn("every tool this harness has", prompt)
+        self.assertIn("unless that guidance names it", prompt)
+        self.assertIn("the whole of your permission", prompt)
         # A limit the runner enforces is a limit the source is told. A source
         # that wrote a 227 character headline lost a whole good answer to one
         # it was never given.
@@ -1494,110 +1531,6 @@ class OffersPage(unittest.TestCase):
         self.assertIn("<em>ends</em>", drawn)
         self.assertIn("&lt;b&gt;deprecated&lt;/b&gt;", drawn)
         self.assertNotIn("<b>", drawn)
-
-
-class Policy(unittest.TestCase):
-    """What a source declared it may do, as flags for its harness."""
-
-    def argv(self, harness: str, policy: str | None = None, **rest: object):
-        source = {
-            "project": "personal/nova-protocol",
-            "root": "/tmp",
-            "harness": harness,
-            "model": "opus",
-            "thinking": "high",
-            **({} if policy is None else {"policy": policy}),
-            **rest,
-        }
-        return briefing.harness_argv(source, "the prompt")
-
-    def flag(self, argv: list[str], name: str) -> str | None:
-        return argv[argv.index(name) + 1] if name in argv else None
-
-    def test_a_source_that_declares_nothing_reads(self) -> None:
-        # The default has to be the narrow rights. A source written before
-        # policies existed says nothing, and it must keep the tools it had.
-        for harness in ("pi", "claude"):
-            with self.subTest(harness=harness):
-                self.assertEqual(self.argv(harness), self.argv(harness, "read"))
-
-    def test_reading_denies_the_edit_tools_and_the_lanes(self) -> None:
-        claude = self.argv("claude", "read")
-        denied = set(self.flag(claude, "--disallowed-tools").split(","))
-        self.assertEqual(denied, {"Edit", "Write", "NotebookEdit", "Task"})
-        self.assertIn("--disable-slash-commands", claude)
-        allowed = set(self.flag(claude, "--tools").split(","))
-        self.assertEqual(allowed & {"Edit", "Write", "Task"}, set())
-
-        pi = self.argv("pi", "read")
-        self.assertIn("--no-skills", pi)
-        tools = set(self.flag(pi, "--tools").split(","))
-        self.assertEqual(tools & {"edit", "write"}, set())
-
-    def test_reviewing_keeps_the_lanes_and_shuts_the_edit_tools(self) -> None:
-        # A review panel dispatches read-only lanes and adjudicates them. It
-        # needs subagents and it needs the command that starts it, and it
-        # still must not be able to change anything.
-        claude = self.argv("claude", "review")
-        denied = set(self.flag(claude, "--disallowed-tools").split(","))
-        self.assertEqual(denied, {"Edit", "Write", "NotebookEdit"})
-        self.assertNotIn("Task", denied)
-        self.assertNotIn("--disable-slash-commands", claude)
-
-        pi = self.argv("pi", "review")
-        self.assertNotIn("--no-skills", pi)
-        self.assertEqual(
-            set(self.flag(pi, "--exclude-tools").split(",")), {"edit", "write"}
-        )
-
-    def test_reviewing_names_what_is_forbidden_and_not_what_is_allowed(self) -> None:
-        # A skill reaches for whatever it needs. An allowlist here would mean
-        # this file guessing at another project's tools and starving the ones
-        # it did not think of.
-        for harness in ("pi", "claude"):
-            with self.subTest(harness=harness):
-                self.assertIsNone(self.flag(self.argv(harness, "review"), "--tools"))
-
-    def test_repairing_shuts_nothing(self) -> None:
-        for harness in ("pi", "claude"):
-            with self.subTest(harness=harness):
-                argv = self.argv(harness, "repair")
-                for flag in (
-                    "--tools",
-                    "--disallowed-tools",
-                    "--exclude-tools",
-                    "--no-skills",
-                    "--disable-slash-commands",
-                ):
-                    self.assertNotIn(flag, argv)
-                self.assertEqual(argv[-1], "the prompt")
-
-    def test_a_policy_nobody_recognises_reads(self) -> None:
-        # The reader refuses an unknown name, so reaching here with one means a
-        # source record built some other way. Failing to the narrow rights is
-        # the only safe direction.
-        self.assertEqual(self.argv("claude", "repairs"), self.argv("claude", "read"))
-
-    def test_the_second_asking_carries_no_tools_whatever_the_policy(self) -> None:
-        # The repair reads nothing and runs nothing: it is given the source's
-        # own answer back. A `repair` policy does not make it able to write.
-        for policy in briefing.POLICIES:
-            with self.subTest(policy=policy):
-                source = {
-                    "project": "personal/nova-protocol",
-                    "root": "/tmp",
-                    "harness": "pi",
-                    "model": "opus",
-                    "thinking": "high",
-                    "policy": policy,
-                }
-                argv = briefing.harness_argv(source, "again", tools=False)
-                self.assertIn("--no-tools", argv)
-                claude = briefing.harness_argv(
-                    {**source, "harness": "claude"}, "again", tools=False
-                )
-                self.assertEqual(self.flag(claude, "--tools"), "")
-                self.assertIn("--disable-slash-commands", claude)
 
 
 class Bounds(unittest.TestCase):

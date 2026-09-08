@@ -122,11 +122,9 @@ keywords = { harness = "claude", model = "Opus", thinking = "medium" }
 guidance = """..."""  # what to read, what to report, what not to touch
 
 [briefings.nightly]
-description = "Review the day's commits and fix what is worth fixing."
-# policy is what this source may do: read (the default, reports only),
-# review (may also run a review panel), repair (may also change files)
-keywords = { harness = "claude", model = "Opus", policy = "repair" }
-guidance = """..."""
+description = "Review the day's commits and report what is worth fixing."
+keywords = { harness = "claude", model = "Opus", thinking = "xhigh" }
+guidance = """..."""  # a source holds every tool; its guidance is the limit
 ```
 
 The module supplies the `scufris-ctl`, service, remote surface gateway,

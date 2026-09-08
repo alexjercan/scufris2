@@ -204,16 +204,26 @@ review workspace does. The project's guidance is what keeps it honest.
 Both harnesses answer without asking on purpose. Nobody is watching a source
 run, so a question it cannot ask is a refusal. Under `claude`'s `dontAsk` the
 shell is sandboxed, and a source told to read CI or refresh its numbers spent
-its run reporting that `gh` or `python3` had been denied. The tool list and the
-project's guidance decide what a source may reach; a sandbox it cannot see
-decides nothing but whether the morning is empty.
+its run reporting that `gh` or `python3` had been denied. A sandbox it cannot
+see decides nothing but whether the morning is empty.
 
-A source is asked to change nothing and spend nothing unless its own guidance
-names it, and then only what it names. A project whose morning is worth a
-refresh says so in its own file: seedzero's briefing reads the channel through
-the API and writes the two data files it just read, under a stated cap on how
-many reads that may cost. What a source may spend is the project's decision,
-written where the rest of that project's intent lives.
+A source runs with every tool its harness has, the writing ones included, and
+nothing here narrows that. There was a tool allowlist once and it was never the
+thing it looked like: `bash` was always in it, so a source that meant to write
+could always write, and the list only decided how awkwardly. Guidance is the
+control, and the prompt says so in as many words - a source is told that it has
+everything, that nothing is watching, and that its guidance is the whole of its
+permission.
+
+That puts the decision where the intent already lives. A source is asked to
+change nothing and spend nothing unless its own guidance names it, and then only
+what it names. A project whose morning is worth a refresh says so in its own
+file: seedzero's briefing reads the channel through the API and writes the two
+data files it just read, under a stated cap on how many reads that may cost.
+
+The one exception is the second asking. A repair is handed the source's own
+answer to say again correctly, so it reads nothing and runs nothing and is given
+no tools at all.
 
 Every source starts at once unless the profile caps it with `parallel`. Each is
 bounded on its own at 900 seconds, and the whole run at 1800; both move with
@@ -222,34 +232,6 @@ profile's `sourceDeadline` and `deadline` set. A source is held to whichever is
 smaller, so raising one alone changes nothing. A second asking is bounded at 300
 by `SCUFRIS_BRIEFING_REPAIR_DEADLINE`, never past what its source has left. One
 project that hangs costs the run its own deadline and nothing else.
-
-## What a source may do
-
-A source declares a `policy` in its keywords. It is a name and not a tool list,
-because the flags belong to the harness and the same guidance should run under
-either one.
-
-| Policy   | Edit tools | Subagents and commands | For                                |
-| -------- | ---------- | ---------------------- | ---------------------------------- |
-| `read`   | no         | no                     | a source that reports what it read |
-| `review` | no         | yes                    | a source that runs a review panel  |
-| `repair` | yes        | yes                    | a source that fixes what it found  |
-
-`read` is the default, and a source that says nothing gets it. It is an
-allowlist; the two wider steps are denylists, because a review skill reaches for
-whatever it needs and an allowlist here would be this program guessing at
-another project's tools.
-
-`review` exists because a review panel dispatches read-only lanes and
-adjudicates them. It needs subagents, and it needs the command that starts it: a
-skill is invoked as a command, so a policy that allowed the lanes and forbade
-the command would allow nothing. It still cannot change anything.
-
-None of this is a sandbox. A source runs with the owner's own hands, exactly as
-the review workspace does, and the project's guidance is what keeps it honest.
-A policy the reader does not know is refused by name rather than narrowed to
-`read`, because a source that meant `repair` and wrote `repairs` would otherwise
-run every night as a reader and report that it fixed nothing.
 
 ## The run directory
 

@@ -38,7 +38,7 @@ struct ProtocolTests {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(hello))
                 as? [String: Any]
         )
-        #expect(object["v"] as? Int == 5)
+        #expect(object["v"] as? Int == 6)
         #expect(object["type"] as? String == "surface.hello")
         let surface = try #require(object["surface"] as? [String: Any])
         #expect(surface["id"] as? String == "ios-test")
@@ -102,7 +102,7 @@ struct ProtocolTests {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
                 as? [String: Any]
         )
-        #expect(object["v"] as? Int == 5)
+        #expect(object["v"] as? Int == 6)
         #expect(object["type"] as? String == "surface.message")
         #expect(object["attachments"] as? [String] == ["att_one", "att_two"])
     }
@@ -184,7 +184,7 @@ struct ProtocolTests {
             IncomingConversationMessage.self,
             from: data
         )
-        #expect(message.v == 5)
+        #expect(message.v == 6)
         #expect(message.role == .assistant)
         #expect(message.text == "Done.")
         #expect(message.details == "Passed.")

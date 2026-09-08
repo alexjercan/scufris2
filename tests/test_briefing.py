@@ -1546,7 +1546,9 @@ class Policy(unittest.TestCase):
 
         pi = self.argv("pi", "review")
         self.assertNotIn("--no-skills", pi)
-        self.assertEqual(set(self.flag(pi, "--exclude-tools").split(",")), {"edit", "write"})
+        self.assertEqual(
+            set(self.flag(pi, "--exclude-tools").split(",")), {"edit", "write"}
+        )
 
     def test_reviewing_names_what_is_forbidden_and_not_what_is_allowed(self) -> None:
         # A skill reaches for whatever it needs. An allowlist here would mean
@@ -1616,7 +1618,9 @@ class Bounds(unittest.TestCase):
         # Stated in the prompt and checked against the answer. A source told
         # it may make eight and refused at four would be refused for obeying.
         with mock.patch.dict(os.environ, {"SCUFRIS_BRIEFING_MAX_OFFERS": "8"}):
-            prompt = briefing.contribution_prompt(self.source(), "nightly", "2026-09-08")
+            prompt = briefing.contribution_prompt(
+                self.source(), "nightly", "2026-09-08"
+            )
             self.assertIn("at most 8 things", prompt)
             offers = [{"label": f"Fix {n}", "detail": "why"} for n in range(8)]
             self.assertEqual(len(briefing.parse_offers(offers)), 8)
@@ -1638,7 +1642,9 @@ class Bounds(unittest.TestCase):
 
     def test_the_body_bound_is_the_same_number_in_both_places(self) -> None:
         with mock.patch.dict(os.environ, {"SCUFRIS_BRIEFING_MAX_BODY": "40000"}):
-            prompt = briefing.contribution_prompt(self.source(), "nightly", "2026-09-08")
+            prompt = briefing.contribution_prompt(
+                self.source(), "nightly", "2026-09-08"
+            )
             self.assertIn("at most 40000 characters", prompt)
             envelope = {
                 "title": "Nova",
@@ -1668,11 +1674,11 @@ class Bounds(unittest.TestCase):
         # A typo in a unit file must not stop the morning. It reads as if the
         # deployment had said nothing.
         for said in ("", "eight", "-3", "0"):
-            with self.subTest(said=said):
-                with mock.patch.dict(
-                    os.environ, {"SCUFRIS_BRIEFING_MAX_OFFERS": said}
-                ):
-                    self.assertEqual(briefing.max_offers(), briefing.MAX_OFFERS)
+            with (
+                self.subTest(said=said),
+                mock.patch.dict(os.environ, {"SCUFRIS_BRIEFING_MAX_OFFERS": said}),
+            ):
+                self.assertEqual(briefing.max_offers(), briefing.MAX_OFFERS)
 
 
 if __name__ == "__main__":

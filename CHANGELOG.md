@@ -9,6 +9,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-09-08
+
 ### Added
 
 - A briefing source declares a `policy` saying what it may do: `read`, the
@@ -27,7 +29,6 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   whichever is smaller, so a profile that wants a long source raises both.
   Anything unreadable reads as the default: a briefing that refuses to run over
   a typo in a unit file is worse than one held to its own numbers.
-
 - A briefing ends with a numbered list of things to do next. Each source may
   offer at most three, each a short label saying what to do and a detail saying
   what and why, and collection merges them across sources into one list
@@ -715,7 +716,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/alexjercan/scufris2/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/alexjercan/scufris2/compare/v2.1.7...v2.2.0
 [2.1.7]: https://github.com/alexjercan/scufris2/compare/v2.1.6...v2.1.7
 [2.1.6]: https://github.com/alexjercan/scufris2/compare/v2.1.5...v2.1.6

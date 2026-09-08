@@ -4,7 +4,6 @@
 - PRIORITY: 90
 - TAGS: workflow
 
-
 ## Goal
 
 Briefings become a scheduler. More than one profile runs on its own time,

@@ -370,14 +370,14 @@ Deterministic checks that would close it, all cheap and already available:
   `gh run list --workflow release.yml --commit <sha> --json status,conclusion,url`;
   `tools/release/check_versions.py` for the version match.
 - CI on master: `gh run list --branch master --commit <sha> --json
-  conclusion,url`. The scufris2 morning briefing already runs this shape of
+conclusion,url`. The scufris2 morning briefing already runs this shape of
   command (`.scufris.toml`, `briefings.morning`), so the pattern is proven.
 
 ### 3. What exists toward an agent board
 
 - Durable state: `job.json`, append-only `status`, `report.md`, generations,
   exact tmux identity (`docs/src/dev/jobs.md`). `scripts/scufris-jobs all
-  --json` lists ID, STATE, LIVE, PROJECT, WORKSPACE, WORKER, SUMMARY
+--json` lists ID, STATE, LIVE, PROJECT, WORKSPACE, WORKER, SUMMARY
   (`scripts/scufris-jobs:20-28`), read-only and fail-closed (tasks
   `20260821-190123`, `20260823-160757`). `scufris_job_list` gives the model
   state, summary, and `window_alive` (`orchestration.ts:1150-1178`). The
@@ -727,4 +727,4 @@ means a new slot geometry, for example stacking two per edge.
 3. Verify agent, `[agents.verify]`, quoting receipts.
 4. HUD: `receipts` and `offers` response fields, jobs rows in the
    conversation window.
-Dropped: named routines, per-project trust flag, jobs widget as first UI.
+   Dropped: named routines, per-project trust flag, jobs widget as first UI.

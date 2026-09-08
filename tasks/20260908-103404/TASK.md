@@ -4,7 +4,6 @@
 - PRIORITY: 80
 - TAGS: workflow
 
-
 ## Goal
 
 After every job reports `done`, a short read-only verify run checks that

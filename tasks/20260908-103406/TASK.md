@@ -4,7 +4,6 @@
 - PRIORITY: 70
 - TAGS: desktop,ux
 
-
 ## Goal
 
 The conversation HUD shows what the helper measured and what Alex can start,

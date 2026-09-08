@@ -1,9 +1,8 @@
 # Add landing receipts: measured git, remote, and CI facts for every job
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: workflow
-
 
 ## Goal
 
@@ -46,7 +45,10 @@ worker boundary: no new worker commands, workers keep the shell they have.
 - Return the receipt from `land`, `stop`, and `inspect`. Show it in
   `scripts/scufris-jobs` output.
 - Stamp `HEAD`, branch, and `git status --porcelain` into the status line
-  at report time so a report is anchored to a revision.
+  at report time so a report is anchored to a revision. Dropped by decision;
+  see `PLAN.md`. The receipt records `head`, `branch`, and `dirty` when the
+  terminal event arrives, so the fact survives without widening a durable
+  format that four functions parse.
 - Foreground policy: quote receipt fields verbatim. A worker claim of push,
   merge, or release with no matching field is said as "claimed, not
   verified". "Not landed" is the sentence when the receipt says so.

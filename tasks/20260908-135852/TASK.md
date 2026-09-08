@@ -1,8 +1,8 @@
 # Add an unprompted wake ingress so a process outside the agent can reach the foreground
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
-- TAGS: workflow,service
+- TAGS: workflow, service
 
 ## Goal
 

@@ -5,7 +5,6 @@
   den,
   briefing,
   projectRoots ? ["~/personal" "~/work" "~/third-party"],
-  briefingTime ? "08:00",
 }: let
   extensionArgs = [
     "--extension"
@@ -40,11 +39,6 @@ in
     text = ''
       if [[ -z "''${SCUFRIS_PROJECT_ROOTS+x}" ]]; then
         export SCUFRIS_PROJECT_ROOTS=${pkgs.lib.escapeShellArg (builtins.toJSON projectRoots)}
-      fi
-      # The morning the briefing extension arms its one timer for. `off` is a
-      # deployment that wants no unprompted briefing at all.
-      if [[ -z "''${SCUFRIS_BRIEFING_TIME+x}" ]]; then
-        export SCUFRIS_BRIEFING_TIME=${pkgs.lib.escapeShellArg briefingTime}
       fi
       export SCUFRIS_ROLE=orchestrator
 

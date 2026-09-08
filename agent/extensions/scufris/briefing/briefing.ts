@@ -6,13 +6,7 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { toolPath, toolResult } from "../shared/runtime.ts";
-import {
-  decide,
-  localDate,
-  parseSchedule,
-  untilTomorrow,
-  type RunState,
-} from "./schedule.ts";
+import { DEFAULT_PROFILE, localDate, type RunState } from "./run.ts";
 
 const helperPath = toolPath("briefing/cli.py", import.meta.url);
 
@@ -30,6 +24,14 @@ interface Manifest {
   state: RunState;
   sources: Array<{ project: string; status: string; headline: string }>;
   diagnostics: Array<{ project: string; diagnostic: string }>;
+}
+
+/** A run that was gathered and whose prose was never written. */
+interface Pending {
+  date: string;
+  profile: string;
+  sources: number;
+  message: string;
 }
 
 function collectTimeout(): number {
@@ -94,22 +96,13 @@ export async function runHelper<T>(
   });
 }
 
-export function wakeMessage(manifest: Manifest): string {
-  const answered = manifest.sources.filter(
-    (source) => source.status !== "failed",
-  ).length;
-  const failed = manifest.sources.length - answered;
-  const missing = failed ? `, ${failed} could not answer` : "";
-  return `The ${manifest.profile} briefing for ${manifest.date} is collected: ${answered} source${answered === 1 ? "" : "s"} answered${missing}. Read it with scufris_briefing_show, then write the briefing yourself: one short piece in your own voice that says what today needs, built from what the sources actually reported. Do not read the sources out one after another, and claim nothing none of them measured. Name any source that could not answer. Call scufris_briefing_publish with that prose, then tell the user the same briefing in the same words.`;
-}
-
 export default function briefing(pi: ExtensionAPI): void {
   if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
 
-  // One timer, re-armed after each decision. Nothing here polls: between the
-  // morning and the next one this extension holds a single pending timeout and
-  // no open handles of its own.
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  // No timer and nothing that polls. A profile's schedule is a systemd timer
+  // that collects out of process and wakes the conversation through the
+  // control socket; the one thing left here is a single file read when a
+  // session opens, for a run gathered while no agent was connected.
   let extensionContext: ExtensionContext | undefined;
   let running = false;
   let stopped = false;
@@ -118,120 +111,52 @@ export default function briefing(pi: ExtensionAPI): void {
     if (extensionContext?.hasUI) extensionContext.ui.notify(message, level);
   };
 
-  const profile = () => process.env.SCUFRIS_BRIEFING_PROFILE || "morning";
-
-  const runState = async (date: string): Promise<RunState> => {
-    const answer = await runHelper<{ state: RunState }>([
-      "state",
+  /** Every run for a date that is gathered and still needs its prose. */
+  const pending = async (date: string): Promise<Pending[]> => {
+    const answer = await runHelper<{ runs: Pending[] }>([
+      "pending",
       "--date",
       date,
       "--json",
     ]);
-    return answer.state;
+    return answer.runs;
   };
 
-  const collect = async (date: string): Promise<Manifest> =>
-    await runHelper<Manifest>(
-      ["collect", "--date", date, "--profile", profile(), "--json"],
-      { timeoutMs: collectTimeout() },
-    );
-
-  const wake = (manifest: Manifest) => {
+  /** Ask for the writing, in the helper's own words.
+   *
+   * The message is the helper's because the timer sends the same one over the
+   * control socket. A briefing asked for by hand and one the clock asked for
+   * must be asked for identically, and two copies of that prose would drift.
+   */
+  const wake = (run: Pending) => {
+    if (stopped) return;
     pi.sendMessage(
       {
         customType: BRIEFING_WAKE,
-        content: wakeMessage(manifest),
+        content: run.message,
         display: true,
         details: {
-          date: manifest.date,
-          profile: manifest.profile,
-          sources: manifest.sources.length,
+          date: run.date,
+          profile: run.profile,
+          sources: run.sources,
         },
       },
       { deliverAs: "followUp", triggerTurn: true },
     );
   };
 
-  const arm = (delayMs: number) => {
-    if (timer !== undefined) clearTimeout(timer);
-    timer = setTimeout(() => {
-      timer = undefined;
-      void tick();
-    }, delayMs);
-  };
-
-  /** Put the day's timer back when a run of its own consumed it.
+  /** Ask for anything gathered while nothing was listening.
    *
-   * A briefing asked for by hand can be running when the morning's timer
-   * fires. That firing finds a run already going and returns, which spends the
-   * one timer this extension holds. Without this the day would stop advancing
-   * until the next session.
+   * A collection whose wake was refused leaves its run `collected`, so this is
+   * the fallback that keeps a briefing gathered while the agent was down. It
+   * is one read at session start and never repeats.
    */
-  const keepTheDayGoing = () => {
-    if (stopped || timer !== undefined) return;
-    const setting = parseSchedule(process.env.SCUFRIS_BRIEFING_TIME);
-    if (setting.kind === "at") arm(untilTomorrow(new Date(), setting));
-  };
-
-  /** Decide what today needs and do that one thing.
-   *
-   * Every path ends by asking again, so the day advances whether the briefing
-   * was delivered, gathered and left, or never collected at all.
-   */
-  const tick = async (): Promise<void> => {
-    if (stopped || running) return;
-    const setting = parseSchedule(process.env.SCUFRIS_BRIEFING_TIME);
-    if (setting.kind === "off") return;
-    if (setting.kind === "invalid") {
-      notify(
-        `SCUFRIS_BRIEFING_TIME is not a time of day: ${setting.raw}. No briefing is scheduled.`,
-        "error",
-      );
-      return;
-    }
-    const now = new Date();
-    const date = localDate(now);
-    let next;
+  const readWhatIsWaiting = async (): Promise<void> => {
     try {
-      next = decide(now, setting, await runState(date));
+      for (const run of await pending(localDate(new Date()))) wake(run);
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error), "error");
-      return;
     }
-    if (next.do === "wait") {
-      arm(next.delayMs);
-      return;
-    }
-    if (next.do === "publish") {
-      // Gathered, and its prose never written. The sources already answered,
-      // so this asks for the writing and not for the morning again.
-      try {
-        const run = await runHelper<{ manifest: Manifest }>([
-          "show",
-          "--date",
-          date,
-          "--json",
-        ]);
-        if (run.manifest.sources.length > 0) wake(run.manifest);
-      } catch (error) {
-        notify(error instanceof Error ? error.message : String(error), "error");
-      }
-      arm(untilTomorrow(new Date(), setting));
-      return;
-    }
-    running = true;
-    try {
-      const manifest = await collect(date);
-      // A morning nothing declared is not an event. Waking the foreground to
-      // say that no project asked for anything would be the only noise the
-      // briefing ever made.
-      if (manifest.sources.length > 0) wake(manifest);
-    } catch (error) {
-      notify(error instanceof Error ? error.message : String(error), "error");
-    } finally {
-      running = false;
-    }
-    arm(untilTomorrow(new Date(), setting));
   };
 
   pi.registerTool(
@@ -242,7 +167,7 @@ export default function briefing(pi: ExtensionAPI): void {
         "Ask every project that declares this briefing for its contribution. Returns as soon as the run starts; the finished run arrives as a follow-up.",
       promptSnippet: "Collect the briefing from every configured project",
       promptGuidelines: [
-        "Use this when the user asks for a briefing now. The scheduled morning run needs no tool call.",
+        "Use this when the user asks for a briefing now. A scheduled briefing needs no tool call: its own timer collects it and wakes you.",
         "It returns immediately. Do not wait for it; the collected run wakes you when it is ready.",
       ],
       parameters: Type.Object(
@@ -256,15 +181,22 @@ export default function briefing(pi: ExtensionAPI): void {
             reason: "a run is already going",
           });
         const date = localDate(new Date());
-        const wanted = params.profile ?? profile();
+        const wanted = params.profile ?? DEFAULT_PROFILE;
         running = true;
         void (async () => {
           try {
-            const manifest = await runHelper<Manifest>(
+            await runHelper<Manifest>(
               ["collect", "--date", date, "--profile", wanted, "--json"],
               { timeoutMs: collectTimeout() },
             );
-            wake(manifest);
+            // A briefing nothing declared is not an event, and the helper
+            // leaves such a run out of what is pending. Waking the foreground
+            // to say that no project asked for anything would be the only
+            // noise the briefing ever made.
+            const waiting = (await pending(date)).find(
+              (run) => run.profile === wanted,
+            );
+            if (waiting) wake(waiting);
           } catch (error) {
             notify(
               error instanceof Error ? error.message : String(error),
@@ -272,7 +204,6 @@ export default function briefing(pi: ExtensionAPI): void {
             );
           } finally {
             running = false;
-            keepTheDayGoing();
           }
         })();
         return toolResult({ started: true, date, profile: wanted });
@@ -287,13 +218,20 @@ export default function briefing(pi: ExtensionAPI): void {
       description:
         "Read one briefing run: every source's contribution, the prose if it has been written, and any project that could not answer.",
       promptSnippet: "Read the collected briefing for a day",
+      promptGuidelines: [
+        "Name the profile you were woken for. Without one this reads the single run for the day that is waiting to be written up, and refuses when two are.",
+      ],
       parameters: Type.Object(
-        { date: Type.Optional(Type.String({ pattern: DATE })) },
+        {
+          date: Type.Optional(Type.String({ pattern: DATE })),
+          profile: Type.Optional(Type.String({ pattern: PROFILE })),
+        },
         { additionalProperties: false },
       ),
       async execute(_id, params) {
-        const date = params.date ?? localDate(new Date());
-        return toolResult(await runHelper(["show", "--date", date, "--json"]));
+        return toolResult(
+          await runHelper(["show", ...runArguments(params), "--json"]),
+        );
       },
     }),
   );
@@ -307,19 +245,20 @@ export default function briefing(pi: ExtensionAPI): void {
       promptSnippet: "Keep the briefing you wrote and render its page",
       promptGuidelines: [
         "Write the prose yourself from the contributions. This tool keeps what you wrote; it writes nothing of its own.",
+        "Publish into the run you read: name the same profile you were woken for. Without one this publishes into the single run waiting to be written up, and refuses when two are or when none is.",
         "Publish before telling the user, and tell them the same briefing you published.",
       ],
       parameters: Type.Object(
         {
           prose: Type.String({ minLength: 1 }),
           date: Type.Optional(Type.String({ pattern: DATE })),
+          profile: Type.Optional(Type.String({ pattern: PROFILE })),
         },
         { additionalProperties: false },
       ),
       async execute(_id, params) {
-        const date = params.date ?? localDate(new Date());
         return toolResult(
-          await runHelper(["publish", "--date", date, "--json"], {
+          await runHelper(["publish", ...runArguments(params), "--json"], {
             stdin: params.prose,
           }),
         );
@@ -335,33 +274,39 @@ export default function briefing(pi: ExtensionAPI): void {
         "Open a briefing's page on this machine. The page opens only when it is asked for.",
       promptSnippet: "Open the briefing page on this machine",
       parameters: Type.Object(
-        { date: Type.Optional(Type.String({ pattern: DATE })) },
+        {
+          date: Type.Optional(Type.String({ pattern: DATE })),
+          profile: Type.Optional(Type.String({ pattern: PROFILE })),
+        },
         { additionalProperties: false },
       ),
       async execute(_id, params) {
-        const date = params.date ?? localDate(new Date());
-        return toolResult(await runHelper(["open", "--date", date, "--json"]));
+        return toolResult(
+          await runHelper(["open", ...runArguments(params), "--json"]),
+        );
       },
     }),
   );
 
-  // The morning is started here and not awaited. pi runs the session_start
-  // listeners one after another, so awaiting a collection would hold back
-  // every extension loaded after this one, the agent channel the surfaces
-  // speak through included. The session finishes opening while the sources
-  // answer.
+  // The read is started here and not awaited. pi runs the session_start
+  // listeners one after another, so awaiting the helper would hold back every
+  // extension loaded after this one, the agent channel the surfaces speak
+  // through included.
   pi.on("session_start", (_event, ctx) => {
     extensionContext = ctx;
     stopped = false;
-    void tick().catch((error) => {
-      notify(error instanceof Error ? error.message : String(error), "error");
-    });
+    void readWhatIsWaiting();
   });
 
   pi.on("session_shutdown", () => {
     stopped = true;
-    if (timer !== undefined) clearTimeout(timer);
-    timer = undefined;
     extensionContext = undefined;
   });
+}
+
+/** The run a tool call names: today unless it says otherwise, and whichever
+ * run is waiting unless it names a profile. */
+function runArguments(params: { date?: string; profile?: string }): string[] {
+  const named = params.profile ? ["--profile", params.profile] : [];
+  return ["--date", params.date ?? localDate(new Date()), ...named];
 }

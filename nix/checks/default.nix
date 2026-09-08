@@ -12,6 +12,7 @@ in
   import ./launcher.nix args
   // import ./resources.nix args
   // import ./home.nix args
+  // import ./briefing.nix args
   // import ./speech.nix args
   // import ./desktop.nix args
   // import ./service.nix args

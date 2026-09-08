@@ -72,16 +72,17 @@ test("package loads only capability-owned Scufris extensions", async () => {
       "worker-report.ts",
     ),
   );
-  // The briefing holds one timer for the day and nothing that polls. Its
-  // decision is arithmetic in a file of its own, so the timer stays a detail
-  // of the extension rather than a thing to test around.
+  // The briefing holds no clock at all. A systemd timer decides when one
+  // happens, and what is left in the extension is one file read at session
+  // start for a run gathered while nothing was connected. The single timeout
+  // is the bound on that helper run, not a schedule.
   const briefing = await readFile(
     join(root, "agent", "extensions", "scufris", "briefing", "briefing.ts"),
     "utf8",
   );
   assert.doesNotMatch(briefing, /setInterval/);
-  assert.equal(briefing.match(/setTimeout\(/g)?.length, 2);
-  assert.match(briefing, /keepTheDayGoing/);
+  assert.equal(briefing.match(/setTimeout\(/g)?.length, 1);
+  assert.doesNotMatch(briefing, /untilTomorrow|parseSchedule|decide\(/);
   await access(join(root, "tools", "briefing", "cli.py"));
   await access(join(root, "tools", "briefing", "page.py"));
   await access(join(root, "tools", "jobs", "scufris-report"));

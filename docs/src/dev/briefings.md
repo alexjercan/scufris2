@@ -1,18 +1,21 @@
-# Morning briefings
+# Briefings
 
 [Previous: Messages](messaging.md)
 
 ```text
-one timer -> collect every declared source -> run directory -> Scufris writes it
-                                                           -> chat
-                                                           -> page, when asked
+systemd timer -> collect every declared source -> run directory -> Scufris writes it
+     |                                                          -> chat
+     +-> wake the conversation                                  -> page, when asked
 ```
 
-One briefing is one run. Every run is a directory named for its local date, and
-it holds everything the morning was built from: the manifest, one contribution
-for each source, the prose Scufris wrote, and the page rendered from the same
-run. Chat and the page are two readings of one artifact, so neither can say
-something the other does not.
+One briefing is one run. Every run is a directory named for its local date and
+its profile, and it holds everything the briefing was built from: the manifest,
+one contribution for each source, the prose Scufris wrote, and the page
+rendered from the same run. Chat and the page are two readings of one artifact,
+so neither can say something the other does not.
+
+The date and the profile together name a run, so a morning and an evening on
+one day are two runs and neither can write over the other.
 
 ## What a source is
 
@@ -33,8 +36,10 @@ The three fields are the ones an agent entry takes, so nothing new has to be
 learned to write one. What differs is that nobody chooses a briefing: it is
 asked on a schedule, so `guidance` is what the source is asked and is required.
 
-A project may declare any profile name. Only `morning` is scheduled today; the
-schema leaves room for `weekly`, `evening` or `release` without a change.
+A project may declare any profile name. Which of them are scheduled is the
+host's decision and not the project's: a project that declares `[briefings.weekly]`
+contributes to a weekly briefing on a host that schedules one, and to nothing on
+a host that does not.
 
 The `briefings` table never reaches the delegation menu. `scufris_project_context`
 renders conventions and agents only, because a briefing rendered beside the
@@ -132,10 +137,13 @@ deadline and nothing else.
 
 ```text
 $XDG_STATE_HOME/scufris/briefings/2026-08-31/
-├── manifest.json          the index: state, every source, every diagnostic
-├── contributions/*.json   one envelope for each source, with its body
-├── briefing.md            the prose Scufris wrote
-└── briefing.html          the page, written when the sources answer
+├── morning/
+│   ├── manifest.json          the index: state, every source, every diagnostic
+│   ├── contributions/*.json   one envelope for each source, with its body
+│   ├── briefing.md            the prose Scufris wrote
+│   └── briefing.html          the page, written when the sources answer
+└── evening/
+    └── ...                    the same again, and never the same files
 ```
 
 `briefing.md` appears when Scufris writes the day up. `briefing.html` does not
@@ -144,43 +152,91 @@ renders it again over the prose when there is some. Whether the day has a page
 is decided by code, so a write-up that never happens costs the day its prose and
 not its briefing.
 
-The last thirty runs are kept. The manifest state is the record of what
-happened, and it is what a restarting session reads:
+The last thirty dates are kept, with every profile that ran on them. The
+manifest state is the record of what happened, and it is what an opening
+session reads:
 
-| state        | what it means                  | what a session does                |
-| ------------ | ------------------------------ | ---------------------------------- |
-| `none`       | nothing was started            | collect, if the morning has passed |
-| `collecting` | a run no process owns any more | collect again                      |
-| `collected`  | gathered, prose never written  | ask for the writing                |
-| `delivered`  | the owner has it               | wait for tomorrow                  |
-| `failed`     | nothing answered               | wait for tomorrow                  |
+| state        | what it means                  | what a session does |
+| ------------ | ------------------------------ | ------------------- |
+| `none`       | nothing was started            | nothing             |
+| `collecting` | a run no process owns any more | nothing             |
+| `collected`  | gathered, prose never written  | ask for the writing |
+| `delivered`  | the owner has it               | nothing             |
+| `failed`     | nothing answered               | nothing             |
 
-A restart therefore neither delivers a briefing twice nor loses one that was
-gathered and never written up.
+Only `collected` asks a session for anything, and only when the run has sources
+and no prose beside it. Everything else is the timer's business: a session
+never decides that a briefing is owed, so it can neither deliver one twice nor
+collect one nobody asked for.
+
+A caller that names a date and no profile is resolved against what is on disk:
+it means the one run that was gathered and is still waiting for its prose.
+Two of those are two briefings, and it refuses rather than guesses between
+them. `publish` resolves only to a waiting run, so a wake can put one
+briefing's prose neither on another's page nor on one already delivered.
+Reading a day where nothing is waiting resolves to the one run there is, and
+also refuses to choose between two.
 
 ## The schedule
 
-One timer for each foreground session, armed at `session_start` and re-armed
-after each decision. Nothing polls.
+Nix owns when a briefing happens; each project's `.scufris.toml` owns what is
+in it. `programs.scufris.agent.briefing.profiles` is an attribute set of
+profile name to a schedule:
 
-The morning is `programs.scufris.agent.briefing.time`, default `08:00`, local
-to the host, or `off`. A session that opens after that time with no run for
-today catches it up once, at any hour: a morning nobody was awake for is still
-a morning that was never delivered.
+```nix
+programs.scufris.agent.briefing.profiles = {
+  morning.schedule = "07:30";
+  weekly = {
+    schedule = "Mon *-*-* 09:00";
+    deadline = 3600;
+  };
+};
+```
 
-A morning no project declared is not an event. The run is recorded and the
-foreground is never woken, so the schedule costs nothing until a project asks
-for something.
+Each one renders `scufris-briefing-<profile>.timer` and its `oneshot` service.
+The unit collects that profile and carries the result to the conversation with
+`scufris-ctl wake`. Nothing in the agent holds a clock, and nothing polls.
+
+`schedule` is a systemd `OnCalendar` specification, checked with
+`systemd-analyze calendar` while the module is built, so a schedule nobody can
+act on fails the build rather than the morning. systemd reads none of crontab's
+syntax: `0 7 * * *` is not a schedule and is refused where a person can still
+fix it.
+
+`Persistent=true` is what catches a briefing up. systemd triggers a unit
+immediately when it would have fired at least once while the timer was
+inactive, so a machine that was off at half past seven collects at login
+instead. That is one rule kept by systemd rather than arithmetic written here
+about what a late session owes the day. A profile that is only worth having on
+time sets `persistent = false`.
+
+`{}` schedules nothing, and the tools still collect a briefing when asked.
+Timers are systemd's, so nothing is scheduled off Linux.
+
+A briefing no project declared is not an event. The run is recorded and the
+foreground is never woken, so a schedule costs nothing until a project asks for
+something.
 
 ## Writing and delivery
 
-The collected run wakes the foreground once, through the same proactive path a
-worker event uses. Scufris reads the run, writes one briefing in its own voice
-from what the sources reported, publishes that prose, and says it in chat.
+The collected run wakes the foreground once. The timer's own run does it from
+outside the agent, over `control.wake`; a briefing asked for by hand does it in
+process. Both send the same words, because both ask the helper for them.
+Scufris reads the run, writes one briefing in its own voice from what the
+sources reported, publishes that prose, and says it in chat.
 
-Everything before that point is code. The time, the sources, the runs and the
-record are decided by `schedule.ts` and `briefing.py`, and no model is asked
-whether the morning should happen. Scufris adds the prose on top of a run that
+The run on disk is the durable half and the wake is only the delivery. A wake
+refused with `agent_unavailable` therefore leaves the run `collected`, and the
+next session that opens reads what is waiting and asks for the writing. Losing
+a gathered briefing because the agent happened to be down is the failure this
+does not have.
+
+That session-start read is one file read and not a timer. It happens once, at
+`session_start`, and there is no interval behind it.
+
+Everything before the prose is code. The schedule, the sources, the runs and
+the record are decided by systemd and `briefing.py`, and no model is asked
+whether a briefing should happen. Scufris adds the prose on top of a run that
 already exists and already has a page.
 
 The page never opens by itself. Nothing in the stack answers "is the owner at
@@ -216,17 +272,26 @@ that name.
 | `scufris_briefing_publish` | Keep the prose Scufris wrote and render the page.                 |
 | `scufris_briefing_open`    | Open a page on this machine.                                      |
 
+Each takes a `profile`, and the wake names the one it was collected for.
+Without one they resolve to the run that is waiting to be written up.
+
 ## From a terminal
 
 The same program, for whoever is not the agent:
 
 ```bash
-scufris-briefing sources
-scufris-briefing collect
+scufris-briefing sources --profile morning
+scufris-briefing collect --profile morning
+scufris-briefing wake --profile morning
+scufris-briefing pending --json
 scufris-briefing show --json
 scufris-briefing publish < prose.md
-scufris-briefing open --date 2026-08-30
+scufris-briefing open --date 2026-08-30 --profile morning
 ```
+
+Every subcommand takes `--profile`. `wake` is what the timer runs after a
+collection: it carries the run to the conversation and reports rather than
+fails when nothing is listening. `pending` is what an opening session reads.
 
 `tools/briefing/page.py` renders and asks nothing: given a finished run it
 writes the same page a year from now. Everything a source wrote is escaped

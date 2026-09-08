@@ -15,6 +15,7 @@
     then "http://${config.services.ai-tools-api.host}:${toString config.services.ai-tools-api.port}"
     else "http://127.0.0.1:10300";
   agentCfg = cfg.agent;
+  briefingCfg = agentCfg.briefing;
   serviceCfg = cfg.service;
   remoteSurfaceCfg = serviceCfg.remoteSurface;
   managedApiCfg = cfg.aiToolsApi;
@@ -43,8 +44,21 @@
     den = defaults.denPackage;
     briefing = defaults.briefingPackage;
     projectRoots = agentCfg.projectRoots;
-    briefingTime = agentCfg.briefing.time;
   };
+  # One unit pair for each profile, so a schedule is systemd's and the run
+  # directory it collects into is that profile's own. The name is concrete
+  # rather than a template instance: every profile carries its own OnCalendar,
+  # which a template timer could not.
+  briefingUnitName = name: "scufris-briefing-${name}";
+  briefingRunner = name: profile:
+    import ./briefing-unit.nix {
+      inherit pkgs name profile;
+      briefing = defaults.briefingPackage;
+      ctl = cfg.ctlPackage;
+      pi = agentCfg.piPackage;
+      projectRoots = agentCfg.projectRoots;
+    };
+  briefingProfileName = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
   # The frontend owns the speaker, so the synthesiser is bound here and handed
   # to the companion. A deployment with no speech hands it nothing and the
   # companion stays silent.
@@ -74,6 +88,10 @@ in {
     (lib.mkRemovedOptionModule ["programs" "scufris" "desktop" "widgets" "todayCommand"] "The journal widgets read the-den directly. Remove this option; set desktop.widgets.denPath if the journal is not where DEN_PATH says.")
     (lib.mkRenamedOptionModule ["programs" "scufris" "desktop" "denPath"] ["programs" "scufris" "desktop" "widgets" "denPath"])
     (lib.mkRenamedOptionModule ["programs" "scufris" "desktop" "macrosDatabase"] ["programs" "scufris" "desktop" "widgets" "macrosDatabase"])
+    # Removed rather than renamed: the schedule is systemd's now and its type
+    # is an attribute set of profiles, so a rename would carry a time of day
+    # into an option that cannot hold one.
+    (lib.mkRemovedOptionModule ["programs" "scufris" "agent" "briefing" "time"] "A briefing runs on its own systemd timer now. Set programs.scufris.agent.briefing.profiles instead, for example { morning.schedule = \"08:00\"; }, or {} for no scheduled briefing.")
   ];
 
   options.programs.scufris = {
@@ -105,16 +123,69 @@ in {
       };
 
       briefing = {
-        time = lib.mkOption {
-          type = lib.types.strMatching "(([01]?[0-9]|2[0-3]):[0-5][0-9]|off)";
-          default = "08:00";
-          example = "07:15";
+        profiles = lib.mkOption {
+          type = lib.types.attrsOf (lib.types.submodule {
+            options = {
+              schedule = lib.mkOption {
+                type = lib.types.str;
+                example = "Mon..Fri 07:30";
+                description = ''
+                  systemd `OnCalendar` specification, in the host's own local
+                  time. It is checked with `systemd-analyze calendar` while
+                  this is built, so a schedule nobody can act on fails the
+                  build rather than the morning. systemd reads none of
+                  crontab's syntax: write `07:30`, `Mon *-*-* 09:00` or
+                  `Mon..Fri 23:00`.
+                '';
+              };
+
+              persistent = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = ''
+                  Collect once at the next login when the machine was off at
+                  the scheduled time. A briefing nobody was awake for is still
+                  one that was never delivered. Set it false for a profile
+                  that is only worth having on time.
+                '';
+              };
+
+              deadline = lib.mkOption {
+                type = lib.types.ints.positive;
+                default = 1800;
+                example = 3600;
+                description = ''
+                  Seconds the whole collection may take before it publishes
+                  with whatever came back. The unit is given longer than this,
+                  so a run is bounded by its own deadline and never killed
+                  halfway by systemd.
+                '';
+              };
+            };
+          });
+          default = {morning.schedule = "08:00";};
+          example = lib.literalExpression ''
+            {
+              morning.schedule = "07:30";
+              weekly = {
+                schedule = "Mon *-*-* 09:00";
+                deadline = 3600;
+              };
+            }
+          '';
           description = ''
-            Local time of day the unprompted briefing is assembled, or `off`
-            for a deployment that wants none. A session that opens after this
-            time with no run for the day catches it up once. Only projects
-            declaring `[briefings.morning]` in their own `.scufris.toml`
-            contribute, so the schedule costs nothing until one does.
+            Briefings that run on their own systemd user timer, one timer and
+            one run directory for each. The attribute name is the profile:
+            only projects declaring `[briefings.<name>]` in their own
+            `.scufris.toml` contribute, so a schedule costs nothing until one
+            does.
+
+            When a briefing happens is declared here; what is in it is
+            declared by each project. Nothing in this option says anything
+            about a briefing's content.
+
+            `{}` schedules none, and the tools still collect one when asked.
+            Timers are systemd's, so nothing is scheduled off Linux.
           '';
         };
       };
@@ -350,6 +421,46 @@ in {
     }
     (lib.mkIf cfg.enable {
       home.packages = [agentCfg.package];
+    })
+    # A briefing is collected out of process and delivered over the control
+    # socket, so the schedule needs neither a session nor an agent. The user
+    # manager runs from login to logout, which is where Scufris lives, and
+    # `Persistent=true` catches up a briefing the machine was off for.
+    (lib.mkIf (cfg.enable && pkgs.stdenv.hostPlatform.isLinux && briefingCfg.profiles != {}) {
+      assertions = [
+        {
+          assertion = lib.all (name: builtins.match briefingProfileName name != null) (lib.attrNames briefingCfg.profiles);
+          message = "programs.scufris.agent.briefing.profiles names are letters, digits, dashes and underscores: they are run directory names and a command line argument";
+        }
+      ];
+
+      systemd.user.services = lib.mapAttrs' (name: profile:
+        lib.nameValuePair (briefingUnitName name) {
+          Unit.Description = "Scufris ${name} briefing";
+          Service = {
+            Type = "oneshot";
+            ExecStart = lib.getExe (briefingRunner name profile);
+            # Above the deadline the collection holds itself to, so a run
+            # still asking its sources is never killed halfway. What it has
+            # gathered by then is published either way.
+            TimeoutStartSec = profile.deadline + 300;
+            WorkingDirectory = "%h";
+          };
+        })
+      briefingCfg.profiles;
+
+      systemd.user.timers = lib.mapAttrs' (name: profile:
+        lib.nameValuePair (briefingUnitName name) {
+          Unit.Description = "Scufris ${name} briefing schedule";
+          Timer = {
+            OnCalendar = profile.schedule;
+            # One catch-up, by the clock systemd keeps, instead of a rule
+            # written here about what a late session owes the day.
+            Persistent = profile.persistent;
+          };
+          Install.WantedBy = ["timers.target"];
+        })
+      briefingCfg.profiles;
     })
     (lib.mkIf (cfg.enable && managedApiCfg.enable) {
       assertions = [

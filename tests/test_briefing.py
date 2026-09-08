@@ -414,14 +414,27 @@ class Run(unittest.TestCase):
             )
         ]
 
-    def declare(self, name: str, harness: str = "pi") -> Path:
+    def declare(
+        self, name: str, harness: str = "pi", *profiles: str
+    ) -> Path:
+        """A project that declares one briefing for each profile named."""
         return self.project(
             name,
-            "[briefings.morning]\n"
-            f'description = "Report {name}."\n'
-            f'keywords = {{ harness = "{harness}" }}\n'
-            f'guidance = "Read {name} and report it."\n',
+            "".join(
+                f"[briefings.{profile}]\n"
+                f'description = "Report {name}."\n'
+                f'keywords = {{ harness = "{harness}" }}\n'
+                f'guidance = "Read {name} and report it."\n'
+                for profile in (profiles or ("morning",))
+            ),
         )
+
+    def control(self, program: str) -> Path:
+        """A stand-in for scufris-ctl, which the wake carries the words to."""
+        executable = self.bin / "scufris-ctl"
+        executable.write_text(program, encoding="utf-8")
+        executable.chmod(0o755)
+        return executable
 
     def test_only_a_project_that_declares_the_profile_is_asked(self) -> None:
         self.declare("the-den")
@@ -429,7 +442,7 @@ class Run(unittest.TestCase):
             "quiet",
             '[agents.work]\ndescription = "Implement a change."\n',
         )
-        manifest = briefing.collect("morning", "2026-08-31")
+        manifest = briefing.collect("2026-08-31", "morning")
         self.assertEqual(
             [item["project"] for item in manifest["sources"]], ["projects/the-den"]
         )
@@ -438,7 +451,7 @@ class Run(unittest.TestCase):
 
     def test_a_contribution_is_kept_beside_a_manifest_that_indexes_it(self) -> None:
         self.declare("the-den")
-        manifest = briefing.collect("morning", "2026-08-31")
+        manifest = briefing.collect("2026-08-31", "morning")
         entry = manifest["sources"][0]
         self.assertEqual(entry["status"], "attention")
         self.assertEqual(entry["headline"], ENVELOPE["headline"])
@@ -446,7 +459,7 @@ class Run(unittest.TestCase):
         self.assertNotIn("body", entry)
         kept = json.loads(
             (
-                briefing.run_dir("2026-08-31")
+                briefing.run_dir("2026-08-31", "morning")
                 / "contributions"
                 / "projects-the-den.json"
             ).read_text()
@@ -459,13 +472,13 @@ class Run(unittest.TestCase):
     ) -> None:
         self.declare("the-den")
         self.answer.write_text("I could not read the journal today.", encoding="utf-8")
-        manifest = briefing.collect("morning", "2026-08-31")
+        manifest = briefing.collect("2026-08-31", "morning")
         entry = manifest["sources"][0]
         self.assertEqual(entry["status"], "failed")
         self.assertIn("not one JSON envelope", entry["headline"])
         kept = json.loads(
             (
-                briefing.run_dir("2026-08-31")
+                briefing.run_dir("2026-08-31", "morning")
                 / "contributions"
                 / "projects-the-den.json"
             ).read_text()
@@ -481,7 +494,7 @@ class Run(unittest.TestCase):
             ' "facts": [], "body": "The comment ("plinko") is unchanged."}\n```\n',
             "```json\n" + json.dumps(ENVELOPE) + "\n```\n",
         )
-        manifest = briefing.collect("morning", "2026-08-31")
+        manifest = briefing.collect("2026-08-31", "morning")
         entry = manifest["sources"][0]
         self.assertEqual(entry["status"], "attention")
         self.assertEqual(entry["headline"], ENVELOPE["headline"])
@@ -502,14 +515,14 @@ class Run(unittest.TestCase):
             "```json\n" + json.dumps({**ENVELOPE, "headline": "h" * 227}) + "\n```\n",
             "```json\n" + json.dumps(ENVELOPE) + "\n```\n",
         )
-        manifest = briefing.collect("morning", "2026-08-31")
+        manifest = briefing.collect("2026-08-31", "morning")
         self.assertEqual(manifest["sources"][0]["status"], "attention")
         self.assertIn("longer than 200 characters", self.asked()[1])
 
     def test_a_source_that_cannot_say_it_twice_is_failed_and_says_so(self) -> None:
         self.declare("seedzero")
         self.answers("I could not read the channel today.")
-        manifest = briefing.collect("morning", "2026-08-31")
+        manifest = briefing.collect("2026-08-31", "morning")
         entry = manifest["sources"][0]
         self.assertEqual(entry["status"], "failed")
         self.assertIn("not one JSON envelope", entry["headline"])
@@ -548,7 +561,7 @@ class Run(unittest.TestCase):
         # spend the deadline of a source that has already failed to start.
         self.declare("the-den")
         self.harness(FAILING)
-        manifest = briefing.collect("morning", "2026-08-31")
+        manifest = briefing.collect("2026-08-31", "morning")
         self.assertEqual(manifest["sources"][0]["status"], "failed")
         self.assertNotIn("again when asked", manifest["sources"][0]["headline"])
 
@@ -556,7 +569,7 @@ class Run(unittest.TestCase):
         self.declare("seedzero")
         self.answers("not an envelope at all")
         manifest = briefing.collect(
-            "morning", "2026-08-31", source_deadline=briefing.REPAIR_FLOOR - 1
+            "2026-08-31", "morning", source_deadline=briefing.REPAIR_FLOOR - 1
         )
         self.assertEqual(manifest["sources"][0]["status"], "failed")
         self.assertEqual(len(self.asked()), 1)
@@ -566,7 +579,7 @@ class Run(unittest.TestCase):
         self.declare("seedzero")
         self.answers("not an envelope at all", "#sleep")
         with mock.patch.dict(os.environ, {"SCUFRIS_BRIEFING_REPAIR_DEADLINE": "0.4"}):
-            manifest = briefing.collect("morning", "2026-08-31")
+            manifest = briefing.collect("2026-08-31", "morning")
         entry = manifest["sources"][0]
         self.assertEqual(entry["status"], "failed")
         # The repair timed out, so what is reported is what the source did say.
@@ -577,14 +590,14 @@ class Run(unittest.TestCase):
     def test_bytes_that_are_not_text_are_refused_rather_than_raised(self) -> None:
         self.declare("the-den")
         self.harness(BINARY)
-        manifest = briefing.collect("morning", "2026-08-31")
+        manifest = briefing.collect("2026-08-31", "morning")
         self.assertEqual(manifest["sources"][0]["status"], "failed")
         self.assertEqual(manifest["state"], "failed")
 
     def test_a_harness_that_exits_badly_is_named_rather_than_guessed(self) -> None:
         self.declare("the-den")
         self.harness(FAILING)
-        manifest = briefing.collect("morning", "2026-08-31")
+        manifest = briefing.collect("2026-08-31", "morning")
         entry = manifest["sources"][0]
         self.assertEqual(entry["status"], "failed")
         self.assertIn("exited 3", entry["headline"])
@@ -603,7 +616,7 @@ class Run(unittest.TestCase):
             return real(source, *rest)
 
         with mock.patch.object(briefing, "ask", explode):
-            manifest = briefing.collect("morning", "2026-08-31")
+            manifest = briefing.collect("2026-08-31", "morning")
         self.assertEqual(manifest["state"], "collected")
         by_project = {item["project"]: item for item in manifest["sources"]}
         self.assertEqual(by_project["projects/the-den"]["status"], "attention")
@@ -619,13 +632,13 @@ class Run(unittest.TestCase):
         with mock.patch.object(
             page, "render_page", side_effect=RuntimeError("no layout")
         ):
-            manifest = briefing.collect("morning", "2026-08-31")
+            manifest = briefing.collect("2026-08-31", "morning")
         self.assertEqual(manifest["state"], "collected")
-        self.assertFalse((briefing.run_dir("2026-08-31") / "briefing.html").exists())
+        self.assertFalse((briefing.run_dir("2026-08-31", "morning") / "briefing.html").exists())
         said = " ".join(item["diagnostic"] for item in manifest["diagnostics"])
         self.assertIn("the page could not be rendered", said)
         kept = json.loads(
-            (briefing.run_dir("2026-08-31") / "manifest.json").read_text()
+            (briefing.run_dir("2026-08-31", "morning") / "manifest.json").read_text()
         )
         self.assertEqual(kept["state"], "collected")
 
@@ -640,7 +653,7 @@ class Run(unittest.TestCase):
             real(path, data)
 
         with mock.patch.object(briefing, "atomic_write", refuse):
-            manifest = briefing.collect("morning", "2026-08-31")
+            manifest = briefing.collect("2026-08-31", "morning")
         self.assertEqual(manifest["state"], "collected")
         self.assertEqual(
             [item["project"] for item in manifest["sources"]], ["projects/the-den"]
@@ -655,7 +668,7 @@ class Run(unittest.TestCase):
         # Both run the same fake harness, so the slow one is made by giving the
         # whole run a deadline the sleeper cannot meet.
         self.harness(SLEEPING)
-        manifest = briefing.collect("morning", "2026-08-31", source_deadline=0.5)
+        manifest = briefing.collect("2026-08-31", "morning", source_deadline=0.5)
         self.assertEqual(manifest["state"], "failed")
         self.assertEqual(len(manifest["sources"]), 2)
         for entry in manifest["sources"]:
@@ -663,18 +676,18 @@ class Run(unittest.TestCase):
             self.assertIn("did not answer within", entry["headline"])
 
     def test_a_morning_with_no_source_is_still_a_run(self) -> None:
-        manifest = briefing.collect("morning", "2026-08-31")
+        manifest = briefing.collect("2026-08-31", "morning")
         self.assertEqual(manifest["sources"], [])
         self.assertEqual(manifest["state"], "collected")
-        self.assertFalse(briefing.delivered("2026-08-31"))
-        rendered = (briefing.run_dir("2026-08-31") / "briefing.html").read_text(
+        self.assertFalse(briefing.delivered("2026-08-31", "morning"))
+        rendered = (briefing.run_dir("2026-08-31", "morning") / "briefing.html").read_text(
             encoding="utf-8"
         )
         self.assertIn("No project declared this briefing.", rendered)
 
     def test_a_broken_project_configuration_is_carried_as_a_diagnostic(self) -> None:
         self.project("broken", "[briefings.morning]\nguidance = 12\n")
-        manifest = briefing.collect("morning", "2026-08-31")
+        manifest = briefing.collect("2026-08-31", "morning")
         self.assertEqual(manifest["sources"], [])
         self.assertEqual(len(manifest["diagnostics"]), 1)
         self.assertEqual(manifest["diagnostics"][0]["project"], "projects/broken")
@@ -683,8 +696,8 @@ class Run(unittest.TestCase):
         # The page is what the owner opens. Whether the day has one is decided
         # by the collection and not by anything a model chooses to do next.
         self.declare("the-den")
-        briefing.collect("morning", "2026-08-31")
-        rendered = (briefing.run_dir("2026-08-31") / "briefing.html").read_text(
+        briefing.collect("2026-08-31", "morning")
+        rendered = (briefing.run_dir("2026-08-31", "morning") / "briefing.html").read_text(
             encoding="utf-8"
         )
         self.assertIn("The Den", rendered)
@@ -693,12 +706,12 @@ class Run(unittest.TestCase):
 
     def test_publishing_keeps_the_prose_and_renders_the_same_run(self) -> None:
         self.declare("the-den")
-        briefing.collect("morning", "2026-08-31")
-        self.assertFalse(briefing.delivered("2026-08-31"))
+        briefing.collect("2026-08-31", "morning")
+        self.assertFalse(briefing.delivered("2026-08-31", "morning"))
         result = briefing.publish(
-            "2026-08-31", "Good morning. Two tasks are left over."
+            "2026-08-31", "morning", "Good morning. Two tasks are left over."
         )
-        self.assertTrue(briefing.delivered("2026-08-31"))
+        self.assertTrue(briefing.delivered("2026-08-31", "morning"))
         markdown = Path(result["markdown"]).read_text(encoding="utf-8")
         rendered = Path(result["page"]).read_text(encoding="utf-8")
         self.assertEqual(markdown, "Good morning. Two tasks are left over.\n")
@@ -710,16 +723,189 @@ class Run(unittest.TestCase):
 
     def test_publishing_a_run_that_is_not_there_is_refused(self) -> None:
         with self.assertRaises(briefing.Refused):
-            briefing.publish("2026-08-31", "Good morning.")
+            briefing.publish("2026-08-31", "morning", "Good morning.")
         with self.assertRaises(briefing.Refused):
-            briefing.publish("not-a-date", "Good morning.")
+            briefing.publish("not-a-date", "morning", "Good morning.")
+
+    def test_two_profiles_on_one_date_are_two_runs_and_two_deliveries(self) -> None:
+        # One date is not one briefing. A morning and an evening on the same
+        # day are two runs, each with its own directory, page and prose.
+        self.declare("the-den", "pi", "morning", "evening")
+        morning = briefing.collect("2026-08-31", "morning")
+        evening = briefing.collect("2026-08-31", "evening")
+        self.assertEqual(morning["state"], "collected")
+        self.assertEqual(evening["state"], "collected")
+        self.assertNotEqual(
+            briefing.run_dir("2026-08-31", "morning"),
+            briefing.run_dir("2026-08-31", "evening"),
+        )
+        for profile in ("morning", "evening"):
+            directory = briefing.run_dir("2026-08-31", profile)
+            self.assertTrue((directory / "manifest.json").is_file())
+            self.assertTrue(
+                (directory / "contributions" / "projects-the-den.json").is_file()
+            )
+        first = briefing.publish("2026-08-31", "morning", "The morning.")
+        second = briefing.publish("2026-08-31", "evening", "The evening.")
+        self.assertNotEqual(first["page"], second["page"])
+        self.assertIn("The morning.", Path(first["page"]).read_text(encoding="utf-8"))
+        self.assertIn("The evening.", Path(second["page"]).read_text(encoding="utf-8"))
+        self.assertTrue(briefing.delivered("2026-08-31", "morning"))
+        self.assertTrue(briefing.delivered("2026-08-31", "evening"))
+
+    def test_a_run_without_a_profile_is_the_one_waiting_to_be_written(self) -> None:
+        # Naming no profile means the one obvious run. One briefing waiting
+        # for its prose is that run; two are two briefings, and guessing
+        # between them would put one's prose on the other's page.
+        self.declare("the-den", "pi", "morning", "evening")
+        briefing.collect("2026-08-31", "morning")
+        self.assertEqual(briefing.resolve("2026-08-31"), "morning")
+        briefing.collect("2026-08-31", "evening")
+        with self.assertRaises(briefing.Refused) as refused:
+            briefing.resolve("2026-08-31")
+        self.assertIn("evening", str(refused.exception))
+        self.assertIn("morning", str(refused.exception))
+        # Named, each publishes into its own run and neither touches the
+        # other's.
+        for profile in ("morning", "evening"):
+            briefing.publish("2026-08-31", profile, f"The {profile}.")
+            self.assertEqual(
+                (briefing.run_dir("2026-08-31", profile) / "briefing.md").read_text(
+                    encoding="utf-8"
+                ),
+                f"The {profile}.\n",
+            )
+        # A delivered run is never what an unnamed publish lands on.
+        with self.assertRaises(briefing.Refused):
+            briefing.resolve("2026-08-31", undelivered=True)
+
+    def test_the_last_run_of_a_finished_day_is_read_without_naming_it(self) -> None:
+        # A person reading yesterday names a date and nothing else. One run is
+        # unambiguous whether or not it was written up.
+        self.declare("the-den")
+        briefing.collect("2026-08-31", "morning")
+        briefing.publish("2026-08-31", "morning", "Good morning.")
+        self.assertEqual(briefing.resolve("2026-08-31"), "morning")
+        self.assertEqual(briefing.read_run("2026-08-31", "morning")["prose"], "Good morning.\n")
+        # A date nothing ran on answers with the default, so the refusal a
+        # caller reads is about the missing run and not about a missing name.
+        self.assertEqual(briefing.resolve("2026-08-30"), "morning")
+
+    def test_a_gathered_run_is_what_a_session_finds_waiting(self) -> None:
+        self.declare("the-den", "pi", "morning", "evening")
+        briefing.collect("2026-08-31", "morning")
+        briefing.collect("2026-08-31", "evening")
+        self.assertEqual(
+            sorted(item["profile"] for item in briefing.pending("2026-08-31")),
+            ["evening", "morning"],
+        )
+        briefing.publish("2026-08-31", "morning", "The morning.")
+        self.assertEqual(
+            [item["profile"] for item in briefing.pending("2026-08-31")], ["evening"]
+        )
+
+    def test_a_briefing_no_project_declared_is_not_waiting_for_anyone(self) -> None:
+        # A run is still recorded, so nothing collects it twice. Nobody is
+        # woken for it: a morning nothing declared is not an event.
+        manifest = briefing.collect("2026-08-31", "morning")
+        self.assertEqual(manifest["state"], "collected")
+        self.assertEqual(briefing.pending("2026-08-31"), [])
+
+    def test_the_wake_asks_for_one_briefing_and_names_what_could_not_answer(
+        self,
+    ) -> None:
+        said = briefing.wake_message(
+            {
+                "date": "2026-08-31",
+                "profile": "morning",
+                "sources": [
+                    {"project": "personal/the-den", "status": "ok"},
+                    {"project": "personal/seedzero", "status": "failed"},
+                ],
+            }
+        )
+        self.assertIn("1 source answered, 1 could not answer", said)
+        self.assertIn("scufris_briefing_show", said)
+        self.assertIn("scufris_briefing_publish", said)
+        self.assertIn("profile morning", said)
+        self.assertIn("Do not read the sources out one after another", said)
+        self.assertIn("Name any source that could not answer", said)
+        quiet = briefing.wake_message(
+            {
+                "date": "2026-08-31",
+                "profile": "morning",
+                "sources": [
+                    {"project": "personal/the-den", "status": "ok"},
+                    {"project": "personal/seedzero", "status": "attention"},
+                ],
+            }
+        )
+        self.assertIn("2 sources answered.", quiet)
+        self.assertNotRegex(quiet, r", \d+ could not answer")
+
+    def test_a_gathered_run_is_carried_to_the_conversation(self) -> None:
+        self.declare("the-den")
+        briefing.collect("2026-08-31", "morning")
+        kept = self.root / "woken.json"
+        self.control(
+            "#!/usr/bin/env python3\n"
+            "import json, os, pathlib, sys\n"
+            f"pathlib.Path({str(kept)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+        )
+        answer = briefing.wake("2026-08-31", "morning")
+        self.assertTrue(answer["woken"], answer)
+        argv = json.loads(kept.read_text())
+        self.assertEqual(argv[0], "wake")
+        self.assertIn("morning briefing for 2026-08-31", argv[1])
+        self.assertEqual(argv[2:4], ["--custom-type", briefing.BRIEFING_WAKE])
+        self.assertEqual(
+            json.loads(argv[5]),
+            {"date": "2026-08-31", "profile": "morning", "sources": 1},
+        )
+
+    def test_a_refused_wake_leaves_the_run_gathered_for_later(self) -> None:
+        # Losing a gathered briefing because the agent happened to be down is
+        # the failure this must not have. The run is the durable half; the
+        # wake is only the delivery.
+        self.declare("the-den")
+        briefing.collect("2026-08-31", "morning")
+        self.control(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            'print("scufris-ctl: agent_unavailable: no agent", file=sys.stderr)\n'
+            "raise SystemExit(1)\n"
+        )
+        answer = briefing.wake("2026-08-31", "morning")
+        self.assertFalse(answer["woken"])
+        self.assertIn("agent_unavailable", answer["reason"])
+        self.assertEqual(briefing.run_state("2026-08-31", "morning"), "collected")
+        self.assertEqual(
+            [item["profile"] for item in briefing.pending("2026-08-31")], ["morning"]
+        )
+
+    def test_a_wake_with_no_control_client_is_reported_and_not_raised(self) -> None:
+        self.declare("the-den")
+        briefing.collect("2026-08-31", "morning")
+        answer = briefing.wake("2026-08-31", "morning", ctl=str(self.root / "missing"))
+        self.assertFalse(answer["woken"])
+        self.assertIn("could not be run", answer["reason"])
+        self.assertEqual(briefing.run_state("2026-08-31", "morning"), "collected")
+
+    def test_a_delivered_run_is_never_woken_for_twice(self) -> None:
+        self.declare("the-den")
+        briefing.collect("2026-08-31", "morning")
+        briefing.publish("2026-08-31", "morning", "Good morning.")
+        self.control("#!/usr/bin/env python3\nraise SystemExit(0)\n")
+        answer = briefing.wake("2026-08-31", "morning")
+        self.assertFalse(answer["woken"])
+        self.assertIn("delivered", answer["reason"])
 
     def test_only_the_last_runs_are_kept(self) -> None:
         root = briefing.state_root()
         root.mkdir(parents=True)
         for day in range(1, 9):
-            (root / f"2026-08-0{day}").mkdir()
-            (root / f"2026-08-0{day}" / "manifest.json").write_text("{}")
+            (root / f"2026-08-0{day}" / "morning").mkdir(parents=True)
+            (root / f"2026-08-0{day}" / "morning" / "manifest.json").write_text("{}")
         (root / "not-a-run").mkdir()
         briefing.prune(keep=3)
         kept = sorted(path.name for path in root.iterdir())

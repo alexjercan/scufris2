@@ -11,6 +11,17 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Added
 
+- Briefing profiles on systemd timers.
+  `programs.scufris.agent.briefing.profiles` names a briefing and its
+  `OnCalendar` schedule, and each one renders its own
+  `scufris-briefing-<profile>` timer and oneshot service. A schedule is
+  checked with `systemd-analyze calendar` while the module is built, so a
+  schedule nobody can act on fails the build rather than the morning.
+  `Persistent = true` collects once at the next login when the machine was off
+  at the scheduled time. `{}` schedules none.
+- `scufris-briefing wake` carries a gathered run to the conversation, and
+  `scufris-briefing pending` lists the runs for a day that still need their
+  prose. Every subcommand takes `--profile`.
 - Unprompted wake ingress: `scufris-ctl wake "<text>"` delivers a proactive
   message to the foreground conversation from outside the agent process, so a
   timer or a finished job can reach it with words. The wake is not recorded as
@@ -29,12 +40,33 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Changed
 
+- Briefing runs are keyed by date and profile:
+  `$XDG_STATE_HOME/scufris/briefings/<date>/<profile>/`. Two profiles on one
+  date used to be one directory, and the second collection wrote over the
+  first. Old single-profile runs are not migrated; they age out with the last
+  thirty dates.
+- A briefing tool call takes a profile, and the wake names the one it was
+  collected for. Publishing without a profile resolves only to a run that was
+  gathered and never written up, so a wake can never put one briefing's prose
+  on another's page.
+- A session no longer holds a briefing timer. It reads once, at session start,
+  for a run that was gathered while nothing was connected, and asks for the
+  writing. A wake refused with `agent_unavailable` therefore leaves the run
+  gathered instead of losing it.
 - Service protocol version 6 replaces 5 without negotiation, adding the
   `control.wake` and `agent.wake` messages. Service, agent, gateway, and every
   surface must be updated together.
 - Stopping a job with `remove_workspace` now keeps a branch that was never
   merged. Deleting one needs an explicit `abandon`, so unlanded work is no
   longer lost to a cleanup.
+
+### Removed
+
+- `programs.scufris.agent.briefing.time` and `SCUFRIS_BRIEFING_TIME`. The
+  schedule is a systemd timer now, so it is removed with a message rather than
+  renamed: the option's type is an attribute set of profiles and cannot hold a
+  time of day. `SCUFRIS_BRIEFING_PROFILE` is gone with it; the unit names the
+  profile on the command line.
 
 ## [2.1.7] - 2026-09-07
 

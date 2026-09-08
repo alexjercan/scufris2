@@ -72,7 +72,11 @@ class Command(unittest.TestCase):
             "[briefings.morning]\n"
             'description = "Report the journal."\n'
             'keywords = { harness = "pi" }\n'
-            'guidance = "Read the journal and report yesterday."\n',
+            'guidance = "Read the journal and report yesterday."\n'
+            "[briefings.evening]\n"
+            'description = "Report the journal."\n'
+            'keywords = { harness = "pi" }\n'
+            'guidance = "Read the journal and report today."\n',
             encoding="utf-8",
         )
         self.env = {
@@ -112,8 +116,13 @@ class Command(unittest.TestCase):
             [item["project"] for item in found["sources"]], ["projects/the-den"]
         )
         self.assertEqual(
-            self.answered("sources", "--profile", "evening")["sources"], []
+            [
+                item["project"]
+                for item in self.answered("sources", "--profile", "evening")["sources"]
+            ],
+            ["projects/the-den"],
         )
+        self.assertEqual(self.answered("sources", "--profile", "weekly")["sources"], [])
 
     def test_a_run_is_collected_shown_published_and_opened(self) -> None:
         collected = self.answered("collect")
@@ -136,15 +145,63 @@ class Command(unittest.TestCase):
         self.ok("open")
         self.assertEqual(self.opened.read_text(), published["page"])
 
+    def test_two_profiles_on_one_date_do_not_collide(self) -> None:
+        # Two profiles on one date used to be one run directory, so the second
+        # collection wrote over the first.
+        self.ok("collect", "--profile", "morning")
+        self.ok("collect", "--profile", "evening")
+        morning = self.ok("path", "--profile", "morning")
+        evening = self.ok("path", "--profile", "evening")
+        self.assertNotEqual(morning, evening)
+        self.assertTrue(morning.endswith("2026-08-31/morning"))
+        self.assertTrue(evening.endswith("2026-08-31/evening"))
+        waiting = self.answered("pending")
+        assert isinstance(waiting, dict)
+        self.assertEqual(
+            sorted(run["profile"] for run in waiting["runs"]), ["evening", "morning"]
+        )
+        published = self.answered("publish", "--profile", "morning", stdin="Morning.")
+        assert isinstance(published, dict)
+        self.assertEqual(published["profile"], "morning")
+        self.assertIn("2026-08-31/morning", published["page"])
+        left = self.answered("pending")
+        assert isinstance(left, dict)
+        self.assertEqual([run["profile"] for run in left["runs"]], ["evening"])
+        # The evening's page is untouched by the morning's prose.
+        self.assertNotIn(
+            "Morning.",
+            Path(self.ok("render", "--profile", "evening")).read_text(encoding="utf-8"),
+        )
+
+    def test_a_wake_that_cannot_land_leaves_the_run_waiting(self) -> None:
+        self.ok("collect")
+        refusing = self.bin / "refusing-ctl"
+        refusing.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            "print('scufris-ctl: agent_unavailable: no agent', file=sys.stderr)\n"
+            "raise SystemExit(1)\n",
+            encoding="utf-8",
+        )
+        refusing.chmod(0o755)
+        answer = self.answered("wake", "--ctl", str(refusing))
+        assert isinstance(answer, dict)
+        self.assertFalse(answer["woken"])
+        self.assertIn("agent_unavailable", answer["reason"])
+        waiting = self.answered("pending")
+        assert isinstance(waiting, dict)
+        self.assertEqual([run["profile"] for run in waiting["runs"]], ["morning"])
+        self.assertIn("morning briefing for 2026-08-31", waiting["runs"][0]["message"])
+
     def test_plain_output_reads_as_lines(self) -> None:
         self.ok("collect")
         self.assertIn("[ok] projects/the-den:", self.ok("show"))
-        self.assertTrue(self.ok("path").endswith("2026-08-31"))
+        self.assertTrue(self.ok("path").endswith("2026-08-31/morning"))
 
     def test_showing_a_run_that_was_never_collected_is_refused(self) -> None:
         done = self.run_briefing("show")
         self.assertEqual(done.returncode, 1)
-        self.assertIn("no briefing run for 2026-08-31", done.stderr)
+        self.assertIn("no morning run for 2026-08-31", done.stderr)
 
     def test_a_date_that_is_not_a_date_is_refused(self) -> None:
         done = subprocess.run(

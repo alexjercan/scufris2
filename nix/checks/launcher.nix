@@ -21,7 +21,6 @@ in {
       cat > expected <<'EOF'
       ["~/personal","~/work","~/third-party"]
       orchestrator
-      08:00
 
 
       system-pi

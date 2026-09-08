@@ -126,6 +126,7 @@ flowchart TB
     Pi[Pi] --> Launcher
     Den[scufris-den] --> Launcher
     Briefing[scufris-briefing] --> Launcher
+    Briefing --> Timers["scufris-briefing-&lt;profile&gt; timers"]
     Service["scufris-service + scufris-ctl<br/>Linux, headless"] --> Gateway["optional surface gateway"]
     Gateway --> Tailscale[declarative Tailscale Serve root route]
     Desktop["scufris-desktop<br/>Linux + X11"] --> Speak[optional scufris-speak]
@@ -147,13 +148,14 @@ only added to: a row is clicked to open what wrote it, and the red `x` beside
 it is the one control that deletes. The command line carries the same verbs, so
 the agent and the person are never able to do different things to a day.
 
-The morning briefing is assembled the same way and for the same reason. A
-project says what it wants reported in its own `.scufris.toml`; one bounded
-headless run asks it; the answers, the prose Scufris writes from them, and the
-page rendered from all of it live in one directory named for the day. The page
-is a second reading of that directory rather than a second generation, so it
-cannot say anything the morning did not. See
-[Morning briefings](briefings.md).
+A briefing is assembled the same way and for the same reason. A project says
+what it wants reported in its own `.scufris.toml`; a systemd timer decides when
+it is asked; one bounded headless run asks it; the answers, the prose Scufris
+writes from them, and the page rendered from all of it live in one directory
+named for the day and the profile. The page is a second reading of that
+directory rather than a second generation, so it cannot say anything the
+briefing did not. See
+[Briefings](briefings.md).
 
 The den holds the reference data the days are written against: `Foods.csv`,
 which keeps macros.nvim's row format, and `Exercises.csv`, which is

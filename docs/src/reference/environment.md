@@ -22,18 +22,23 @@ worker wrapper -> private per-execution environment
 | `SCUFRIS_PROJECT_ROOTS`  | launcher, jobs helper                                     | JSON string array searched for Git projects. Packaged default: `["~/personal","~/work","~/third-party"]`.      |
 | `SCUFRIS_CALM`           | development/worker environment                            | Reserved launcher value. Calm session state defaults on and is controlled by `/calm`.                          |
 
-## Morning briefings
+## Briefings
 
-| Variable                           | Consumer           | Meaning and default                                                                      |
-| ---------------------------------- | ------------------ | ---------------------------------------------------------------------------------------- |
-| `SCUFRIS_BRIEFING_TIME`            | briefing extension | Local `HH:MM` the unprompted briefing is assembled, or `off`. Launcher default: `08:00`. |
-| `SCUFRIS_BRIEFING_PROFILE`         | briefing extension | Which `[briefings.<profile>]` table the schedule asks for. Default: `morning`.           |
-| `SCUFRIS_BRIEFING_DEADLINE`        | briefing helper    | Seconds the whole run may take before it publishes with what came back. Default: `1800`. |
-| `SCUFRIS_BRIEFING_SOURCE_DEADLINE` | briefing helper    | Seconds one source may take before it is recorded as failed. Default: `900`.             |
+| Variable                           | Consumer        | Meaning and default                                                                      |
+| ---------------------------------- | --------------- | ---------------------------------------------------------------------------------------- |
+| `SCUFRIS_BRIEFING_DEADLINE`        | briefing helper | Seconds the whole run may take before it publishes with what came back. Default: `1800`. |
+| `SCUFRIS_BRIEFING_SOURCE_DEADLINE` | briefing helper | Seconds one source may take before it is recorded as failed. Default: `900`.             |
+| `SCUFRIS_CTL`                      | briefing helper | Control client a wake is carried by. Default: `scufris-ctl` on `PATH`.                   |
 
-A run is written under `$XDG_STATE_HOME/scufris/briefings/<local date>/`. Only
-projects declaring the profile in their own `.scufris.toml` contribute, so the
-schedule costs nothing until one does.
+When a briefing happens is a systemd timer and not a variable. Each profile in
+`programs.scufris.agent.briefing.profiles` renders its own
+`scufris-briefing-<profile>.timer`, which sets
+`SCUFRIS_BRIEFING_DEADLINE` from that profile's own `deadline`.
+
+A run is written under
+`$XDG_STATE_HOME/scufris/briefings/<local date>/<profile>/`. Only projects
+declaring the profile in their own `.scufris.toml` contribute, so a schedule
+costs nothing until one does.
 
 Socket precedence:
 

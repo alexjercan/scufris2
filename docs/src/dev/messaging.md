@@ -107,4 +107,4 @@ only the exact recorded adapter process, which in turn stops its exact Pi child.
 
 ---
 
-Next: [Morning briefings](briefings.md)
+Next: [Briefings](briefings.md)

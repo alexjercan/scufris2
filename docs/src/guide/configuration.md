@@ -25,7 +25,7 @@ programs.scufris
 ├── agent
 │   ├── piPackage
 │   ├── projectRoots
-│   ├── briefing.time
+│   ├── briefing.profiles.<name>.{schedule,persistent,deadline}
 │   └── package
 ├── aiToolsApi.{enable,baseUrl}
 ├── service
@@ -62,6 +62,7 @@ programs.scufris
 | Install the agent                                 | `enable`                                   | `false`                                    |
 | Select Pi                                         | `agent.piPackage`                          | pinned `llm-agents` Pi                     |
 | Find projects                                     | `agent.projectRoots`                       | `~/personal`, `~/work`, `~/third-party`    |
+| Schedule briefings                                | `agent.briefing.profiles`                  | `{ morning.schedule = "08:00"; }`          |
 | Replace the complete launcher                     | `agent.package`                            | module-rendered launcher                   |
 | Run the conversation owner                        | `service.enable`                           | `false`                                    |
 | Store its Pi session                              | `service.sessionDirectory`                 | `$XDG_DATA_HOME/scufris/sessions`          |

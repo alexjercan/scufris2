@@ -1,10 +1,13 @@
 """One morning briefing, assembled from whatever the projects declare.
 
 A briefing is a run, not a message. Every run lives in one directory named for
-its local date and holds everything the day was built from: the manifest, one
-file for each source that answered, the prose Scufris wrote from them, and the
-page rendered from the same run. Chat and the page are two readings of one
-artifact, so neither can say something the other does not.
+its local date and its profile, and holds everything the day was built from:
+the manifest, one file for each source that answered, the prose Scufris wrote
+from them, and the page rendered from the same run. Chat and the page are two
+readings of one artifact, so neither can say something the other does not.
+
+The date and the profile together name a run, so a morning and an evening on
+one day are two runs and never one that overwrites the other.
 
 A source is a project that declares `[briefings.<profile>]` in its own
 `.scufris.toml`. Nothing here knows what any of them report. The project owns
@@ -39,6 +42,16 @@ import page
 
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PROFILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+
+#: The profile a caller that names none is asking about.
+DEFAULT_PROFILE = "morning"
+
+#: The custom message type a briefing wake carries, so the extension that hides
+#: unprompted machinery from the transcript keeps matching it.
+BRIEFING_WAKE = "scufris-briefing"
+
+#: The control client that carries a wake to the foreground conversation.
+CTL = "scufris-ctl"
 
 #: What a source may say about itself. `failed` is not among them: only the
 #: runner writes that, about a source that could not answer.
@@ -120,8 +133,97 @@ def local_date() -> str:
     return datetime.now().astimezone().date().isoformat()
 
 
-def run_dir(date: str) -> Path:
-    return state_root() / validated_date(date)
+def run_dir(date: str, profile: str = DEFAULT_PROFILE) -> Path:
+    """Where one run lives.
+
+    The date names the day and the profile names the briefing, so two profiles
+    on one date are two directories and neither can write over the other.
+    """
+    return state_root() / validated_date(date) / validated_profile(profile)
+
+
+def profiles_for(date: str) -> list[str]:
+    """Every profile that has a run for this date, by name.
+
+    The order is the name's and not the clock's. Nothing chooses between two
+    runs by which is newer: a caller that means one of them says which.
+    """
+    directory = state_root() / validated_date(date)
+    if not directory.is_dir():
+        return []
+    found = []
+    for path in sorted(directory.iterdir()):
+        if not path.is_dir() or not PROFILE.fullmatch(path.name):
+            continue
+        try:
+            read_manifest(date, path.name)
+        except Refused:
+            continue
+        found.append(path.name)
+    return found
+
+
+def collected_runs(date: str) -> list[dict[str, Any]]:
+    """Every run for this date that was gathered and never written up.
+
+    A collection whose wake was refused leaves the run here, so a briefing
+    gathered while the agent was down is still found later.
+    """
+    runs = []
+    for profile in profiles_for(date):
+        manifest = read_manifest(date, profile)
+        if manifest["state"] != "collected":
+            continue
+        # The state is the record, and the prose beside it is the second
+        # reading of the same thing: a run that has one was written up even if
+        # the manifest was never brought up to date.
+        if (run_dir(date, profile) / "briefing.md").is_file():
+            continue
+        runs.append(manifest)
+    return runs
+
+
+def pending(date: str) -> list[dict[str, Any]]:
+    """Every gathered run for this date that still needs its prose said.
+
+    A run no project contributed to is not one of them. A morning nothing
+    declared is not an event, so nothing is woken for it.
+    """
+    return [manifest for manifest in collected_runs(date) if manifest["sources"]]
+
+
+def ambiguous(date: str, names: list[str]) -> Refused:
+    said = ", ".join(names)
+    return Refused(f"name one of the briefings for {date} with --profile: {said}")
+
+
+def resolve(date: str, profile: str | None = None, *, undelivered: bool = False) -> str:
+    """Which run the caller means when it named a date and no profile.
+
+    Naming no profile means the one obvious run: the briefing that was
+    gathered and is still waiting for its prose. Two of those are two
+    briefings, and this refuses rather than guesses between them. A wake that
+    published into another profile's run would put one briefing's prose on
+    another's page, and picking the newer of two would do exactly that on the
+    day both were collected in the same minute.
+    """
+    if profile is not None:
+        return validated_profile(profile)
+    date = validated_date(date)
+    waiting = [str(manifest["profile"]) for manifest in collected_runs(date)]
+    if len(waiting) == 1:
+        return waiting[0]
+    if waiting:
+        raise ambiguous(date, waiting)
+    if undelivered:
+        raise Refused(f"no gathered briefing for {date} is waiting to be written")
+    # Nothing is waiting, so this is a reader looking at a day that is done.
+    found = profiles_for(date)
+    if len(found) == 1:
+        return found[0]
+    if found:
+        raise ambiguous(date, found)
+    return DEFAULT_PROFILE
 
 
 def slug(project: str) -> str:
@@ -143,21 +245,22 @@ def atomic_write(path: Path, data: str) -> None:
         raise
 
 
-def read_manifest(date: str) -> dict[str, Any]:
-    path = run_dir(date) / "manifest.json"
+def read_manifest(date: str, profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
+    named = f"{profile} run for {date}"
+    path = run_dir(date, profile) / "manifest.json"
     try:
         found = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise Refused(f"no briefing run for {date}") from None
+        raise Refused(f"no {named}") from None
     except (OSError, json.JSONDecodeError) as trouble:
-        raise Refused(f"the {date} run is unreadable: {trouble}") from None
+        raise Refused(f"the {named} is unreadable: {trouble}") from None
     if not isinstance(found, dict) or found.get("version") != 1:
-        raise Refused(f"the {date} run is not a briefing manifest")
+        raise Refused(f"the {named} is not a briefing manifest")
     return found
 
 
 def write_manifest(manifest: dict[str, Any]) -> None:
-    directory = run_dir(manifest["date"])
+    directory = run_dir(manifest["date"], manifest["profile"])
     atomic_write(
         directory / "manifest.json", json.dumps(manifest, indent=2, sort_keys=True)
     )
@@ -605,8 +708,8 @@ def index_entry(contribution: dict[str, Any]) -> dict[str, Any]:
 
 
 def collect(
-    profile: str = "morning",
     date: str | None = None,
+    profile: str = DEFAULT_PROFILE,
     *,
     source_deadline: float | None = None,
     run_deadline: float | None = None,
@@ -630,8 +733,9 @@ def collect(
         else run_deadline
     )
     sources, diagnostics = declared_sources(profile)
-    directory = run_dir(date)
+    directory = run_dir(date, profile)
     (directory / "contributions").mkdir(parents=True, exist_ok=True)
+    directory.parent.chmod(0o700)
     directory.chmod(0o700)
     started = datetime.now().astimezone()
     manifest: dict[str, Any] = {
@@ -677,7 +781,7 @@ def finish(
     sources; the prose Scufris writes is added on top later. A morning nobody
     wrote up is then still a morning the owner can read.
     """
-    directory = run_dir(manifest["date"])
+    directory = run_dir(manifest["date"], manifest["profile"])
     kept = []
     for contribution in contributions:
         try:
@@ -714,7 +818,8 @@ def finish(
     # if it cannot be laid out or the old runs cannot be swept.
     try:
         atomic_write(
-            directory / "briefing.html", page.render_page(read_run(manifest["date"]))
+            directory / "briefing.html",
+            page.render_page(read_run(manifest["date"], manifest["profile"])),
         )
     except Exception as trouble:  # noqa: BLE001
         manifest = {
@@ -772,23 +877,22 @@ def prune(keep: int = KEEP_RUNS) -> None:
         old.rmdir()
 
 
-def run_state(date: str) -> str:
-    """What the run directory for this date says, or `none` when there is not one.
+def run_state(date: str, profile: str = DEFAULT_PROFILE) -> str:
+    """What the run directory for this date and profile says.
 
-    A caller deciding whether the morning still needs doing asks this. It
-    answers `none` only when nothing was ever started, so a run left
+    It answers `none` only when nothing was ever started, so a run left
     `collecting` by a crash is told apart from a morning nobody began.
     """
-    if not (run_dir(date) / "manifest.json").is_file():
+    if not (run_dir(date, profile) / "manifest.json").is_file():
         return "none"
-    state = read_manifest(date)["state"]
+    state = read_manifest(date, profile)["state"]
     return state if state in RUN_STATES else "failed"
 
 
-def read_run(date: str) -> dict[str, Any]:
+def read_run(date: str, profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
     """The whole run, for whoever writes the briefing from it."""
-    manifest = read_manifest(date)
-    directory = run_dir(date) / "contributions"
+    manifest = read_manifest(date, profile)
+    directory = run_dir(date, profile) / "contributions"
     contributions = []
     for entry in manifest["sources"]:
         path = directory / f"{entry['slug']}.json"
@@ -796,48 +900,110 @@ def read_run(date: str) -> dict[str, Any]:
             contributions.append(json.loads(path.read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError):
             contributions.append({**entry, "body": "", "raw": None})
-    prose_path = run_dir(date) / "briefing.md"
+    prose_path = run_dir(date, profile) / "briefing.md"
     prose = prose_path.read_text(encoding="utf-8") if prose_path.is_file() else None
     return {"manifest": manifest, "contributions": contributions, "prose": prose}
 
 
-def publish(date: str, prose: str) -> dict[str, Any]:
+def publish(date: str, profile: str, prose: str) -> dict[str, Any]:
     """Keep the prose Scufris wrote and render the page over again with it.
 
     Collection already wrote a page from the contributions alone. This adds the
     prose to the same run and renders it once more, so the page the owner opens
     is never behind what Scufris said.
     """
-    manifest = read_manifest(date)
+    manifest = read_manifest(date, profile)
     if not isinstance(prose, str) or not prose.strip():
         raise Refused("a briefing needs its prose")
     if len(prose) > MAX_PROSE:
         raise Refused(f"the prose is longer than {MAX_PROSE} characters")
-    directory = run_dir(date)
+    directory = run_dir(date, profile)
     atomic_write(directory / "briefing.md", prose.strip() + "\n")
     manifest = {**manifest, "state": "delivered"}
     write_manifest(manifest)
-    run = read_run(date)
+    run = read_run(date, profile)
     atomic_write(directory / "briefing.html", page.render_page(run))
     return {
         "date": date,
+        "profile": profile,
         "state": manifest["state"],
         "markdown": str(directory / "briefing.md"),
         "page": str(directory / "briefing.html"),
     }
 
 
-def render(date: str) -> str:
+def render(date: str, profile: str = DEFAULT_PROFILE) -> str:
     """Write the page from a run that already exists."""
-    run = read_run(date)
-    path = run_dir(date) / "briefing.html"
+    run = read_run(date, profile)
+    path = run_dir(date, profile) / "briefing.html"
     atomic_write(path, page.render_page(run))
     return str(path)
 
 
-def delivered(date: str) -> bool:
-    """Whether this date already has a briefing the owner has been given."""
+def delivered(date: str, profile: str = DEFAULT_PROFILE) -> bool:
+    """Whether this run already has a briefing the owner has been given."""
     try:
-        return read_manifest(date)["state"] == "delivered"
+        return read_manifest(date, profile)["state"] == "delivered"
     except Refused:
         return False
+
+
+def wake_message(manifest: dict[str, Any]) -> str:
+    """What the foreground is told when a run is gathered.
+
+    One owner for these words. The timer reaches the conversation through
+    `scufris-ctl` and a tool call reaches it in process, and a briefing that
+    was asked for by hand must be asked for in the same words as one the clock
+    asked for.
+    """
+    answered = len([item for item in manifest["sources"] if item["status"] != "failed"])
+    failed = len(manifest["sources"]) - answered
+    missing = f", {failed} could not answer" if failed else ""
+    plural = "" if answered == 1 else "s"
+    return (
+        f"The {manifest['profile']} briefing for {manifest['date']} is collected: "
+        f"{answered} source{plural} answered{missing}. Read it with "
+        f"scufris_briefing_show for date {manifest['date']} and profile "
+        f"{manifest['profile']}, then write the briefing yourself: one short "
+        "piece in your own voice that says what today needs, built from what "
+        "the sources actually reported. Do not read the sources out one after "
+        "another, and claim nothing none of them measured. Name any source "
+        "that could not answer. Call scufris_briefing_publish with that prose "
+        "and the same date and profile, then tell the user the same briefing "
+        "in the same words."
+    )
+
+
+def wake(date: str, profile: str, *, ctl: str | None = None) -> dict[str, Any]:
+    """Carry one gathered run to the foreground conversation.
+
+    The run on disk is the durable half and this is the delivery. A refused
+    wake therefore leaves the run exactly as it was: the session-start read
+    finds it later, and a morning gathered while the agent was down is still
+    written up.
+    """
+    manifest = read_manifest(date, profile)
+    answer = {"date": date, "profile": profile, "woken": False, "reason": ""}
+    if manifest["state"] != "collected":
+        return {**answer, "reason": f"the run is {manifest['state']}"}
+    if not manifest["sources"]:
+        return {**answer, "reason": "no project declared this briefing"}
+    command = [
+        ctl or os.environ.get("SCUFRIS_CTL") or CTL,
+        "wake",
+        wake_message(manifest),
+        "--custom-type",
+        BRIEFING_WAKE,
+        "--details",
+        json.dumps(
+            {"date": date, "profile": profile, "sources": len(manifest["sources"])},
+            sort_keys=True,
+        ),
+    ]
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, check=False)
+    except OSError as trouble:
+        return {**answer, "reason": f"{command[0]} could not be run: {trouble}"}
+    if done.returncode != 0:
+        return {**answer, "reason": done.stderr.strip() or f"{command[0]} exited {done.returncode}"}
+    return {**answer, "woken": True}

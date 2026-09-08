@@ -8,11 +8,25 @@ from pathlib import Path
 
 WORKER_EVENTS = {"working", "blocked", "done"}
 MAX_REPORT_DETAIL = 512 * 1024
+#: Bytes of UTF-8, matching `MAX_SUMMARY` in the jobs helper. Checked here so
+#: the refusal names the argument the caller typed rather than arriving as a
+#: helper envelope from two processes away.
+MAX_SUMMARY = 500
 
 
 def main() -> int:
     if len(sys.argv) != 3:
         print("usage: scufris-report EVENT SUMMARY < REPORT.md", file=sys.stderr)
+        return 2
+    summary = sys.argv[2]
+    if len(summary.encode("utf-8")) > MAX_SUMMARY:
+        print(
+            f"scufris-report: summary exceeds {MAX_SUMMARY} bytes of UTF-8",
+            file=sys.stderr,
+        )
+        return 2
+    if "\r" in summary or "\n" in summary:
+        print("scufris-report: a summary is one line", file=sys.stderr)
         return 2
     if sys.argv[1] not in WORKER_EVENTS:
         print(
@@ -38,7 +52,7 @@ def main() -> int:
         "job_id": job_id,
         "capability": capability,
         "event": sys.argv[1],
-        "summary": sys.argv[2],
+        "summary": summary,
         "report": report,
     }
     result = subprocess.run(

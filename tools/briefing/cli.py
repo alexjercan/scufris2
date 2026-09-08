@@ -218,7 +218,9 @@ def main(argv: list[str] | None = None) -> int:
                     "date": manifest["date"],
                     "profile": manifest["profile"],
                     "sources": len(manifest["sources"]),
-                    "message": briefing.wake_message(manifest),
+                    "message": briefing.failure_message(manifest)
+                    if manifest["state"] == "failed"
+                    else briefing.wake_message(manifest),
                 }
                 for manifest in briefing.pending(date)
             ]

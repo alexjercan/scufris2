@@ -138,13 +138,13 @@ class HelperBoundsTest(unittest.TestCase):
         self.assertIsNone(self.jobs.parse_event(over))
         # Measured in bytes, not code points. A 500-character summary of an em
         # dash is 1500 bytes and the record refuses it.
-        wide = json.dumps(
-            {"generation": 1, "event": "done", "summary": "—" * 250}
-        )
+        wide = json.dumps({"generation": 1, "event": "done", "summary": "—" * 250})
         self.assertIsNone(self.jobs.parse_event(wide))
         # The record holds exactly what the parser admits.
         self.assertTrue(
-            self.jobs.valid_record_text("x" * self.jobs.MAX_SUMMARY, self.jobs.MAX_SUMMARY)
+            self.jobs.valid_record_text(
+                "x" * self.jobs.MAX_SUMMARY, self.jobs.MAX_SUMMARY
+            )
         )
 
     def test_a_trimmed_report_keeps_the_history_that_fits(self) -> None:
@@ -1073,7 +1073,11 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         # oldest, and it has to say so.
         self.assertTrue(bounded_report.startswith("# report trimmed\n"))
         self.assertRegex(bounded_report, r"[1-9]\d* older entr(y|ies) dropped")
-        self.assertTrue(bounded_report.endswith("# working: bounded update 4\n\n" + large_detail + "\n"))
+        self.assertTrue(
+            bounded_report.endswith(
+                "# working: bounded update 4\n\n" + large_detail + "\n"
+            )
+        )
         self.assertIn("# working: bounded update 3\n", bounded_report)
         self.assertNotIn("# working: bounded update 0\n", bounded_report)
 
@@ -2315,7 +2319,9 @@ with (directory / 'status').open('a') as stream:
         self.jobs.append(job_id)
         directory = self.root / "state" / "scufris" / "jobs" / job_id
         self.wait_for(directory / "status", "done: report complete")
-        worktree = Path(json.loads((directory / "job.json").read_text())["working_directory"])
+        worktree = Path(
+            json.loads((directory / "job.json").read_text())["working_directory"]
+        )
         (worktree / "RESULT.md").write_text("worth landing\n")
         subprocess.run(["git", "add", "RESULT.md"], cwd=worktree, check=True)
         subprocess.run(
@@ -2336,7 +2342,8 @@ with (directory / 'status').open('a') as stream:
         self.assertIsNone(record["cleanup"], "a refused landing recorded an intent")
         # Every exit is still open: different words, and stopping instead.
         again = self.call(
-            "land", {"job_id": job_id, "subject": "Different words entirely"},
+            "land",
+            {"job_id": job_id, "subject": "Different words entirely"},
             check=False,
         )
         self.assertFalse(again["ok"])

@@ -36,7 +36,11 @@ export default function workerReport(pi: ExtensionAPI): void {
         {
           event: StringEnum(WORKER_REPORT_EVENTS),
           summary: Type.String({
-            description: "One-line status summary.",
+            // 500 bytes of UTF-8 at the helper's door, and this bound is
+            // characters. A 300-character summary quoting an em dash or a box
+            // drawing character passed here and was refused there.
+            description:
+              "One-line status summary, at most 500 bytes of UTF-8. Plain ASCII is the safe way to stay inside it.",
             minLength: 1,
             maxLength: 500,
             pattern: "^[^\\r\\n]+$",

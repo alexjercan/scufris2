@@ -13,7 +13,7 @@ Use this process for a stable `vX.Y.Z` release.
    python3 -m unittest discover -s tests -p 'test_*.py'
    ruff check .
    ruff format --check .
-   shellcheck scripts/scufris-dev
+   shellcheck scripts/scufris-agent scripts/scufris-dev scripts/scufris-staging
    (cargo clippy --all-targets -- -D warnings && cargo test)
    nix fmt -- --check .
    nix flake check -L
@@ -25,3 +25,11 @@ Use this process for a stable `vX.Y.Z` release.
 8. In GitHub Actions, verify the reusable check job passed, the tag matched the root package version, and the publication job created a source-only GitHub Release with generated notes. Do not add assets; Nix consumers use the tagged source flake.
 9. Verify every workflow the release push started, not only `release`. Pushing `master` also starts `check`, `Documentation`, and `iOS`, and all of them run against the tagged commit. The Swift suite runs in `iOS` and nowhere else: it needs Xcode, so no step above reaches it and CI is its only gate. `gh run list --limit 5` after the push shows every one.
 10. When `SERVICE_VERSION` changed in this release, ship the iOS surface too: `gh workflow run testflight.yml --ref vX.Y.Z`. The gateway compares the version with exact equality and negotiates nothing (`shared/control/src/service.rs`), so a phone still on the previous number is refused at its hello the moment the machine switches. `testflight.yml` is `workflow_dispatch` only; no push and no tag starts it. The release is not done until the build is uploaded, because every surface has to move together.
+11. Deploy. A tag reaches nothing on its own: the consuming Nix configuration pins a tag, so until its input is bumped and switched, every unit on the machine still runs the previous release. Bump the `scufris2` input to `vX.Y.Z` in that configuration, run its `home-manager switch`, and confirm the units picked the new build up:
+
+    ```bash
+    systemctl --user show scufris-service -p ExecStart | grep -o '/nix/store/[^ ]*'
+    systemctl --user status scufris-desktop scufris-surface-gateway
+    ```
+
+    When `SERVICE_VERSION` moved, do not switch until step 10's TestFlight build is installed on the phone. An upload is not an install, and the moment the machine switches the phone is refused at its hello.

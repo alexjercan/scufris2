@@ -295,7 +295,9 @@ class Structure(unittest.TestCase):
             den.toggle_habit("# Monday\n\n### Tasks\n", "Gym")
 
     def test_an_ambiguous_habit_is_refused_rather_than_guessed(self) -> None:
-        habits = "### Habits\n\n- [ ] \N{PERSONAL COMPUTER} Code\n- [ ] \N{BOOKS} Code\n"
+        habits = (
+            "### Habits\n\n- [ ] \N{PERSONAL COMPUTER} Code\n- [ ] \N{BOOKS} Code\n"
+        )
         with self.assertRaises(ValueError):
             den.toggle_habit(habits, "Code")
 
@@ -305,9 +307,12 @@ class Structure(unittest.TestCase):
         # `_sections` matched at column 0 and `_header` matched after strip, so
         # `task list` showed nothing while `task done 1` edited the invisible
         # items.
-        text = "# T\n\n  ### Tasks\n\n- [ ] one\n- [ ] two\n\n### Habits\n\n- [ ] Learn\n"
-        self.assertEqual([task.text for task in den.parse_text(text, "f").tasks],
-                         ["one", "two"])
+        text = (
+            "# T\n\n  ### Tasks\n\n- [ ] one\n- [ ] two\n\n### Habits\n\n- [ ] Learn\n"
+        )
+        self.assertEqual(
+            [task.text for task in den.parse_text(text, "f").tasks], ["one", "two"]
+        )
 
     def test_an_offset_beyond_a_century_is_refused_with_a_reason(self) -> None:
         with self.assertRaises(ValueError):

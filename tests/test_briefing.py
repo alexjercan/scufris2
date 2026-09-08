@@ -1219,6 +1219,60 @@ class Run(unittest.TestCase):
         self.assertIn("the-den", said)
         self.assertIn("Claim nothing about what they would have said", said)
 
+    def test_a_run_records_the_bounds_it_was_actually_given(self) -> None:
+        # The profile's numbers live in the timer unit's environment. A run
+        # started any other way - the `scufris_briefing_run` tool under the
+        # service, or a shell - gets the code defaults instead, and nothing
+        # said so: a source cut off at 15 minutes looked the same as one cut
+        # off at the 8 hours the profile asks for.
+        self.declare("the-den")
+        self.harness("#!/usr/bin/env python3\nprint('all clear')\n")
+        manifest = briefing.collect("2026-08-31", "morning")
+        self.assertEqual(
+            manifest["bounds"],
+            {
+                "source_deadline": briefing.SOURCE_DEADLINE,
+                "run_deadline": briefing.RUN_DEADLINE,
+                "parallel": 1,
+            },
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "SCUFRIS_BRIEFING_SOURCE_DEADLINE": "120",
+                "SCUFRIS_BRIEFING_DEADLINE": "240",
+            },
+        ):
+            bounded = briefing.collect("2026-09-01", "morning")
+        self.assertEqual(bounded["bounds"]["source_deadline"], 120.0)
+        self.assertEqual(bounded["bounds"]["run_deadline"], 240.0)
+
+    def test_a_failed_run_is_still_waiting_when_nothing_was_connected(self) -> None:
+        # The wake is only the delivery. The 23:00 nightly with nothing
+        # connected was refused its wake and then excluded from `pending`, so
+        # the session-start read - the one thing that recovers a refused wake -
+        # never saw it, and the run sat on disk failed forever.
+        self.declare("the-den")
+        self.harness("#!/usr/bin/env python3\nraise SystemExit(1)\n")
+        self.assertEqual(briefing.collect("2026-08-31", "morning")["state"], "failed")
+        self.control(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            'print("scufris-ctl: agent_unavailable: no agent", file=sys.stderr)\n'
+            "raise SystemExit(1)\n"
+        )
+        self.assertFalse(briefing.wake("2026-08-31", "morning")["woken"])
+        waiting = briefing.pending("2026-08-31")
+        self.assertEqual([item["profile"] for item in waiting], ["morning"])
+        # And it closes the way a collected run closes, so it is asked about
+        # once rather than every session: there is no other way to end it.
+        self.assertIn("scufris_briefing_publish", briefing.failure_message(waiting[0]))
+        briefing.publish(
+            "2026-08-31", "morning", "No briefing: the-den could not answer."
+        )
+        self.assertEqual(briefing.pending("2026-08-31"), [])
+        self.assertEqual(briefing.run_state("2026-08-31", "morning"), "delivered")
+
     def test_a_refused_wake_leaves_the_run_gathered_for_later(self) -> None:
         # Losing a gathered briefing because the agent happened to be down is
         # the failure this must not have. The run is the durable half; the

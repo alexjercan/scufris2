@@ -168,15 +168,22 @@ def profiles_for(date: str) -> list[str]:
 
 
 def collected_runs(date: str) -> list[dict[str, Any]]:
-    """Every run for this date that was gathered and never written up.
+    """Every run for this date that still owes the conversation something.
 
     A collection whose wake was refused leaves the run here, so a briefing
     gathered while the agent was down is still found later.
+
+    A run where every source failed is one of them. The absence of a briefing
+    is itself the news, and leaving `failed` out made a total failure quieter
+    than a partial one: the 23:00 nightly with nothing connected was refused
+    its wake, excluded from this list, and never mentioned again. Both states
+    close the same way, by Scufris publishing the prose - which for a failed
+    run is the sentence saying there is none.
     """
     runs = []
     for profile in profiles_for(date):
         manifest = read_manifest(date, profile)
-        if manifest["state"] != "collected":
+        if manifest["state"] not in ("collected", "failed"):
             continue
         # The state is the record, and the prose beside it is the second
         # reading of the same thing: a run that has one was written up even if
@@ -922,6 +929,11 @@ def collect(
         else run_deadline
     )
     sources, diagnostics = declared_sources(profile, config)
+    # Resolved before the manifest is written, so the run records what it was
+    # given rather than what it would have been given.
+    workers = min(
+        len(sources), environment_int("SCUFRIS_BRIEFING_PARALLEL", len(sources))
+    )
     # Read before this run writes its own manifest over the last one: a date
     # and a profile name one directory. Every source is told the same moment,
     # so a run is one window and not one for each source.
@@ -940,6 +952,16 @@ def collect(
         "finished": None,
         "sources": [],
         "diagnostics": diagnostics,
+        # What this run was actually given. The profile's numbers live in the
+        # timer unit's environment, and a run started any other way - the
+        # `scufris_briefing_run` tool, or a shell - gets the code defaults
+        # instead, silently. A source cut off at 15 minutes when the profile
+        # says 8 hours now says which number it was cut by.
+        "bounds": {
+            "source_deadline": source_deadline,
+            "run_deadline": run_deadline,
+            "parallel": workers,
+        },
     }
     write_manifest(manifest)
     if not sources:
@@ -966,9 +988,6 @@ def collect(
     #
     # The cap is on sources and not on what a source starts. What a source
     # spawns is its harness's business and this cannot see it.
-    workers = min(
-        len(sources), environment_int("SCUFRIS_BRIEFING_PARALLEL", len(sources))
-    )
     with ThreadPoolExecutor(max_workers=workers) as pool:
         contributions = list(pool.map(bounded, sources))
     return finish(manifest, contributions)
@@ -1255,8 +1274,11 @@ def failure_message(manifest: dict[str, Any]) -> str:
         f"The {manifest['profile']} briefing for {manifest['date']} did not "
         f"collect: every source failed ({named}). Tell the user plainly that "
         "there is no briefing this time and name the sources that could not "
-        "answer. Claim nothing about what they would have said. Then call "
-        "scufris_final_response; do not collect it again unless he asks."
+        "answer. Claim nothing about what they would have said. Call "
+        "scufris_briefing_publish with that same sentence and the same date "
+        f"and profile - a run nobody publishes is a run this asks about again "
+        "every session - then tell the user, and do not collect it again "
+        "unless he asks."
     )
 
 

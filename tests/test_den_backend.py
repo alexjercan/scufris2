@@ -603,7 +603,11 @@ class Notes(Panel):
         # `#### ` in a body starts another note and `### ` starts another
         # section, both silently, both taking the rest of the words with them.
         reading = self.do(
-            {"action": "note", "heading": "standup", "body": "ok\n### Habits\n- [x] Gym"}
+            {
+                "action": "note",
+                "heading": "standup",
+                "body": "ok\n### Habits\n- [x] Gym",
+            }
         )
         self.assertEqual(len(reading["notes"]), 1)
         self.assertIn("heading", str(reading["trouble"]))

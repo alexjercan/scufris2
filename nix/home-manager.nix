@@ -692,7 +692,12 @@ in {
           # the service itself and the conversation is on disk either way.
           Restart = "on-failure";
           RestartSec = 3;
-          RuntimeDirectory = serviceCfg.serviceName;
+          # No `RuntimeDirectory`. It made `%t/scufris-service`, which nothing
+          # uses: the sockets live in `%t/scufris`, at 0700, created by the
+          # code that binds them. Pointing the option at that directory would
+          # be worse than leaving it - systemd would relax it to 0755 and
+          # delete it when this unit stops, taking the companion's and the
+          # gateway's sockets with it.
           WorkingDirectory = "%h";
         };
         Install.WantedBy = ["default.target"];

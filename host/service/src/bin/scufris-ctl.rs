@@ -4,7 +4,7 @@ use std::{io::BufReader, os::unix::net::UnixStream, process::ExitCode};
 
 use clap::{Parser, Subcommand};
 use scufris_control::command::{
-    Answer, Command as DesktopCommand, Outcome, Verb, command_socket_path,
+    Answer, COMMAND_VERSION, Command as DesktopCommand, Outcome, Verb, command_socket_path,
 };
 use scufris_control::service::{
     ControlRequest, ControlRequestBody, ControlResponseBody, control_socket_path,
@@ -135,6 +135,18 @@ fn desktop(verb: Verb) -> Result<(), String> {
         .map_err(|error| format!("cannot connect to {}: {error}", path.display()))?;
     write_message(&mut stream, &DesktopCommand::new(verb)).map_err(render)?;
     let answer: Answer = read_message(&mut BufReader::new(stream)).map_err(render)?;
+    // The companion checks the version of what it is sent; this is the other
+    // half of that gate. It matters more than it looks: `scufris-ctl` ships
+    // from the service package and `desktop.sock` is served by the desktop
+    // package, so a partial deployment can leave the two at different
+    // versions with nothing between them but this.
+    if answer.v != COMMAND_VERSION {
+        return Err(format!(
+            "this client speaks command version {COMMAND_VERSION} and the companion answered {}. \
+             Update the host and client together.",
+            answer.v
+        ));
+    }
     match answer.outcome {
         Outcome::Taken => Ok(()),
         Outcome::Refused { detail } => Err(detail),

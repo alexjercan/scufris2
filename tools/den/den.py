@@ -1683,7 +1683,9 @@ def normalize_move(split: str, name: str) -> str:
     # with the header's own words is appended, never listed, and appended
     # again on every retry.
     if written.lower() == "split,exercise":
-        raise ValueError("a movement cannot be called split,exercise: that is the table header")
+        raise ValueError(
+            "a movement cannot be called split,exercise: that is the table header"
+        )
     return written
 
 

@@ -202,7 +202,6 @@ Test ownership:
   unrelated sessions survive.
 - `tests/test_quick_review_agent.py`: the strict RPC adapter, pinned npm
   extension invocation, resource isolation, and completion relay.
-- `tests/test_scufris_artifacts_prune.py`: sidecar pruning.
 - `tests/test_usage_backends.py`: what the subscription backends make of an
   answer. Nothing here reaches the network, and one test names the only three
   fields a window may carry, because the answers behind them carry the account

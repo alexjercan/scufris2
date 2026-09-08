@@ -100,6 +100,83 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   owner asked first and is waiting, and returning their own question to them
   silent on every screen would be the worse trade. `surface_unavailable` is
   gone, and `SERVICE_VERSION` is unchanged, so no surface has to move with this.
+- One attachment no longer takes the whole assistant down. A single unreadable
+  metadata file made every upload, every read and every send fail from then on,
+  because the store loaded its index by reading every record and gave up on the
+  first one it could not read. A store at its quota refused every upload rather
+  than expiring the oldest, a failed write left its temporary behind to be
+  counted against the quota forever, an oversized message came back as a plain
+  refusal with no size in it, and a truncated upload was reported as a server
+  fault. Each record is now quarantined on its own, the quota expires before it
+  refuses, temporaries are removed on every path, and the gateway distinguishes
+  a message that was too large from one that arrived incomplete. A
+  `Content-Type` carrying a charset - which is what a browser sends - is no
+  longer read as an unknown type.
+- A worker event that cannot be delivered is now recoverable. The drain caught
+  its own failure, remembered it, and never tried again, so every later event
+  from every job was stuck behind it and the only recovery was restarting
+  Scufris. The failure is reported once as an attention notice, and the turn it
+  wakes is what retries. A notice is cleared when its job lands, is stopped, or
+  is forgotten, and a job recovered at session start brings its notice with it,
+  so the tray stops saying a job needs attention after it has been dealt with.
+- The tray says something when a job is blocked or has failed. Both states fell
+  through to the same grey "idle" as a companion with nothing to do, which is
+  the one thing they are not. The desktop pill and its sound follow.
+- A briefing that fails says so. A run where every source failed reached
+  nobody: the wake refused the state, the session-start read left it out, and
+  the unit exited 0, so one source failing out of five was reported and five
+  out of five was silence. A failed run is now carried to the conversation and
+  closes the same way a collected one does. The nightly is no longer lost
+  either: it collects at 23:00, and a session opening the next morning reads
+  yesterday's date as well as today's, which is the only thing that would ever
+  have found it. A collection that fails after `scufris_briefing_run` has
+  already answered now reports itself instead of leaving Alex waiting.
+- A briefing source is told it gets exactly one turn, so a source that ended a
+  turn intending to continue is no longer recorded as having failed to answer.
+- One over-long worker summary no longer wedges every job. The event file was
+  rejected whole, so nothing after that line could be read from any job until
+  the file was edited by hand; the summary is now bounded at the door it is
+  written at, in bytes, in all three places that write one. A report file at
+  its ceiling keeps its history instead of being replaced by the newest entry
+  alone. `scufris_job_inspect` shows the current run's events rather than every
+  run's.
+- A landing that Sprout refuses no longer traps the job. The cleanup intent was
+  made durable before the refusal could be seen, so the job could be neither
+  landed nor abandoned afterwards; the guard now runs first, and `stop` can
+  re-decide a workspace removal the same way it can re-decide an abandonment. A
+  subject mismatch names the subject that was recorded.
+- The composer no longer eats a message it could not send. Words and every
+  attached file were cleared the moment Enter was pressed, so a submission
+  refused before it left - the service restarting, a message one byte over the
+  bound - took them with it. They come back in the box with the reason.
+- The desktop no longer refuses to start because of one unreadable file. A
+  crash between creating `surface-id` and its bytes reaching disk left a
+  zero-length file that made the companion exit on every launch, for good, and
+  the file survives the reboot that caused it. The write is crash-safe and an
+  unusable file is replaced. "Restart backend" past its budget says why instead
+  of doing nothing.
+- The den refuses text that would rewrite the journal. A task, idea or note
+  carrying a newline wrote whatever followed it as journal structure: an
+  embedded `### Habits` made a second Habits section, hid the real one from
+  every later write, ticked a habit nobody made, and dropped the rest of the
+  sentence, all with a success message. Ticking a habit by name no longer ticks
+  a different one - `Work` matched `Deep Work` - and an ambiguous name is
+  refused. A section header that is a file's last line survives the next write,
+  a day written before a section existed takes a write into it, `--json` is
+  honoured by every read, and a den on a full or unreadable disk refuses one
+  click instead of killing the panel.
+- A widget panel says what went wrong instead of going quiet. A backend handed
+  a spawn payload it did not expect died before its first reading and was
+  restarted into the same death; a widget that threw left a panel that rendered
+  nothing forever; a dead panel that had also dimmed drew its numbers at an
+  unreadable 14% opacity; a click on a panel whose backend had gone did nothing
+  and said nothing; and the paperclip at eight attachments did nothing with the
+  reason unreachable. Sampling intervals are held to what the panel's own
+  staleness tolerance allows, so a panel no longer wears a STALE badge over
+  numbers that are current. Widget window sizes are bounded, as the
+  documentation always said they were. On the way out, backends that ignore
+  SIGTERM are now actually killed rather than left running until the machine is
+  rebooted.
 
 ## [2.3.0] - 2026-09-08
 

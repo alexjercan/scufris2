@@ -243,8 +243,9 @@ project that hangs costs the run its own deadline and nothing else.
 ```text
 $XDG_STATE_HOME/scufris/briefings/2026-08-31/
 ├── morning/
-│   ├── manifest.json          the index: state, every source, the numbered
-│   │                          offers, every diagnostic
+│   ├── manifest.json          the index: state, the bounds the run was given,
+│   │                          every source, the numbered offers, every
+│   │                          diagnostic
 │   ├── contributions/*.json   one envelope for each source, with its body
 │   ├── briefing.md            the prose Scufris wrote
 │   └── briefing.html          the page, written when the sources answer
@@ -258,6 +259,15 @@ renders it again over the prose when there is some. Whether the day has a page
 is decided by code, so a write-up that never happens costs the day its prose and
 not its briefing.
 
+The manifest's `bounds` are the numbers that run was actually given: the source
+deadline, the run deadline, and how many sources were asked at once. A profile's
+own numbers live in its timer unit's environment, so a run started any other way
+
+- the `scufris_briefing_run` tool under the service, or a shell - gets the code
+  defaults instead. Recording them is what makes a source cut off at fifteen
+  minutes distinguishable from one cut off at the eight hours the profile asks
+  for.
+
 The last thirty dates are kept, with every profile that ran on them. The
 manifest state is the record of what happened, and it is what an opening
 session reads:
@@ -268,12 +278,16 @@ session reads:
 | `collecting` | a run no process owns any more | nothing             |
 | `collected`  | gathered, prose never written  | ask for the writing |
 | `delivered`  | the owner has it               | nothing             |
-| `failed`     | nothing answered               | nothing             |
+| `failed`     | nothing answered               | say there is none   |
 
-Only `collected` asks a session for anything, and only when the run has sources
-and no prose beside it. Everything else is the timer's business: a session
-never decides that a briefing is owed, so it can neither deliver one twice nor
-collect one nobody asked for.
+`collected` and `failed` ask a session for something, and only when the run has
+sources and no prose beside it. A failed run is asked about because the absence
+of a briefing is itself the news: one source failing out of five was reported
+and five out of five used to be silence. It closes the same way a collected run
+closes, by Scufris publishing the prose - which for a failed run is the
+sentence saying there is none. Everything else is the timer's business: a
+session never decides that a briefing is owed, so it can neither deliver one
+twice nor collect one nobody asked for.
 
 A caller that names a date and no profile is resolved against what is on disk:
 it means the one run that was gathered and is still waiting for its prose.

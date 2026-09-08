@@ -181,7 +181,7 @@ pub enum Event {
     /// the pill away while there are words on screen is a gesture that can lose
     /// them, and this one is on the key that is pressed most.
     Dismiss,
-    /// The stop key was pressed, or the tray was asked to stop Scufris.
+    /// The stop key was pressed.
     ///
     /// The one gesture here that reaches the conversation without saying
     /// anything to it. What it stops is the agent's run; cutting the speech is
@@ -506,8 +506,11 @@ impl Companion {
         Vec::new()
     }
 
-    /// Reports a durable-storage failure that has no transcript behind it.
-    pub fn report_store_failure(&mut self, reason: String) {
+    /// Reports trouble that has no transcript behind it.
+    ///
+    /// Only from rest. Every other phase is holding something the person is
+    /// answering, and a sentence about the service is not worth their words.
+    pub fn report_trouble(&mut self, reason: String) {
         if !matches!(self.phase, Phase::Resting) {
             return;
         }
@@ -1754,7 +1757,7 @@ mod tests {
     fn a_startup_storage_failure_is_visible_rather_than_silent() {
         let mut companion = Companion::new("pill");
         companion.set_connected(true);
-        companion.report_store_failure("the saved transcript is unreadable".into());
+        companion.report_trouble("the saved transcript is unreadable".into());
         assert!(companion.on_screen());
         let presentation = companion.presentation();
         assert_eq!(presentation.state, "error");

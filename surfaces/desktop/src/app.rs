@@ -621,7 +621,7 @@ impl App {
         let (_, decision) = self.decide(|companion| match loaded {
             Ok(Some(pending)) => companion.restore(pending),
             Ok(None) => {}
-            Err(error) => companion.report_store_failure(error.to_string()),
+            Err(error) => companion.report_trouble(error.to_string()),
         });
         let runtime = Arc::clone(self);
         self.show(
@@ -1669,13 +1669,20 @@ impl App {
             warn!("no chat command is configured");
             return;
         };
-        spawn_hook(command);
+        let _ = spawn_hook(command);
     }
 
     /// Restarts the owned backend service inside the bounded restart budget.
-    pub fn restart_backend(&self) {
+    ///
+    /// A refusal is said out loud. This is reached by clicking a tray item
+    /// while the service is unreachable, which is the moment the person has
+    /// least reason to trust that anything is running: a click that logs to
+    /// the journal and changes nothing on screen reads as a companion that has
+    /// stopped answering its own menu, and the answer to that is to click it
+    /// again, which is what the budget exists to stop.
+    pub fn restart_backend(self: &Arc<Self>) {
         let Some(command) = &self.ports.restart_command else {
-            warn!("no backend restart command is configured");
+            self.report("No restart command is configured for the Scufris service.".into());
             return;
         };
         let now = SystemTime::now()
@@ -1688,21 +1695,42 @@ impl App {
             .unwrap_or_else(|error| error.into_inner())
             .allow(now)
         {
-            warn!("backend restart budget is exhausted");
+            self.report(
+                "The Scufris service has been restarted too often just now. Wait a minute, or start it yourself."
+                    .into(),
+            );
             return;
         }
-        spawn_hook(command);
+        if let Err(reason) = spawn_hook(command) {
+            self.report(reason);
+        }
+    }
+
+    /// Puts one sentence in front of the person, when there is room for it.
+    ///
+    /// Nothing here is worth taking a pill that is holding words: an
+    /// unanswered transcript is the person's, and a tray click is not a reason
+    /// to lose it. The journal takes the sentence either way.
+    fn report(self: &Arc<Self>, reason: String) {
+        warn!("{reason}");
+        let (_, decision) = self.decide(|companion| companion.report_trouble(reason));
+        self.show(decision, Box::new(|_| {}));
     }
 }
 
-fn spawn_hook(command: &Path) {
+fn spawn_hook(command: &Path) -> Result<(), String> {
     match Command::new(command).spawn() {
         Ok(mut child) => {
             thread::spawn(move || {
                 let _ = child.wait();
             });
+            Ok(())
         }
-        Err(error) => error!("cannot run {}: {error}", command.display()),
+        Err(error) => {
+            let reason = format!("cannot run {}: {error}", command.display());
+            error!("{reason}");
+            Err(reason)
+        }
     }
 }
 
@@ -2305,6 +2333,35 @@ mod tests {
         take(harness);
         harness.app.handle(Event::Enter { text: None });
         harness.executor.drain();
+    }
+
+    /// A tray item that refuses has to say so somewhere the person is looking.
+    #[test]
+    fn a_restart_the_budget_refuses_is_said_on_the_pill() {
+        // Reached by clicking "Restart backend" while the service is down,
+        // which is the moment a click that changes nothing on screen reads as
+        // a companion that has stopped answering its own menu. It used to warn
+        // into the journal and return.
+        let resting = harness(FakeRecorder::default(), Ok(String::new()));
+        resting.app.restart_backend();
+        resting.executor.drain();
+        let shown = resting.surface.last();
+        assert_eq!(shown.state, "error");
+        assert!(
+            shown.detail.contains("No restart command is configured"),
+            "{:?}",
+            shown.detail
+        );
+
+        // And it does not take a pill that is holding the person's words.
+        let holding = harness(FakeRecorder::default(), Ok("send this".into()));
+        take(&holding);
+        assert_eq!(holding.surface.last().state, "editing");
+        holding.app.restart_backend();
+        holding.executor.drain();
+        let shown = holding.surface.last();
+        assert_eq!(shown.state, "editing");
+        assert_eq!(shown.text, "send this");
     }
 
     /// The stop key is the one gesture on the pill that reaches the

@@ -487,6 +487,92 @@ class Run(unittest.TestCase):
         executable.chmod(0o755)
         return executable
 
+    def test_two_sources_offers_become_one_numbered_list_on_the_run(self) -> None:
+        # The numbers belong to the run, not to any source. They are assigned
+        # once, in source order, and stored, so a pick made later resolves from
+        # the file rather than from what the model remembers saying.
+        # Both sources answer the same, because sources run in one pool and
+        # which of two scripted answers reaches which of them is a race. What
+        # is being checked here is the merge, and it is the same either way:
+        # every source's offers, in the order the sources were asked.
+        self.declare("aaa")
+        self.declare("zzz")
+        self.answer.write_text(
+            json.dumps(
+                {
+                    **ENVELOPE,
+                    "offers": [
+                        {"label": "First here", "detail": "a"},
+                        {"label": "Second here", "detail": "b"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        manifest = briefing.collect("2026-08-31", "morning")
+        self.assertEqual([item["number"] for item in manifest["offers"]], [1, 2, 3, 4])
+        self.assertEqual(
+            [item["project"] for item in manifest["offers"]],
+            ["projects/aaa", "projects/aaa", "projects/zzz", "projects/zzz"],
+        )
+        self.assertEqual(
+            [item["label"] for item in manifest["offers"]],
+            ["First here", "Second here", "First here", "Second here"],
+        )
+
+    def test_a_run_nobody_offered_anything_for_carries_an_empty_list(self) -> None:
+        self.declare("the-den")
+        manifest = briefing.collect("2026-08-31", "morning")
+        self.assertEqual(manifest["offers"], [])
+        page_text = (
+            briefing.run_dir("2026-08-31", "morning") / "briefing.html"
+        ).read_text()
+        self.assertNotIn("<h2>Next</h2>", page_text)
+
+    def test_the_offers_a_run_was_collected_with_survive_publish(self) -> None:
+        # Publishing writes the prose and renders the page again. It must not
+        # renumber or drop the list, or the briefing said in chat and the one
+        # stored would disagree about what 1 means.
+        self.declare("the-den")
+        self.answers(
+            json.dumps(
+                {**ENVELOPE, "offers": [{"label": "Call the dentist", "detail": "a"}]}
+            )
+        )
+        collected = briefing.collect("2026-08-31", "morning")
+        briefing.publish("2026-08-31", "morning", "Today is quiet.")
+        after = briefing.read_manifest("2026-08-31", "morning")
+        self.assertEqual(after["offers"], collected["offers"])
+        page_text = (
+            briefing.run_dir("2026-08-31", "morning") / "briefing.html"
+        ).read_text()
+        self.assertIn("<h2>Next</h2>", page_text)
+        self.assertIn("Call the dentist", page_text)
+
+    def test_a_source_is_told_what_it_may_offer(self) -> None:
+        self.declare("the-den")
+        briefing.collect("2026-08-31", "morning")
+        asked = self.prompt.read_text()
+        self.assertIn('"offers"', asked)
+        self.assertIn("at most 3 things the owner could do next", asked)
+        self.assertIn("whoever picks it writes the words for it then", asked)
+
+    def test_the_wake_names_the_numbered_list_only_when_there_is_one(self) -> None:
+        quiet = {
+            "profile": "morning",
+            "date": "2026-08-31",
+            "sources": [],
+            "offers": [],
+        }
+        self.assertNotIn("numbered", briefing.wake_message(quiet))
+        loud = {
+            **quiet,
+            "offers": [{"number": 1, "label": "One", "detail": "a"}],
+        }
+        said = briefing.wake_message(loud)
+        self.assertIn("1 thing that could be done next", said)
+        self.assertIn("using those numbers exactly", said)
+
     def test_a_source_the_machine_declares_contributes_with_no_project(self) -> None:
         # A jobs source has no checkout to belong to. It is an ordinary source
         # declared in one user-level file, and nothing else about it differs.
@@ -1224,6 +1310,144 @@ class Page(unittest.TestCase):
         self.assertIn("<pre><code>plain code</code></pre>", rendered)
         self.assertIn("<code>code</code>", rendered)
         self.assertIn('href="https://example.invalid/x"', rendered)
+
+
+class Offers(unittest.TestCase):
+    """What a source may offer, and how one run's offers get their numbers."""
+
+    def envelope(self, *offers: dict) -> str:
+        return json.dumps({**ENVELOPE, "offers": list(offers)})
+
+    def test_an_offer_is_a_label_and_a_detail(self) -> None:
+        found = briefing.parse_contribution(
+            self.envelope({"label": "Call the dentist", "detail": "Left over."})
+        )
+        self.assertEqual(
+            found["offers"],
+            [{"label": "Call the dentist", "detail": "Left over."}],
+        )
+
+    def test_a_source_that_offers_nothing_carries_an_empty_list(self) -> None:
+        # Nothing to do is the ordinary case, and it must cost the envelope
+        # nothing: an absent key is a source with no next step, not a bad one.
+        self.assertEqual(
+            briefing.parse_contribution(json.dumps(ENVELOPE))["offers"], []
+        )
+
+    def test_more_offers_than_the_bound_is_refused_by_name(self) -> None:
+        text = self.envelope(
+            *({"label": f"Do {n}", "detail": "Because."} for n in range(4))
+        )
+        with self.assertRaises(briefing.Unusable) as caught:
+            briefing.parse_contribution(text)
+        self.assertIn("at most 3", str(caught.exception))
+
+    def test_an_offer_without_its_label_or_detail_is_refused_by_name(self) -> None:
+        for offer, named in (
+            ({"detail": "Because."}, "an offer label"),
+            ({"label": "Do it"}, "an offer detail"),
+        ):
+            with self.subTest(offer=offer):
+                with self.assertRaises(briefing.Unusable) as caught:
+                    briefing.parse_contribution(self.envelope(offer))
+                self.assertIn(named, str(caught.exception))
+
+    def test_an_offer_with_a_key_of_its_own_is_refused(self) -> None:
+        # The shape is the whole contract. A source that sends a prompt for
+        # someone to run is doing the thing this design took out, so it is
+        # refused rather than quietly stripped.
+        with self.assertRaises(briefing.Unusable):
+            briefing.parse_contribution(
+                self.envelope(
+                    {"label": "Do it", "detail": "Because.", "prompt": "rm -rf /"}
+                )
+            )
+
+    def test_offers_are_numbered_across_sources_in_source_order(self) -> None:
+        numbered = briefing.numbered_offers(
+            [
+                {
+                    "project": "the-den",
+                    "slug": "the-den",
+                    "offers": [
+                        {"label": "One", "detail": "a"},
+                        {"label": "Two", "detail": "b"},
+                    ],
+                },
+                {
+                    "project": "seedzero",
+                    "slug": "seedzero",
+                    "offers": [
+                        {"label": "Three", "detail": "c"},
+                        {"label": "Four", "detail": "d"},
+                    ],
+                },
+            ]
+        )
+        self.assertEqual([item["number"] for item in numbered], [1, 2, 3, 4])
+        self.assertEqual(
+            [item["label"] for item in numbered], ["One", "Two", "Three", "Four"]
+        )
+        self.assertEqual(numbered[2]["project"], "seedzero")
+
+    def test_a_source_that_offered_nothing_takes_no_numbers(self) -> None:
+        numbered = briefing.numbered_offers(
+            [
+                {"project": "quiet", "slug": "quiet", "offers": []},
+                {
+                    "project": "loud",
+                    "slug": "loud",
+                    "offers": [{"label": "Only", "detail": "a"}],
+                },
+            ]
+        )
+        self.assertEqual(
+            numbered,
+            [
+                {
+                    "number": 1,
+                    "project": "loud",
+                    "slug": "loud",
+                    "label": "Only",
+                    "detail": "a",
+                }
+            ],
+        )
+
+
+class OffersPage(unittest.TestCase):
+    """The block the numbered list is drawn as."""
+
+    def block(self, *offers: dict) -> str:
+        return page.offers_block(list(offers))
+
+    def test_a_run_with_no_offers_draws_nothing(self) -> None:
+        # Not an empty heading. Most mornings need nothing started, and a
+        # standing "Next" with nothing under it reads as a failure.
+        self.assertEqual(self.block(), "")
+
+    def test_an_offer_is_drawn_with_its_number_and_its_source(self) -> None:
+        drawn = self.block(
+            {"number": 2, "project": "the-den", "label": "Call", "detail": "Left over."}
+        )
+        self.assertIn('<span class="number">2</span>', drawn)
+        self.assertIn(">Call<", drawn)
+        self.assertIn(">the-den<", drawn)
+        self.assertIn("Left over.", drawn)
+
+    def test_html_in_an_offer_stays_text_and_markdown_is_read(self) -> None:
+        drawn = self.block(
+            {
+                "number": 1,
+                "project": "p",
+                "label": "Bump `checkout` to v5",
+                "detail": "Node 20 is <b>deprecated</b> and *ends* soon.",
+            }
+        )
+        self.assertIn("<code>checkout</code>", drawn)
+        self.assertIn("<em>ends</em>", drawn)
+        self.assertIn("&lt;b&gt;deprecated&lt;/b&gt;", drawn)
+        self.assertNotIn("<b>", drawn)
 
 
 if __name__ == "__main__":

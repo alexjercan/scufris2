@@ -150,6 +150,16 @@ h1 {
 }
 .body hr { border: none; border-top: 1px solid var(--line); margin: 20px 0; }
 .empty { color: var(--muted); }
+.offers ol { list-style: none; margin: 0; padding: 0; }
+.offers li { border-top: 1px solid var(--line); padding: 14px 0; }
+.offers li:first-child { border-top: none; padding-top: 0; }
+.offers .pick { display: flex; align-items: baseline; gap: 10px; }
+.offers .number {
+  min-width: 1.2em; font-variant-numeric: tabular-nums;
+  font-weight: 600; color: var(--muted);
+}
+.offers .label { color: var(--strong); }
+.offers .detail { margin: 4px 0 0 calc(1.2em + 10px); color: var(--muted); }
 footer {
   margin-top: 48px;
   padding-top: 20px;
@@ -330,6 +340,26 @@ def card(contribution: dict[str, Any]) -> str:
     )
 
 
+def offers_block(offers: list[dict[str, Any]]) -> str:
+    """The numbered list of what could be done next.
+
+    Its own block and not a card, because it belongs to no one source: the
+    numbers are the run's, merged across everything that answered. A run where
+    nothing was offered draws nothing rather than an empty heading.
+    """
+    if not offers:
+        return ""
+    items = "".join(
+        f'<li><div class="pick">'
+        f'<span class="number">{offer["number"]}</span>'
+        f'<span class="label">{inline(offer["label"])}</span>'
+        f'<span class="source">{html.escape(offer["project"])}</span>'
+        f'</div><p class="detail">{inline(offer["detail"])}</p></li>'
+        for offer in offers
+    )
+    return f'<section class="card offers"><h2>Next</h2><ol>{items}</ol></section>'
+
+
 def run_footer(manifest: dict[str, Any]) -> str:
     counted = len(manifest["sources"])
     failed = [item for item in manifest["sources"] if item["status"] == "failed"]
@@ -366,6 +396,7 @@ def render_page(run: dict[str, Any]) -> str:
     cards = "".join(card(item) for item in run["contributions"])
     if not cards:
         cards = '<p class="empty">No project declared this briefing.</p>'
+    cards += offers_block(manifest.get("offers", []))
     return f"""<!doctype html>
 <html lang="en">
 <head>

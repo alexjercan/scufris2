@@ -125,7 +125,10 @@ One JSON envelope with a Markdown body:
   "status": "attention",
   "headline": "Two tasks are left over from yesterday.",
   "facts": [{ "label": "Restant", "value": "2 tasks" }],
-  "body": "### Yesterday\n\n- call the dentist\n"
+  "body": "### Yesterday\n\n- call the dentist\n",
+  "offers": [
+    { "label": "Call the dentist", "detail": "Left over from Tuesday." }
+  ]
 }
 ```
 
@@ -134,6 +137,23 @@ values. Free Markdown would read well and lay out badly: the page needs a
 title, a state and a few values it can put in a row without a model in the
 loop.
 
+`offers` is at most three things the owner could do next about what this
+source found, each a label saying what to do and a detail saying what and why.
+A label and a detail is the whole shape. A stored prompt for a worker to run
+would only make sense for a delegated coding job, so it would quietly restrict
+offers to code sources: a briefing about a calendar or a house has a next step
+too and no prompt to give. Whoever picks one writes the words for it then,
+knowing it was picked.
+
+Only the source that read the project can propose from it, which is why offers
+are in the envelope rather than written afterwards. The merge is the other way
+round: every source runs at once, so nothing collected can see what another
+source found, and the numbered list is assembled by code at the end of the run.
+Numbers are assigned in source order, stored in the manifest, and never
+reassigned - a pick made hours later resolves from the file rather than from
+what the model remembers saying. Merging a list is concatenation, and a model
+in that seat would only add a way to reword an entry or lose one.
+
 The envelope is read for its own end, not for a closing fence. A body is
 Markdown and may fence a diff or a status listing of its own, so the first
 fence after the opening one is usually inside the answer rather than after it.
@@ -141,7 +161,7 @@ Each fenced block is decoded from its opening brace, a block that starts inside
 one already read was quoted by it, and the last block left is the answer.
 
 Every limit the reader holds a source to is in the prompt it was given: the
-title, headline, label, value and body lengths. A contribution dropped for a
+title, headline, label, value, body and offer lengths. A contribution dropped for a
 rule nobody stated is work done twice.
 
 A source that answered badly is asked once more. By then it has read its
@@ -206,7 +226,8 @@ deadline and nothing else.
 ```text
 $XDG_STATE_HOME/scufris/briefings/2026-08-31/
 ├── morning/
-│   ├── manifest.json          the index: state, every source, every diagnostic
+│   ├── manifest.json          the index: state, every source, the numbered
+│   │                          offers, every diagnostic
 │   ├── contributions/*.json   one envelope for each source, with its body
 │   ├── briefing.md            the prose Scufris wrote
 │   └── briefing.html          the page, written when the sources answer

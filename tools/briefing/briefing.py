@@ -73,6 +73,9 @@ MAX_HEADLINE = 200
 MAX_LABEL = 40
 MAX_VALUE = 80
 MAX_BODY = 16 * 1024
+MAX_OFFERS = 3
+MAX_OFFER_LABEL = 60
+MAX_OFFER_DETAIL = 400
 MAX_OUTPUT = 512 * 1024
 MAX_PROSE = 64 * 1024
 KEEP_RUNS = 30
@@ -375,6 +378,7 @@ def contribution_prompt(
     this program's business because it is what the page reads.
     """
     facts = MAX_FACTS
+    offers = MAX_OFFERS
     return f"""# Scufris {profile} briefing for {date}
 
 You are one source in the {profile} briefing. Report on this source only, from
@@ -405,7 +409,8 @@ Reply with exactly one fenced `json` block and nothing outside it:
   "status": "ok",
   "headline": "One sentence: the thing to know this morning",
   "facts": [{{ "label": "Short label", "value": "Short value" }}],
-  "body": "Markdown. What you found, with the paths and numbers behind it."
+  "body": "Markdown. What you found, with the paths and numbers behind it.",
+  "offers": [{{ "label": "What could be done", "detail": "What and why" }}]
 }}
 ```
 
@@ -419,6 +424,12 @@ Reply with exactly one fenced `json` block and nothing outside it:
   Leave it empty rather than filling it with prose.
 - `body` is Markdown of at most {MAX_BODY} characters: headings, paragraphs,
   lists, links, and fenced code. Keep it to what a person reads over coffee.
+- `offers` is at most {offers} things the owner could do next about what you
+  found, each a `label` of at most {MAX_OFFER_LABEL} characters saying what to
+  do and a `detail` of at most {MAX_OFFER_DETAIL} characters saying what and
+  why. Offer only what this run's data supports, and leave it empty when
+  nothing needs doing. Do not write instructions for anyone to run: say the
+  thing, and whoever picks it writes the words for it then.
 - Every claim comes from data you read in this run. If something is missing,
   say it is missing and set `status` to `stale`. Never estimate a number you
   did not measure, and never carry a value over from another day.
@@ -459,7 +470,8 @@ If a value is too long, shorten that value; do not go and measure it again.
   "status": "ok",
   "headline": "One sentence: the thing to know this morning",
   "facts": [{{ "label": "Short label", "value": "Short value" }}],
-  "body": "Markdown. What you found, with the paths and numbers behind it."
+  "body": "Markdown. What you found, with the paths and numbers behind it.",
+  "offers": [{{ "label": "What could be done", "detail": "What and why" }}]
 }}
 ```
 
@@ -471,6 +483,9 @@ If a value is too long, shorten that value; do not go and measure it again.
 - `body` is Markdown of at most {MAX_BODY} characters, carried as one JSON
   string. Escape every quotation mark and newline inside it. Fenced code
   inside the body is fine.
+- `offers` is at most {MAX_OFFERS} entries, each with a label of at most
+  {MAX_OFFER_LABEL} characters and a detail of at most {MAX_OFFER_DETAIL}
+  characters. Keep the ones you already wrote.
 
 ## What you answered
 
@@ -570,12 +585,67 @@ def short(value: Any, limit: int, what: str) -> str:
     return text
 
 
+def parse_offers(raw: Any) -> list[dict[str, str]]:
+    """What this source says could be done next.
+
+    A label and a detail, and nothing else. A stored worker prompt would only
+    make sense for a delegated coding job, so it would quietly restrict offers
+    to code sources; a source reporting on a calendar or a house has a next
+    step too and no prompt to give. Whoever acts on one writes the words for it
+    then, knowing it was picked.
+    """
+    if not isinstance(raw, list) or len(raw) > MAX_OFFERS:
+        raise Unusable(f"offers must be a list of at most {MAX_OFFERS} entries")
+    offers = []
+    for offer in raw:
+        if not isinstance(offer, dict) or set(offer) - {"label", "detail"}:
+            raise Unusable("an offer is one label and one detail")
+        offers.append(
+            {
+                "label": short(offer.get("label"), MAX_OFFER_LABEL, "an offer label"),
+                "detail": short(
+                    offer.get("detail"), MAX_OFFER_DETAIL, "an offer detail"
+                ),
+            }
+        )
+    return offers
+
+
+def numbered_offers(contributions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every source's offers as one list, numbered in source order.
+
+    Code and not a model. Merging a list is concatenation, and a harness in
+    this seat would only add a way to reword an entry or lose one. The number
+    is assigned here and stored, so a pick made hours later resolves from the
+    file rather than from whatever the model still remembers saying.
+    """
+    numbered = []
+    for contribution in contributions:
+        for offer in contribution.get("offers", []):
+            numbered.append(
+                {
+                    "number": len(numbered) + 1,
+                    "project": contribution["project"],
+                    "slug": contribution["slug"],
+                    **offer,
+                }
+            )
+    return numbered
+
+
 def parse_contribution(text: str) -> dict[str, Any]:
     """One source's answer, or a refusal naming what was wrong with it."""
     found = envelope(text)
     if not isinstance(found, dict):
         raise Unusable("the answer is not one JSON envelope")
-    unexpected = set(found) - {"title", "status", "headline", "facts", "body"}
+    unexpected = set(found) - {
+        "title",
+        "status",
+        "headline",
+        "facts",
+        "body",
+        "offers",
+    }
     if unexpected:
         raise Unusable(f"unexpected keys: {', '.join(sorted(unexpected))}")
     status = found.get("status")
@@ -605,6 +675,7 @@ def parse_contribution(text: str) -> dict[str, Any]:
         "headline": short(found.get("headline"), MAX_HEADLINE, "headline"),
         "facts": facts,
         "body": body.strip(),
+        "offers": parse_offers(found.get("offers", [])),
     }
 
 
@@ -771,6 +842,9 @@ def failed_contribution(
         or "the source could not answer",
         "facts": [],
         "body": "",
+        # A source that could not answer proposes nothing. Only what a source
+        # measured can say what to do about it.
+        "offers": [],
         "seconds": round(seconds, 1),
         "raw": raw,
     }
@@ -907,6 +981,11 @@ def finish(
         "state": "collected" if answered or not contributions else "failed",
         "finished": datetime.now().astimezone().isoformat(timespec="seconds"),
         "sources": [index_entry(item) for item in contributions],
+        # The numbered list is the manifest's own, not any source's. It is
+        # written once, here, and every reader after this - the page, the wake,
+        # a pick made hours later - reads these numbers rather than counting
+        # again.
+        "offers": numbered_offers(contributions),
     }
     write_manifest(manifest)
     # The record is written before the page and the pruning, and neither of
@@ -1066,7 +1145,26 @@ def wake_message(manifest: dict[str, Any]) -> str:
         "another, and claim nothing none of them measured. Name any source "
         "that could not answer. Call scufris_briefing_publish with that prose "
         "and the same date and profile, then tell the user the same briefing "
-        "in the same words."
+        "in the same words." + offers_instruction(manifest)
+    )
+
+
+def offers_instruction(manifest: dict[str, Any]) -> str:
+    """What the wake says about the numbered list, when there is one.
+
+    The numbers are already assigned and already on disk. This says to use
+    them rather than to make them, because a briefing said in one set of
+    numbers and stored under another would make a pick mean two things.
+    """
+    offers = manifest.get("offers", [])
+    if not offers:
+        return ""
+    counted = len(offers)
+    return (
+        f" This run has {counted} thing{'' if counted == 1 else 's'} that could "
+        "be done next, already numbered in the manifest. End the briefing with "
+        "them as a numbered list, using those numbers exactly and adding none "
+        "of your own. Alex picks by number."
     )
 
 

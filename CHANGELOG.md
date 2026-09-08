@@ -9,6 +9,20 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Added
+
+- A briefing ends with a numbered list of things to do next. Each source may
+  offer at most three, each a short label saying what to do and a detail saying
+  what and why, and collection merges them across sources into one list
+  numbered in source order. The numbers are assigned by code, stored with the
+  run, and never reassigned, so picking one by number hours later resolves from
+  the file rather than from what the model remembers saying. Only the source
+  that read the project can propose from it, which is why an offer is written
+  there; merging is concatenation, so no model is in that seat. An offer is a
+  label and a detail and nothing else: a stored prompt for a worker would only
+  fit a delegated coding job, and a briefing about a calendar or a house has a
+  next step too.
+
 ## [2.2.0] - 2026-09-08
 
 ### Added

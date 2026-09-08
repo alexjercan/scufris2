@@ -1,8 +1,8 @@
 # Add a briefing scheduler: profiles on a schedule, built-in sources, offers
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 90
-- TAGS: workflow
+- TAGS: workflow, split
 
 ## Goal
 
@@ -57,3 +57,26 @@ Replaces the named routines idea.
   with the stored prompt.
 - `npm run check`, Python unit tests, and one staging run with a nightly
   profile.
+
+## Split
+
+Closed as split, 2026-09-08, with Alex. The task held five separable pieces
+and one wrong assumption: that the extension should own the schedule.
+
+`cron` does not fire a missed job. A systemd timer with `Persistent=true`
+does, and Home Manager already renders that shape on this host. Moving the
+schedule out needs one thing nothing has today: a way for a process outside
+the agent to wake the foreground with words. That is the gate, and it is
+worth having on its own.
+
+The per-project jobs flag is not carried forward. Alex's objection stands: a
+briefing that grows a new key for every new kind of content is the wrong
+shape. The jobs source is still wanted and is being redesigned separately.
+
+| Task            | What                                                    |
+| --------------- | ------------------------------------------------------- |
+| 20260908-135852 | Unprompted wake ingress: protocol v6, `scufris-ctl`     |
+| 20260908-140024 | Profiles, systemd timers, profile-keyed run directories |
+| 20260908-140026 | Offers as a numbered list                               |
+| 20260908-140011 | nova-protocol nightly review, last                      |
+| not filed       | The jobs section. Design open; see the discussion.      |

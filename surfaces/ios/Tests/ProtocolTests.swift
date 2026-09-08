@@ -26,7 +26,7 @@ struct ProtocolTests {
     }
 
     @Test
-    func helloUsesTheStrictProtocolV5SurfaceShape() throws {
+    func helloUsesTheStrictProtocolV6SurfaceShape() throws {
         let hello = SurfaceHello(
             surface: SurfaceRegistration(
                 id: "ios-test",
@@ -178,7 +178,7 @@ struct ProtocolTests {
     @Test
     func conversationResponsesDecodeWithoutWidgetPresentation() throws {
         let data = Data(
-            #"{"v":5,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","details":"Passed.","attachments":[]}"#.utf8
+            #"{"v":6,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","details":"Passed.","attachments":[]}"#.utf8
         )
         let message = try JSONDecoder().decode(
             IncomingConversationMessage.self,
@@ -191,7 +191,7 @@ struct ProtocolTests {
         #expect(message.attachments?.isEmpty == true)
 
         let omitted = Data(
-            #"{"v":5,"type":"surface.message","role":"user","surface":"ios","text":"Hello."}"#.utf8
+            #"{"v":6,"type":"surface.message","role":"user","surface":"ios","text":"Hello."}"#.utf8
         )
         let textOnly = try JSONDecoder().decode(IncomingConversationMessage.self, from: omitted)
         #expect(textOnly.details == nil)

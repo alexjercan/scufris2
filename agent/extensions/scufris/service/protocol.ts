@@ -1,6 +1,6 @@
-/** Protocol v5 agent channel. */
+/** Protocol v6 agent channel. */
 
-export const SERVICE_VERSION = 5;
+export const SERVICE_VERSION = 6;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
 export const SOCKET_DIRECTORY_NAME = "scufris";
 export const AGENT_FILE_NAME = "agent.sock";
@@ -35,9 +35,9 @@ export interface AttachmentDescriptor {
 }
 
 export type AgentRequest =
-  | { v: 5; type: "agent.hello" }
+  | { v: 6; type: "agent.hello" }
   | {
-      v: 5;
+      v: 6;
       type: "agent.response";
       text: string;
       details?: string;
@@ -45,24 +45,31 @@ export type AgentRequest =
       attachments?: string[];
     }
   | {
-      v: 5;
+      v: 6;
       type: "agent.state";
       state: "failed" | "blocked" | "clear";
       detail: string;
     };
 
 export type AgentResponse =
-  | { v: 5; type: "agent.ready" }
+  | { v: 6; type: "agent.ready" }
   | {
-      v: 5;
+      v: 6;
       type: "agent.message";
       id: string;
       text: string;
       widgets: WidgetDefinition[];
       attachments: AttachmentDescriptor[];
     }
-  | { v: 5; type: "agent.abort"; id: string }
-  | { v: 5; type: "agent.rejected"; code: string; detail: string };
+  | {
+      v: 6;
+      type: "agent.wake";
+      custom_type: string;
+      text: string;
+      details?: unknown;
+    }
+  | { v: 6; type: "agent.abort"; id: string }
+  | { v: 6; type: "agent.rejected"; code: string; detail: string };
 
 export class ProtocolError extends Error {
   readonly code: string;
@@ -198,16 +205,37 @@ export function decodeAgentResponse(line: string): AgentResponse {
       "unsupported protocol version",
       "unsupported_version",
     );
-  if (message.type === "agent.ready") return { v: 5, type: "agent.ready" };
+  if (message.type === "agent.ready") return { v: 6, type: "agent.ready" };
   if (message.type === "agent.abort")
-    return { v: 5, type: "agent.abort", id: id(message.id, "id") };
+    return { v: 6, type: "agent.abort", id: id(message.id, "id") };
   if (message.type === "agent.rejected")
     return {
-      v: 5,
+      v: 6,
       type: "agent.rejected",
       code: id(message.code, "code"),
       detail: typeof message.detail === "string" ? message.detail : "",
     };
+  if (message.type === "agent.wake") {
+    // A wake is words from outside the agent process, carried under the
+    // caller's own custom type so an existing wake handler still matches.
+    const details = message.details;
+    if (details !== undefined) {
+      if (
+        typeof details !== "object" ||
+        details === null ||
+        Array.isArray(details) ||
+        Buffer.byteLength(safeStringify(details), "utf8") > MAX_DETAILS_BYTES
+      )
+        throw new ProtocolError("invalid wake details", "invalid_details");
+    }
+    return {
+      v: 6,
+      type: "agent.wake",
+      custom_type: id(message.custom_type, "custom_type"),
+      text: bounded(message.text, MAX_TEXT_BYTES, "text"),
+      ...(details === undefined ? {} : { details }),
+    };
+  }
   if (message.type === "agent.message") {
     if (!Array.isArray(message.widgets) || message.widgets.length > MAX_WIDGETS)
       throw new ProtocolError("invalid widgets", "invalid_widgets");
@@ -235,7 +263,7 @@ export function decodeAgentResponse(line: string): AgentResponse {
     )
       throw new ProtocolError("duplicate attachment", "invalid_attachments");
     return {
-      v: 5,
+      v: 6,
       type: "agent.message",
       id: id(message.id, "id"),
       text: bounded(message.text, MAX_TEXT_BYTES, "text"),

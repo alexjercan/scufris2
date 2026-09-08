@@ -1,4 +1,4 @@
-//! Scufris protocol v5 typed channels.
+//! Scufris protocol v6 typed channels.
 //!
 //! Surface, agent, and control traffic use separate Unix sockets and separate
 //! enums. Each decoder accepts only its channel and direction.
@@ -12,7 +12,7 @@ use crate::{
     ControlPathError, MessageError, chosen_runtime_dir, in_runtime_dir, is_identifier, read_line,
 };
 
-pub const SERVICE_VERSION: u32 = 5;
+pub const SERVICE_VERSION: u32 = 6;
 pub const SURFACE_FILE_NAME: &str = "surface.sock";
 pub const AGENT_FILE_NAME: &str = "agent.sock";
 pub const CONTROL_FILE_NAME: &str = "control.sock";
@@ -301,6 +301,19 @@ pub enum AgentResponseBody {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<AttachmentDescriptor>,
     },
+    /// A proactive message from outside the agent process.
+    ///
+    /// This is not a user turn. The service neither records it in the
+    /// canonical conversation nor echoes it to a surface, and it leaves the
+    /// response association alone. The extension delivers it as the follow-up
+    /// wake a briefing already uses, under the caller's own custom type.
+    #[serde(rename = "agent.wake")]
+    Wake {
+        custom_type: String,
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        details: Option<Value>,
+    },
     #[serde(rename = "agent.abort")]
     Abort { id: String },
     #[serde(rename = "agent.rejected")]
@@ -329,6 +342,19 @@ pub enum ControlRequestBody {
     Hello,
     #[serde(rename = "control.state")]
     State { id: String },
+    /// Deliver one proactive message to the foreground conversation.
+    ///
+    /// The control socket carries this and the surface socket does not: a wake
+    /// is not a second way to drive the conversation, and the remote surface
+    /// gateway speaks only the surface channel.
+    #[serde(rename = "control.wake")]
+    Wake {
+        id: String,
+        custom_type: String,
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        details: Option<Value>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -357,6 +383,8 @@ pub enum ControlResponseBody {
         state: ScufrisState,
         detail: String,
     },
+    #[serde(rename = "control.wake_ack")]
+    WakeAck { id: String },
     #[serde(rename = "control.rejected")]
     Rejected {
         id: String,
@@ -519,6 +547,20 @@ fn calls(value: &Option<Vec<WidgetCall>>) -> Result<(), MessageError> {
     }
     Ok(())
 }
+/// Validates one proactive wake independently of its channel.
+///
+/// The control request and the agent response carry the same three fields, so
+/// what the control socket accepts is exactly what the agent is handed.
+fn wake(custom_type: &str, body: &str, details: &Option<Value>) -> Result<(), MessageError> {
+    id(custom_type, "wake custom type")?;
+    text(body, MAX_TEXT_BYTES, "wake text", false)?;
+    if let Some(details) = details
+        && (!details.is_object() || bytes(details) > MAX_DETAILS_BYTES)
+    {
+        return Err(MessageError::InvalidSubmission("wake details"));
+    }
+    Ok(())
+}
 fn validate_registration(surface: &SurfaceRegistration) -> Result<(), MessageError> {
     id(&surface.id, "surface id")?;
     if surface.id == UNPROMPTED_SURFACE {
@@ -629,6 +671,11 @@ fn validate_agent_response(message: &AgentResponse) -> Result<(), MessageError> 
             widgets(definitions)?;
             attachment_descriptors(attachments)
         }
+        AgentResponseBody::Wake {
+            custom_type,
+            text: body,
+            details,
+        } => wake(custom_type, body, details),
         AgentResponseBody::Abort { id: one } => id(one, "abort id"),
         AgentResponseBody::Rejected { code, detail } => {
             id(code, "rejection code")?;
@@ -640,6 +687,15 @@ fn validate_control_request(message: &ControlRequest) -> Result<(), MessageError
     match &message.body {
         ControlRequestBody::Hello => Ok(()),
         ControlRequestBody::State { id: one } => id(one, "state id"),
+        ControlRequestBody::Wake {
+            id: one,
+            custom_type,
+            text: body,
+            details,
+        } => {
+            id(one, "wake id")?;
+            wake(custom_type, body, details)
+        }
     }
 }
 fn validate_control_response(message: &ControlResponse) -> Result<(), MessageError> {
@@ -651,6 +707,7 @@ fn validate_control_response(message: &ControlResponse) -> Result<(), MessageErr
             id(one, "state id")?;
             text(detail, MAX_DETAIL_BYTES, "state detail", true)
         }
+        ControlResponseBody::WakeAck { id: one } => id(one, "wake id"),
         ControlResponseBody::Rejected {
             id: one,
             code,
@@ -670,13 +727,13 @@ mod tests {
 
     #[test]
     fn channels_and_directions_are_distinct() {
-        let line = b"{\"v\":5,\"type\":\"agent.hello\"}\n";
+        let line = b"{\"v\":6,\"type\":\"agent.hello\"}\n";
         assert!(read_agent_request(&mut Cursor::new(line)).is_ok());
         assert!(matches!(
             read_surface_request(&mut Cursor::new(line)),
             Err(MessageError::InvalidJson(_))
         ));
-        let outbound = b"{\"v\":5,\"type\":\"surface.ready\",\"surface\":\"desk\"}\n";
+        let outbound = b"{\"v\":6,\"type\":\"surface.ready\",\"surface\":\"desk\"}\n";
         assert!(read_surface_response(&mut Cursor::new(outbound)).is_ok());
         assert!(read_surface_request(&mut Cursor::new(outbound)).is_err());
     }
@@ -688,7 +745,7 @@ mod tests {
         // would speak every briefing the owner never asked for.
         let hello = |id: &str| {
             format!(
-                "{{\"v\":5,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{id}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
+                "{{\"v\":6,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{id}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
             )
         };
         assert!(read_surface_request(&mut Cursor::new(hello("desk"))).is_ok());
@@ -700,7 +757,7 @@ mod tests {
 
     #[test]
     fn every_wrong_version_is_identified_before_body_decode() {
-        for version in [0, 3, 4, u32::MAX] {
+        for version in [0, 4, 5, u32::MAX] {
             let line = format!("{{\"v\":{version},\"type\":\"anything\"}}\n");
             assert!(
                 matches!(read_surface_request(&mut Cursor::new(line)), Err(MessageError::UnsupportedVersion(v)) if v == version)
@@ -810,6 +867,62 @@ mod tests {
                 .is_err()
             );
         }
+    }
+
+    #[test]
+    fn a_wake_carries_the_same_bounds_on_control_and_agent_channels() {
+        let control = |text: String, details: Option<Value>| {
+            let mut bytes = Vec::new();
+            crate::write_message(
+                &mut bytes,
+                &ControlRequest::new(ControlRequestBody::Wake {
+                    id: "wake-1".into(),
+                    custom_type: "scufris-briefing".into(),
+                    text,
+                    details,
+                }),
+            )
+            .unwrap();
+            read_control_request(&mut Cursor::new(bytes))
+        };
+        let agent = |text: String, details: Option<Value>| {
+            let mut bytes = Vec::new();
+            crate::write_message(
+                &mut bytes,
+                &AgentResponse::new(AgentResponseBody::Wake {
+                    custom_type: "scufris-briefing".into(),
+                    text,
+                    details,
+                }),
+            )
+            .unwrap();
+            read_agent_response(&mut Cursor::new(bytes))
+        };
+        let details = |bytes: usize| Some(serde_json::json!({"note": "x".repeat(bytes)}));
+
+        assert!(control("Wake up.".into(), details(16)).is_ok());
+        assert!(agent("Wake up.".into(), details(16)).is_ok());
+        assert!(control("Wake up.".into(), None).is_ok());
+        for (text, details) in [
+            (String::new(), None),
+            ("   ".into(), None),
+            ("x".repeat(MAX_TEXT_BYTES + 1), None),
+            ("Wake up.".into(), details(MAX_DETAILS_BYTES)),
+            ("Wake up.".into(), Some(serde_json::json!("not an object"))),
+        ] {
+            assert!(control(text.clone(), details.clone()).is_err());
+            assert!(agent(text, details).is_err());
+        }
+    }
+
+    #[test]
+    fn only_the_control_channel_carries_a_wake() {
+        // A wake is not a second way to drive the conversation, so the channel
+        // the remote gateway speaks cannot express one.
+        let line = b"{\"v\":6,\"type\":\"control.wake\",\"id\":\"wake-1\",\"custom_type\":\"scufris-wake\",\"text\":\"Wake up.\"}\n";
+        assert!(read_control_request(&mut Cursor::new(line)).is_ok());
+        assert!(read_surface_request(&mut Cursor::new(line)).is_err());
+        assert!(read_agent_request(&mut Cursor::new(line)).is_err());
     }
 
     #[test]

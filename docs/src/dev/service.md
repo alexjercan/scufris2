@@ -12,12 +12,13 @@ local HTTP -> content.sock ----+
 
 `scufris-service` owns the Pi RPC process, canonical user-facing state, the
 latest 200 conversation messages, and managed attachment content. It exposes
-three protocol-v5 sockets and one private HTTP socket:
+three protocol-v6 sockets and one private HTTP socket:
 
 - `$XDG_RUNTIME_DIR/scufris/surface.sock`: registered desktop and synthetic
   surfaces;
 - `$XDG_RUNTIME_DIR/scufris/agent.sock`: exactly one local Pi extension; and
-- `$XDG_RUNTIME_DIR/scufris/control.sock`: local state diagnostics; and
+- `$XDG_RUNTIME_DIR/scufris/control.sock`: local state diagnostics and the
+  unprompted wake; and
 - `$XDG_RUNTIME_DIR/scufris/content.sock`: private attachment upload, import,
   lookup, download, and HEAD operations.
 
@@ -28,7 +29,7 @@ coordinated staging stack.
 ## Typed channels
 
 Each socket has its own inbound and outbound message enum. Every line is one
-bounded LF-terminated JSON object with `"v":5`. A wrong version is logged and
+bounded LF-terminated JSON object with `"v":6`. A wrong version is logged and
 the connection closes without a response. Clients show a local message that
 asks the user to update the host and surface together.
 
@@ -38,8 +39,9 @@ connection. A later `surface.message` or `surface.abort` does not repeat the
 surface ID. Registering the same ID replaces only the previous generation.
 
 An agent starts with `agent.hello`. A second agent receives `agent.rejected` and
-is disconnected. Control supports only `control.hello` and `control.state`.
-There is no control watch, abort, debug, event stream, or prompt command.
+is disconnected. Control supports only `control.hello`, `control.state`, and
+`control.wake`. There is no control watch, abort, debug, event stream, or
+prompt command.
 
 ## Replay and broadcast
 
@@ -74,15 +76,43 @@ messages but performs no speech, response animation, or widget calls before
 
 ## Prompt ingress and association
 
-The agent channel is the only prompt ingress. The service sends every accepted
-surface message as `agent.message`, with the original text and a fresh snapshot
-of that surface's registered widget definitions. The Pi extension builds one
+The agent channel is the only prompt ingress, and a surface message is the only
+prompt. The service sends every accepted surface message as `agent.message`,
+with the original text and a fresh snapshot of that surface's registered widget
+definitions. The Pi extension builds one
 self-contained `<scufris_surface_message>` user message and uses
 `pi.sendUserMessage()`. It uses `deliverAs: "steer"` while Pi is busy.
 
 The latest accepted surface message selects the response association. A steer
 from another surface changes it. The service records an assistant response with
 that surface ID and broadcasts it to all surfaces.
+
+## Unprompted wake ingress
+
+`control.wake` is the only way a process outside the agent reaches the
+foreground with words. A systemd timer, a finished collection, or any other
+out-of-process event sends one over `control.sock`; the service forwards it to
+the agent connection as `agent.wake`, and the Pi extension delivers it with
+`pi.sendMessage()` using `deliverAs: "followUp"` and `triggerTurn: true` under
+the `custom_type` the caller named, so an existing wake handler keeps working.
+
+A wake is not a user turn:
+
+- it is never recorded in the canonical conversation;
+- it is never echoed to a surface; and
+- it never sets or changes the response association. An answer produced before
+  any surface has spoken is still recorded against `unprompted`; an answer
+  after one has spoken still belongs to that surface.
+
+Wake text is bounded like every other text, and optional wake details are one
+bounded JSON object. With no agent connected the wake is refused with
+`agent_unavailable` and a detail, never dropped, so the caller knows its own
+durable state is the fallback. The verb exists on the control socket only: the
+remote surface gateway speaks the surface channel, which cannot express one.
+
+`scufris-ctl wake "<text>" [--custom-type <type>] [--details <json>]` sends one
+and exits non-zero when it did not land. The default custom type is
+`scufris-wake`.
 
 ## Atomic responses
 

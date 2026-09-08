@@ -4,12 +4,30 @@
 
 ```text
 worker event -> wake gate -> Pi turn -> final response -> service -> surfaces
+control.wake -> agent.wake -> follow-up wake -> Pi turn
 quiet working event -> transient notification only
 ```
 
 Foreground Scufris coordinates three message flows: worker events into the
 conversation, workflow acknowledgments out of it, and the shaped final
 response to the user.
+
+Two ingress paths carry words into a turn. A `surface.message` is a user turn:
+it is recorded and echoed, and it selects the response association. Everything
+else is a wake. A wake is an extension custom message delivered with
+`deliverAs: "followUp"` and `triggerTurn: true`. It is not a user turn, and it
+leaves the response association alone.
+
+## Wakes from outside the agent process
+
+Worker events, briefings, and review outcomes wake the conversation from
+extensions inside the agent process. A process outside it uses the
+`control.wake` verb on the service control socket, which the service forwards
+as `agent.wake` and the service extension delivers as the same follow-up under
+the `custom_type` the caller named. A wake with no agent connected is refused
+with `agent_unavailable`, never dropped, so the caller keeps its own durable
+state as the fallback. See
+[Background service](service.md#unprompted-wake-ingress).
 
 ## Worker event delivery
 

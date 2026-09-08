@@ -345,7 +345,7 @@ async fn health(
     tag = "gateway",
     security(("bearer_token" = [])),
     responses(
-        (status = 101, description = "Upgrade to the strict protocol-v5 surface WebSocket"),
+        (status = 101, description = "Upgrade to the strict protocol-v6 surface WebSocket"),
         (status = 401, description = "Missing or invalid bearer token", body = ErrorEnvelope)
     )
 )]
@@ -1011,16 +1011,24 @@ mod tests {
     #[test]
     fn websocket_payloads_use_the_strict_surface_decoder() {
         let request = decode_request(
-            r#"{"v":5,"type":"surface.message","id":"ios-1","text":"hello","attachments":[]}"#,
+            r#"{"v":6,"type":"surface.message","id":"ios-1","text":"hello","attachments":[]}"#,
         )
         .unwrap();
         assert!(matches!(request.body, SurfaceRequestBody::Message { .. }));
-        assert!(decode_request(r#"{"v":4,"type":"surface.hello"}"#).is_err());
+        assert!(decode_request(r#"{"v":5,"type":"surface.hello"}"#).is_err());
         assert!(decode_request("{}\n{}").is_err());
+        // The wake verb lives on the control socket. Nothing a remote surface
+        // can put on this channel expresses one.
+        assert!(
+            decode_request(
+                r#"{"v":6,"type":"control.wake","id":"wake-1","custom_type":"scufris-wake","text":"Wake up."}"#
+            )
+            .is_err()
+        );
     }
 
     #[tokio::test]
-    async fn authenticated_websocket_still_bridges_strict_surface_v5() {
+    async fn authenticated_websocket_still_bridges_strict_surface_v6() {
         let root =
             std::env::temp_dir().join(format!("scufris-async-gateway-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);

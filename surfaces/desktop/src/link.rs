@@ -1,4 +1,4 @@
-//! Registered protocol v5 surface link.
+//! Registered protocol v6 surface link.
 
 use std::{
     io::BufReader,

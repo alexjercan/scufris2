@@ -23,7 +23,7 @@ loopback listener and bearer-token boundary:
 
 | Method       | Path                    | Purpose                                          |
 | ------------ | ----------------------- | ------------------------------------------------ |
-| `GET`        | `/` or `/surface`       | Upgrade to a protocol-v5 surface WebSocket       |
+| `GET`        | `/` or `/surface`       | Upgrade to a protocol-v6 surface WebSocket       |
 | `GET`        | `/health`               | Read the authenticated gateway identity          |
 | `POST`       | `/audio/transcription`  | Forward a bounded mono PCM WAV to host inference |
 | `POST`       | `/attachments?name=...` | Upload one bounded object                        |
@@ -39,7 +39,7 @@ The transcription route accepts at most 2 MiB and 60 seconds of audio. It sends
 multipart `file`, `model=whisper-1`, and `response_format=json` to the loopback
 `ai-tools-api`. Its bounded `{ "text": "..." }` response is presentation data,
 not a surface message. The iOS app places it in the editable composer and sends
-it only through an ordinary protocol-v5 `surface.message` after confirmation.
+it only through an ordinary protocol-v6 `surface.message` after confirmation.
 
 ## Surface lifecycle
 
@@ -90,9 +90,9 @@ attachment IDs. The service resolves them into canonical descriptors before a
 message reaches the agent, another surface, or replay.
 
 ```json
-{"v":5,"type":"surface.hello","surface":{"id":"laptop-a","name":"Laptop A","widgets":[]}}
-{"v":5,"type":"surface.message","id":"message-1","text":"What changed?","attachments":["att_opaque"]}
-{"v":5,"type":"surface.abort","id":"abort-1"}
+{"v":6,"type":"surface.hello","surface":{"id":"laptop-a","name":"Laptop A","widgets":[]}}
+{"v":6,"type":"surface.message","id":"message-1","text":"What changed?","attachments":["att_opaque"]}
+{"v":6,"type":"surface.abort","id":"abort-1"}
 ```
 
 ## Messages a client receives

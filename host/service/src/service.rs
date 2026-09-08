@@ -1,4 +1,4 @@
-//! Canonical protocol v5 service state.
+//! Canonical protocol v6 service state.
 
 use std::{
     collections::HashMap,
@@ -13,9 +13,9 @@ use std::{
 };
 
 use scufris_control::service::{
-    AgentRequestBody, AgentResponse, AgentResponseBody, AgentState, ConversationMessage,
-    ConversationRole, MAX_DETAIL_BYTES, ScufrisState, SurfaceRegistration, SurfaceResponse,
-    SurfaceResponseBody, UNPROMPTED_SURFACE, WidgetCall, WidgetDefinition,
+    AgentRequestBody, AgentResponse, AgentResponseBody, AgentState, ControlResponseBody,
+    ConversationMessage, ConversationRole, MAX_DETAIL_BYTES, ScufrisState, SurfaceRegistration,
+    SurfaceResponse, SurfaceResponseBody, UNPROMPTED_SURFACE, WidgetCall, WidgetDefinition,
 };
 use serde_json::Value;
 use tracing::{debug, error, info, warn};
@@ -520,6 +520,44 @@ impl Service {
 
     pub fn control_state(&self) -> (ScufrisState, String) {
         self.lock().state()
+    }
+
+    /// Hands one proactive wake to the agent, or says why it did not land.
+    ///
+    /// A wake is words from outside the agent process, not a turn the owner
+    /// took. So nothing here records a conversation entry, nothing is
+    /// broadcast, and the response association is left exactly as it was: an
+    /// answer before any surface has spoken is still attributed to
+    /// `unprompted`, and an answer after one has spoken still belongs to that
+    /// surface. A caller with no agent to reach is told so, because its own
+    /// durable state is the fallback and it has to know it needs one.
+    pub fn control_wake(
+        &self,
+        id: String,
+        custom_type: String,
+        text: String,
+        details: Option<Value>,
+    ) -> ControlResponseBody {
+        let mut inner = self.lock();
+        debug!(
+            wake_id = id,
+            custom_type,
+            text_bytes = text.len(),
+            "control wake received"
+        );
+        if inner.send_agent(AgentResponseBody::Wake {
+            custom_type,
+            text,
+            details,
+        }) {
+            ControlResponseBody::WakeAck { id }
+        } else {
+            ControlResponseBody::Rejected {
+                id,
+                code: "agent_unavailable".into(),
+                detail: "The Scufris agent is unavailable.".into(),
+            }
+        }
     }
 
     pub fn start_agent(self: &Arc<Self>) {
@@ -1106,6 +1144,98 @@ mod tests {
         for inbox in [&one, &two] {
             assert!(drain(inbox).iter().any(|body| matches!(body, SurfaceResponseBody::Message { role: ConversationRole::Assistant, surface, .. } if surface == "two")));
         }
+    }
+
+    fn wake(service: &Arc<Service>, id: &str, text: &str) -> ControlResponseBody {
+        service.control_wake(id.into(), "scufris-wake".into(), text.into(), None)
+    }
+
+    #[test]
+    fn a_wake_reaches_the_agent_and_is_neither_recorded_nor_echoed() {
+        let service = service();
+        let (_, one) = surface(&service, 1, "one");
+        let (_, two) = surface(&service, 2, "two");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        // A systemd timer, not the owner, has words for the foreground.
+        let answer = service.control_wake(
+            "wake-1".into(),
+            "scufris-briefing".into(),
+            "The morning briefing is collected.".into(),
+            Some(serde_json::json!({"profile": "morning"})),
+        );
+        assert!(matches!(answer, ControlResponseBody::WakeAck { id } if id == "wake-1"));
+        assert!(matches!(
+            agent_in.recv().unwrap().body,
+            AgentResponseBody::Wake {
+                custom_type,
+                text,
+                details,
+            } if custom_type == "scufris-briefing"
+                && text == "The morning briefing is collected."
+                && details == Some(serde_json::json!({"profile": "morning"}))
+        ));
+        // It is not a turn the owner took: no conversation entry, no echo.
+        assert_eq!(service.lock().conversation.len(), 0);
+        assert!(drain(&one).is_empty());
+        assert!(drain(&two).is_empty());
+    }
+
+    #[test]
+    fn a_wake_leaves_the_response_association_alone() {
+        let service = service();
+        let (_, one) = surface(&service, 1, "one");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        let answer = |service: &Arc<Service>| {
+            service.agent_request(
+                10,
+                AgentRequestBody::Response {
+                    text: "Looked.".into(),
+                    details: None,
+                    widgets: None,
+                    attachments: vec![],
+                },
+            );
+        };
+
+        // Nobody has spoken yet, so what the wake produces is still unprompted.
+        assert!(matches!(
+            wake(&service, "wake-1", "Look at this."),
+            ControlResponseBody::WakeAck { .. }
+        ));
+        agent_in.recv().unwrap();
+        answer(&service);
+        assert!(drain(&one).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Message { surface, .. } if surface == UNPROMPTED_SURFACE
+        )));
+
+        // The owner speaks, and a later wake does not take that association.
+        service.surface_message(1, "m-1".into(), "hello".into(), vec![]);
+        agent_in.recv().unwrap();
+        while one.try_recv().is_ok() {}
+        wake(&service, "wake-2", "And this.");
+        agent_in.recv().unwrap();
+        answer(&service);
+        assert!(drain(&one).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Message { surface, .. } if surface == "one"
+        )));
+    }
+
+    #[test]
+    fn a_wake_with_no_agent_is_refused_with_a_code_and_a_detail() {
+        // A caller that cannot reach the foreground has to be told, because
+        // its own durable state is the only fallback it has.
+        let service = service();
+        assert!(matches!(
+            wake(&service, "wake-1", "Nobody is home."),
+            ControlResponseBody::Rejected { id, code, detail }
+                if id == "wake-1" && code == "agent_unavailable" && !detail.is_empty()
+        ));
     }
 
     #[test]

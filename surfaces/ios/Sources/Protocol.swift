@@ -1,6 +1,6 @@
 import Foundation
 
-let scufrisProtocolVersion = 5
+let scufrisProtocolVersion = 6
 let scufrisMaximumMessageBytes = 64 * 1024
 let scufrisMaximumTextBytes = 8 * 1024
 let scufrisMaximumDetailsBytes = 32 * 1024

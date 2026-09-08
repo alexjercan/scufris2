@@ -95,6 +95,15 @@ export default function service(pi: ExtensionAPI): void {
         if (busy) pi.sendUserMessage(message, { deliverAs: "steer" });
         else pi.sendUserMessage(message);
       },
+      // The same wake a briefing already performs, under the caller's custom
+      // type. It is a follow-up that triggers a turn, never a user message, so
+      // nothing here looks like the owner typed it.
+      wake: ({ customType, content, details }) => {
+        void pi.sendMessage(
+          { customType, content, details, display: true },
+          { deliverAs: "followUp", triggerTurn: true },
+        );
+      },
       log: notify,
     });
     client.start();

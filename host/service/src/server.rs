@@ -245,6 +245,15 @@ fn control(service: Arc<Service>, stream: UnixStream, connection: u64) {
                             detail,
                         }));
                     }
+                    ControlRequestBody::Wake {
+                        id,
+                        custom_type,
+                        text,
+                        details,
+                    } => {
+                        let answer = service.control_wake(id, custom_type, text, details);
+                        let _ = outbox.try_send(ControlResponse::new(answer));
+                    }
                 }
             }
             Err(MessageError::Empty) => break,

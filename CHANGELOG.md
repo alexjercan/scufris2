@@ -11,6 +11,14 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Added
 
+- Unprompted wake ingress: `scufris-ctl wake "<text>"` delivers a proactive
+  message to the foreground conversation from outside the agent process, so a
+  timer or a finished job can reach it with words. The wake is not recorded as
+  a user message, is not echoed to any surface, and does not change which
+  surface an answer is attributed to. With no agent connected it is refused
+  with `agent_unavailable` instead of being dropped. The verb lives on the
+  local control socket only and is unreachable from the remote surface
+  gateway.
 - Job receipts: measured git, remote, and CI facts for one job, appended to
   `receipts.jsonl` and returned by `land`, `stop`, and `inspect`. Scufris
   measures on every terminal event, so a completion claim about landing,
@@ -21,6 +29,9 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Changed
 
+- Service protocol version 6 replaces 5 without negotiation, adding the
+  `control.wake` and `agent.wake` messages. Service, agent, gateway, and every
+  surface must be updated together.
 - Stopping a job with `remove_workspace` now keeps a branch that was never
   merged. Deleting one needs an explicit `abandon`, so unlanded work is no
   longer lost to a cleanup.

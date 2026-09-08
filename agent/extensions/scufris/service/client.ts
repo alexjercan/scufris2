@@ -23,6 +23,13 @@ export interface AtomicResponse {
   attachments?: string[];
 }
 
+/** One proactive message delivered from outside the agent process. */
+export interface AgentWake {
+  customType: string;
+  content: string;
+  details?: unknown;
+}
+
 export function nextBackoff(current: number): number {
   return Math.min(current * 2, MAX_BACKOFF_MS);
 }
@@ -30,6 +37,7 @@ export function nextBackoff(current: number): number {
 export interface AgentClientOptions {
   socketPath: string;
   sendUserMessage: (message: string, busy: boolean) => void;
+  wake: (wake: AgentWake) => void;
   abort: () => void;
   busy: () => boolean;
   log?: (message: string, level: "info" | "error") => void;
@@ -123,6 +131,14 @@ export class AgentClient {
             surfacePrompt(message.text, message.widgets, message.attachments),
             this.options.busy(),
           );
+        } else if (message.type === "agent.wake") {
+          this.options.wake({
+            customType: message.custom_type,
+            content: message.text,
+            ...(message.details === undefined
+              ? {}
+              : { details: message.details }),
+          });
         } else if (message.type === "agent.abort") {
           this.options.abort();
         } else {

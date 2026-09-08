@@ -13,6 +13,7 @@ import {
 import {
   AgentClient,
   UPDATE_TOGETHER,
+  type AgentWake,
 } from "../agent/extensions/scufris/service/client.ts";
 import { resolveSocketPath } from "../agent/extensions/scufris/service/index.ts";
 
@@ -22,17 +23,17 @@ const widget = {
   input_schema: { type: "object", properties: { passed: { type: "integer" } } },
 };
 
-test("agent v5 messages are bounded and channel-specific", () => {
+test("agent v6 messages are bounded and channel-specific", () => {
   assert.equal(
-    encodeAgentRequest({ v: 5, type: "agent.hello" }),
-    '{"v":5,"type":"agent.hello"}\n',
+    encodeAgentRequest({ v: 6, type: "agent.hello" }),
+    '{"v":6,"type":"agent.hello"}\n',
   );
   assert.deepEqual(
     decodeAgentResponse(
-      '{"v":5,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}',
+      '{"v":6,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}',
     ),
     {
-      v: 5,
+      v: 6,
       type: "agent.message",
       id: "m-1",
       text: "hello",
@@ -40,9 +41,9 @@ test("agent v5 messages are bounded and channel-specific", () => {
       attachments: [],
     },
   );
-  assert.throws(() => decodeAgentResponse('{"v":4,"type":"agent.ready"}'));
+  assert.throws(() => decodeAgentResponse('{"v":5,"type":"agent.ready"}'));
   assert.throws(() =>
-    decodeAgentResponse('{"v":5,"type":"surface.ready","surface":"desk"}'),
+    decodeAgentResponse('{"v":6,"type":"surface.ready","surface":"desk"}'),
   );
 });
 
@@ -55,7 +56,7 @@ test("attachment descriptors are strict and reach the surface prompt", () => {
   };
   const message = decodeAgentResponse(
     JSON.stringify({
-      v: 5,
+      v: 6,
       type: "agent.message",
       id: "m-1",
       text: "See it.",
@@ -78,7 +79,7 @@ test("attachment descriptors are strict and reach the surface prompt", () => {
     assert.throws(() =>
       decodeAgentResponse(
         JSON.stringify({
-          v: 5,
+          v: 6,
           type: "agent.message",
           id: "m-1",
           text: "See it.",
@@ -108,13 +109,13 @@ test("framing retains partial lines and rejects oversized input", () => {
 });
 
 test("the agent client sends messages through sendUserMessage and steers while busy", async () => {
-  const root = await mkdtemp(join(tmpdir(), "scufris-agent-v5-"));
+  const root = await mkdtemp(join(tmpdir(), "scufris-agent-v6-"));
   const socketPath = join(root, "agent.sock");
   const server = createServer((socket) => {
     socket.once("data", () => {
-      socket.write('{"v":5,"type":"agent.ready"}\n');
+      socket.write('{"v":6,"type":"agent.ready"}\n');
       socket.write(
-        '{"v":5,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}\n',
+        '{"v":6,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}\n',
       );
     });
   });
@@ -124,6 +125,7 @@ test("the agent client sends messages through sendUserMessage and steers while b
       socketPath,
       busy: () => true,
       abort() {},
+      wake() {},
       sendUserMessage: (text, busy) => {
         resolve({ text, busy });
         client.stop();
@@ -148,6 +150,7 @@ test("handshake EOF produces the local update-together message", async () => {
       socketPath,
       busy: () => false,
       abort() {},
+      wake() {},
       sendUserMessage() {},
       log(message) {
         resolve(message);
@@ -157,6 +160,84 @@ test("handshake EOF produces the local update-together message", async () => {
     client.start();
   });
   assert.equal(await seen, UPDATE_TOGETHER);
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await rm(root, { recursive: true, force: true });
+});
+
+test("a wake is decoded under its own kind with bounded details", () => {
+  const wake = (fields: Record<string, unknown>) =>
+    decodeAgentResponse(
+      JSON.stringify({ v: 6, type: "agent.wake", ...fields }),
+    );
+  assert.deepEqual(
+    wake({
+      custom_type: "scufris-briefing",
+      text: "The briefing is collected.",
+      details: { profile: "morning" },
+    }),
+    {
+      v: 6,
+      type: "agent.wake",
+      custom_type: "scufris-briefing",
+      text: "The briefing is collected.",
+      details: { profile: "morning" },
+    },
+  );
+  assert.deepEqual(wake({ custom_type: "scufris-wake", text: "Wake up." }), {
+    v: 6,
+    type: "agent.wake",
+    custom_type: "scufris-wake",
+    text: "Wake up.",
+  });
+  for (const invalid of [
+    { custom_type: "not an identifier", text: "Wake up." },
+    { custom_type: "scufris-wake", text: "" },
+    { custom_type: "scufris-wake", text: "x".repeat(8 * 1024 + 1) },
+    { custom_type: "scufris-wake", text: "Wake up.", details: "a string" },
+    { custom_type: "scufris-wake", text: "Wake up.", details: [1, 2] },
+    {
+      custom_type: "scufris-wake",
+      text: "Wake up.",
+      details: { note: "x".repeat(32 * 1024) },
+    },
+  ])
+    assert.throws(() => wake(invalid));
+});
+
+test("a wake becomes a follow-up, never a user message", async () => {
+  const root = await mkdtemp(join(tmpdir(), "scufris-agent-wake-"));
+  const socketPath = join(root, "agent.sock");
+  const server = createServer((socket) => {
+    socket.once("data", () => {
+      socket.write('{"v":6,"type":"agent.ready"}\n');
+      socket.write(
+        '{"v":6,"type":"agent.wake","custom_type":"scufris-briefing","text":"Wake up.","details":{"profile":"morning"}}\n',
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  let userMessages = 0;
+  const received = await new Promise<AgentWake>((resolve) => {
+    const client = new AgentClient({
+      socketPath,
+      busy: () => false,
+      abort() {},
+      sendUserMessage: () => {
+        userMessages += 1;
+      },
+      wake: (value) => {
+        resolve(value);
+        client.stop();
+      },
+    });
+    client.start();
+  });
+  assert.deepEqual(received, {
+    customType: "scufris-briefing",
+    content: "Wake up.",
+    details: { profile: "morning" },
+  });
+  assert.equal(userMessages, 0);
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await rm(root, { recursive: true, force: true });
 });

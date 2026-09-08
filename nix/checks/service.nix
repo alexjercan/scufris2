@@ -59,14 +59,18 @@ in
       ${service}/bin/scufris-surface-gateway --help | grep -F 'SCUFRIS_GATEWAY_DOCS'
       ! ${service}/bin/scufris-surface-gateway --nonsense
 
-      # Protocol v5 control is intentionally diagnostic-only.
+      # Protocol v6 control is diagnostic, window, and wake only.
       ${ctl}/bin/scufris-ctl --help | grep -F 'Usage: scufris-ctl [COMMAND]'
-      for verb in state open hud show hide; do
+      for verb in state open hud show hide wake; do
         ${ctl}/bin/scufris-ctl --help | grep -qE "^  $verb "
       done
       for removed in send watch abort debug; do
         ! ${ctl}/bin/scufris-ctl --help | grep -qE "^  $removed "
       done
+      # A wake carries words and says whether they landed.
+      ${ctl}/bin/scufris-ctl wake --help | grep -F -- '--custom-type'
+      ${ctl}/bin/scufris-ctl wake --help | grep -F -- '--details'
+      ! ${ctl}/bin/scufris-ctl wake
       ! ${ctl}/bin/scufris-ctl nonsense
       touch "$out"
     '';

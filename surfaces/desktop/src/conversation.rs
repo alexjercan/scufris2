@@ -60,6 +60,11 @@ pub struct Conversation {
     sending: Option<String>,
     thinking: bool,
     attachments: Vec<AttachmentDescriptor>,
+    /// The files the last `typed` took, kept until that line is answered for.
+    ///
+    /// A submission the window could not send never reaches the service, so
+    /// the composer has to be able to get its files back whole.
+    withdrawn: Vec<AttachmentDescriptor>,
     trouble: String,
     prefix: String,
     submissions: u64,
@@ -79,6 +84,7 @@ impl Conversation {
             sending: None,
             thinking: false,
             attachments: Vec::new(),
+            withdrawn: Vec::new(),
             trouble: String::new(),
             prefix: prefix.into(),
             submissions: 0,
@@ -197,10 +203,12 @@ impl Conversation {
         self.submissions += 1;
         let id = format!("{}-h{}", self.prefix, self.submissions);
         self.sending = Some(id.clone());
-        let attachments = std::mem::take(&mut self.attachments)
-            .into_iter()
-            .map(|attachment| attachment.id)
+        let taken = std::mem::take(&mut self.attachments);
+        let attachments = taken
+            .iter()
+            .map(|attachment| attachment.id.clone())
             .collect();
+        self.withdrawn = taken;
         self.trouble.clear();
         Some(Submission { id, attachments })
     }
@@ -215,6 +223,7 @@ impl Conversation {
             return false;
         }
         self.sending = None;
+        self.withdrawn.clear();
         self.trouble.clear();
         true
     }
@@ -225,6 +234,24 @@ impl Conversation {
             return false;
         }
         self.sending = None;
+        self.withdrawn.clear();
+        self.trouble = trouble.into();
+        true
+    }
+
+    /// Puts a submission that never left this process back in the composer.
+    ///
+    /// `typed` empties the composer and the page clears the field whenever the
+    /// window says it took the line. A local failure that only set a notice
+    /// therefore destroyed the paragraph and every selected file: the service
+    /// restarting, a message over the byte bound, or no backend attached each
+    /// cost him the whole message with no way to get it back.
+    pub fn returned(&mut self, id: &str, trouble: impl Into<String>) -> bool {
+        if self.sending.as_deref() != Some(id) {
+            return false;
+        }
+        self.sending = None;
+        self.attachments = std::mem::take(&mut self.withdrawn);
         self.trouble = trouble.into();
         true
     }
@@ -409,6 +436,38 @@ mod tests {
             .expect("the files are sent");
         assert_eq!(submission.attachments.len(), MAX_ATTACHMENTS - 1);
         assert!(!submission.attachments.contains(&"att_3".to_string()));
+        assert!(conversation.notice().attachments.is_empty());
+    }
+
+    #[test]
+    fn a_submission_that_never_left_keeps_its_words_and_its_files() {
+        // The page clears the field whenever the window says it took the line,
+        // so a local failure that only set a notice destroyed the paragraph
+        // and every selected file: the service restarting, a message over the
+        // byte bound, or no backend attached each cost him the whole message.
+        let mut conversation = Conversation::new("p");
+        for index in 0..3 {
+            assert!(conversation.attach(AttachmentDescriptor {
+                id: format!("att_{index}"),
+                name: format!("file{index}.txt"),
+                media_type: "text/plain".into(),
+                size: 4,
+            }));
+        }
+        let submission = conversation.typed("a long paragraph").expect("taken");
+        assert!(conversation.notice().attachments.is_empty());
+        assert!(conversation.returned(&submission.id, "The Scufris service is unavailable."));
+        let notice = conversation.notice();
+        assert_eq!(notice.attachments.len(), 3);
+        assert_eq!(notice.trouble, "The Scufris service is unavailable.");
+        assert!(!notice.sending, "the composer is free for the next attempt");
+        // Sending again takes the same files, and only the line it was told.
+        let again = conversation.typed("a long paragraph").expect("taken again");
+        assert_eq!(again.attachments.len(), 3);
+        assert!(!conversation.returned("some-other-line", "unrelated"));
+        // A line the service answered for keeps nothing to give back.
+        assert!(conversation.accepted(&again.id));
+        assert!(!conversation.returned(&again.id, "too late"));
         assert!(conversation.notice().attachments.is_empty());
     }
 

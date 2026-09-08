@@ -118,12 +118,17 @@ body {
 .pill[data-state="speaking"] {
   --acc: var(--green);
 }
+/* `blocked` and `failed` are the service's own words for the two states that
+ * most need him. With no rule of their own they fell to the base accent, which
+ * is what idle wears: a blocked job looked like nothing to do. */
 .pill[data-state="attention"],
+.pill[data-state="blocked"],
 .pill[data-state="retained"],
 .pill[data-state="uncertain"] {
   --acc: var(--wisteria);
 }
-.pill[data-state="attention"] .orb::after {
+.pill[data-state="attention"] .orb::after,
+.pill[data-state="blocked"] .orb::after {
   content: "";
   position: absolute;
   inset: -12px;
@@ -167,7 +172,8 @@ body {
   --acc: var(--wisteria);
   filter: saturate(0.5);
 }
-.pill[data-state="error"] {
+.pill[data-state="error"],
+.pill[data-state="failed"] {
   --acc: var(--red);
   filter: saturate(0.85);
 }

@@ -154,8 +154,13 @@ function tone(name: string): void {
 function boundaryCue(previous: string, next: string): void {
   if (next === "listening") return tone("open");
   // An error crossing swallows the mic-close cue: one boundary, one sound.
-  if (next === "error") return tone("error");
-  if (next === "attention" || next === "retained" || next === "uncertain") {
+  if (next === "error" || next === "failed") return tone("error");
+  if (
+    next === "attention" ||
+    next === "blocked" ||
+    next === "retained" ||
+    next === "uncertain"
+  ) {
     return tone("chime");
   }
   if (previous === "listening") return tone("close");
@@ -189,8 +194,10 @@ const BASELINE: Record<string, number> = {
   working: 0.3,
   speaking: 0.5,
   attention: 0.3,
+  blocked: 0.3,
   detached: 0.12,
   error: 0.22,
+  failed: 0.22,
   starting: 0.12,
   disconnected: 0.1,
 };
@@ -246,6 +253,7 @@ const ORB_LOOKS: Record<string, OrbLook> = {
   uncertain: { state: "shaping", speed: 1 },
   detached: { state: "breathing", speed: 0.35 },
   error: { state: "breathing", speed: 0.35 },
+  failed: { state: "breathing", speed: 0.35 },
   starting: { state: "connecting", speed: 1 },
   disconnected: { state: "connecting", speed: 1 },
 };

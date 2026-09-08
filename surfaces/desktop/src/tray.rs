@@ -52,9 +52,13 @@ pub fn state_color(state: &str) -> [u8; 3] {
         "transcribing" => [0xCC, 0x8C, 0x3C],
         "working" => [0x96, 0xA6, 0xC8],
         "speaking" => [0x73, 0xC9, 0x36],
-        "attention" => [0x9E, 0x95, 0xC7],
+        // `blocked` and `failed` are the service's own words for the two
+        // states that most need him. Without their own arms they fell to the
+        // default, which is byte-identical to idle: a blocked job and a dead
+        // agent looked exactly like nothing to do.
+        "attention" | "blocked" => [0x9E, 0x95, 0xC7],
         "detached" => [0x6F, 0x62, 0x8C],
-        "error" => [0xF4, 0x38, 0x41],
+        "error" | "failed" => [0xF4, 0x38, 0x41],
         "starting" => [0x6C, 0x77, 0x72],
         "disconnected" => [0x52, 0x49, 0x4E],
         _ => [0x95, 0xA9, 0x9F],
@@ -101,9 +105,9 @@ pub fn tooltip(state: &str, detail: &str) -> String {
         "transcribing" => "Scufris is transcribing",
         "working" => "Scufris is working",
         "speaking" => "Scufris is speaking",
-        "attention" => "Scufris needs you",
+        "attention" | "blocked" => "Scufris needs you",
         "detached" => "Scufris is attached to a terminal",
-        "error" => "Scufris reported an error",
+        "error" | "failed" => "Scufris reported an error",
         "starting" => "Scufris is starting",
         "disconnected" => "Scufris service unavailable",
         _ => "Scufris is idle",
@@ -270,6 +274,13 @@ mod tests {
         "error",
     ];
 
+    /// The service's own state names, which the companion shows as they are.
+    ///
+    /// The list above was the nine the tray happened to implement, so the two
+    /// that reach it from the service and had no arm - `blocked` and `failed`
+    /// - passed every test by not being in it.
+    const SERVICE_STATES: [&str; 5] = ["starting", "idle", "working", "blocked", "failed"];
+
     #[test]
     fn every_tray_state_has_its_own_colour() {
         let colours: HashSet<[u8; 3]> = STATES
@@ -278,6 +289,25 @@ mod tests {
             .map(|state| state_color(state))
             .collect();
         assert_eq!(colours.len(), STATES.len() + 1);
+    }
+
+    #[test]
+    fn no_service_state_that_needs_him_reads_as_idle() {
+        let idle = state_color("idle");
+        let idle_words = tooltip("idle", "");
+        for state in SERVICE_STATES {
+            if state == "idle" {
+                continue;
+            }
+            assert_ne!(state_color(state), idle, "{state} is coloured like idle");
+            assert_ne!(
+                tooltip(state, "the workflow needs review"),
+                format!("{idle_words}: the workflow needs review"),
+                "{state} reads as idle"
+            );
+        }
+        assert_eq!(state_color("blocked"), state_color("attention"));
+        assert_eq!(state_color("failed"), state_color("error"));
     }
 
     #[test]

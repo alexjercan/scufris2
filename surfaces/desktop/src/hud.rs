@@ -320,7 +320,14 @@ impl Hud {
             None => Err("Scufris is not reachable.".into()),
         };
         if let Err(trouble) = sent {
-            self.refused(&submission.id, trouble);
+            // Nothing left this process, so the composer gets the words and
+            // the files back. Answering `true` here cleared the field on the
+            // page and destroyed both, for a service that was merely
+            // restarting or a message one byte over the bound.
+            if self.lock().returned(&submission.id, trouble) {
+                self.tell();
+            }
+            return false;
         }
         // Taken by the window, which is what the composer is cleared on.
         // Whether the service takes it is a later answer and arrives as notice.

@@ -27,6 +27,27 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   permission. A boundary a model can read is worth more than a flag that
   suggested one it never had.
 
+### Fixed
+
+- An answer whose surface has disconnected reaches the screens that are still
+  connected, rather than reaching nobody. The response association named
+  whichever surface had spoken most recently and was never cleared, so one
+  message from a phone owned every answer after it: a morning briefing hours
+  later was attributed to that phone, found it gone, and was refused with
+  `surface_unavailable` instead of being shown anywhere. The association now
+  covers one turn. It opens on an accepted surface message and closes when that
+  turn's answer is recorded or its abort is accepted, so an answer with no turn
+  outstanding - the ordinary case for a briefing, however recently a surface
+  spoke - is `unprompted`, which every screen shows and none speaks. An owner
+  that left before its answer arrived is recorded the same way with its widgets
+  stripped, because a widget belongs to the surface that asked and there is no
+  such surface. A refusal is not an answer and leaves the turn open, so an agent
+  can correct invalid widgets and still reach the owner that is waiting. An
+  owner's outstanding turn still wins over a wake that lands beside it: the
+  owner asked first and is waiting, and returning their own question to them
+  silent on every screen would be the worse trade. `surface_unavailable` is
+  gone, and `SERVICE_VERSION` is unchanged, so no surface has to move with this.
+
 ## [2.3.0] - 2026-09-08
 
 ### Added

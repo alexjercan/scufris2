@@ -40,6 +40,10 @@
   # The morning, collected and rendered. The agent runs it through the briefing
   # extension; this is the same program for a person and for the checks.
   briefing = import ./briefing.nix {inherit pkgs;};
+  # Stored jobs, read. The orchestrator reads them through its tools; this is
+  # the same records for a person and for a briefing source, which needs a
+  # program on PATH rather than a path into a checkout.
+  jobs = import ./jobs.nix {inherit pkgs;};
   desktop = import ./desktop.nix {
     inherit pkgs version;
     source = rustSource;
@@ -67,6 +71,7 @@ in {
     speak
     den
     briefing
+    jobs
     desktop
     service
     ctl

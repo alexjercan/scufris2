@@ -54,6 +54,7 @@
     import ./briefing-unit.nix {
       inherit pkgs name profile;
       briefing = defaults.briefingPackage;
+      jobs = defaults.jobsPackage;
       ctl = cfg.ctlPackage;
       pi = agentCfg.piPackage;
       projectRoots = agentCfg.projectRoots;

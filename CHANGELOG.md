@@ -11,6 +11,9 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Added
 
+- `scufris-jobs` is an installed program. A briefing source that reports
+  on jobs names it rather than a path into a checkout, and it is on the
+  PATH of every briefing timer's run.
 - Briefing profiles on systemd timers.
   `programs.scufris.agent.briefing.profiles` names a briefing and its
   `OnCalendar` schedule, and each one renders its own

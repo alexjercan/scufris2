@@ -151,6 +151,11 @@ in
       grep -F -- "collect --profile weekly" "$runner"
       grep -F -- "wake --profile weekly" "$runner"
       ! grep -F -- "--profile morning" "$runner"
+
+      # A machine source reports on jobs, so the reader is a program on the
+      # run's own PATH. A user manager inherits no login shell, and guidance
+      # that named a checkout would work on one machine and nowhere else.
+      grep -E '^export PATH=' "$runner" | grep -F scufris-jobs
       touch "$out"
     '';
 

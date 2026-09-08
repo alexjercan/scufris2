@@ -27,13 +27,17 @@ interface WidgetChoice {
 interface WidgetField {
   /** The key the answer arrives under, beside the action's own keys. */
   name: string;
-  /** What is printed over the field. */
+  /** What is printed over the field. Clipped to 64 characters. */
   label: string;
   /** What the field starts with. */
   value?: string;
-  /** How many lines the field is. One is a line; more is a block. */
+  /**
+   * How many lines the field is. One is a line; more is a block.
+   *
+   * Clamped to 1..12. A field asking for twenty lines quietly gets twelve.
+   */
   lines?: number;
-  /** Grey words in an empty field. */
+  /** Grey words in an empty field. Clipped to 64 characters. */
   hint?: string;
   /**
    * Ask the backend what this field could be, as it is typed.
@@ -44,14 +48,15 @@ interface WidgetField {
    * `choices`, and the person picks one from a list under the field. A field
    * that is picked from answers with the choice's `id` rather than its label.
    *
-   * One line only. A block is prose, and prose has no candidates.
+   * One line only. A block is prose, and prose has no candidates, and a
+   * field declaring both is refused rather than quietly given neither.
    */
   suggest?: Record<string, unknown>;
 }
 
 /** A question a widget cannot ask on its own page. */
 interface WidgetAsk {
-  /** What the box is titled. */
+  /** What the box is titled. Clipped to 64 characters. */
   title: string;
   /** The fields, in the order they are asked. At least one, at most four. */
   fields: WidgetField[];

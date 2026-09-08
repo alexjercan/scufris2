@@ -421,7 +421,17 @@
   }
 
   attach.addEventListener("click", () => {
-    if (selectedAttachments.length >= 8 || attach.disabled) return;
+    if (attach.disabled) return;
+    if (selectedAttachments.length >= 8) {
+      // The button still looks live - `disabled` is set only while an import
+      // runs - so a click that returns here is a paperclip that does nothing
+      // and says nothing. The host wrote this sentence for exactly this and
+      // the guard made it unreachable.
+      notice.dataset["tone"] = "trouble";
+      notice.textContent =
+        "A message can contain at most 8 different attachments.";
+      return;
+    }
     attach.disabled = true;
     notice.dataset["tone"] = "sending";
     notice.textContent = "importing";

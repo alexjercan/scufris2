@@ -35,6 +35,19 @@ use tracing::{debug, warn};
 /// says so is marked stale for a moment rather than being wrong.
 const DEFAULT_CADENCE: Duration = Duration::from_secs(1);
 
+/// The smallest a widget window may ask to be, in logical pixels.
+///
+/// Small enough for a one-line readout, large enough that the shell's own
+/// chrome has somewhere to draw.
+const MIN_SIDE: u32 = 80;
+
+/// The largest a widget window may ask to be, in logical pixels.
+///
+/// A panel is a panel rather than a screen. Nothing on the display can argue
+/// with the size afterwards: the window is unfocusable, has no chrome, and
+/// `fit` pins its minimum and maximum to the number the manifest gave.
+const MAX_SIDE: u32 = 2000;
+
 /// One widget directory, as `build.rs` compiled it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Source<'a> {
@@ -122,6 +135,19 @@ pub enum CatalogError {
         directory: String,
         /// The identifier the manifest claimed.
         id: String,
+    },
+    /// The manifest asks for a window no screen would hold.
+    #[error(
+        "widgets/{directory} asks for {width}x{height}; a widget window is between \
+         {MIN_SIDE} and {MAX_SIDE} logical pixels on a side"
+    )]
+    Oversized {
+        /// The directory whose manifest is wrong.
+        directory: String,
+        /// The width the manifest asked for.
+        width: u32,
+        /// The height the manifest asked for.
+        height: u32,
     },
     /// The directory name is not a name the protocol can carry.
     #[error("widgets/{directory} is not a bounded identifier, and a widget id crosses the socket")]
@@ -343,6 +369,19 @@ fn install(source: Source<'_>, backends: &[&str]) -> Result<Widget, CatalogError
             id: manifest.id,
         });
     }
+    // A widget window is built unfocusable, with no chrome and no compositor
+    // to argue with, so nothing on screen can move or shrink one that asked
+    // for more than the screen. The rule list in the widget documentation has
+    // always said these are bounded; this is where it becomes true.
+    if !(MIN_SIDE..=MAX_SIDE).contains(&manifest.width)
+        || !(MIN_SIDE..=MAX_SIDE).contains(&manifest.height)
+    {
+        return Err(CatalogError::Oversized {
+            directory: source.directory.to_string(),
+            width: manifest.width,
+            height: manifest.height,
+        });
+    }
     // A widget naming a backend nothing installs is a panel that opens and then
     // never shows a number. Caught here rather than there, for the reason a
     // renamed widget is.
@@ -411,6 +450,26 @@ height = 110
         assert_eq!(widget.name, "Note");
         assert_eq!((widget.width, widget.height), (250, 110));
         assert_eq!(catalog.get("weather"), None);
+    }
+
+    /// A widget window is unfocusable, chromeless, and pinned to the size its
+    /// manifest asked for, so nothing on the display can move or shrink one
+    /// that asked for more than the screen.
+    #[test]
+    fn a_widget_asking_for_more_than_a_screen_is_refused_by_name() {
+        for (width, height) in [(100_000, 110), (250, 0), (4, 110)] {
+            let declared = format!(
+                "id = \"note\"\nname = \"Note\"\ndescription = \"Show a short note\"\n\
+                 width = {width}\nheight = {height}\n"
+            );
+            let refused = Catalog::build(&[source("note", &declared)], BACKENDS)
+                .expect_err("the size is out of bounds");
+            let said = refused.to_string();
+            assert!(said.contains("widgets/note"), "{said}");
+            assert!(said.contains("logical pixels"), "{said}");
+        }
+        // The shipped sizes are all inside it.
+        Catalog::build(&[source("note", NOTE)], BACKENDS).expect("250x110 is a panel");
     }
 
     /// Two widgets can sit over one backend and ask it different questions.

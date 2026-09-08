@@ -55,9 +55,28 @@
   let view: WidgetView | null = null;
   let pending: unknown = undefined;
   let waiting = false;
+  /// True once a widget threw. Nothing is delivered to a panel in this state:
+  /// there is no widget left to take it, and holding the data would only make
+  /// the next `become` show a reading from before the failure.
+  let failed = false;
 
   const broken = (reason: string): void => {
     forward("error", reason);
+    // The widget is let go before its tree is. A shipped widget builds its
+    // tree once in `mount` and only mutates it afterwards, so `replaceChildren`
+    // detaches that tree for good: every later reading then updated a tree
+    // nothing was showing, returned normally, and rendered nothing. The panel
+    // sat on its first error message with a healthy backend behind it.
+    if (view !== null) {
+      const going = view;
+      view = null;
+      try {
+        going.destroy();
+      } catch (error) {
+        forward("error", `destroy: ${String(error)}`);
+      }
+    }
+    failed = true;
     root.replaceChildren();
     const said = document.createElement("p");
     said.className = "broken";
@@ -66,6 +85,7 @@
   };
 
   const deliver = (data: unknown): void => {
+    if (failed) return;
     if (view === null) {
       // Held rather than dropped. The module is still importing, and this is
       // the payload it was opened to show.

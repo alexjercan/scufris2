@@ -354,7 +354,8 @@ def weight(args: argparse.Namespace, here: Path, when: date) -> None:
 
 def macros(args: argparse.Namespace, here: Path, when: date) -> None:
     if args.what == "database":
-        print(den.resolve_database(None, here))
+        where = den.resolve_database(None, here)
+        emit(args, {"path": str(where)}, str(where))
         return
     if args.what == "query":
         try:
@@ -434,7 +435,7 @@ def macros(args: argparse.Namespace, here: Path, when: date) -> None:
 def gym(args: argparse.Namespace, here: Path, when: date) -> None:
     book = den.resolve_exercises(None, here)
     if args.what == "database":
-        print(book)
+        emit(args, {"path": str(book)}, str(book))
         return
     if args.what == "known":
         known = den.Exercises.load(book)
@@ -543,9 +544,11 @@ def main(argv: list[str] | None = None) -> int:
             getattr(args, "date", None), getattr(args, "offset", None)
         )
         if args.command == "path":
-            print(den.entry_path(here, when))
+            where = den.entry_path(here, when)
+            emit(args, {"path": str(where)}, str(where))
         elif args.command == "create":
-            print(den.ensure_day(here, when))
+            where = den.ensure_day(here, when)
+            emit(args, {"path": str(where)}, str(where))
         elif args.command == "show":
             day, _current = read(here, when)
             emit(args, day.to_dict(), day.file)

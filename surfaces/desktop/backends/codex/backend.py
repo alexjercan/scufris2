@@ -44,7 +44,12 @@ USAGE = "https://chatgpt.com/backend-api/codex/usage"
 #: The interval is clamped into this range, for the reason the Claude backend
 #: clamps it: a subscription window is hours long.
 FLOOR = 15.0
-CEILING = 3600.0
+# The ceiling is what the widget's `cadence` buys: the companion marks a
+# backend stale after three of its widget's cadences of silence, and that
+# cadence is fixed in the manifest while this interval is the caller's. A
+# reading slower than the tolerance wears a STALE badge over numbers that are
+# current, for as long as the panel is open.
+CEILING = 180.0
 
 #: How long one request has to answer.
 PATIENCE = 10.0
@@ -200,7 +205,12 @@ def listen(wake: threading.Event) -> None:
 
 
 def main() -> None:
-    spawn = json.loads(sys.stdin.readline() or "null") or {}
+    spawn = json.loads(sys.stdin.readline() or "null")
+    # A spawn payload is whatever the model wrote. Nothing between the model
+    # and this pipe requires an object: `beneath` passes `arguments` through as
+    # they stand, and `or {}` rescued only falsy JSON, so a bare string reached
+    # `.get` and killed the backend before its first reading.
+    spawn = spawn if isinstance(spawn, dict) else {}
     every = spawn.get("every", 60)
     every = float(every) if isinstance(every, (int, float)) else 60.0
     every = min(max(every, FLOOR), CEILING)

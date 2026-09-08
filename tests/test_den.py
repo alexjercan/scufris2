@@ -217,6 +217,103 @@ class Sections(unittest.TestCase):
         self.assertEqual(den.ensure_section(DAY, "workout"), DAY)
 
 
+class Structure(unittest.TestCase):
+    """Free text becomes a line of a Markdown file, so it must not be one."""
+
+    def test_a_newline_in_free_text_is_refused_rather_than_written(self) -> None:
+        # `task add "ok\n### Habits\n- [x] Gym"` wrote a second Habits header,
+        # hid the real one from `_header`, ticked a habit nobody made, and
+        # dropped the rest of the sentence. Exit 0 throughout.
+        for bad in ("ok\n### Habits\n- [x] Gym", "one\r\ntwo", "   ", ""):
+            with self.assertRaises(ValueError):
+                den.add_task(DAY, bad)
+            with self.assertRaises(ValueError):
+                den.add_idea("# Backlog\n\n", bad)
+
+    def test_a_heading_is_not_a_task(self) -> None:
+        with self.assertRaises(ValueError):
+            den.add_task(DAY, "### Habits")
+        with self.assertRaises(ValueError):
+            den.add_note(DAY, "#### 09:00", "body")
+
+    def test_a_note_body_holding_a_heading_is_refused(self) -> None:
+        # Note bodies are legitimately many lines and come from a form box and
+        # from the model, so this is prose somebody would plausibly write.
+        for bad in ("ship it\n### Tasks\n- [ ] ship it", "a\n#### 08:00\nb"):
+            with self.assertRaises(ValueError):
+                den.add_note(DAY, "standup", bad)
+            with self.assertRaises(ValueError):
+                den.edit_note(DAY, 1, "standup", bad)
+        # An ordinary many-line body is still a body.
+        self.assertIn("two\nlines", den.add_note(DAY, "standup", "two\nlines"))
+
+    def test_a_section_header_as_the_last_line_survives_the_next_write(self) -> None:
+        # A template with no final newline is an ordinary thing an editor
+        # leaves. `_last` returns `start` for an empty region, so the guard
+        # that terminates the previous line was skipped and the new entry was
+        # concatenated onto the header, which no reader could then find.
+        for write in (
+            lambda text: den.add_task(text, "buy milk"),
+            lambda text: den.add_note(text, "standup", "what was said"),
+            lambda text: den.set_weight(text, "71.2"),
+        ):
+            written = write("# Monday\n\n### Tasks\n\n### Weight\n\n### Notes")
+            for line in written.splitlines():
+                if line.startswith("### "):
+                    self.assertRegex(line, r"^### \w+$", written)
+            for name in ("tasks", "weight", "notes"):
+                self.assertIsNotNone(
+                    den._header(written.splitlines(keepends=True), name), name
+                )
+
+    def test_a_write_into_a_day_without_the_section_puts_it_back(self) -> None:
+        # `ensure_section` promises exactly this and only two callers used it,
+        # so a day from before a section existed refused four of the six
+        # writes - and `promote` failed after the move was decided.
+        bare = "# Monday\n\n### Tasks\n\n### Macros\n\nwhat,protein,carbs,fat\n"
+        self.assertIn("- [ ] buy milk", den.add_task(bare, "buy milk"))
+        self.assertIn("#### ", den.add_note(bare, "standup", "said"))
+        self.assertIn("71.2 kg", den.set_weight(bare, "71.2"))
+        for name in ("weight", "notes"):
+            self.assertIn(f"### {name.title()}", den.ensure_section(bare, name))
+
+    def test_a_habit_toggles_the_habit_that_was_named(self) -> None:
+        # `written.split(maxsplit=1)[-1]` dropped the first word of every
+        # habit, so `Work` matched `Deep Work` and ticked it, reporting
+        # success. Nothing said so until the next `habit list`.
+        habits = "### Habits\n\n- [ ] Deep Work\n- [ ] Work\n- [ ] \N{PERSONAL COMPUTER} Code\n"
+        self.assertIn("- [x] Work\n", den.toggle_habit(habits, "Work"))
+        self.assertIn("- [x] Deep Work", den.toggle_habit(habits, "deep work"))
+        # The icon is still optional.
+        self.assertIn(
+            "- [x] \N{PERSONAL COMPUTER} Code", den.toggle_habit(habits, "Code")
+        )
+        with self.assertRaises(LookupError):
+            den.toggle_habit(habits, "Gym")
+        # And a day with no Habits section has no habits, not a file problem.
+        with self.assertRaises(LookupError):
+            den.toggle_habit("# Monday\n\n### Tasks\n", "Gym")
+
+    def test_an_ambiguous_habit_is_refused_rather_than_guessed(self) -> None:
+        habits = "### Habits\n\n- [ ] \N{PERSONAL COMPUTER} Code\n- [ ] \N{BOOKS} Code\n"
+        with self.assertRaises(ValueError):
+            den.toggle_habit(habits, "Code")
+
+    def test_an_indented_header_is_the_same_section_to_readers_and_writers(
+        self,
+    ) -> None:
+        # `_sections` matched at column 0 and `_header` matched after strip, so
+        # `task list` showed nothing while `task done 1` edited the invisible
+        # items.
+        text = "# T\n\n  ### Tasks\n\n- [ ] one\n- [ ] two\n\n### Habits\n\n- [ ] Learn\n"
+        self.assertEqual([task.text for task in den.parse_text(text, "f").tasks],
+                         ["one", "two"])
+
+    def test_an_offset_beyond_a_century_is_refused_with_a_reason(self) -> None:
+        with self.assertRaises(ValueError):
+            den.resolve_date(offset=99999999)
+
+
 class Edits(unittest.TestCase):
     def test_a_task_is_added_under_the_ones_already_there(self) -> None:
         written = den.add_task(DAY, "buy milk")

@@ -28,8 +28,9 @@ A day is five sections, and a missing one reads as empty:
     71.2 kg
 
     ### Workout
-    split,exercise,weight,reps
-    Push,bench press,60,8
+    Push
+    exercise,weight,reps
+    bench press,60,8
 
     ### Notes
     #### 22:04 - standup
@@ -265,7 +266,7 @@ def _sections(lines: list[str]) -> dict[str, list[str]]:
     found: dict[str, list[str]] = {}
     current: str | None = None
     for line in lines:
-        header = _H3.match(line)
+        header = _H3.match(line.strip())
         if header:
             name = header.group(1).strip().lower()
             current = name if name in SECTIONS else None
@@ -516,7 +517,10 @@ def _append(lines: list[str], name: str, value: str) -> None:
     start, end = _region(lines, name)
     newline = _newline(lines)
     position = _last(lines, start, end)
-    if position > start and not lines[position - 1].endswith(("\n", "\r")):
+    # `> 0`, not `> start`: a section header that is the file's last line with
+    # no terminator is at `start - 1`, and concatenating onto it destroys the
+    # header and makes the section unreachable through every reader.
+    if position > 0 and not lines[position - 1].endswith(("\n", "\r")):
         lines[position - 1] += newline
     lines.insert(position, value + newline)
 
@@ -531,8 +535,8 @@ def _flip(line: str, done: bool) -> str:
 
 
 def add_task(text: str, item: str) -> str:
-    lines = text.splitlines(keepends=True)
-    _append(lines, "tasks", f"- [ ] {item}")
+    lines = ensure_section(text, "tasks").splitlines(keepends=True)
+    _append(lines, "tasks", f"- [ ] {one_line(item, 'a task')}")
     return "".join(lines)
 
 
@@ -557,24 +561,59 @@ def remove_task(text: str, index: int) -> str:
     return "".join(lines)
 
 
+def _unadorned(written: str) -> str:
+    """A habit written with a leading icon, without it.
+
+    Only a first token with no letter or digit in it is an icon. Splitting on
+    the first space whatever it was dropped the first word of every habit, so
+    `Work` matched `Deep Work` and ticked it.
+    """
+    head, _, rest = written.partition(" ")
+    if rest.strip() and not any(character.isalnum() for character in head):
+        return rest.strip()
+    return written
+
+
 def toggle_habit(text: str, name: str) -> str:
-    """Ticks one habit, named with or without the icon it is written with."""
+    """Ticks one habit, named with or without the icon it is written with.
+
+    The name has to be the habit's own. An exact match wins over one that
+    needed the icon dropped, and an ambiguous name is refused rather than
+    guessed: ticking the wrong habit reports success and is invisible until
+    the next `habit list`.
+    """
     lines = text.splitlines(keepends=True)
     wanted = name.strip().lower()
-    for target in _checked(lines, "habits"):
+    try:
+        found = _checked(lines, "habits")
+    except LookupError:
+        # There is no section, so there is no habit. Naming the section sends
+        # the person looking for a file problem they do not have.
+        raise LookupError(f"habit not found: {name}") from None
+    exact = []
+    loose = []
+    for target in found:
         box = _CHECK.match(lines[target])
         assert box is not None
         written = box.group(2).strip()
-        bare = written.split(maxsplit=1)[-1] if written else written
-        if wanted not in {written.lower(), bare.lower()}:
-            continue
-        lines[target] = _flip(lines[target], box.group(1) in "xX")
-        return "".join(lines)
-    raise LookupError(f"habit not found: {name}")
+        if written.lower() == wanted:
+            exact.append(target)
+        elif _unadorned(written).lower() == wanted:
+            loose.append(target)
+    matched = exact or loose
+    if not matched:
+        raise LookupError(f"habit not found: {name}")
+    if len(matched) > 1:
+        raise ValueError(f"{len(matched)} habits are called {name}")
+    target = matched[0]
+    box = _CHECK.match(lines[target])
+    assert box is not None
+    lines[target] = _flip(lines[target], box.group(1) in "xX")
+    return "".join(lines)
 
 
 def set_weight(text: str, value: str) -> str:
-    lines = text.splitlines(keepends=True)
+    lines = ensure_section(text, "weight").splitlines(keepends=True)
     start, end = _region(lines, "weight")
     newline = _newline(lines)
     written = f"{value} kg{newline}"
@@ -584,6 +623,8 @@ def set_weight(text: str, value: str) -> str:
         for index in reversed(filled[1:]):
             del lines[index]
     else:
+        if start > 0 and not lines[start - 1].endswith(("\n", "\r")):
+            lines[start - 1] += newline
         lines.insert(start, newline)
         lines.insert(start + 1, written)
     return "".join(lines)
@@ -679,10 +720,15 @@ def _block(heading: str, body: str, newline: str) -> list[str]:
 
 
 def add_note(text: str, heading: str, body: str) -> str:
+    heading = one_line(heading, "a note heading")
+    body = note_body(body, "a note")
+    text = ensure_section(text, "notes")
     lines = text.splitlines(keepends=True)
     newline = _newline(lines)
     start, end = _region(lines, "notes")
     position = _last(lines, start, end)
+    if position > 0 and not lines[position - 1].endswith(("\n", "\r")):
+        lines[position - 1] += newline
     block = _block(heading, body, newline)
     if position > start and lines[position - 1].strip():
         block.insert(0, newline)
@@ -691,6 +737,8 @@ def add_note(text: str, heading: str, body: str) -> str:
 
 
 def edit_note(text: str, index: int, heading: str, body: str) -> str:
+    heading = one_line(heading, "a note heading")
+    body = note_body(body, "a note")
     lines = text.splitlines(keepends=True)
     found = _blocks(lines)
     if index < 1 or index > len(found):
@@ -733,7 +781,12 @@ def resolve_date(value: str | None = None, offset: int | None = None) -> date:
             return date.fromisoformat(value)
         except ValueError:
             raise ValueError(f"invalid date: {value}") from None
-    return datetime.now().astimezone().date() + timedelta(days=offset or 0)
+    days = offset or 0
+    # `timedelta` and `date` both overflow long before this, and an
+    # `OverflowError` reaches the person as a traceback rather than a reason.
+    if abs(days) > 36500:
+        raise ValueError(f"an offset is a number of days, within a century: {days}")
+    return datetime.now().astimezone().date() + timedelta(days=days)
 
 
 def stem_for(day: date) -> str:
@@ -919,6 +972,46 @@ def normalize_weight(value: str) -> str:
     if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", written):
         raise ValueError(f"a weight is a number of kilograms: {value}")
     return written
+
+
+def _structure(line: str) -> bool:
+    """Whether one line would be read back as journal structure."""
+    bare = line.strip()
+    return bool(_H1.match(bare) or _H3.match(bare) or _H4.match(bare))
+
+
+def one_line(text: str, what: str) -> str:
+    """Reads one line of free text before it becomes a line of the journal.
+
+    The journal is Markdown and the writers put what they are given straight
+    into it, so text carrying a newline is not one entry: `task add` with an
+    embedded `### Habits` wrote a second Habits section, hid the real one from
+    `_header`, and left the rest of the sentence as a habit already ticked.
+    """
+    cleaned = text.strip()
+    if not cleaned:
+        raise ValueError(f"{what} must not be empty")
+    if "\n" in cleaned or "\r" in cleaned:
+        raise ValueError(f"{what} is one line")
+    if _structure(cleaned):
+        raise ValueError(f"{what} must not be a Markdown heading: {cleaned}")
+    return cleaned
+
+
+def note_body(text: str, what: str) -> str:
+    """Reads a note body, which is many lines but still not structure.
+
+    A heading inside a note ends the note: `###` starts another section and
+    `####` starts another note, both silently, and both take the rest of what
+    was written with them.
+    """
+    cleaned = text.strip()
+    if not cleaned:
+        raise ValueError(f"{what} must not be empty")
+    for line in cleaned.splitlines():
+        if _structure(line):
+            raise ValueError(f"{what} must not hold a Markdown heading: {line.strip()}")
+    return cleaned
 
 
 def _plain(cell: str, what: str) -> str:
@@ -1116,7 +1209,7 @@ def add_idea(text: str, item: str) -> str:
     position = _last(lines, 0, len(lines))
     if position > 0 and not lines[position - 1].endswith(("\n", "\r")):
         lines[position - 1] += newline
-    lines.insert(position, f"- [ ] {item}{newline}")
+    lines.insert(position, f"- [ ] {one_line(item, 'an idea')}{newline}")
     return "".join(lines)
 
 
@@ -1585,19 +1678,26 @@ def resolve_exercises(given: str | None = None, den: Path | None = None) -> Path
 
 def normalize_move(split: str, name: str) -> str:
     """Checks one `split,exercise` row before it is written."""
-    return f"{_plain(split, 'a split')},{_plain(name, 'an exercise')}"
+    written = f"{_plain(split, 'a split')},{_plain(name, 'an exercise')}"
+    # `Exercises.load` skips the header by matching it, so a movement written
+    # with the header's own words is appended, never listed, and appended
+    # again on every retry.
+    if written.lower() == "split,exercise":
+        raise ValueError("a movement cannot be called split,exercise: that is the table header")
+    return written
 
 
 def learn_move(path: Path, split: str, name: str) -> Move:
     """Adds one movement to the database, under a lock, keeping the header."""
     row = normalize_move(split, name)
-    known = Exercises.load(path)
-    if known.split_of(name) is not None:
-        raise ValueError(f"already known: {name.strip()}")
     path.parent.mkdir(parents=True, exist_ok=True)
     with (path.parent / f".{path.name}.lock").open("a", encoding="utf-8") as guard:
         fcntl.flock(guard.fileno(), fcntl.LOCK_EX)
         try:
+            # Inside the lock. Read outside it, two `gym learn` calls racing
+            # both see a database without the movement and both append it.
+            if Exercises.load(path).split_of(name) is not None:
+                raise ValueError(f"already known: {name.strip()}")
             held = path.read_text(encoding="utf-8") if path.is_file() else ""
             if not held.strip():
                 held = "split,exercise\n"

@@ -238,7 +238,9 @@ class Panel:
         except Conflict:
             self.seen.pop(selected, None)
             raise Refused("the day changed elsewhere - showing it again") from None
-        except (LookupError, IndexError, ValueError) as trouble:
+        except (OSError, LookupError, IndexError, ValueError) as trouble:
+            # `change` reaches `mkdir`, `mkstemp`, `os.link` and `os.replace`,
+            # so a full or read-only mount arrives here as an `OSError`.
             raise Refused(str(trouble)) from None
         self.seen[selected] = after
 
@@ -346,7 +348,9 @@ class Panel:
         """Keeps one structured note, with a heading when there is one."""
         body = words(action.get("body"))
         if not body:
-            return
+            # The box is gone by the time this runs, and so are the words. The
+            # edit path already refuses out loud for the same condition.
+            raise Refused("a note with nothing in it is not a note")
         try:
             heading = note_heading(
                 words(action.get("heading")) or None, datetime.now().astimezone()
@@ -394,7 +398,7 @@ class Panel:
         except Conflict:
             self.backlog_at = ""
             raise Refused("the backlog changed elsewhere - showing it again") from None
-        except (IndexError, ValueError) as trouble:
+        except (OSError, IndexError, ValueError) as trouble:
             raise Refused(str(trouble)) from None
         self.backlog_at = after
 
@@ -415,7 +419,7 @@ class Panel:
             self.backlog_at = ""
             self.seen.pop(selected, None)
             raise Refused(f"{trouble} - showing it again") from None
-        except (IndexError, ValueError) as trouble:
+        except (OSError, IndexError, ValueError) as trouble:
             raise Refused(str(trouble)) from None
         self.seen[selected] = after
         self.backlog_at = left
@@ -476,7 +480,7 @@ class Panel:
             return []
         try:
             return Database.load(self.database).query(typed)
-        except ValueError as trouble:
+        except (OSError, ValueError) as trouble:
             raise Refused(str(trouble)) from None
 
     def eat(self, selected: str, action: dict[str, object]) -> None:
@@ -621,7 +625,11 @@ class Panel:
             self.built = time.monotonic()
             try:
                 self.frame = self.build(view, selected)
-            except OSError as trouble:
+            except (OSError, ValueError, RuntimeError) as trouble:
+                # `ValueError` covers `UnicodeDecodeError`: one non-UTF-8 byte
+                # in any file inside the `restant` window used to kill the
+                # process before a single reading was printed, and the restart
+                # tick then killed it again.
                 self.frame = self.bare(view, selected, str(trouble))
         reading = dict(self.frame or {})
         if view == "macros":
@@ -752,7 +760,12 @@ def listen(mail: Mail) -> None:
 
 
 def main() -> None:
-    spawn = json.loads(sys.stdin.readline() or "null") or {}
+    spawn = json.loads(sys.stdin.readline() or "null")
+    # A spawn payload is whatever the model wrote. Nothing between the model
+    # and this pipe requires an object: `beneath` passes `arguments` through as
+    # they stand, and `or {}` rescued only falsy JSON, so a bare string reached
+    # `.get` and killed the backend before its first reading.
+    spawn = spawn if isinstance(spawn, dict) else {}
     view = spawn.get("view")
     view = view if view in VIEWS else "agenda"
     panel = Panel(spawn)
@@ -765,9 +778,11 @@ def main() -> None:
     while True:
         refused = [panel.act(action) for action in mail.take()]
         reading = panel.read(view)
-        for trouble in refused:
-            if trouble:
-                reading["trouble"] = trouble
+        # Two quick clicks are one beat. Keeping only the last sentence let the
+        # person read the other action as having landed.
+        troubles = [trouble for trouble in refused if trouble]
+        if troubles:
+            reading["trouble"] = "; ".join(troubles)
         try:
             print(json.dumps(reading, ensure_ascii=False), flush=True)
         except BrokenPipeError:

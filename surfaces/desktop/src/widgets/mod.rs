@@ -694,7 +694,19 @@ impl Widgets {
                     }
                 }
                 Act::Unsubscribe { surface } => self.backends.unsubscribe(&surface),
-                Act::Send { surface, action } => self.backends.send(&surface, &action),
+                Act::Send { surface, action } => {
+                    if !self.backends.send(&surface, &action) {
+                        // The runtime refuses a panel that never had a
+                        // backend; this is the panel whose backend has since
+                        // gone. Same click, same silence, same answer.
+                        self.pool.send(
+                            &surface,
+                            ShellMsg::Refused {
+                                detail: "nothing to send to".into(),
+                            },
+                        );
+                    }
+                }
                 Act::Ask { surface, ask } => {
                     // A question that cannot be put up is a tick that did
                     // nothing, and a tick that does nothing reads as broken.

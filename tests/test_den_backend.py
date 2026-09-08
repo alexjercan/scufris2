@@ -591,9 +591,23 @@ class Notes(Panel):
         self.assertEqual(len(reading["notes"]), 2)
         self.assertTrue(str(reading["notes"][1]["heading"]).endswith("- standup"))
 
-    def test_a_note_with_nothing_in_it_is_not_kept(self) -> None:
+    def test_a_note_with_nothing_in_it_is_refused_out_loud(self) -> None:
+        # The form box is gone by the time this runs and the words with it, so
+        # a silent return leaves a redraw identical to the one before it. The
+        # edit path has always refused out loud for the same condition.
         reading = self.do({"action": "note", "heading": "standup", "body": "  "})
         self.assertEqual(len(reading["notes"]), 1)
+        self.assertIn("nothing in it", str(reading["trouble"]))
+
+    def test_a_note_holding_a_heading_is_refused_rather_than_written(self) -> None:
+        # `#### ` in a body starts another note and `### ` starts another
+        # section, both silently, both taking the rest of the words with them.
+        reading = self.do(
+            {"action": "note", "heading": "standup", "body": "ok\n### Habits\n- [x] Gym"}
+        )
+        self.assertEqual(len(reading["notes"]), 1)
+        self.assertIn("heading", str(reading["trouble"]))
+        self.assertNotIn("- [x] Gym", self.entry())
 
     def test_a_note_is_replaced_whole(self) -> None:
         reading = self.do(
@@ -612,8 +626,70 @@ class Notes(Panel):
         self.assertEqual(reading["notes"][0]["heading"], "09:00 - idea")
 
 
+class Trouble(Panel):
+    """What the panel does when the journal itself will not answer."""
+
+    def test_a_day_that_is_not_text_is_trouble_beside_the_day(self) -> None:
+        # `Panel.read` caught `OSError` only, so one non-UTF-8 byte anywhere in
+        # the 60-day window raised `UnicodeDecodeError` out of `main` and the
+        # process died before printing a reading. The restart tick then re-ran
+        # the same spawn and it died again.
+        den.entry_path(self.den, YESTERDAY).write_bytes(b"# Sunday\n\xff\n")
+        reading = self.read()
+        self.assertEqual(reading["view"], self.view)
+        self.assertIsNotNone(reading["trouble"])
+
+    def test_a_journal_that_cannot_be_written_refuses_one_click(self) -> None:
+        # `change` reaches `mkdir`, `mkstemp`, `os.link` and `os.replace`, so a
+        # full or read-only mount arrives as an `OSError` - which used to leave
+        # `on_day` and kill the backend on the first habit tick.
+        (self.den / "Daily").chmod(0o500)
+        self.addCleanup(lambda: (self.den / "Daily").chmod(0o700))
+        reading = self.do({"action": "habit", "name": "Gym"})
+        self.assertIsNotNone(reading["trouble"])
+        self.assertEqual(reading["view"], self.view)
+
+
 class Program(unittest.TestCase):
     """The backend as the companion runs it: one text, through `python3 -c`."""
+
+    def test_every_refusal_in_one_beat_is_said(self) -> None:
+        # `Mail.take` batches whatever arrived between beats, so two quick
+        # clicks are one beat. Keeping only the last sentence let the person
+        # read the other action as having landed.
+        with tempfile.TemporaryDirectory() as room:
+            here = Path(room) / "the-den"
+            (here / "Daily").mkdir(parents=True)
+            running = subprocess.Popen(
+                [sys.executable, "-c", assemble("den")],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                text=True,
+                env={**os.environ, "DEN_PATH": str(here)},
+            )
+            try:
+                assert running.stdin is not None and running.stdout is not None
+                running.stdin.write(json.dumps({"view": "agenda"}) + "\n")
+                running.stdin.flush()
+                json.loads(running.stdout.readline())
+                for action in (
+                    {"action": "weight", "value": "heavy"},
+                    {"action": "note", "heading": "standup", "body": "  "},
+                ):
+                    running.stdin.write(json.dumps(action) + "\n")
+                running.stdin.flush()
+                said = ""
+                for _ in range(6):
+                    said = str(json.loads(running.stdout.readline())["trouble"] or "")
+                    if said:
+                        break
+            finally:
+                running.kill()
+                running.wait(timeout=5)
+                running.stdin.close()
+                running.stdout.close()
+        self.assertIn("kilograms", said)
+        self.assertIn("nothing in it", said)
 
     def test_the_assembled_program_answers_a_spawn_payload(self) -> None:
         with tempfile.TemporaryDirectory() as room:

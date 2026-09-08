@@ -106,7 +106,12 @@ def listen(count: Countdown) -> None:
 
 
 def main() -> None:
-    spawn = json.loads(sys.stdin.readline() or "null") or {}
+    spawn = json.loads(sys.stdin.readline() or "null")
+    # A spawn payload is whatever the model wrote. Nothing between the model
+    # and this pipe requires an object: `beneath` passes `arguments` through as
+    # they stand, and `or {}` rescued only falsy JSON, so a bare string reached
+    # `.get` and killed the backend before its first reading.
+    spawn = spawn if isinstance(spawn, dict) else {}
     seconds = spawn.get("seconds", 300)
     count = Countdown(float(seconds) if isinstance(seconds, (int, float)) else 300.0)
 

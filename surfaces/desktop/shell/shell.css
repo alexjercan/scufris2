@@ -207,7 +207,12 @@ body {
   color: var(--sw-alarm);
 }
 
-.panel[data-health="dead"] .root {
+/* Not on a panel that is already dim: `[data-life="dim"]` sets 0.4 on the whole
+ * panel and creates a stacking context, so a second opacity inside it
+ * multiplies to 0.14, which is about 1.3:1 against the ground and unreadable.
+ * A panel Scufris opened, the conversation moved past, and whose backend then
+ * died showed a red frame and a DEAD badge over nothing anyone could read. */
+.panel:not([data-life="dim"])[data-health="dead"] .root {
   opacity: 0.35;
 }
 

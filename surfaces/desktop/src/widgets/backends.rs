@@ -247,7 +247,7 @@ impl Backends {
         if running.refs.is_empty()
             && let Some(running) = held.running.remove(&key)
         {
-            stop(running);
+            drop(stop(running));
         }
     }
 
@@ -260,7 +260,7 @@ impl Backends {
         let key = order.key(&surface);
         let mut held = self.state();
         if let Some(running) = held.running.remove(&key) {
-            stop(running);
+            drop(stop(running));
         }
         held.readers.insert(surface, key.clone());
         let refs: BTreeSet<SurfaceId> = held
@@ -278,30 +278,44 @@ impl Backends {
     /// A backend that owns something writable answers by reporting the new
     /// state, which fans out to every panel reading it - so an entry the person
     /// makes and one Scufris makes travel the same loop.
-    pub fn send(&self, surface: &str, action: &Value) {
+    /// Answers whether the line landed. A tick on a panel whose process has
+    /// gone did nothing and said nothing: the health badge is a beat behind,
+    /// so the person sees a live panel ignoring them.
+    #[must_use]
+    pub fn send(&self, surface: &str, action: &Value) -> bool {
         let mut held = self.state();
         let Some(key) = held.readers.get(surface).cloned() else {
-            return;
+            return false;
         };
         let Some(running) = held.running.get_mut(&key) else {
-            return;
+            return false;
         };
         let Some(stdin) = running.stdin.as_mut() else {
-            return;
+            return false;
         };
         if let Err(error) = writeln!(stdin, "{action}") {
             debug!(surface, "an action did not reach its backend: {error}");
+            return false;
         }
+        true
     }
 
     /// Stops every backend. The companion is going away.
+    ///
+    /// The escalation is waited for here, which is the whole point of this
+    /// call. Everywhere else the SIGKILL can be left to a detached thread,
+    /// because the process lives on to run it; on the way out it does not, and
+    /// a backend that ignores or blocks SIGTERM - or any grandchild of one -
+    /// was left running until the machine was rebooted. Every wait runs at
+    /// once, so the cost is one `GOODBYE`, not one per backend.
     pub fn halt(&self) {
         let mut held = self.state();
         held.readers.clear();
         let running: Vec<Running> = held.running.drain().map(|(_, running)| running).collect();
         drop(held);
-        for one in running {
-            stop(one);
+        let leaving: Vec<_> = running.into_iter().map(stop).collect();
+        for one in leaving {
+            let _ = one.join();
         }
     }
 
@@ -482,7 +496,8 @@ fn complain(id: &str, stderr: ChildStderr) {
 /// refuse once its three seconds are up. The second signal goes out before the
 /// leader is reaped rather than after, because a reaped identifier is one the
 /// kernel is free to hand to somebody else.
-fn stop(mut running: Running) {
+#[must_use]
+fn stop(mut running: Running) -> thread::JoinHandle<()> {
     drop(running.stdin.take());
     let pid = running.pid;
     group(pid, Signal::SIGTERM);
@@ -499,7 +514,7 @@ fn stop(mut running: Running) {
         }
         group(pid, Signal::SIGKILL);
         let _ = running.child.wait();
-    });
+    })
 }
 
 /// Signals one process group by its leader's recorded identifier.
@@ -892,7 +907,7 @@ mod tests {
             }],
             "the spawn payload is separate from the later action"
         );
-        backends.send("widget-1", &serde_json::json!({ "add": "milk" }));
+        assert!(backends.send("widget-1", &serde_json::json!({ "add": "milk" })));
         assert_eq!(
             hear(&backends),
             vec![News::Data {
@@ -905,7 +920,9 @@ mod tests {
     #[test]
     fn an_action_for_a_panel_with_no_backend_goes_nowhere_rather_than_anywhere() {
         let backends = Backends::with_launch(shell());
-        backends.send("widget-9", &serde_json::json!({ "add": "milk" }));
+        // And says so, so the panel can be told rather than left believing a
+        // click landed on a process that is gone.
+        assert!(!backends.send("widget-9", &serde_json::json!({ "add": "milk" })));
         assert!(backends.drain(Duration::ZERO).is_empty());
     }
 

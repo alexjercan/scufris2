@@ -412,14 +412,13 @@ fn write_bounded(path: &Path, reader: &mut impl Read, expected: u64) -> Result<(
     // Every failure removes the temporary. An id is fresh per put, so a leak
     // here cost disk rather than correctness, but it leaked on the one path
     // that fails most: a short read from the source file.
-    let result = io::copy(&mut reader.take(MAX_ATTACHMENT_BYTES + 1), &mut file).and_then(
-        |copied| {
+    let result =
+        io::copy(&mut reader.take(MAX_ATTACHMENT_BYTES + 1), &mut file).and_then(|copied| {
             if copied != expected || copied == 0 || copied > MAX_ATTACHMENT_BYTES {
                 return Ok(None);
             }
             file.sync_all().map(|()| Some(()))
-        },
-    );
+        });
     drop(file);
     match result {
         Ok(Some(())) => Ok(()),
@@ -975,8 +974,14 @@ mod tests {
             .unwrap();
         assert_eq!(store.stat(&descriptor.id).unwrap(), descriptor);
         fs::write(store.object_path(&descriptor.id), b"c").unwrap();
-        assert!(matches!(store.stat(&descriptor.id), Err(StoreError::Corrupt)));
-        assert!(matches!(store.read(&descriptor.id), Err(StoreError::Corrupt)));
+        assert!(matches!(
+            store.stat(&descriptor.id),
+            Err(StoreError::Corrupt)
+        ));
+        assert!(matches!(
+            store.read(&descriptor.id),
+            Err(StoreError::Corrupt)
+        ));
         fs::remove_file(store.object_path(&descriptor.id)).unwrap();
         assert!(store.stat(&descriptor.id).is_err());
         fs::remove_dir_all(root).unwrap();

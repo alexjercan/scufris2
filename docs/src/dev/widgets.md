@@ -66,13 +66,18 @@ Rules:
 ```text
 directory name == id
 id is a protocol identifier
-width and height are bounded
+width and height are 80..2000 logical pixels
 backend names an installed backend
 no duplicate id
 ```
 
 `shared = true` lets equal requests share one backend process. Use `false` for
 stateful instances such as two independent timers.
+
+`cadence` is also the staleness tolerance: the companion marks a backend stale
+after three cadences of silence. A backend whose reading interval is the
+caller's - the `every` in a spawn payload - must not be allowed past that, or
+the badge reads STALE over numbers that are current.
 
 ## View contract
 

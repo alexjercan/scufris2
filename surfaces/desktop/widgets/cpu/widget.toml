@@ -1,6 +1,6 @@
 id = "cpu"
 name = "CPU"
-description = "Show what this machine is doing right now: processor load as a live graph over the last minute, with the package temperature, the memory in use, and the one-minute load average beside it. Data comes from the system backend rather than from the caller. The spawn payload is { every: number }, the sampling interval in seconds, and 1 is the usual answer."
+description = "Show what this machine is doing right now: processor load as a live graph over the last minute, with the package temperature, the memory in use, and the one-minute load average beside it. Data comes from the system backend rather than from the caller. The spawn payload is { every: number }, the sampling interval in seconds, 1 is the usual answer, and 3 seconds is the slowest it samples: past that the panel marks itself stale over numbers that are current."
 width = 340
 height = 225
 backend = "system"

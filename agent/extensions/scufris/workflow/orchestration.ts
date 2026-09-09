@@ -1500,6 +1500,37 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     systemPrompt: `${event.systemPrompt}\n\n${activeJobPrompt(jobs.values())}`,
   }));
 
+  // Says that worker panes from another session are still running.
+  //
+  // `recover` only ever reconciles this session's own jobs, and the deployed
+  // service starts Pi with `--continue`, so the session identifier survives a
+  // restart and this is usually empty. What it catches is the rest: a session
+  // killed outright, a development Pi run beside the service, a state directory
+  // carried to a new session. Those panes keep running, keep spending, and
+  // belonged to nobody who was going to look.
+  //
+  // Only said. Another session's capabilities are not this one's to hold, so
+  // nothing here can stop them; the tmux session names are what a person can
+  // act on, so they are what is carried.
+  const reportStrayWorkers = async (owner: string) => {
+    const stray = await runHelper<{
+      jobs: Array<{ job_id: string; tmux_session: string; summary: string }>;
+    }>("orphans", { owner_session: owner });
+    if (stray.jobs.length === 0) return;
+    const named = stray.jobs
+      .map((job) => `${job.job_id} in tmux session ${job.tmux_session}`)
+      .join(", ");
+    pi.sendMessage(
+      {
+        customType: "scufris-job-event",
+        content: `Worker panes from a previous foreground session are still running and this session cannot see their progress or stop them: ${named}. Say this to the user once, plainly, and tell them they can look with \`tmux attach -t <session>\` and end one with \`tmux kill-session -t <session>\`. Do not act on them yourself.`,
+        display: true,
+        details: { stray_workers: stray.jobs },
+      },
+      { deliverAs: "followUp", triggerTurn: false },
+    );
+  };
+
   pi.on("session_start", async (_event, ctx) => {
     extensionContext = ctx;
     shuttingDown = false;
@@ -1530,6 +1561,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         if (job.window_alive) watchJob(job);
       }
       await readEvents();
+      await reportStrayWorkers(ctx.sessionManager.getSessionId());
     } catch (error) {
       if (ctx.hasUI)
         ctx.ui.notify(

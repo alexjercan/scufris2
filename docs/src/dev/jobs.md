@@ -275,8 +275,17 @@ session: it finishes interrupted execution creation, marks lost executions
 failed with a linked report entry, resolves terminal events left in `status`,
 stops leftover panes, rotates the trusted capability, and returns the owned
 jobs for watching. `session_shutdown` calls `suspend-owner`, which stops
-executions exactly and marks nonterminal jobs `suspended`. `orphans` lists
-live panes owned by other sessions without touching them.
+executions exactly and marks nonterminal jobs `suspended`.
+
+`orphans` lists live panes owned by other sessions, with the tmux session name
+each can be reached by, and touches none of them. The foreground asks after
+`recover` and says what came back once. It is usually empty: the service starts
+Pi with `--continue`, so the session identifier survives a restart and `recover`
+answers for those jobs. What it catches is a session killed outright, a
+development Pi run beside the service, or a state directory carried to a new
+session - panes that keep running and keep spending for nobody. Adoption is not
+offered: another session's capabilities are not this session's to hold, so the
+tmux session name is what a person acts on.
 
 ---
 

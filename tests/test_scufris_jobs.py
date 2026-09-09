@@ -2093,6 +2093,42 @@ print('# Recovered Claude review\\n\\nNo findings.')
             self.assertTrue(recovered["jobs"][0]["window_alive"])
             self.assertEqual(jobs_module.load_job(job_id)["execution_state"], "running")
 
+    def test_a_pane_from_another_session_is_named_with_its_tmux_session(self) -> None:
+        job_id = "5a5b5c5d5e5f"
+        self.call(
+            "spawn",
+            {
+                "job_id": job_id,
+                "instructions": "Outlive the session that started this.",
+                "owner_session": "the-previous-session",
+            },
+        )
+        self.jobs.append(job_id)
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
+        self.wait_for(directory / "status", "done: report complete")
+
+        jobs_module = load_jobs_module()
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            # The session that started it never came back, so its pane is
+            # nobody's. Nothing here can stop it, so what the answer is worth is
+            # the name a person can reach it by.
+            stray = jobs_module.orphans({"owner_session": "the-session-now"})
+            self.assertEqual(stray["job_ids"], [job_id])
+            named = stray["jobs"][0]
+            self.assertEqual(named["job_id"], job_id)
+            self.assertEqual(
+                named["tmux_session"],
+                jobs_module.load_job(job_id)["tmux_session_name"],
+            )
+            self.assertTrue(named["tmux_session"])
+
+            # And its own session sees nothing stray, because `recover` is what
+            # answers for the jobs it owns.
+            self.assertEqual(
+                jobs_module.orphans({"owner_session": "the-previous-session"}),
+                {"job_ids": [], "jobs": []},
+            )
+
     def test_partial_descendant_failure_retains_root_for_retry(self) -> None:
         context = self.call("context", {"project": "projects/nova-protocol"})["result"]
         root_id = "223344556677"

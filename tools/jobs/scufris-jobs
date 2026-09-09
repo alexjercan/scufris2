@@ -3907,13 +3907,23 @@ def orphans(request: dict[str, Any]) -> dict[str, Any]:
     owner = request["owner_session"]
     if not isinstance(owner, str):
         raise JobError("owner session must be text")
-    return {
-        "job_ids": sorted(
-            job["job_id"]
+    stray = sorted(
+        (
+            {
+                "job_id": job["job_id"],
+                "tmux_session": job["tmux_session_name"],
+                "summary": job["summary"],
+            }
             for job in all_job_records()
             if job["owner_session"] != owner and pane_alive(job)
-        )
-    }
+        ),
+        key=lambda job: job["job_id"],
+    )
+    # The names as well as the identifiers. Nothing here can stop another
+    # session's worker - its capabilities are not this session's to hold - so
+    # what the answer is worth is what a person can act on by hand, and that is
+    # the tmux session.
+    return {"job_ids": [job["job_id"] for job in stray], "jobs": stray}
 
 
 def main() -> int:

@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use scufris_control::refusal;
 use scufris_control::service::{
     AgentRequestBody, AgentResponse, AgentResponseBody, AgentState, ControlResponseBody,
     ConversationMessage, ConversationRole, MAX_DETAIL_BYTES, ScufrisState, SurfaceRegistration,
@@ -33,6 +34,13 @@ const MAX_EVENT_BYTES: usize = 4 * 1024 * 1024;
 const HEALTHY: Duration = Duration::from_secs(10);
 const RESTART_DELAY: Duration = Duration::from_secs(1);
 const MAX_FAILURES: u32 = 3;
+/// What a person can do about a service that has stopped trying.
+///
+/// Both ways in here are terminal: nothing retries after them, and the state
+/// they publish is the only thing anyone sees. The tray's "Restart backend"
+/// runs the same restart, so this is the sentence and not a second mechanism.
+const RECOVERY: &str =
+    " Restart it from the tray, or with `systemctl --user restart scufris-service`.";
 const HELLO_GRACE: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
@@ -329,7 +337,7 @@ impl Service {
                     SurfaceResponseBody::Rejected {
                         id: Some(id),
                         operation: "message".into(),
-                        code: "attachments_unavailable".into(),
+                        code: refusal::ATTACHMENTS_UNAVAILABLE.into(),
                         detail: "One or more attachments are unavailable.".into(),
                     },
                 );
@@ -356,7 +364,7 @@ impl Service {
                 SurfaceResponseBody::Rejected {
                     id: Some(id),
                     operation: "message".into(),
-                    code: "agent_unavailable".into(),
+                    code: refusal::AGENT_UNAVAILABLE.into(),
                     detail: "The Scufris agent is unavailable.".into(),
                 },
             );
@@ -404,7 +412,7 @@ impl Service {
                 SurfaceResponseBody::Rejected {
                     id: Some(id),
                     operation: "abort".into(),
-                    code: "agent_unavailable".into(),
+                    code: refusal::AGENT_UNAVAILABLE.into(),
                     detail: "The Scufris agent is unavailable.".into(),
                 },
             );
@@ -416,7 +424,7 @@ impl Service {
         if inner.agent.is_some() {
             info!(connection, "second agent connection rejected");
             let _ = outbox.try_send(AgentResponse::new(AgentResponseBody::Rejected {
-                code: "agent_exists".into(),
+                code: refusal::AGENT_EXISTS.into(),
                 detail: "One agent is already connected.".into(),
             }));
             return false;
@@ -498,7 +506,7 @@ impl Service {
                 };
                 if let Some(detail) = invalid {
                     inner.send_agent(AgentResponseBody::Rejected {
-                        code: "invalid_widgets".into(),
+                        code: refusal::INVALID_WIDGETS.into(),
                         detail,
                     });
                     widgets = None;
@@ -507,7 +515,7 @@ impl Service {
                     Ok(descriptors) => descriptors,
                     Err(_) => {
                         inner.send_agent(AgentResponseBody::Rejected {
-                            code: "attachments_unavailable".into(),
+                            code: refusal::ATTACHMENTS_UNAVAILABLE.into(),
                             detail: "One or more attachments are unavailable.".into(),
                         });
                         Vec::new()
@@ -569,7 +577,7 @@ impl Service {
         } else {
             ControlResponseBody::Rejected {
                 id,
-                code: "agent_unavailable".into(),
+                code: refusal::AGENT_UNAVAILABLE.into(),
                 detail: "The Scufris agent is unavailable.".into(),
             }
         }
@@ -589,7 +597,7 @@ impl Service {
             Err(error) => {
                 inner.failures += 1;
                 inner.lifecycle = Lifecycle::Failed;
-                inner.lifecycle_detail = format!("The agent would not start: {error}");
+                inner.lifecycle_detail = format!("The agent would not start: {error}.{RECOVERY}");
                 inner.publish_state();
                 error!(%error, "the agent would not start");
                 return;
@@ -715,8 +723,10 @@ impl Service {
         inner.failures += 1;
         if inner.failures >= MAX_FAILURES {
             inner.lifecycle = Lifecycle::Failed;
-            inner.lifecycle_detail =
-                format!("The agent stopped {} times in a row.", inner.failures);
+            inner.lifecycle_detail = format!(
+                "The agent stopped {} times in a row.{RECOVERY}",
+                inner.failures
+            );
             inner.publish_state();
             return;
         }
@@ -1101,7 +1111,7 @@ mod tests {
         );
         assert!(drain(&surface_in).iter().any(|body| matches!(
             body,
-            SurfaceResponseBody::Rejected { code, .. } if code == "attachments_unavailable"
+            SurfaceResponseBody::Rejected { code, .. } if code == refusal::ATTACHMENTS_UNAVAILABLE
         )));
     }
 
@@ -1187,7 +1197,7 @@ mod tests {
         )));
         assert!(matches!(
             agent_in.recv().unwrap().body,
-            AgentResponseBody::Rejected { ref code, .. } if code == "invalid_widgets"
+            AgentResponseBody::Rejected { ref code, .. } if code == refusal::INVALID_WIDGETS
         ));
     }
 
@@ -1220,7 +1230,7 @@ mod tests {
         )));
         assert!(matches!(
             agent_in.recv().unwrap().body,
-            AgentResponseBody::Rejected { ref code, .. } if code == "attachments_unavailable"
+            AgentResponseBody::Rejected { ref code, .. } if code == refusal::ATTACHMENTS_UNAVAILABLE
         ));
     }
 
@@ -1353,7 +1363,7 @@ mod tests {
         );
         assert!(matches!(
             agent_in.recv().unwrap().body,
-            AgentResponseBody::Rejected { code, .. } if code == "attachments_unavailable"
+            AgentResponseBody::Rejected { code, .. } if code == refusal::ATTACHMENTS_UNAVAILABLE
         ));
         service.agent_request(
             10,
@@ -1470,7 +1480,7 @@ mod tests {
         assert!(matches!(
             wake(&service, "wake-1", "Nobody is home."),
             ControlResponseBody::Rejected { id, code, detail }
-                if id == "wake-1" && code == "agent_unavailable" && !detail.is_empty()
+                if id == "wake-1" && code == refusal::AGENT_UNAVAILABLE && !detail.is_empty()
         ));
     }
 

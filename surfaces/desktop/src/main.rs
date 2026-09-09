@@ -128,6 +128,11 @@ fn configure_webkit_renderer() -> Result<(), Box<dyn Error>> {
     Err(error.into())
 }
 
+/// How much of a clipboard refusal the pill will say.
+///
+/// The page writes it, and the pill has one line for it beside the transcript.
+const MAX_COPY_REASON: usize = 120;
+
 /// Whether the four boundary earcons play. Session-scoped: every start ships
 /// them enabled, the tray menu mutes them.
 struct CueSwitch(AtomicBool);
@@ -242,9 +247,13 @@ impl Surface for DesktopSurface {
         tray::apply(&self.handle, &self.menu, state, detail)
     }
 
-    fn copy(&self, text: String) {
-        // The webview owns the clipboard.
-        let _ = self.handle.emit(COPY_EVENT, text);
+    fn copy(&self, text: String) -> Result<(), String> {
+        // The webview owns the clipboard, so this only carries the words to it.
+        // A clipboard that then refuses them comes back through
+        // `textbox_copy_failed`, which is the other half of this.
+        self.handle
+            .emit(COPY_EVENT, text)
+            .map_err(|error| format!("the words did not reach the clipboard: {error}"))
     }
 }
 
@@ -450,6 +459,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             textbox_submit,
             textbox_cancel,
             textbox_copy,
+            textbox_copy_failed,
             widget_shell_ready,
             widget_tick,
             widget_hover,
@@ -925,6 +935,32 @@ fn textbox_cancel(runtime: tauri::State<'_, Arc<App>>) {
 #[tauri::command]
 fn textbox_copy(runtime: tauri::State<'_, Arc<App>>) {
     runtime.inner().clone().handle(Event::Copy);
+}
+
+/// The clipboard refused the words the copy carried to it.
+///
+/// Copying is what the pill offers for a transcript whose outcome nobody knows,
+/// so a refusal that said nothing sent the person away believing the words were
+/// safe somewhere. The reason is written by the page, so it is bounded here
+/// before it is put in front of anybody.
+#[tauri::command]
+fn textbox_copy_failed(runtime: tauri::State<'_, Arc<App>>, reason: String) {
+    let trimmed = reason.trim();
+    let reason = if trimmed.is_empty() {
+        "the clipboard would not take the words"
+    } else {
+        // On a character boundary. `truncate` panics inside one, and the page
+        // writes this.
+        let mut end = MAX_COPY_REASON.min(trimmed.len());
+        while end > 0 && !trimmed.is_char_boundary(end) {
+            end -= 1;
+        }
+        &trimmed[..end]
+    };
+    runtime
+        .inner()
+        .clone()
+        .handle(Event::CopyFailed(format!("Not copied: {reason}.")));
 }
 
 /// The HUD page saying hello, and asking for everything it has missed.

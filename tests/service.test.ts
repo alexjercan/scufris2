@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { createServer } from "node:net";
 import test from "node:test";
 import {
   decodeAgentResponse,
   encodeAgentRequest,
   MAX_DETAIL_BYTES,
+  REFUSAL,
   stateDetail,
   surfacePrompt,
   takeLines,
@@ -308,4 +310,27 @@ test("agent socket resolution has no service socket fallback", () => {
     "/run/scufris/agent.sock",
   );
   assert.equal(resolveSocketPath({}), undefined);
+});
+
+// The refusal vocabulary is implemented twice, and neither compiler sees the
+// other. A code changed on one side only is a match that stops matching, on the
+// one path nobody exercises by hand, so the two lists are read and compared.
+test("every refusal code is named the same on both sides", () => {
+  const module = readFileSync(
+    resolve(
+      new URL("..", import.meta.url).pathname,
+      "shared/control/src/refusal.rs",
+    ),
+    "utf8",
+  );
+  const host = new Map<string, string>();
+  for (const line of module.split("\n")) {
+    const declared = /^pub const ([A-Z_]+): &str = "([a-z_]+)";$/.exec(line);
+    if (declared) host.set(declared[1]!, declared[2]!);
+  }
+  assert.ok(host.size > 0, "no refusal codes were read from the Rust module");
+  assert.deepEqual(
+    Object.fromEntries([...host].sort()),
+    Object.fromEntries(Object.entries(REFUSAL).sort()),
+  );
 });

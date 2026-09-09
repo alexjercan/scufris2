@@ -14,6 +14,7 @@ use std::{
     thread,
 };
 
+use scufris_control::refusal;
 use scufris_control::service::{
     AgentRequestBody, AgentResponse, ControlRequestBody, ControlResponse, ControlResponseBody,
     SurfaceRequestBody, SurfaceResponse, read_agent_request, read_control_request,
@@ -233,7 +234,7 @@ fn control(service: Arc<Service>, stream: UnixStream, connection: u64) {
                         let _ =
                             outbox.try_send(ControlResponse::new(ControlResponseBody::Rejected {
                                 id: "hello".into(),
-                                code: "duplicate_hello".into(),
+                                code: refusal::DUPLICATE_HELLO.into(),
                                 detail: "Control already completed its handshake.".into(),
                             }));
                     }

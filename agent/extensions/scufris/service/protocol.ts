@@ -72,6 +72,41 @@ export type AgentResponse =
   | { v: 6; type: "agent.abort"; id: string }
   | { v: 6; type: "agent.rejected"; code: string; detail: string };
 
+/**
+ * Every stable refusal code, mirroring `shared/control/src/refusal.rs`.
+ *
+ * A refusal crosses the socket as a bare string in `code`, and nothing checks
+ * it: a service that sends `attachments_unavailable` and a client that matches
+ * `attachment_unavailable` both run, and what breaks is the behaviour that
+ * depended on the match. Naming them here is what turns a typo into a
+ * type error on this side.
+ *
+ * These are the wire codes only. `ProtocolError` also carries codes that never
+ * leave this process - `invalid_json`, `invalid_framing`, and the rest - which
+ * are this extension's own vocabulary for `tell()` and are not part of the
+ * protocol.
+ *
+ * `tests/service.test.ts` reads the Rust module and holds the two together.
+ */
+export const REFUSAL = {
+  DUPLICATE_HELLO: "duplicate_hello",
+  AGENT_EXISTS: "agent_exists",
+  AGENT_UNAVAILABLE: "agent_unavailable",
+  ATTACHMENTS_UNAVAILABLE: "attachments_unavailable",
+  ATTACHMENT_TOO_LARGE: "attachment_too_large",
+  INVALID_ATTACHMENT: "invalid_attachment",
+  ATTACHMENT_INCOMPLETE: "attachment_incomplete",
+  ATTACHMENT_NOT_FOUND: "attachment_not_found",
+  ATTACHMENT_QUOTA: "attachment_quota",
+  ATTACHMENT_UNAVAILABLE: "attachment_unavailable",
+  INVALID_RANGE: "invalid_range",
+  INVALID_WIDGETS: "invalid_widgets",
+  WIDGET_NOT_FOUND: "widget_not_found",
+  SURFACE_NOT_FOUND: "surface_not_found",
+  NO_FREE_SLOT: "no_free_slot",
+  NOT_SHOWN: "not_shown",
+} as const;
+
 export class ProtocolError extends Error {
   readonly code: string;
 

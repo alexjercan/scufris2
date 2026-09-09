@@ -22,6 +22,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use scufris_control::refusal;
 use scufris_control::service::{
     AttachmentDescriptor, MAX_ATTACHMENT_BYTES, validate_attachment_descriptor,
 };
@@ -520,32 +521,32 @@ impl IntoResponse for ApiError {
         let (status, code, message) = match self.0 {
             StoreError::Invalid(_) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "invalid_attachment",
+                refusal::INVALID_ATTACHMENT,
                 "The attachment is invalid.",
             ),
             StoreError::TooLarge => (
                 StatusCode::PAYLOAD_TOO_LARGE,
-                "attachment_too_large",
+                refusal::ATTACHMENT_TOO_LARGE,
                 "The attachment is too large.",
             ),
             StoreError::Incomplete => (
                 StatusCode::BAD_REQUEST,
-                "attachment_incomplete",
+                refusal::ATTACHMENT_INCOMPLETE,
                 "The attachment did not finish uploading.",
             ),
             StoreError::NotFound => (
                 StatusCode::NOT_FOUND,
-                "attachment_not_found",
+                refusal::ATTACHMENT_NOT_FOUND,
                 "The attachment is unavailable.",
             ),
             StoreError::Quota => (
                 StatusCode::INSUFFICIENT_STORAGE,
-                "attachment_quota",
+                refusal::ATTACHMENT_QUOTA,
                 "Attachment storage is full.",
             ),
             _ => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "attachment_unavailable",
+                refusal::ATTACHMENT_UNAVAILABLE,
                 "Attachment storage is unavailable.",
             ),
         };
@@ -692,7 +693,7 @@ fn range_not_satisfiable(size: u64) -> Result<Response, ApiError> {
         StatusCode::RANGE_NOT_SATISFIABLE,
         Json(ErrorEnvelope {
             error: ErrorBody {
-                code: "invalid_range",
+                code: refusal::INVALID_RANGE,
                 message: "The requested attachment range is unavailable.",
             },
         }),
@@ -1098,7 +1099,7 @@ mod tests {
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
         let error: serde_json::Value =
             serde_json::from_slice(&to_bytes(missing.into_body(), 4096).await.unwrap()).unwrap();
-        assert_eq!(error["error"]["code"], "attachment_not_found");
+        assert_eq!(error["error"]["code"], refusal::ATTACHMENT_NOT_FOUND);
         fs::remove_dir_all(root).unwrap();
     }
 }

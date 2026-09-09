@@ -14,6 +14,7 @@ use std::{
 };
 
 use reqwest::{StatusCode, blocking::Client, header};
+use scufris_control::refusal;
 use scufris_control::service::{
     AttachmentDescriptor, MAX_ATTACHMENT_BYTES, validate_attachment_descriptor,
 };
@@ -217,13 +218,13 @@ fn import_failure(status: StatusCode, body: &[u8]) -> String {
         .ok()
         .and_then(|value| value.pointer("/error/code")?.as_str().map(str::to_owned));
     match (status, code.as_deref()) {
-        (StatusCode::PAYLOAD_TOO_LARGE, _) | (_, Some("attachment_too_large")) => {
+        (StatusCode::PAYLOAD_TOO_LARGE, _) | (_, Some(refusal::ATTACHMENT_TOO_LARGE)) => {
             "The attachment is larger than 16 MiB.".into()
         }
-        (StatusCode::UNPROCESSABLE_ENTITY, _) | (_, Some("invalid_attachment")) => {
+        (StatusCode::UNPROCESSABLE_ENTITY, _) | (_, Some(refusal::INVALID_ATTACHMENT)) => {
             "Choose a readable regular file with a valid name.".into()
         }
-        (StatusCode::INSUFFICIENT_STORAGE, _) | (_, Some("attachment_quota")) => {
+        (StatusCode::INSUFFICIENT_STORAGE, _) | (_, Some(refusal::ATTACHMENT_QUOTA)) => {
             "Attachment storage is full.".into()
         }
         _ => unavailable(),
@@ -351,7 +352,7 @@ mod tests {
         assert_eq!(
             import_failure(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                br#"{"error":{"code":"invalid_attachment","message":"private"}}"#,
+                br#"{"error":{"code":refusal::INVALID_ATTACHMENT,"message":"private"}}"#,
             ),
             "Choose a readable regular file with a valid name."
         );

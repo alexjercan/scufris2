@@ -202,6 +202,8 @@ pub enum Event {
     PersistFailed(String),
     /// A transcript the user discarded could not be removed or tombstoned.
     DiscardFailed(String),
+    /// The clipboard refused the transcript, or never took it.
+    CopyFailed(String),
     /// The service acknowledged a submission.
     Acknowledged(String),
     /// The submission never reached the service, or the service refused it
@@ -786,7 +788,10 @@ impl Companion {
                 };
                 Vec::new()
             }
-            (Phase::Editing { transcript, id, .. }, Event::PersistFailed(notice)) => {
+            (
+                Phase::Editing { transcript, id, .. },
+                Event::PersistFailed(notice) | Event::CopyFailed(notice),
+            ) => {
                 self.phase = Phase::Editing {
                     transcript: transcript.clone(),
                     id: id.clone(),
@@ -802,7 +807,7 @@ impl Companion {
                     warned,
                     ..
                 },
-                Event::PersistFailed(reason),
+                Event::PersistFailed(reason) | Event::CopyFailed(reason),
             ) => {
                 self.phase = Phase::Retained {
                     transcript: transcript.clone(),

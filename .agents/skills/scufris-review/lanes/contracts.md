@@ -15,9 +15,11 @@ Grep both sides of every pair the change touches:
   `MAX_TEXT_BYTES` and `MAX_MESSAGE_BYTES`. A message shape,
   a role name, a refusal code, or a cap changed on one side only is a
   broken pair, and `tests/service.test.ts` is the TS side's own guard.
-  Every stable refusal code belongs in the `refusal` module; one
-  written as a literal at its send site is invisible to a client author
-  enumerating the module.
+  Every stable refusal code belongs in
+  `shared/control/src/refusal.rs` and its mirror, the `REFUSAL` map in
+  `protocol.ts`; one written as a literal at its send site is invisible
+  to a client author enumerating them. `tests/service.test.ts` reads
+  the Rust module and compares the two.
 - Identity: the sentence in `agent/extensions/scufris/workflow/identity.ts`
   is asserted byte-for-byte in `tests/identity.test.ts`.
 - Launcher: the argv built in `nix/launcher.nix` is asserted exactly

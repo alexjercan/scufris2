@@ -17,6 +17,7 @@ use std::{
 };
 
 use super::protocol::{Posture, WidgetReport};
+use scufris_control::refusal;
 use serde::Serialize;
 use serde_json::Value;
 use tauri::PhysicalPosition;
@@ -553,7 +554,11 @@ impl Runtime {
         data: Value,
     ) -> Vec<Act> {
         let Some(installed) = catalog.get(&widget) else {
-            return refused(id, "widget_not_found", format!("no widget named {widget}"));
+            return refused(
+                id,
+                refusal::WIDGET_NOT_FOUND,
+                format!("no widget named {widget}"),
+            );
         };
         let size = Size {
             width: f64::from(installed.width),
@@ -569,7 +574,7 @@ impl Runtime {
                 None => {
                     return refused(
                         id,
-                        "no_free_slot",
+                        refusal::NO_FREE_SLOT,
                         "every instrument slot is taken".to_string(),
                     );
                 }
@@ -649,7 +654,7 @@ impl Runtime {
         let Some(open) = self.surfaces.get_mut(&surface) else {
             return vec![failed(
                 id,
-                "surface_not_found",
+                refusal::SURFACE_NOT_FOUND,
                 format!("{surface} is not open"),
             )];
         };
@@ -1797,7 +1802,7 @@ cadence = 500
         let acts = open(&mut runtime, &catalog, "clock", Posture::Instrument);
         assert!(matches!(
             acts.as_slice(),
-            [Act::Report(WidgetReport::Failed { code, .. })] if code == "no_free_slot"
+            [Act::Report(WidgetReport::Failed { code, .. })] if code == refusal::NO_FREE_SLOT
         ));
     }
 
@@ -1808,7 +1813,7 @@ cadence = 500
         let acts = open(&mut runtime, &catalog, "weather", Posture::Exhibit);
         assert!(matches!(
             acts.as_slice(),
-            [Act::Report(WidgetReport::Failed { code, .. })] if code == "widget_not_found"
+            [Act::Report(WidgetReport::Failed { code, .. })] if code == refusal::WIDGET_NOT_FOUND
         ));
         assert!(runtime.surfaces.is_empty());
     }
@@ -1827,7 +1832,7 @@ cadence = 500
         );
         assert!(matches!(
             acts.as_slice(),
-            [Act::Report(WidgetReport::Failed { code, .. })] if code == "surface_not_found"
+            [Act::Report(WidgetReport::Failed { code, .. })] if code == refusal::SURFACE_NOT_FOUND
         ));
     }
 

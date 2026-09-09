@@ -5,6 +5,7 @@ import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   CONTENT_FILE_NAME,
   decodeAttachmentDescriptor,
+  REFUSAL,
   SOCKET_DIRECTORY_NAME,
   type AttachmentDescriptor,
 } from "./protocol.ts";
@@ -70,15 +71,15 @@ function safeFailure(status: number | undefined, body: Buffer): Error {
   } catch {
     // The service boundary is strict. An invalid error body is unavailable.
   }
-  if (status === 413 || code === "attachment_too_large")
+  if (status === 413 || code === REFUSAL.ATTACHMENT_TOO_LARGE)
     return new Error("The attachment is larger than 16 MiB.");
-  if (status === 422 || code === "invalid_attachment")
+  if (status === 422 || code === REFUSAL.INVALID_ATTACHMENT)
     return new Error(
       "The attachment must be a readable regular file with a valid display name.",
     );
-  if (status === 507 || code === "attachment_quota")
+  if (status === 507 || code === REFUSAL.ATTACHMENT_QUOTA)
     return new Error("Attachment storage is full.");
-  if (code === "attachment_incomplete")
+  if (code === REFUSAL.ATTACHMENT_INCOMPLETE)
     return new Error("The attachment did not finish uploading.");
   return new Error("Attachment storage is unavailable.");
 }

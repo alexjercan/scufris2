@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod command;
+pub mod refusal;
 pub mod service;
 
 /// Maximum encoded message size, including its LF terminator.

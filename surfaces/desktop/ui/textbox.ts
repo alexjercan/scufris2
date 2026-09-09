@@ -247,8 +247,24 @@
 
   void listen("scufris://copy", (event) => {
     // Copying is the safe choice offered for a transcript whose outcome nobody
-    // knows, so a clipboard that refuses must not look like anything happened.
-    navigator.clipboard?.writeText(event.payload as string).catch(() => {});
+    // knows, so a clipboard that refuses must not look like it worked: a person
+    // told the words are safe closes the pill and pastes them somewhere else.
+    const refused = (reason: unknown) => {
+      void invoke("textbox_copy_failed", {
+        reason: reason instanceof Error ? reason.message : String(reason),
+      });
+    };
+    const clipboard = navigator.clipboard;
+    if (!clipboard) {
+      refused("this window has no clipboard");
+      return;
+    }
+    try {
+      clipboard.writeText(event.payload as string).catch(refused);
+    } catch (error) {
+      // A clipboard that throws where it should reject.
+      refused(error);
+    }
   });
 
   // A transcript recovered from a previous process is published while this page

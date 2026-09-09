@@ -24,6 +24,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use scufris_control::refusal;
 use scufris_control::service::{WidgetCall, WidgetDefinition};
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, ipc::Channel};
@@ -494,7 +495,11 @@ impl Widgets {
     /// discarded rather than kept, for the same reason.
     fn opening(&self, id: Option<String>, widget: String, posture: Posture, data: Value) {
         let Some(spawn) = self.catalog.get(&widget).map(|found| found.spawn.clone()) else {
-            self.refuse(id, "widget_not_found", format!("no widget named {widget}"));
+            self.refuse(
+                id,
+                refusal::WIDGET_NOT_FOUND,
+                format!("no widget named {widget}"),
+            );
             return;
         };
         // Both roads into an open pass here, which is why the manifest's own
@@ -738,7 +743,7 @@ impl Widgets {
                     warn!(surface, "a widget never reached the screen: {detail}");
                     self.report(WidgetReport::Failed {
                         id,
-                        code: "not_shown".into(),
+                        code: refusal::NOT_SHOWN.into(),
                         detail,
                     });
                 }

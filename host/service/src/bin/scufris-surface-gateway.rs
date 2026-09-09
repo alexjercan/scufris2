@@ -30,7 +30,7 @@ use clap::Parser;
 use futures_util::StreamExt;
 use reqwest::{Client, Url, multipart};
 use scufris_control::{
-    MAX_MESSAGE_BYTES, MessageError, is_identifier,
+    MAX_MESSAGE_BYTES, MessageError, is_identifier, refusal,
     service::{
         MAX_ATTACHMENT_BYTES, SurfaceRequest, content_socket_path, read_surface_request,
         read_surface_response, surface_socket_path,
@@ -620,7 +620,7 @@ fn rejected_upload(rejection: BytesRejection) -> ApiError {
     if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
         return ApiError::new(
             StatusCode::PAYLOAD_TOO_LARGE,
-            "attachment_too_large",
+            refusal::ATTACHMENT_TOO_LARGE,
             "The attachment is too large.",
         );
     }

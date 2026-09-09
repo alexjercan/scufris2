@@ -199,9 +199,11 @@ pub trait Surface: Send + Sync {
     fn tray(&self, state: &str, detail: &str) -> Result<(), String>;
     /// Puts one transcript on the clipboard.
     ///
-    /// Copying is inert either way, so a clipboard that refuses the text is not
-    /// worth interrupting the person for.
-    fn copy(&self, text: String);
+    /// Copying is the safe choice offered for a transcript whose outcome nobody
+    /// knows, so it is the one thing that must not quietly do nothing: a person
+    /// told the words are on the clipboard walks away and pastes them somewhere
+    /// else. A refusal comes back here and is said on the pill.
+    fn copy(&self, text: String) -> Result<(), String>;
 }
 
 /// Where the one key outside a window is held while the pill is up.
@@ -1413,7 +1415,9 @@ impl App {
             Action::DiscardPending { id } => return self.discard_pending(&id),
             Action::Abort { id } => self.abort(id),
             Action::Submit { id, text } => self.submit(id, text),
-            Action::CopyTranscript { text } => self.ports.surface.copy(text),
+            Action::CopyTranscript { text } => {
+                return self.ports.surface.copy(text).map_err(Event::CopyFailed);
+            }
         }
         Ok(())
     }
@@ -1826,6 +1830,8 @@ mod tests {
         refuse_present: Refusals,
         /// States the tray refuses to take.
         refuse_tray: Refusals,
+        /// Transcripts the clipboard refuses.
+        refuse_copy: Refusals,
         /// Runs once as a presentation reaches the pill, so a test can move the
         /// companion on while an older presentation is still on the surface.
         at_present: Mutex<Option<Watcher>>,
@@ -1860,6 +1866,7 @@ mod tests {
                 refuse_focus: Refusals::new("the previous window would not take focus"),
                 refuse_present: Refusals::new("the pill would not render"),
                 refuse_tray: Refusals::new("the tray icon would not change"),
+                refuse_copy: Refusals::new("the clipboard would not take the words"),
                 at_present: Mutex::default(),
                 holding: AtomicBool::new(false),
             }
@@ -2006,8 +2013,10 @@ mod tests {
             self.tray.lock().unwrap().push(state.to_string());
             Ok(())
         }
-        fn copy(&self, text: String) {
+        fn copy(&self, text: String) -> Result<(), String> {
+            self.refuse_copy.attempt()?;
             self.copied.lock().unwrap().push(text);
+            Ok(())
         }
     }
 
@@ -2534,6 +2543,36 @@ mod tests {
             "the words are still the person's to correct"
         );
         assert!(harness.backend.submissions.lock().unwrap().is_empty());
+    }
+
+    /// Copying is what the pill offers instead of sending, so a clipboard that
+    /// refuses must not look like it worked: the words are still only here.
+    #[test]
+    fn a_clipboard_that_refuses_the_transcript_says_so_on_the_pill() {
+        let harness = harness(FakeRecorder::default(), Ok("book the flight".into()));
+        harness.surface.refuse_copy.fail(1);
+        take(&harness);
+
+        harness.app.handle(Event::Copy);
+        let presentation = harness.surface.last();
+        assert_eq!(presentation.state, "editing");
+        assert_eq!(presentation.text, "book the flight");
+        assert!(
+            presentation.detail.contains("the clipboard would not take"),
+            "a refused copy said nothing: {}",
+            presentation.detail
+        );
+        assert!(
+            harness.surface.copied.lock().unwrap().is_empty(),
+            "nothing was copied, so nothing may be recorded as copied"
+        );
+
+        // The next copy is an ordinary one, and says nothing.
+        harness.app.handle(Event::Copy);
+        assert_eq!(
+            harness.surface.copied.lock().unwrap().as_slice(),
+            ["book the flight"]
+        );
     }
 
     #[test]

@@ -81,6 +81,13 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   interpreter the helpers run under is now written once, in `nix/python.nix`,
   and the launcher, the staging run, the packaged command and the development
   shell all take it from that one place.
+- A delegated worker finds its own job again when tmux is already running.
+  A tmux session takes the server's environment, and the server belongs to
+  whoever started it first, so a staging run beside a developer's own tmux
+  launched its workers into the wrong answer to where jobs are kept: the
+  worker died on the first artifact it looked for, saying only `job artifact
+is unavailable: job.json`. Every variable that says where things are is now
+  pinned onto the session the worker is started in.
 - A job row no longer draws its project over the state beside it. A project is
   a relative path, so a name wider than its column overlapped what came next;
   every cell in a row is now clipped to its own column, with the whole of it

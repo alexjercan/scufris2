@@ -1001,6 +1001,32 @@ def prepare_execution(record: dict[str, Any]) -> tuple[dict[str, Any], str]:
     return updated, launch_capability
 
 
+# Where a worker looks for everything. A tmux session does not inherit the
+# environment of whoever asked for it: it takes the server's, and the server
+# belongs to whoever started it first, which on a developer's machine is a
+# login shell and not this. A worker launched into that session reads another
+# installation's job records and dies on the first one it cannot find, so
+# every variable that answers "where" is pinned onto the session itself.
+LOCATING_VARIABLES = (
+    "XDG_STATE_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CONFIG_HOME",
+    "SCUFRIS_CONFIG",
+    "SCUFRIS_PROJECT_ROOTS",
+    "PI_CODING_AGENT_DIR",
+)
+
+
+def session_environment() -> list[str]:
+    """The `-e` arguments that pin this process's answer to "where"."""
+    arguments: list[str] = []
+    for variable in LOCATING_VARIABLES:
+        value = os.environ.get(variable)
+        if value is not None:
+            arguments.extend(["-e", f"{variable}={value}"])
+    return arguments
+
+
 def start_execution(record: dict[str, Any], launch_capability: str) -> dict[str, Any]:
     validate_workspace_identity(record)
     name = record["tmux_session_name"]
@@ -1009,6 +1035,7 @@ def start_execution(record: dict[str, Any], launch_capability: str) -> dict[str,
             "new-session",
             "-d",
             "-P",
+            *session_environment(),
             "-F",
             "#{session_id}\t#{window_id}\t#{pane_id}",
             "-s",

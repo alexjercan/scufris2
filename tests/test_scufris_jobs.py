@@ -1962,6 +1962,37 @@ print('# Recovered Claude review\\n\\nNo findings.')
             self.assertEqual(self.tmux("has-session", "-t", survivor).returncode, 0)
         self.tmux("kill-session", "-t", "unrelated-explicit-session")
 
+    def test_a_worker_finds_its_job_under_another_shells_tmux_server(self) -> None:
+        # A tmux session takes the server's environment, and the server
+        # belongs to whoever started it first. On a developer's machine that
+        # is a login shell, so a staging run beside one used to launch its
+        # workers into the developer's own answer to where jobs are kept.
+        stray = dict(self.env)
+        stray["XDG_STATE_HOME"] = str(self.root / "elsewhere")
+        subprocess.run(
+            ["tmux", "new-session", "-d", "-s", "another-shell"],
+            env=stray,
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+        self.addCleanup(self.tmux, "kill-session", "-t", "another-shell", check=False)
+        job_id = "5c0f1a2b3d4e"
+        self.call(
+            "spawn",
+            {
+                "job_id": job_id,
+                "instructions": "Find your own record.",
+                "owner_session": "stray-server-owner",
+            },
+        )
+        self.jobs.append(job_id)
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
+        # Without the session's own environment the worker dies on the first
+        # artifact it looks for, and this file is never written.
+        self.wait_for(directory / "status", "done: report complete")
+        self.assertFalse((self.root / "elsewhere").exists())
+
     def test_atomic_tmux_ownership_mismatch_refuses_termination(self) -> None:
         job_id = "abcdefabcdef"
         self.call(

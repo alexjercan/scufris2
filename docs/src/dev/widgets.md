@@ -115,6 +115,19 @@ Build DOM directly. Use the shared `--sw-*` CSS tokens. Do not draw window
 chrome, grab focus, start a private timer for backend data, or trust unknown
 input without checking it.
 
+## The one reserved reading key
+
+A reading is the widget's own except for `_hold`. A reading with `_hold: true`
+stops the companion ageing that panel out: an exhibit ordinarily goes about a
+minute after the conversation moves past it, and a backend still working - a
+countdown that has not run out - has not moved on. Each reading says it again or
+stops saying it, so a backend that dies, restarts, or pauses stops holding by
+saying nothing. A hold that never ends is capped at four hours, after which the
+ordinary minute runs.
+
+Use it for work the panel is still doing. It is not a way to keep a panel up
+because it is interesting.
+
 ## Backend rule
 
 Backends live under `surfaces/desktop/backends/NAME/`. They are deterministic

@@ -1,6 +1,6 @@
 id = "timer"
 name = "Timer"
-description = "Count down and show the time left, and show that it is up when it is - it does not announce itself. The spawn payload is { seconds: number }, the length. It opens as an exhibit, so it ages out about a minute after the conversation moves past it and the count ends with it: use it for a stretch of the conversation, not for a reminder an hour from now. Its own ticks pause, resume, reset, and add a minute, and hovering it keeps it."
+description = "Count down and show the time left, and show that it is up when it is - it does not announce itself, so it is worth seeing rather than worth relying on. The spawn payload is { seconds: number }, the length. It stays on screen while it is counting, however far the conversation moves on, and goes about a minute after it runs out or is paused. Its own ticks pause, resume, reset, and add a minute, and hovering it keeps it."
 width = 280
 height = 185
 backend = "timer"

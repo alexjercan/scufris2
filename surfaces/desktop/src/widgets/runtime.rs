@@ -79,6 +79,23 @@ const EDGE_MARGIN: f64 = 24.0;
 /// passed; short enough that an afternoon does not leave a wall of them.
 pub const GRACE: Duration = Duration::from_secs(60);
 
+/// The reserved key a reading uses to say its widget is still working.
+///
+/// A reading is otherwise entirely the widget's own, so the one thing the
+/// runtime reads out of it is named apart from anything a widget author would
+/// choose. Underscore-led, because it is the runtime's and not theirs.
+pub const HOLD_KEY: &str = "_hold";
+
+/// The longest a backend may keep a dim exhibit on screen by asking.
+///
+/// A hold is a backend saying "not yet" - a timer still counting is the case it
+/// exists for - and it stops the grace rather than replacing it: the moment the
+/// hold ends, the ordinary minute begins. The ceiling is what a backend that
+/// says "not yet" and then dies cannot get past. Long enough for any timer
+/// somebody actually sets in front of themselves, short enough that a stuck one
+/// is gone by the end of the afternoon.
+pub const HOLD_CEILING: Duration = Duration::from_secs(4 * 60 * 60);
+
 /// A surface identifier, which doubles as the window label.
 pub type SurfaceId = String;
 
@@ -190,6 +207,11 @@ pub struct Surface {
     pub hovered: bool,
     /// How long it has been dim, counting only the time its clock ran.
     pub aging: Duration,
+    /// True while its newest reading asks to be kept. A widget with no backend
+    /// never asks, and neither does one whose backend has stopped saying so.
+    pub held: bool,
+    /// How long it has been kept that way, against [`HOLD_CEILING`].
+    pub holding: Duration,
     /// Which backend feeds it, if any. A widget with no backend shows only
     /// what the open and the updates carried.
     pub backend: Option<String>,
@@ -599,6 +621,8 @@ impl Runtime {
                 cited: true,
                 hovered: false,
                 aging: Duration::ZERO,
+                held: false,
+                holding: Duration::ZERO,
                 backend: installed.backend.clone(),
                 spawn: spawn.clone(),
                 cadence: installed.cadence,
@@ -686,8 +710,18 @@ impl Runtime {
     /// be the one exhibit that never ages out, and the shelf would fill with
     /// them.
     fn feed(&mut self, surface: SurfaceId, data: Value) -> Vec<Act> {
-        if !self.surfaces.contains_key(&surface) {
+        let Some(open) = self.surfaces.get_mut(&surface) else {
             return Vec::new();
+        };
+        // Each reading says it again or stops saying it. A backend that goes
+        // quiet stops holding by saying nothing, which is what makes a hold
+        // survive nothing - not a crash, not a restart, not a paused timer.
+        open.held = data
+            .get(HOLD_KEY)
+            .and_then(Value::as_bool)
+            .unwrap_or_default();
+        if !open.held {
+            open.holding = Duration::ZERO;
         }
         vec![Act::Update { surface, data }]
     }
@@ -842,6 +876,14 @@ impl Runtime {
         let mut spent = Vec::new();
         for surface in self.surfaces.values_mut() {
             if surface.life != Life::Dim || surface.hovered {
+                continue;
+            }
+            // A backend still working keeps its panel up, up to the ceiling. A
+            // timer counting down is the case: the minute of grace measures
+            // the conversation moving on, and a count nobody has cancelled has
+            // not moved on.
+            if surface.held && surface.holding < HOLD_CEILING {
+                surface.holding = surface.holding.saturating_add(elapsed);
                 continue;
             }
             surface.aging = surface.aging.saturating_add(elapsed);
@@ -1634,6 +1676,132 @@ cadence = 500
             Some(Life::Dim)
         );
         // And its grace still runs out.
+        assert!(
+            runtime
+                .apply(&catalog, Cmd::Sweep { elapsed: GRACE })
+                .contains(&Act::Retire {
+                    surface: gauge.clone()
+                })
+        );
+    }
+
+    /// A reading is not a citation, but a backend still working is not the
+    /// conversation having moved on either. The one thing the runtime reads out
+    /// of a reading is the hold, and it stops the grace rather than replacing
+    /// it.
+    #[test]
+    fn a_backend_that_says_it_is_still_working_keeps_its_panel() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let gauge = opened(&open(&mut runtime, &catalog, "gauge", Posture::Exhibit));
+        runtime.apply(&catalog, Cmd::TurnEnded);
+        runtime.apply(&catalog, Cmd::TurnEnded);
+        assert_eq!(
+            runtime.surface(&gauge).map(|open| open.life),
+            Some(Life::Dim)
+        );
+
+        runtime.apply(
+            &catalog,
+            Cmd::Feed {
+                surface: gauge.clone(),
+                data: json!({ "left": 90, "_hold": true }),
+            },
+        );
+        assert!(
+            runtime
+                .apply(&catalog, Cmd::Sweep { elapsed: GRACE })
+                .is_empty(),
+            "a panel whose backend is still working aged out under it"
+        );
+
+        // The hold is only ever as old as the newest reading. One that stops
+        // asking starts the ordinary minute, from the beginning.
+        runtime.apply(
+            &catalog,
+            Cmd::Feed {
+                surface: gauge.clone(),
+                data: json!({ "left": 0, "_hold": false }),
+            },
+        );
+        assert!(
+            runtime
+                .apply(
+                    &catalog,
+                    Cmd::Sweep {
+                        elapsed: GRACE - Duration::from_secs(1)
+                    }
+                )
+                .is_empty(),
+            "the grace did not start over when the hold ended"
+        );
+        assert!(
+            runtime
+                .apply(
+                    &catalog,
+                    Cmd::Sweep {
+                        elapsed: Duration::from_secs(1)
+                    }
+                )
+                .contains(&Act::Retire {
+                    surface: gauge.clone()
+                })
+        );
+    }
+
+    /// A backend that says "not yet" and then stops answering must not own a
+    /// slot for the rest of the day.
+    #[test]
+    fn a_hold_that_never_ends_still_runs_out() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let gauge = opened(&open(&mut runtime, &catalog, "gauge", Posture::Exhibit));
+        runtime.apply(&catalog, Cmd::TurnEnded);
+        runtime.apply(&catalog, Cmd::TurnEnded);
+        runtime.apply(
+            &catalog,
+            Cmd::Feed {
+                surface: gauge.clone(),
+                data: json!({ "_hold": true }),
+            },
+        );
+        assert!(
+            runtime
+                .apply(
+                    &catalog,
+                    Cmd::Sweep {
+                        elapsed: HOLD_CEILING
+                    }
+                )
+                .is_empty(),
+            "the ceiling was reached early"
+        );
+        assert!(
+            runtime
+                .apply(&catalog, Cmd::Sweep { elapsed: GRACE })
+                .contains(&Act::Retire {
+                    surface: gauge.clone()
+                }),
+            "a hold nothing ended kept the panel past the ceiling"
+        );
+    }
+
+    /// The hold is the runtime's key, and a widget that happens to report
+    /// something truthy under an ordinary name is not asking for anything.
+    #[test]
+    fn only_the_reserved_key_holds_a_panel() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let gauge = opened(&open(&mut runtime, &catalog, "gauge", Posture::Exhibit));
+        runtime.apply(&catalog, Cmd::TurnEnded);
+        runtime.apply(&catalog, Cmd::TurnEnded);
+        runtime.apply(
+            &catalog,
+            Cmd::Feed {
+                surface: gauge.clone(),
+                data: json!({ "hold": true, "running": true, "_hold": "yes" }),
+            },
+        );
         assert!(
             runtime
                 .apply(&catalog, Cmd::Sweep { elapsed: GRACE })

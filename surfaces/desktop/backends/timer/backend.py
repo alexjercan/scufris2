@@ -13,11 +13,16 @@ length. Every line after it is an action:
 
 Each line written is an object:
 
-    {"left": 284.2, "of": 300.0, "running": true, "done": false}
+    {"left": 284.2, "of": 300.0, "running": true, "done": false, "_hold": true}
 
 `left` is what remains, in seconds. It stops at zero and `done` stays true from
 then on, because a timer that has finished has to keep saying so: the panel may
 have been on another workspace at the moment it ran out.
+
+`_hold` is the companion's, not the widget's. It is true exactly while the count
+is running, and it stops the panel ageing out from under a count nobody has
+cancelled. It goes false the moment the count is paused or reaches zero, so a
+finished timer is read and then goes the ordinary way.
 """
 
 import json
@@ -67,6 +72,9 @@ class Countdown:
                 "of": round(self.of, 1),
                 "running": self.running,
                 "done": self.left <= 0.0,
+                # A running count has not moved on, whatever the conversation
+                # has done since. A paused or finished one has.
+                "_hold": self.running,
             }
 
     def act(self, action: dict[str, object]) -> None:

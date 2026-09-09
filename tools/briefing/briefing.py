@@ -1067,6 +1067,70 @@ def finish(
     return manifest
 
 
+#: Where a deployment writes each profile's bounds, below the config home.
+#:
+#: Home Manager owns a profile: its schedule, its deadlines, how wide it runs.
+#: Those numbers reached the collection through the timer unit's environment,
+#: which is to say they reached a run the timer started and nothing else. A
+#: briefing asked for by hand - the `scufris_briefing_run` tool, or a shell -
+#: got the code defaults instead, silently, so a night profile that allows eight
+#: hours a source was cut at fifteen minutes and the work was lost.
+#:
+#: The file is the same numbers where every run can read them. It is generated,
+#: never hand-written, and a deployment without one is the ordinary case for a
+#: checkout.
+PROFILE_BOUNDS_FILE = "briefing-profiles.json"
+
+#: What a profile may set, and the variable each one is read through.
+PROFILE_BOUNDS = {
+    "deadline": "SCUFRIS_BRIEFING_DEADLINE",
+    "source_deadline": "SCUFRIS_BRIEFING_SOURCE_DEADLINE",
+    "parallel": "SCUFRIS_BRIEFING_PARALLEL",
+    "max_offers": "SCUFRIS_BRIEFING_MAX_OFFERS",
+    "max_body": "SCUFRIS_BRIEFING_MAX_BODY",
+    "keep_days": "SCUFRIS_BRIEFING_KEEP_DAYS",
+}
+
+
+def config_home() -> Path:
+    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / "scufris"
+
+
+def apply_profile_bounds(profile: str) -> None:
+    """Puts the deployment's numbers for one profile into this process.
+
+    Into the environment rather than through every caller, because that is where
+    the bounds are already read from and where a source's own subprocess already
+    inherits them. The environment still wins where it is set, so the timer unit
+    and a run asking for a number by hand both keep the number they asked for.
+
+    Everything that can go wrong here reads as if the file said nothing. A
+    briefing that refuses to run over a generated file is worse than one held to
+    its defaults, and the manifest records the numbers it actually used.
+    """
+    try:
+        raw = (config_home() / PROFILE_BOUNDS_FILE).read_bytes()
+    except OSError:
+        return
+    try:
+        declared = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return
+    if not isinstance(declared, dict):
+        return
+    bounds = declared.get(profile)
+    if not isinstance(bounds, dict):
+        return
+    for field, variable in PROFILE_BOUNDS.items():
+        value = bounds.get(field)
+        # `parallel` is null for a profile that runs every source at once, which
+        # is what saying nothing already means.
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            continue
+        os.environ.setdefault(variable, str(value))
+
+
 def environment_seconds(name: str, fallback: float) -> float:
     raw = os.environ.get(name)
     if raw is None:

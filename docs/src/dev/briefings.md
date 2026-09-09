@@ -238,6 +238,14 @@ smaller, so raising one alone changes nothing. A second asking is bounded at 300
 by `SCUFRIS_BRIEFING_REPAIR_DEADLINE`, never past what its source has left. One
 project that hangs costs the run its own deadline and nothing else.
 
+A profile's bounds reach a run through `$XDG_CONFIG_HOME/scufris/briefing-profiles.json`,
+which Home Manager generates from the profile options. Every entry point reads
+it, so a briefing asked for by hand is held to the same numbers as the one the
+timer starts. The environment still wins where it is set, which is how a run
+asking for a number on the command line keeps it. Without the file - an ordinary
+checkout - the built-in defaults hold, and a file that cannot be read or parsed
+reads as if it said nothing rather than refusing the morning.
+
 ## The run directory
 
 ```text

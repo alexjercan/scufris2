@@ -85,7 +85,12 @@ in
     assert !(lib.elem "graphical-session.target" (serviceUnit.Unit.After or []));
     assert serviceUnit.Service.ExecStart == [(lib.getExe service)];
     assert serviceUnit.Service.Restart == "on-failure";
-    assert serviceUnit.Service.RuntimeDirectory == "scufris-service";
+    # No `RuntimeDirectory`. The sockets live in `%t/scufris`, at 0700, made by
+    # the code that binds them; the option made an unused `%t/scufris-service`
+    # beside it, and pointing it at the real one would have systemd relax it to
+    # 0755 and delete it - with the companion's and the gateway's sockets - every
+    # time this unit stops.
+    assert !(serviceUnit.Service ? RuntimeDirectory);
     assert serviceUnit.Unit.Wants == ["scufris-surface-gateway.service"];
     assert gatewayConfig.serviceName == "scufris-surface-gateway";
     assert gatewayConfig.tailscaleServiceName == "scufris-tailscale-serve";

@@ -604,6 +604,26 @@ in {
 
       xdg.configFile."scufris/config.toml".source = briefingConfigFile;
     })
+    # The same numbers the timer exports, in a file every run can read.
+    #
+    # A profile's bounds only ever reached a run the timer started: the unit
+    # exports them into its own environment. A briefing asked for by hand - the
+    # `scufris_briefing_run` tool, or a shell - got the code defaults instead
+    # and said nothing, so a night profile that allows eight hours a source was
+    # silently cut at fifteen minutes. The environment still wins where it is
+    # set, so a run asking for a number by hand still gets it.
+    (lib.mkIf (cfg.enable && briefingCfg.profiles != {}) {
+      xdg.configFile."scufris/briefing-profiles.json".text = builtins.toJSON (lib.mapAttrs (_: profile: {
+          inherit (profile) deadline parallel;
+          # The helper's names, which are the environment variables' names. The
+          # option names are Home Manager's convention and stop here.
+          source_deadline = profile.sourceDeadline;
+          max_offers = profile.maxOffers;
+          max_body = profile.maxBody;
+          keep_days = briefingCfg.keepDays;
+        })
+        briefingCfg.profiles);
+    })
     # A briefing is collected out of process and delivered over the control
     # socket, so the schedule needs neither a session nor an agent. The user
     # manager runs from login to logout, which is where Scufris lives, and

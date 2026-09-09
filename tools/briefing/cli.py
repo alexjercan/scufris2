@@ -126,8 +126,16 @@ def named_profile(options: argparse.Namespace) -> str | None:
 
 
 def wanted_profile(options: argparse.Namespace) -> str:
-    """The profile a collection asks the sources for."""
-    return named_profile(options) or briefing.DEFAULT_PROFILE
+    """The profile a collection asks the sources for.
+
+    Resolving it is also where the deployment's numbers for it are put into this
+    process, because a profile is its bounds as much as it is its name: a run
+    started by hand under a profile that allows a source eight hours must not be
+    cut at the built-in fifteen minutes for having been asked for by hand.
+    """
+    profile = named_profile(options) or briefing.DEFAULT_PROFILE
+    briefing.apply_profile_bounds(profile)
+    return profile
 
 
 def named_config(options: argparse.Namespace) -> str | None:
@@ -150,7 +158,11 @@ def wanted_run(
     and waiting for its prose - needs nothing said about it.
     """
     date = wanted_date(options)
-    return date, briefing.resolve(date, named_profile(options), undelivered=undelivered)
+    profile = briefing.resolve(date, named_profile(options), undelivered=undelivered)
+    # As in `wanted_profile`: the run is only half resolved until the numbers
+    # its profile is held to are the ones in force.
+    briefing.apply_profile_bounds(profile)
+    return date, profile
 
 
 def say(options: argparse.Namespace, value: object, lines: list[str]) -> None:

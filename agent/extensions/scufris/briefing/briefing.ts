@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import {
   defineTool,
@@ -34,9 +36,48 @@ interface Pending {
   message: string;
 }
 
-function collectTimeout(): number {
+/** Seconds the deployment allows this profile's whole collection.
+ *
+ * The same generated file the helper reads. Without it this waited the built-in
+ * half hour on a profile that allows its sources eight, and killed a run the
+ * helper was still within its own deadline for - which looked to the helper
+ * like the collection being cut off for no reason it could name.
+ *
+ * Anything that can go wrong reads as if the file said nothing. A briefing that
+ * refuses to start over a generated file is worse than one held to defaults.
+ */
+function profileDeadline(profile: string): number | undefined {
+  const home =
+    process.env.XDG_CONFIG_HOME ??
+    (process.env.HOME === undefined
+      ? undefined
+      : join(process.env.HOME, ".config"));
+  if (home === undefined) return undefined;
+  let declared: unknown;
+  try {
+    declared = JSON.parse(
+      readFileSync(join(home, "scufris", "briefing-profiles.json"), "utf8"),
+    );
+  } catch {
+    return undefined;
+  }
+  if (typeof declared !== "object" || declared === null) return undefined;
+  const bounds = (declared as Record<string, unknown>)[profile];
+  if (typeof bounds !== "object" || bounds === null) return undefined;
+  const deadline = (bounds as Record<string, unknown>).deadline;
+  return typeof deadline === "number" &&
+    Number.isFinite(deadline) &&
+    deadline > 0
+    ? deadline
+    : undefined;
+}
+
+function collectTimeout(profile: string): number {
   const raw = Number(process.env.SCUFRIS_BRIEFING_DEADLINE);
-  const deadline = Number.isFinite(raw) && raw > 0 ? raw : RUN_DEADLINE;
+  const deadline =
+    Number.isFinite(raw) && raw > 0
+      ? raw
+      : (profileDeadline(profile) ?? RUN_DEADLINE);
   return deadline * 1000 + COLLECT_SLACK;
 }
 
@@ -231,7 +272,7 @@ export default function briefing(pi: ExtensionAPI): void {
           try {
             const manifest = await runHelper<Manifest>(
               ["collect", "--date", date, "--profile", wanted, "--json"],
-              { timeoutMs: collectTimeout() },
+              { timeoutMs: collectTimeout(wanted) },
             );
             // A briefing nothing declared is not an event, and the helper
             // leaves such a run out of what is pending. Waking the foreground

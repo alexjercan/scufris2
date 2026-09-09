@@ -35,8 +35,15 @@ worker wrapper -> private per-execution environment
 | `SCUFRIS_CTL`                      | briefing helper | Control client a wake is carried by. Default: `scufris-ctl` on `PATH`.                                             |
 | `SCUFRIS_CONFIG`                   | jobs helper     | User-level file the machine's own briefing sources are read from. Default: `$XDG_CONFIG_HOME/scufris/config.toml`. |
 
-Anything unreadable in these reads as the default. A briefing that refuses to
-run over a typo in a unit file is worse than one held to its own numbers.
+The first six default to the running profile's number from
+`$XDG_CONFIG_HOME/scufris/briefing-profiles.json`, which Home Manager generates
+from the profile options, before they fall back to the built-in default. Setting
+one here wins over both, which is how a run asking for a number on the command
+line keeps it.
+
+Anything unreadable in these reads as the default, the generated file included.
+A briefing that refuses to run over a typo in a unit file is worse than one held
+to its own numbers.
 
 When a briefing happens is a systemd timer and not a variable. Each profile in
 `programs.scufris.agent.briefing.profiles` renders its own

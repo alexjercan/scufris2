@@ -1345,6 +1345,73 @@ class Run(unittest.TestCase):
             briefing.collect(profile="nightly")
         self.assertEqual(self.where.read_text().split(), ["in", "out", "in", "out"])
 
+    def test_a_profile_run_by_hand_gets_the_deployment_numbers(self) -> None:
+        # The bounds only ever reached a run the timer started, because the
+        # timer unit exports them. A briefing asked for by hand got the code
+        # defaults and said nothing, so a night that allows a source eight hours
+        # was cut at fifteen minutes and the work was lost.
+        (self.config / "scufris").mkdir(parents=True, exist_ok=True)
+        (self.config / "scufris" / briefing.PROFILE_BOUNDS_FILE).write_text(
+            json.dumps(
+                {
+                    "nightly": {
+                        "deadline": 28800,
+                        "source_deadline": 28800,
+                        "parallel": 2,
+                        "max_offers": 8,
+                        "max_body": 65536,
+                        "keep_days": 30,
+                    },
+                    "morning": {"deadline": 1800, "parallel": None},
+                }
+            ),
+            encoding="utf-8",
+        )
+        # Three sources and a cap of two, so the cap is what the run records
+        # rather than however many happened to declare the profile.
+        for name in ("aaa", "bbb", "ccc"):
+            self.declare(name, "pi", "nightly")
+        # What the CLI does when it resolves the profile a run is asked for.
+        briefing.apply_profile_bounds("nightly")
+        gathered = briefing.collect(profile="nightly")
+        self.assertEqual(
+            gathered["bounds"],
+            {"source_deadline": 28800.0, "run_deadline": 28800.0, "parallel": 2},
+        )
+        self.assertEqual(briefing.max_offers(), 8)
+        self.assertEqual(briefing.max_body(), 65536)
+
+    def test_a_number_asked_for_by_hand_beats_the_deployment(self) -> None:
+        (self.config / "scufris").mkdir(parents=True, exist_ok=True)
+        (self.config / "scufris" / briefing.PROFILE_BOUNDS_FILE).write_text(
+            json.dumps({"nightly": {"deadline": 28800, "source_deadline": 28800}}),
+            encoding="utf-8",
+        )
+        self.declare("aaa", "pi", "nightly")
+        with mock.patch.dict(os.environ, {"SCUFRIS_BRIEFING_DEADLINE": "240"}):
+            briefing.apply_profile_bounds("nightly")
+            gathered = briefing.collect(profile="nightly")
+        self.assertEqual(gathered["bounds"]["run_deadline"], 240.0)
+
+    def test_an_unusable_profile_file_reads_as_if_it_said_nothing(self) -> None:
+        (self.config / "scufris").mkdir(parents=True, exist_ok=True)
+        for written in ("", "not json", "[]", '{"nightly": 5}', '{"nightly": {}}'):
+            (self.config / "scufris" / briefing.PROFILE_BOUNDS_FILE).write_text(
+                written, encoding="utf-8"
+            )
+            for variable in briefing.PROFILE_BOUNDS.values():
+                os.environ.pop(variable, None)
+            briefing.apply_profile_bounds("nightly")
+            self.assertEqual(
+                [
+                    variable
+                    for variable in briefing.PROFILE_BOUNDS.values()
+                    if variable in os.environ
+                ],
+                [],
+                f"a briefing refused to run over {written!r}",
+            )
+
     def test_every_source_runs_at_once_when_nothing_caps_them(self) -> None:
         self.declare("aaa", "pi", "morning")
         self.declare("bbb", "pi", "morning")

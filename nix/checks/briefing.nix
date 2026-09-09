@@ -53,6 +53,7 @@
   quiet = mkHome {settings.agent.briefing.profiles = {};};
   units = "${scheduled.activationPackage}/home-files/.config/systemd/user";
   none = "${quiet.activationPackage}/home-files/.config/systemd/user";
+  bounds = "${scheduled.activationPackage}/home-files/.config/scufris/briefing-profiles.json";
 in
   {
     # `[briefings.<profile>.<name>]` is what the helper reads, and it reads a
@@ -158,6 +159,29 @@ in
       grep -E '^export PATH=' "$runner" | grep -F scufris-jobs
       touch "$out"
     '';
+
+    # The same numbers, where a run started any other way can read them. Only
+    # the timer's environment carried them before, so a briefing asked for by
+    # hand was held to the built-in defaults and never said so.
+    briefing-profile-bounds =
+      pkgs.runCommand "scufris-briefing-bounds-check" {
+        nativeBuildInputs = [pkgs.jq];
+      } ''
+        test "$(jq -r '.morning.deadline' ${bounds})" = 1800
+        test "$(jq -r '.weekly.deadline' ${bounds})" = 3600
+        test "$(jq -r '.morning.source_deadline' ${bounds})" = 900
+        test "$(jq -r '.morning.parallel' ${bounds})" = null
+        test "$(jq -r '.morning.max_offers' ${bounds})" = 3
+        test "$(jq -r '.morning.max_body' ${bounds})" = 16384
+        test "$(jq -r '.morning.keep_days' ${bounds})" = 30
+        # Every profile that has a timer has its numbers here, and nothing else
+        # does.
+        test "$(jq -r 'keys | join(",")' ${bounds})" = "morning,weekly"
+        # A machine that schedules nothing writes no file, and the helper reads
+        # that as a machine held to its defaults.
+        ! test -e ${quiet.activationPackage}/home-files/.config/scufris/briefing-profiles.json
+        touch "$out"
+      '';
 
     # No profile is no timer, and the tools still work. The schedule costs a
     # deployment that wants none exactly nothing.

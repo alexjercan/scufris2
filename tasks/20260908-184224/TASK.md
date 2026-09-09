@@ -1,6 +1,6 @@
 # Review the day's commits nightly and fix what is worth fixing
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 90
 - TAGS: workflow,review,schedule
 
@@ -225,14 +225,6 @@ The append-as-you-go task paid for itself on that same night:
 MAJOR three lanes found independently, even though the envelope came back
 empty. Keep that instruction first in any nightly guidance.
 
-### Still open
-
-- `manifest.json` carries `sources: []` until a run finishes, so a briefing in
-  flight is invisible. Related: `20260908-103406`, the conversation HUD.
-- `attempt` discards all output on `TimeoutExpired`. A source that ran for its
-  whole deadline and wrote a good answer slowly leaves nothing behind.
-- `Linger=no`. A logout mid-night still kills the run.
-
 ### Closed since
 
 - The one-turn contract is in `contribution_prompt` as of `315b931`, so every
@@ -240,3 +232,42 @@ empty. Keep that instruction first in any nightly guidance.
 - A profile's deadlines and width reach a run started by hand as of `ad6b97f`.
   A nightly asked for out of hours was held to the built-in half hour before
   that, which is the same failure the deadline options existed to prevent.
+- `Linger=yes`. `nix.dotfiles` `965b5d7` sets `users.users.alex.linger`, and
+  `loginctl show-user alex` reports it after the rebuild. The user manager runs
+  from boot, so a logout no longer takes a night in flight with it.
+- A run in flight names the sources it is waiting on. Every source is in the
+  manifest from the start with the status `asking`, and its own entry is
+  written over that as it answers. An eight-hour night used to read exactly
+  like a night nothing declared.
+- A source cut off at its deadline keeps what it had written. `TimeoutExpired`
+  carries the partial output, and if that output already holds the whole
+  envelope - the answer finished and only the process was late - it is read as
+  the answer rather than thrown away.
+
+### The night and the morning, as built
+
+- `scufris2` declares `[briefings.nightly]`: group the day's commits by
+  component, `/scufris-review` over one group at a time, never `--live` because
+  the Feel lane wants a display nobody is at. The tatr task comes first and is
+  appended to as each group is adjudicated.
+- `nova-protocol` already declared its own. `parallel = 2` in `nix.dotfiles`
+  covers both and no more.
+- Both `[briefings.morning]` sources now read yesterday's `nightly` run - the
+  manifest, their own contribution, and the task named in the body - and report
+  what the night found, what still stands and what needs Alex. A finding
+  checked against the tree and still standing becomes a numbered offer.
+
+### Verified, 2026-09-09
+
+- 375 Python tests, ruff, `npm run check` (105 Node tests, strict TypeScript,
+  Prettier) and `nix flake check` all pass.
+- Three new tests: a run in flight names its sources and writes each answer
+  into the manifest as it arrives; a source that answers well and will not exit
+  is still read; a source cut off partway keeps its words.
+- `loginctl show-user alex` reports `Linger=yes`.
+- Both `.scufris.toml` files parse and declare `morning` and `nightly`.
+
+What is left is one night's evidence, which only the clock can produce: the
+first run with two sources, a morning that reports it, and a night narrowed for
+size rather than abandoned. The machinery is built and checked; watching it run
+is not work this task can do.

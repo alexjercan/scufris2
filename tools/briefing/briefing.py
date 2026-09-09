@@ -30,6 +30,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date as Date
@@ -61,7 +62,13 @@ CTL = "scufris-ctl"
 #: What a source may say about itself. `failed` is not among them: only the
 #: runner writes that, about a source that could not answer.
 REPORTED = ("ok", "attention", "stale")
-STATUSES = (*REPORTED, "failed")
+
+#: What the manifest says about a source the run is still waiting on. A source
+#: never says it: `collect` writes it before the first question and writes over
+#: it with the answer, so a run in flight names the projects it is asking
+#: rather than reading as a run that found nothing.
+ASKING = "asking"
+STATUSES = (*REPORTED, "failed", ASKING)
 
 #: A run's states. `collecting` survives a crash, so a directory left in it is
 #: an incomplete run and not a delivered one.
@@ -725,6 +732,19 @@ class Attempt(NamedTuple):
     seconds: float
 
 
+def decoded(output: bytes | str | None) -> str:
+    """Whatever a killed harness had written, as text.
+
+    `TimeoutExpired` carries bytes even from a run in text mode, because the
+    decoding happens after the timeout is raised.
+    """
+    if output is None:
+        return ""
+    if isinstance(output, bytes):
+        return output.decode("utf-8", errors="replace")
+    return output
+
+
 def attempt(
     source: dict[str, Any], prompt: str, deadline: float, *, tools: bool = True
 ) -> Attempt:
@@ -744,14 +764,24 @@ def attempt(
             check=False,
             timeout=deadline,
         )
-    except subprocess.TimeoutExpired:
-        return Attempt(
-            None,
-            f"the source did not answer within {int(deadline)} seconds",
-            None,
-            False,
-            time.monotonic() - started,
-        )
+    except subprocess.TimeoutExpired as cut:
+        seconds = time.monotonic() - started
+        # What it had already written. A source that spent the whole deadline
+        # is the one whose words are worth most, and this used to throw them
+        # away: an eight-hour night that answered slowly left nothing at all.
+        answer = decoded(cut.stdout)[:MAX_OUTPUT]
+        try:
+            # A source can finish its envelope and still not exit. Then the
+            # answer is there and only the process was late, so read it.
+            return Attempt(parse_contribution(answer), "", answer, True, seconds)
+        except Unusable:
+            return Attempt(
+                None,
+                f"the source did not answer within {int(deadline)} seconds",
+                answer or None,
+                False,
+                seconds,
+            )
     except (OSError, ValueError) as trouble:
         return Attempt(
             None,
@@ -881,6 +911,26 @@ def failed_contribution(
     }
 
 
+def asking_entry(source: dict[str, Any]) -> dict[str, Any]:
+    """The manifest entry for a source that has been asked and not answered.
+
+    The same shape as a finished entry, so one reader answers a run in flight
+    and a run that is over. `collect` writes one of these for every source
+    before the first question: a manifest whose `sources` was empty until the
+    last source returned made an eight-hour night indistinguishable from a
+    night that declared nothing.
+    """
+    marked = stamp(source)
+    return {
+        **marked,
+        "title": marked["project"][:MAX_TITLE],
+        "status": ASKING,
+        "headline": "still being asked",
+        "facts": [],
+        "seconds": 0.0,
+    }
+
+
 def index_entry(contribution: dict[str, Any]) -> dict[str, Any]:
     """What the manifest keeps about a contribution.
 
@@ -951,7 +1001,9 @@ def collect(
         "state": "collecting",
         "started": started.isoformat(timespec="seconds"),
         "finished": None,
-        "sources": [],
+        # Named before the first question rather than after the last answer, so
+        # a run in flight says which projects it is waiting on.
+        "sources": [asking_entry(source) for source in sources],
         "diagnostics": diagnostics,
         # What this run was actually given. The profile's numbers live in the
         # timer unit's environment, and a run started any other way - the
@@ -968,19 +1020,45 @@ def collect(
     if not sources:
         return finish(manifest, [])
     clock = time.monotonic()
+    # The live index. One entry per source, written over as each one answers,
+    # and read by whoever opens the run before it is over.
+    asked = [dict(entry) for entry in manifest["sources"]]
+    stumbles: list[dict[str, str]] = []
+    keeping = threading.Lock()
 
-    def bounded(source: dict[str, Any]) -> dict[str, Any]:
+    def note(place: int, contribution: dict[str, Any]) -> None:
+        """Put one answer in the manifest as it arrives.
+
+        Under a lock because the sources run together. A progress write that
+        fails must not cost the run the answer it was writing down, so it is
+        caught and named here; `finish` writes the record either way.
+        """
+        with keeping:
+            asked[place] = index_entry(contribution)
+            try:
+                write_manifest({**manifest, "sources": list(asked)})
+            except (OSError, TypeError, ValueError) as trouble:
+                stumbles.append(
+                    {
+                        "project": str(contribution.get("project", "")),
+                        "diagnostic": f"the run's progress could not be written: {trouble!r}",
+                    }
+                )
+
+    def bounded(place: int, source: dict[str, Any]) -> dict[str, Any]:
         left = run_deadline - (time.monotonic() - clock)
         try:
-            return ask(source, profile, date, min(source_deadline, left), since)
+            contribution = ask(source, profile, date, min(source_deadline, left), since)
         except Exception as trouble:  # noqa: BLE001
             # The last line between one source and the whole morning. `ask`
             # answers rather than raises, so reaching here means a way to fail
             # nobody has thought of yet; the run still publishes with the rest
             # and this source is named.
-            return failed_contribution(
+            contribution = failed_contribution(
                 source, f"the runner could not ask this source: {trouble!r}"
             )
+        note(place, contribution)
+        return contribution
 
     # Every source at once unless a profile caps it. A morning of six cheap
     # reports wants no cap; a night of two agents that each fan out into review
@@ -990,8 +1068,11 @@ def collect(
     # The cap is on sources and not on what a source starts. What a source
     # spawns is its harness's business and this cannot see it.
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        contributions = list(pool.map(bounded, sources))
-    return finish(manifest, contributions)
+        contributions = list(pool.map(bounded, range(len(sources)), sources))
+    return finish(
+        {**manifest, "diagnostics": [*manifest["diagnostics"], *stumbles]},
+        contributions,
+    )
 
 
 def finish(

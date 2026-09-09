@@ -37,6 +37,9 @@ STATUS_WORDS = {
     "attention": "needs you",
     "stale": "no data",
     "failed": "no answer",
+    # A run that is still going. Only a page rendered before its run finished
+    # carries one, which is the point: the page says who it is waiting on.
+    "asking": "still working",
 }
 
 STYLE = """
@@ -106,6 +109,7 @@ h1 {
 .attention { color: var(--attention); }
 .stale { color: var(--warn); }
 .failed { color: var(--alarm); }
+.asking { color: var(--muted); }
 .source { margin-left: auto; color: var(--muted); font-size: 11px; letter-spacing: 0.04em; }
 .headline { margin: 12px 0 0; color: var(--strong); }
 .facts {

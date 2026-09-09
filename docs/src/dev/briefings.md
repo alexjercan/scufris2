@@ -181,6 +181,12 @@ badly, or misses its deadline becomes a failed contribution whose headline says
 why, with its own words kept beside it, and it is named in the briefing rather
 than quietly dropped.
 
+A source killed at its deadline keeps what it had already written, which used to
+be thrown away with the process: an eight-hour night that answered slowly left
+nothing behind at all. If that partial output already holds the whole envelope -
+the source finished its answer and only the process was late - it is read as the
+answer.
+
 Nothing a source does ends the run. The reader refuses every malformed answer
 by name rather than raising, including one nested past the decoder's stack or
 written in bytes that are not text; a source that finds a way past that is
@@ -278,6 +284,13 @@ own numbers live in its timer unit's environment, so a run started any other way
   minutes distinguishable from one cut off at the eight hours the profile asks
   for.
 
+Every source is in the manifest from the moment the run starts, with the status
+`asking` until it answers and its own entry written over that as it does. The
+index used to be empty until the last source returned, which made an eight-hour
+night in flight read exactly like a night nothing had declared. Only a
+`collecting` manifest carries `asking`; a run that is over has one entry for
+each source and nothing else.
+
 The last thirty dates are kept, with every profile that ran on them. The
 manifest state is the record of what happened, and it is what an opening
 session reads:
@@ -354,6 +367,28 @@ timer's shape and nothing else. Build-time validation is the whole reason to
 generate the file, so the known keys are declared over a freeform type: a
 missing `guidance` or a nested keyword fails the build, and a key the reader
 learns before the module does still renders.
+
+## The night and the morning after it
+
+Two profiles run on this machine, and one reads the other. `nightly` collects
+at 23:00 with an eight-hour deadline; `scufris2` and `nova-protocol` each
+declare a source for it that groups the day's commits, runs the project's own
+review skill over one group at a time, and reports what is worth fixing. It
+changes nothing. A source is owned by a schedule: it has no job record, no tmux
+pane, no receipts, and nobody awake to steer or cancel it, so its commits would
+be the only unverifiable ones in the system.
+
+The durable half of a night is a tatr task in the reviewed project, opened
+before anything is read and appended to as each group is adjudicated. The
+envelope is only written when the source returns, so a night that is killed
+returns nothing at all, and the task is what remains.
+
+Each project's `morning` source then reads yesterday's `nightly` run - its
+manifest, its own contribution, and the task named in the body - and reports
+what the night found, what still stands, and what needs the owner. A finding
+that survives that check becomes a numbered offer, so a fix is picked by number
+and then run as a job in a Sprout worktree: a branch to read before it lands,
+and a pane to watch.
 
 ## Writing and delivery
 

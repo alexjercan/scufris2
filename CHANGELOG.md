@@ -22,6 +22,11 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Changed
 
+- Scufris reviews its own day. `scufris2` declares a `nightly` briefing source
+  that groups the day's commits, runs `/scufris-review` over one group at a
+  time and reports what is worth fixing, without changing anything. The morning
+  briefing in both reviewed projects reads the night's run and its task, and
+  carries a finding that still stands into a numbered offer.
 - A source is told plainly that it holds every tool, that nothing is withheld
   from it and nothing is watching, and that its guidance is the whole of its
   permission. A boundary a model can read is worth more than a flag that
@@ -33,6 +38,13 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   caught by a test rather than by a match that silently stops matching.
 
 ### Fixed
+
+- A briefing that is still collecting now names the sources it is waiting on.
+  The manifest carried an empty `sources` until the last source returned, so an
+  eight-hour night in flight read exactly like a night nothing had declared.
+- A source that is cut off at its deadline keeps what it had already written.
+  An eight-hour night that answered slowly used to leave nothing at all; if the
+  answer was complete when the clock ran out, it is now read as the answer.
 
 - Cancelling a Quick Review while it starts no longer wedges Scufris. The
   helper's cancel path set the flag that suppresses its own crash report, and

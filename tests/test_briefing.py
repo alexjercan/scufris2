@@ -15,6 +15,7 @@ import tempfile
 import unittest
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -99,6 +100,40 @@ time.sleep(0.4)
 with where.open("a") as stream:
     stream.write("out\\n")
 print(pathlib.Path(os.environ["BRIEFING_ANSWER"]).read_text())
+"""
+
+#: Keeps a copy of the run's manifest as it stands while this source is being
+#: asked, so a run in flight can be read and not only a run that is over.
+WATCHING = """#!/usr/bin/env python3
+import os
+import pathlib
+where = pathlib.Path(os.environ["BRIEFING_WHERE"])
+taken = list(where.parent.glob(where.name + ".*"))
+pathlib.Path(f"{where}.{len(taken)}").write_text(
+    pathlib.Path(os.environ["BRIEFING_MANIFEST"]).read_text()
+)
+print(pathlib.Path(os.environ["BRIEFING_ANSWER"]).read_text())
+"""
+
+#: Answers well and then will not exit. This is the source that used to leave
+#: nothing behind: the envelope was written and the deadline killed the run.
+SLOW_ANSWER = """#!/usr/bin/env python3
+import os
+import pathlib
+import sys
+import time
+sys.stdout.write(pathlib.Path(os.environ["BRIEFING_ANSWER"]).read_text())
+sys.stdout.flush()
+time.sleep(30)
+"""
+
+#: Says something that is not an envelope and then will not exit.
+SLOW_PROSE = """#!/usr/bin/env python3
+import sys
+import time
+sys.stdout.write("I got halfway through the journal")
+sys.stdout.flush()
+time.sleep(30)
 """
 
 #: Writes bytes that are not text at all.
@@ -944,6 +979,75 @@ class Run(unittest.TestCase):
         manifest = briefing.collect("2026-08-31", "morning")
         self.assertEqual(manifest["sources"][0]["status"], "failed")
         self.assertEqual(manifest["state"], "failed")
+
+    def snapshots(self) -> list[dict[str, Any]]:
+        """Every manifest a `WATCHING` source read while the run was going."""
+        return [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted(
+                self.where.parent.glob(f"{self.where.name}.*"),
+                key=lambda item: int(item.suffix[1:]),
+            )
+        ]
+
+    def test_a_run_in_flight_names_the_sources_it_is_waiting_on(self) -> None:
+        # The manifest carried an empty `sources` until the last source
+        # returned, so an eight-hour night read exactly like a night nothing
+        # declared. One source at a time, so what the second one sees is what
+        # the first one wrote and not a race.
+        self.declare("the-den")
+        self.declare("seedzero")
+        self.harness(WATCHING)
+        with mock.patch.dict(
+            os.environ,
+            {
+                "SCUFRIS_BRIEFING_PARALLEL": "1",
+                "BRIEFING_MANIFEST": str(
+                    briefing.run_dir("2026-08-31", "morning") / "manifest.json"
+                ),
+            },
+        ):
+            manifest = briefing.collect("2026-08-31", "morning")
+        first, second = self.snapshots()
+        self.assertEqual(first["state"], "collecting")
+        self.assertEqual([item["status"] for item in first["sources"]], ["asking"] * 2)
+        self.assertEqual(
+            sorted(item["project"] for item in first["sources"]),
+            sorted(item["project"] for item in manifest["sources"]),
+        )
+        # The one that had answered is in the record before the run is over.
+        answered = [item for item in second["sources"] if item["status"] != "asking"]
+        self.assertEqual(len(answered), 1)
+        self.assertEqual(answered[0]["status"], ENVELOPE["status"])
+        self.assertEqual(answered[0]["headline"], ENVELOPE["headline"])
+        self.assertEqual(manifest["state"], "collected")
+
+    def test_a_source_that_answered_slowly_still_answered(self) -> None:
+        # It wrote the whole envelope and then would not exit. The answer is
+        # there and only the process was late, so read it rather than throw it
+        # away with the run.
+        self.declare("the-den")
+        self.harness(SLOW_ANSWER)
+        manifest = briefing.collect("2026-08-31", "morning", source_deadline=1.0)
+        entry = manifest["sources"][0]
+        self.assertEqual(entry["status"], ENVELOPE["status"])
+        self.assertEqual(entry["headline"], ENVELOPE["headline"])
+
+    def test_a_source_cut_off_partway_keeps_what_it_had_written(self) -> None:
+        self.declare("the-den")
+        self.harness(SLOW_PROSE)
+        manifest = briefing.collect("2026-08-31", "morning", source_deadline=1.0)
+        entry = manifest["sources"][0]
+        self.assertEqual(entry["status"], "failed")
+        self.assertIn("did not answer within", entry["headline"])
+        kept = json.loads(
+            (
+                briefing.run_dir("2026-08-31", "morning")
+                / "contributions"
+                / "projects-the-den.json"
+            ).read_text()
+        )
+        self.assertIn("halfway through the journal", kept["raw"])
 
     def test_a_harness_that_exits_badly_is_named_rather_than_guessed(self) -> None:
         self.declare("the-den")

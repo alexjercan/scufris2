@@ -9,6 +9,18 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-09-09
+
+### Fixed
+
+- Filing a job row now stays filed. The set of filed rows lived in memory
+  only, and the service starts Pi with `--continue`, so `recover` handed back
+  every job that had never been stopped or landed and every row Alex had
+  cleared came back at the next restart. An acknowledgement a restart forgets
+  is not one. The filing is written into the session beside the wake mode, and
+  restored once the recovery says which jobs still exist, so an id belonging
+  to a job that has since been landed is dropped rather than carried forever.
+
 ## [2.4.0] - 2026-09-09
 
 ### Added
@@ -981,7 +993,8 @@ is unavailable: job.json`. Every variable that says where things are is now
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.4.1...HEAD
+[2.4.1]: https://github.com/alexjercan/scufris2/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/alexjercan/scufris2/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/alexjercan/scufris2/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/alexjercan/scufris2/compare/v2.1.7...v2.2.0

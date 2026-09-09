@@ -227,12 +227,16 @@ empty. Keep that instruction first in any nightly guidance.
 
 ### Still open
 
-- The one-turn contract is a property of the harness, not of any project, so
-  every source in every profile needs it. It is written in nova's guidance
-  today. It belongs in `contribution_prompt` beside the envelope shape, which
-  is already this program's business.
 - `manifest.json` carries `sources: []` until a run finishes, so a briefing in
   flight is invisible. Related: `20260908-103406`, the conversation HUD.
 - `attempt` discards all output on `TimeoutExpired`. A source that ran for its
   whole deadline and wrote a good answer slowly leaves nothing behind.
 - `Linger=no`. A logout mid-night still kills the run.
+
+### Closed since
+
+- The one-turn contract is in `contribution_prompt` as of `315b931`, so every
+  source in every profile is told it rather than only nova's guidance saying so.
+- A profile's deadlines and width reach a run started by hand as of `ad6b97f`.
+  A nightly asked for out of hours was held to the built-in half hour before
+  that, which is the same failure the deadline options existed to prevent.

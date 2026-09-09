@@ -26,6 +26,11 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   from it and nothing is watching, and that its guidance is the whole of its
   permission. A boundary a model can read is worth more than a flag that
   suggested one it never had.
+- Every refusal code the sockets carry is named once, in
+  `shared/control/src/refusal.rs` and its TypeScript mirror, instead of being
+  written as a string literal at each of the twenty-one places that send or
+  match one. Nothing user-facing changed; a code misspelled on one side is now
+  caught by a test rather than by a match that silently stops matching.
 
 ### Fixed
 
@@ -184,6 +189,25 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   `worker starting`, so the foreground read it as a worker still thinking and
   the only way out was noticing by hand and restarting it. Such a launch now
   publishes a `failed` event with the reason.
+- A timer stays for as long as it counts. A widget Scufris opens goes about a
+  minute after the conversation moves past it, which is what makes it something
+  shown rather than something kept - but a countdown that has not run out has
+  not moved on, so a timer set for longer than the conversation took vanished
+  mid-count and the only timer worth setting was one nobody needed. A backend
+  can now say it is still working, and the panel stays while it does.
+- A clipboard that refuses no longer looks like it worked. Copying is what the
+  pill offers for a transcript whose outcome nobody knows, and the page threw
+  the refusal away: a person told the words were safe closed the pill and pasted
+  something else. The refusal is said beside the words.
+- A service that has stopped trying says how to start it again, instead of
+  leaving the reader to know that the tray has had "Restart backend" all along.
+- Scufris says when worker panes from a previous foreground session are still
+  running. It could not see them and cannot stop them, so it names the tmux
+  session each one can be reached by.
+- A briefing asked for by hand is held to the same numbers as the one its timer
+  starts. A profile's deadlines and width reached only the run the timer
+  started, so a nightly that allows a source eight hours was silently cut at
+  fifteen minutes and the work was lost.
 
 ## [2.3.0] - 2026-09-08
 

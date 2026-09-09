@@ -1,6 +1,6 @@
 # Never lose an answer to a surface that left
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 85
 - TAGS: service,bug
 

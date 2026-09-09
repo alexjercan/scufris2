@@ -1,6 +1,6 @@
 # Review Scufris master for what blocks or slows its use
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 80
 - TAGS: review
 
@@ -124,18 +124,45 @@ Minor, none of them blocking:
 
 ### For Alex
 
-Architectural, held back per the rules above:
+Six architectural questions were put to him on 2026-09-09. He asked for 3, 4
+and 6, and asked for 1, 2 and 5 to be explained and decided. All six are now
+settled and none of them needed a major version.
 
-1. Restore the `refusal` module the contracts still describe, or delete the
-   contract text.
-2. A control verb to restart a service parked at `MAX_FAILURES`. Today only a
-   `systemctl restart` clears it.
-3. Give `Surface::copy` a `Result` through the port and the page, so a copy
-   that fails is not silently successful.
-4. Call `orphans` at session start, and give `recover` a way to adopt a
-   previous session's jobs.
-5. Where per-profile briefing bounds live, so a hand-run briefing gets the
-   profile's numbers: a new generated file, or a user-config schema change.
-6. Whether a widget whose backend reports `running: true` - a timer - should
-   be exempt from the exhibit sweep. This changes what "exhibit" means and
-   would let the model set a real timer.
+| #   | Question                                                 | Answer                                                                       | Commit    |
+| --- | -------------------------------------------------------- | ---------------------------------------------------------------------------- | --------- |
+| 1   | Restore the `refusal` module, or delete the contract?    | Restore. 21 literals over two languages, compared by literal at the far end. | `474a7fa` |
+| 2   | A control verb to restart a service at `MAX_FAILURES`?   | No. The tray already restarts it; the detail now says so.                    | `474a7fa` |
+| 3   | Give `Surface::copy` a `Result`?                         | Yes, and the page half besides, which is where the refusal actually is.      | `474a7fa` |
+| 4   | Call `orphans` at session start; let `recover` adopt?    | Call it and say what it found. No adoption.                                  | `936c7ce` |
+| 5   | Where per-profile briefing bounds live?                  | A generated file Home Manager writes, under the environment.                 | `ad6b97f` |
+| 6   | Exempt a widget whose backend is working from the sweep? | Yes, through one reserved reading key, capped at four hours.                 | `96fb4df` |
+
+What each answer turned on:
+
+- **1** was never architectural. The codes were literals at 21 send and match
+  sites across Rust and TypeScript, and `attachments.ts` compared one by
+  literal, so a rename on the Rust side would have stopped matching and said
+  nothing. Now one module, one mirror, one test that reads both.
+- **2** would have cost a `SERVICE_VERSION` bump: the control socket shares
+  version 6 with the agent and surface channels, so a new verb moves the
+  desktop, the phone and `scufris-ctl` in lockstep, for a state that only
+  happens when the agent has crashed three times inside ten seconds each - when
+  something is broken enough that it must be fixed before a restart is worth
+  anything. The tray's "Restart backend" already runs
+  `systemctl --user restart scufris-service`. Both terminal states now say so.
+- **4** kept the report and dropped the adoption. Adoption means taking
+  ownership of jobs whose capabilities belong to another session, which is the
+  thing the capability model is for. `orphans` now carries the tmux session
+  name, which is what a person can act on.
+- **5** turned out to have a second half: the `scufris_briefing_run` tool held
+  the helper to its own 30-minute timeout, so raising the helper's deadline
+  alone would have moved the kill from one place to another. The tool reads the
+  same generated file.
+- **6** needed a bound. A reading may carry `_hold`, the one key in a reading
+  that is the companion's rather than the widget's; a hold nothing ends is
+  capped at four hours, so a backend that says "not yet" and dies cannot own a
+  slot for the day.
+
+Also fixed on the way: `b32dd6e` removed the service unit's `RuntimeDirectory`
+and left `nix/checks/service.nix` asserting it, which `nix flake check` catches
+and nothing else does.

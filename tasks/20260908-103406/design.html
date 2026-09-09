@@ -1,0 +1,1253 @@
+<title>Receipts, Offers and Job Rows</title>
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap"
+/>
+<style>
+  :root {
+    /* The window's own palette, from surfaces/desktop/ui/hud.css. The page is
+       set in the colours of the thing it specifies, so a mockup is the real
+       object rather than a picture of one. Deliberately single-theme: the
+       subject is an undecorated near-black X11 window. */
+    --hud-bg: #101010;
+    --hud-line: #33302e;
+    --fg: #d8d8e2;
+    --fg-strong: #f4f4ff;
+    --muted: #6c7772;
+    --dim: #4a514d;
+    --quartz: #95a99f;
+    --wisteria: #9e95c7;
+    --niagara: #96a6c8;
+    --yellow: #ffdd33;
+    --red: #f43841;
+
+    /* The page's own ground: a shade under the window's, so a 760px frame
+       laid on it reads as an object with edges. */
+    --page: #0b0b0c;
+    --rule: #26241f;
+    --raise: #131315;
+
+    --mono:
+      "JetBrains Mono", Iosevka, ui-monospace, "SFMono-Regular", monospace;
+    --text: Spectral, "Iowan Old Style", Georgia, serif;
+    --measure: 68ch;
+    --frame: 760px;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--page);
+    color: var(--fg);
+    font-family: var(--text);
+    font-size: 16.5px;
+    line-height: 1.66;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #doc {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 28px 120px;
+  }
+
+  /* ---------- the page's own crown ---------- */
+
+  .crown {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 14px 0 12px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--page);
+  }
+
+  .mark,
+  .eyebrow,
+  #reset,
+  .who,
+  .notice {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .mark {
+    color: var(--quartz);
+  }
+
+  #reset {
+    padding: 5px 11px;
+    border: 1px solid var(--rule);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  #reset:hover {
+    border-color: var(--yellow);
+    color: var(--yellow);
+  }
+
+  #reset:focus-visible {
+    outline: 1px solid var(--yellow);
+    outline-offset: 1px;
+  }
+
+  /* ---------- prose ---------- */
+
+  h1 {
+    max-width: 20ch;
+    margin: 52px 0 0;
+    font-size: clamp(34px, 5.4vw, 46px);
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.015em;
+    color: var(--fg-strong);
+    text-wrap: balance;
+  }
+
+  .lede {
+    max-width: var(--measure);
+    margin: 18px 0 0;
+    font-size: 19px;
+    font-weight: 300;
+    line-height: 1.58;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--fg-strong);
+    text-wrap: balance;
+  }
+
+  h3 {
+    margin: 34px 0 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--fg-strong);
+  }
+
+  section {
+    margin-top: 58px;
+  }
+
+  .eyebrow {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    margin-bottom: 14px;
+    color: var(--wisteria);
+  }
+
+  .eyebrow::after {
+    content: "";
+    flex: 1 1 auto;
+    border-top: 1px solid var(--rule);
+  }
+
+  p,
+  ul,
+  ol {
+    max-width: var(--measure);
+  }
+
+  p {
+    margin: 16px 0 0;
+  }
+
+  ul,
+  ol {
+    margin: 16px 0 0;
+    padding-left: 22px;
+  }
+
+  li {
+    margin-top: 8px;
+  }
+
+  li::marker {
+    color: var(--muted);
+  }
+
+  strong {
+    font-weight: 600;
+    color: var(--fg-strong);
+  }
+
+  em {
+    font-style: italic;
+    color: var(--fg-strong);
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.84em;
+    color: var(--yellow);
+  }
+
+  .path {
+    color: var(--quartz);
+  }
+
+  /* ---------- code blocks ---------- */
+
+  pre {
+    max-width: 100%;
+    margin: 20px 0 0;
+    padding: 14px 16px;
+    overflow-x: auto;
+    border-left: 2px solid var(--quartz);
+    background: var(--raise);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--fg);
+  }
+
+  pre code {
+    font-size: inherit;
+    color: inherit;
+  }
+
+  pre b {
+    font-weight: 700;
+    color: var(--yellow);
+  }
+
+  pre i {
+    font-style: normal;
+    color: var(--muted);
+  }
+
+  /* ---------- the HUD mockup ---------- */
+
+  .stage {
+    margin-top: 26px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+  }
+
+  .hud {
+    display: flex;
+    flex-direction: column;
+    width: var(--frame);
+    min-width: var(--frame);
+    border: 1px solid var(--quartz);
+    background: var(--hud-bg);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--fg);
+    user-select: none;
+  }
+
+  .hud[data-size="tall"] {
+    height: 400px;
+  }
+
+  .hud[data-size="short"] {
+    height: 250px;
+  }
+
+  .hud-crown {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 8px 13px;
+    border-bottom: 1px solid var(--hud-line);
+  }
+
+  .hud-crown .mark {
+    font-size: 10px;
+  }
+
+  .notice {
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+  }
+
+  .stream {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    justify-content: flex-end;
+    min-height: 0;
+    padding: 13px;
+    overflow: hidden;
+  }
+
+  .line {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    column-gap: 13px;
+    row-gap: 7px;
+    align-items: baseline;
+    padding-top: 12px;
+  }
+
+  .who {
+    grid-column: 1;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-align: right;
+    color: var(--muted);
+  }
+
+  .line[data-speaker="you"] .who {
+    color: var(--quartz);
+  }
+
+  .line[data-speaker="scufris"] .who {
+    color: var(--wisteria);
+  }
+
+  .what {
+    grid-column: 2;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .line[data-speaker="scufris"] .what {
+    color: var(--fg-strong);
+  }
+
+  .jid {
+    color: var(--quartz);
+  }
+
+  /* ---------- badges ---------- */
+
+  /* A receipt is inert evidence and an offer runs something, so they share a
+     family and never a silhouette: a receipt is flat and bracketed, an offer
+     carries the caret the typing line uses and lights on hover. */
+  .badge {
+    display: inline-flex;
+    gap: 6px;
+    align-items: baseline;
+    padding: 0 5px;
+    border: 1px solid currentColor;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+
+  .badge .k {
+    opacity: 0.72;
+  }
+
+  .badge[data-state="measured"] {
+    color: var(--quartz);
+  }
+
+  .badge[data-state="refuted"] {
+    color: var(--red);
+  }
+
+  .badge[data-state="claimed"] {
+    color: var(--yellow);
+  }
+
+  .badge[data-state="unknown"] {
+    color: var(--muted);
+  }
+
+  .offer {
+    display: inline-flex;
+    gap: 6px;
+    align-items: baseline;
+    padding: 0 6px 0 5px;
+    border: 1px solid var(--niagara);
+    background: rgba(150, 166, 200, 0.09);
+    color: var(--niagara);
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .offer::before {
+    content: ">";
+    color: var(--quartz);
+  }
+
+  .offer:hover {
+    border-color: var(--yellow);
+    color: var(--yellow);
+  }
+
+  .offer:focus-visible {
+    outline: 1px solid var(--yellow);
+    outline-offset: 1px;
+  }
+
+  /* Taken. The badge stays where it was, because it is the only mark in the
+     window that the reply below it answers. */
+  .offer[data-spent] {
+    border-color: var(--dim);
+    background: none;
+    color: var(--dim);
+    cursor: default;
+  }
+
+  .offer[data-spent]::before {
+    content: "-";
+    color: var(--dim);
+  }
+
+  .offer[data-spent]:hover {
+    border-color: var(--dim);
+    color: var(--dim);
+  }
+
+  /* The strip: one wrapping rank of badges in the body column, exactly where
+     .message-attachments already sits, led by the job it cites. */
+  .strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: baseline;
+    grid-column: 2;
+  }
+
+  .strip .cite {
+    padding-right: 2px;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: var(--quartz);
+  }
+
+  /* ---------- the job list ---------- */
+
+  .jobs {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    column-gap: 13px;
+    padding-top: 13px;
+  }
+
+  .jobs > .who {
+    align-self: start;
+    padding-top: 3px;
+  }
+
+  .rows {
+    display: flex;
+    flex-direction: column;
+    grid-column: 2;
+    border-top: 1px solid var(--hud-line);
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 8.1em 5em 3.4em 2.4em 1fr 3.6em;
+    gap: 10px;
+    align-items: baseline;
+    padding: 4px 0;
+    font-size: 11.5px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .row + .row {
+    border-top: 1px solid #1d1c1b;
+  }
+
+  .row .id {
+    color: var(--quartz);
+  }
+
+  .row .st {
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .row[data-state="working"] .st {
+    color: var(--wisteria);
+  }
+
+  .row[data-state="blocked"] .st {
+    color: var(--yellow);
+  }
+
+  .row[data-state="failed"] .st {
+    color: var(--red);
+  }
+
+  .row[data-state="done"] .st {
+    color: var(--quartz);
+  }
+
+  .row .said {
+    overflow: hidden;
+    color: var(--fg);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .row .said::before {
+    content: "says ";
+    color: var(--muted);
+  }
+
+  /* One control per row, and which one it is says what the row is. A live job
+     can only be stopped; a finished one can only be filed. */
+  .row .do {
+    justify-self: end;
+    padding: 0 3px;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--dim);
+    cursor: pointer;
+  }
+
+  .row .do:focus-visible {
+    outline: 1px solid var(--yellow);
+    outline-offset: 1px;
+  }
+
+  .row .do[data-act="cancel"]:hover,
+  .row .do[data-armed] {
+    color: var(--red);
+  }
+
+  .row .do[data-act="archive"]:hover {
+    color: var(--quartz);
+  }
+
+  .sweep {
+    padding: 5px 0 0;
+    border-top: 1px solid var(--hud-line);
+    background: none;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-align: right;
+    color: var(--dim);
+    cursor: pointer;
+  }
+
+  .sweep:hover {
+    color: var(--quartz);
+  }
+
+  .sweep:focus-visible {
+    outline: 1px solid var(--yellow);
+    outline-offset: 1px;
+  }
+
+  .ask {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 10px;
+    align-items: baseline;
+    padding: 9px 13px 11px;
+    border-top: 1px solid var(--hud-line);
+  }
+
+  .ask .caret {
+    color: var(--quartz);
+  }
+
+  .ask .cursor {
+    display: inline-block;
+    width: 7px;
+    height: 15px;
+    background: var(--yellow);
+    translate: 0 2px;
+    animation: blink 1.1s steps(1) infinite;
+  }
+
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ask .cursor {
+      animation: none;
+    }
+  }
+
+  .caption {
+    max-width: var(--measure);
+    margin: 12px 0 0;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.62;
+    color: var(--muted);
+  }
+
+  .caption b {
+    font-weight: 500;
+    color: var(--quartz);
+  }
+
+  /* ---------- other blocks ---------- */
+
+  .decide {
+    margin-top: 26px;
+    padding: 20px 22px;
+    border: 1px solid var(--wisteria);
+    background: var(--raise);
+  }
+
+  .decide h3 {
+    margin-top: 0;
+  }
+
+  .decide ol {
+    max-width: none;
+  }
+
+  .struck {
+    margin-top: 22px;
+    padding: 16px 20px;
+    border-left: 2px solid var(--rule);
+    color: var(--muted);
+  }
+
+  .struck h3 {
+    margin-top: 0;
+    color: var(--muted);
+    font-size: 16px;
+  }
+
+  .struck h3 + p {
+    margin-top: 8px;
+  }
+
+  .struck p {
+    max-width: none;
+    font-size: 15px;
+  }
+
+  footer {
+    max-width: var(--measure);
+    margin-top: 72px;
+    padding-top: 18px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+
+  @media (max-width: 620px) {
+    #doc {
+      padding: 0 18px 90px;
+    }
+  }
+</style>
+
+<div id="doc">
+  <header class="crown">
+    <span class="mark">scufris &middot; hud &middot; protocol 7</span>
+    <button id="reset" type="button">reset mockups</button>
+  </header>
+
+  <h1>Receipts, offers and job rows</h1>
+  <p class="lede">
+    Measured facts as badges under the message, cited by job. Offers as badges
+    that run. Jobs as a list at the foot of the chat that holds every row until
+    you file it. Settled and ready to build; the mockups below work, so take an
+    offer, stop a job, clear the list.
+  </p>
+
+  <section>
+    <div class="eyebrow">settled</div>
+    <h2>Decided</h2>
+    <ul>
+      <li>
+        <strong>Badges go at the foot of the message, grouped by job.</strong>
+        One wrapping rank per job, led by that job's id. The id does the
+        binding, so the prose never has to be parsed and never has to be broken.
+      </li>
+      <li>
+        <strong>An offer is a control.</strong> Click it and it runs. It sends
+        <em>for job &lt;id&gt; do &lt;thing&gt;</em> behind the scenes and puts
+        no user line in the chat.
+      </li>
+      <li>
+        <strong>A job holds its row until it is filed.</strong> Finishing does
+        not remove it. A live row can be stopped; a finished row can be
+        archived.
+      </li>
+      <li>
+        <strong>The job list scrolls away.</strong> It is the last item in the
+        conversation flow, not a sticky floor.
+      </li>
+      <li>
+        <strong>The tray keeps its one aggregate word</strong>, derived on the
+        host from the rows rather than sent as its own field.
+      </li>
+      <li>
+        <strong>Cancel arms before it fires.</strong> The mistake costs an hour
+        of an agent's work and the guard costs a click.
+      </li>
+      <li>
+        <strong>Live rows never drop.</strong> At the cap of 8 the oldest
+        terminal rows fall off the top. They are still in
+        <code>scufris-jobs</code>.
+      </li>
+      <li>
+        <strong>Spent is recorded with the conversation entry</strong>, so a
+        reconnect cannot re-arm a button for finished work. The one store change
+        in this design.
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="eyebrow">the message</div>
+    <h2>Two jobs, cited separately</h2>
+    <p>
+      The prose runs whole and the evidence sits under it, one rank per job. The
+      prose here is what Scufris would really write: literal plain text, no
+      Markdown, because that is all <code>scufris_final_response</code> accepts
+      (<span class="path"><code>response.ts:141</code></span
+      >).
+    </p>
+
+    <div class="stage">
+      <div class="hud" data-size="tall">
+        <div class="hud-crown">
+          <span class="mark">scufris</span>
+          <span class="notice"
+            >enter sends &middot; + attaches &middot; esc closes</span
+          >
+        </div>
+        <div class="stream">
+          <div class="line" data-speaker="you">
+            <span class="who">you</span>
+            <span class="what">how did the two jobs go</span>
+          </div>
+          <div class="line" data-speaker="scufris">
+            <span class="who">scufris</span>
+            <span class="what"
+              >Job <span class="jid">750a4de8a80d</span> landed
+              briefing-markdown on master as 75919d8. Job
+              <span class="jid">01ccbac98b97</span> finished the nightly review
+              and says the suite passed.</span
+            >
+            <span class="strip">
+              <span class="cite">750a4de8a80d</span>
+              <span class="badge" data-state="measured"
+                ><span class="k">landed</span>yes</span
+              >
+              <span class="badge" data-state="refuted"
+                ><span class="k">pushed</span>no</span
+              >
+              <button class="offer" type="button">push master</button>
+            </span>
+            <span class="strip">
+              <span class="cite">01ccbac98b97</span>
+              <span class="badge" data-state="claimed"
+                ><span class="k">tests</span>claimed, not verified</span
+              >
+              <span class="badge" data-state="unknown"
+                ><span class="k">release</span>not measured</span
+              >
+              <button class="offer" type="button">re-run the checks</button>
+            </span>
+          </div>
+          <div class="jobs">
+            <span class="who">jobs</span>
+            <div class="rows">
+              <div class="row" data-state="working">
+                <span class="id">3f81c204b1e9</span><span>scufris2</span
+                ><span class="st">work</span><span>4m</span
+                ><span class="said">reviewing G1, three lanes out</span
+                ><button class="do" type="button" data-act="cancel">x</button>
+              </div>
+              <div class="row" data-state="blocked">
+                <span class="id">9ad0117e5c22</span><span>nova</span
+                ><span class="st">block</span><span>2h</span
+                ><span class="said">needs the display slot</span
+                ><button class="do" type="button" data-act="cancel">x</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="ask">
+          <span class="caret">&gt;</span><span class="cursor"></span>
+        </div>
+      </div>
+    </div>
+
+    <p class="caption">
+      The citation label is the full 12-character job id, in quartz, sitting
+      where a gutter label sits. It is not decoration: it is the handle you
+      already use to talk about the job.
+    </p>
+
+    <h3>One job carries a label too</h3>
+    <p>
+      No special case. The label costs one token and buys a rule with no
+      exceptions, and on a single-job message it is still the thing you would
+      quote back.
+    </p>
+
+    <div class="stage">
+      <div class="hud" data-size="short">
+        <div class="hud-crown">
+          <span class="mark">scufris</span>
+          <span class="notice"
+            >enter sends &middot; + attaches &middot; esc closes</span
+          >
+        </div>
+        <div class="stream">
+          <div class="line" data-speaker="you">
+            <span class="who">you</span>
+            <span class="what">land briefing-markdown on master</span>
+          </div>
+          <div class="line" data-speaker="scufris">
+            <span class="who">scufris</span>
+            <span class="what"
+              >Landed it as 75919d8. The worker says it ran the suite; nothing
+              measured that.</span
+            >
+            <span class="strip">
+              <span class="cite">750a4de8a80d</span>
+              <span class="badge" data-state="measured"
+                ><span class="k">landed</span>yes</span
+              >
+              <span class="badge" data-state="refuted"
+                ><span class="k">pushed</span>no</span
+              >
+              <span class="badge" data-state="claimed"
+                ><span class="k">tests</span>claimed, not verified</span
+              >
+              <button class="offer" type="button">push master</button>
+            </span>
+          </div>
+        </div>
+        <div class="ask">
+          <span class="caret">&gt;</span><span class="cursor"></span>
+        </div>
+      </div>
+    </div>
+    <p class="caption">
+      And the prose gets shorter, because the id no longer has to be said twice.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">offers</div>
+    <h2>What a click does</h2>
+    <p>
+      The badge carries a stored prompt the model wrote. Clicking submits
+      <code>for job 750a4de8a80d: push master</code> as a turn, and the surface
+      never writes that string: the extension composed it when it built the
+      offer, so the button ships an id and nothing else.
+    </p>
+    <p>
+      No user line appears. What appears is the answer, and above it the badge
+      you pressed, now spent. That mark is doing real work: it is the only thing
+      in the window that says what the reply is replying to.
+      <strong>Try it.</strong>
+    </p>
+
+    <div class="stage">
+      <div class="hud" data-size="short">
+        <div class="hud-crown">
+          <span class="mark">scufris</span>
+          <span class="notice"
+            >enter sends &middot; + attaches &middot; esc closes</span
+          >
+        </div>
+        <div class="stream">
+          <div class="line" data-speaker="scufris">
+            <span class="who">scufris</span>
+            <span class="what"
+              >Landed it as 75919d8, and it is not on the remote yet.</span
+            >
+            <span class="strip">
+              <span class="cite">750a4de8a80d</span>
+              <span class="badge" data-state="measured"
+                ><span class="k">landed</span>yes</span
+              >
+              <span class="badge" data-state="refuted"
+                ><span class="k">pushed</span>no</span
+              >
+              <button
+                class="offer"
+                type="button"
+                data-reply="Pushed. master is at 75919d8 on origin."
+              >
+                push master
+              </button>
+            </span>
+          </div>
+        </div>
+        <div class="ask">
+          <span class="caret">&gt;</span><span class="cursor"></span>
+        </div>
+      </div>
+    </div>
+    <p class="caption">
+      Spent is permanent and recorded against the offer's id, so a reconnect
+      does not hand back a live button for work already done. That is the one
+      thing here the conversation store does not hold today.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">jobs</div>
+    <h2>The row outlives the job</h2>
+    <p>
+      A finished job keeps its row and its last words, so an overnight run is
+      still there in the morning. Filing it is the acknowledgement, and it is
+      what clears it.
+    </p>
+    <p>
+      One control per row, and which control it is tells you the state before
+      you read it. A live job can only be stopped, so it shows a red
+      <code>x</code>. A finished one can only be filed, so it shows
+      <code>clear</code>. <strong>Both work below.</strong>
+    </p>
+
+    <div class="stage">
+      <div class="hud" data-size="tall">
+        <div class="hud-crown">
+          <span class="mark">scufris</span>
+          <span class="notice"
+            >enter sends &middot; + attaches &middot; esc closes</span
+          >
+        </div>
+        <div class="stream">
+          <div class="line" data-speaker="scufris">
+            <span class="who">scufris</span>
+            <span class="what"
+              >The night finished. Two of the four groups it opened are still
+              running.</span
+            >
+          </div>
+          <div class="jobs">
+            <span class="who">jobs</span>
+            <div class="rows">
+              <div class="row" data-state="done">
+                <span class="id">01ccbac98b97</span><span>scufris2</span
+                ><span class="st">done</span><span>7h</span
+                ><span class="said">reviewed 9 commits, 3 findings</span
+                ><button class="do" type="button" data-act="archive">
+                  clear
+                </button>
+              </div>
+              <div class="row" data-state="failed">
+                <span class="id">16f0eceb1bb9</span><span>nova</span
+                ><span class="st">fail</span><span>6h</span
+                ><span class="said">the harness exited 1</span
+                ><button class="do" type="button" data-act="archive">
+                  clear
+                </button>
+              </div>
+              <div class="row" data-state="working">
+                <span class="id">3f81c204b1e9</span><span>scufris2</span
+                ><span class="st">work</span><span>4m</span
+                ><span class="said">reviewing G1, three lanes out</span
+                ><button class="do" type="button" data-act="cancel">x</button>
+              </div>
+              <div class="row" data-state="blocked">
+                <span class="id">9ad0117e5c22</span><span>nova</span
+                ><span class="st">block</span><span>2h</span
+                ><span class="said">needs the display slot</span
+                ><button class="do" type="button" data-act="cancel">x</button>
+              </div>
+              <button class="sweep" type="button">clear the 2 finished</button>
+            </div>
+          </div>
+        </div>
+        <div class="ask">
+          <span class="caret">&gt;</span><span class="cursor"></span>
+        </div>
+      </div>
+    </div>
+    <p class="caption">
+      <b>x</b> arms before it fires: one click turns it into <b>sure?</b> for
+      three seconds. Stopping the wrong job costs an hour of an agent's work,
+      and the two-step costs a click. <b>clear the N finished</b> appears only
+      when two or more rows are terminal.
+    </p>
+
+    <h3>Which makes the tray honest</h3>
+    <p>
+      The aggregate word is derived from the rows, and a failed row holds. So
+      the tray stays red after a job fails at 03:00 and goes quiet when you file
+      it, rather than when the process happens to exit. Acknowledgement, not
+      timing.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">protocol</div>
+    <h2>What version 7 carries</h2>
+    <p>
+      <code>SERVICE_VERSION</code> is 6, and <code>read_exact</code> at
+      <span class="path"><code>shared/control/src/service.rs:422</code></span>
+      rejects any other version outright &mdash; no negotiation, no ignoring
+      unknown fields across versions. Desktop, phone (<span class="path"
+        ><code>ios/Sources/Protocol.swift:3</code></span
+      >) and <code>scufris-ctl</code> move together, and that cost is the same
+      for one field or four.
+    </p>
+    <pre><code>agent.response
+  text, details?, widgets?, attachments?
+<b>+ receipts?: Citation[]</b>       <i>// at most 4, one per job</i>
+
+<b>Citation</b> { job_id: string,
+             badges: Receipt[],   <i>// at most 6</i>
+             offers: Offer[] }    <i>// at most 2</i>
+
+<b>Receipt</b>  { label, value,
+             state: "measured" | "refuted" | "claimed" | "unknown" }
+<b>Offer</b>    { id, label }          <i>// the prompt stays host-side</i>
+
+<b>agent.jobs</b>                    <i>// replaces agent.state</i>
+  jobs: JobRow[]              <i>// at most 8, replayed on connect</i>
+
+<b>JobRow</b>   { id, project, since, summary,
+             state: "working" | "blocked" | "done" | "failed" }
+
+<b>job.command</b>                   <i>// surface -> host -> extension</i>
+  { id, action: "cancel" | "archive" }
+<b>offer.take</b>
+  { id }                      <i>// the host submits the stored prompt</i></code></pre>
+    <p>
+      Offers sit inside the citation because every offer follows from a receipt,
+      and the strip is where they are drawn. An offer with no job has no place
+      to go, which is a constraint worth having.
+    </p>
+    <p>
+      <code>agent.state</code> goes. Today every surface gets one aggregate word
+      &mdash; <code>failed</code>, <code>blocked</code>,
+      <code>clear</code> &mdash; and one detail string (<span class="path"
+        ><code>service/index.ts:47-55</code></span
+      >). The tray still wants that word, so the host folds the rows down to it.
+      One source, two readings.
+    </p>
+
+    <h3>No model writes a badge</h3>
+    <p>
+      The rule the whole thing rests on. The extension builds every
+      <code>Receipt</code> from the helper's own <code>receipt.facts</code>,
+      <code>receipt.claims</code> and <code>receipt.unavailable</code>, exactly
+      as <code>receipt_sentences</code> does at
+      <span class="path"><code>tools/jobs/scufris-jobs:3467</code></span
+      >. The four states are that vocabulary and not a second one:
+    </p>
+    <p class="strip" style="margin-top: 16px">
+      <span class="badge" data-state="measured"
+        ><span class="k">landed</span>yes</span
+      >
+      <span class="badge" data-state="refuted"
+        ><span class="k">pushed</span>no</span
+      >
+      <span class="badge" data-state="claimed"
+        ><span class="k">tests</span>claimed, not verified</span
+      >
+      <span class="badge" data-state="unknown"
+        ><span class="k">release</span>not measured</span
+      >
+    </p>
+    <p class="caption">
+      measured = the fact is true &middot; refuted = measured and false &middot;
+      claimed = the worker said it and no fact backs it &middot; unknown = it is
+      in <code>unavailable</code> with a reason, and is never drawn as a no.
+    </p>
+    <p>
+      The offer is the exception, and the only one: the model chooses it and
+      writes its prompt. That is why it is the badge that looks like a control.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">the phone</div>
+    <h2>What iOS does</h2>
+    <p>
+      The same shapes SwiftUI already has. A strip becomes a wrapping run of
+      capsules under the bubble, one run per job, with the same four state
+      colours. The job list becomes a section above the composer, and the row
+      control becomes a swipe: swipe a live row to stop it, a finished one to
+      file it, which is the gesture the platform already teaches. The
+      <code>blocked</code> notice at
+      <span class="path"><code>ContentView.swift:1134</code></span>
+      goes: it was the aggregate, and the rows say the same thing with names on
+      it.
+    </p>
+  </section>
+
+  <section>
+    <div class="eyebrow">for the record</div>
+    <h2>What was dropped</h2>
+    <div class="struck">
+      <h3>Inline badges</h3>
+      <p>
+        Badges flowing inside the sentence, like a link. Kept the evidence
+        closest to the claim, but three or four marks in a paragraph is a
+        paragraph you stop reading, and a badge can land on a line break and
+        split the sentence.
+      </p>
+      <h3>Strips spliced into the prose</h3>
+      <p>
+        The message broken at the sentence that names each job, so a strip sat
+        immediately after its claim and needed no label. It bought a shorter
+        badge and cost a byte offset in the protocol, a sentence-boundary search
+        over the model's prose, a fallback for when the model did not name the
+        job, and four blocks of height for two sentences. The job id does the
+        same binding for one token.
+      </p>
+      <h3>The sticky floor</h3>
+      <p>
+        A job list pinned to the bottom of the scroller so a running job stayed
+        on screen. Cost about 46px of a 560px window permanently, and it would
+        have been the first chrome this window owns that is not a message.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">build order</div>
+    <h2>Four steps, each shippable</h2>
+    <div class="decide">
+      <ol>
+        <li>
+          <strong>Protocol 7 across the three surfaces.</strong> The version
+          bump is lockstep and pays for everything after it, so it goes first
+          and alone: the fields land, nothing draws them yet.
+        </li>
+        <li>
+          <strong>Citations on the desktop.</strong> The extension folds
+          <code>receipt.facts</code>, <code>claims</code> and
+          <code>unavailable</code> into badges; the HUD draws the strip. Read
+          only, no controls, no store change.
+        </li>
+        <li>
+          <strong>Job rows, then their controls.</strong>
+          <code>agent.jobs</code> replaces <code>agent.state</code> and the tray
+          folds the word. Rows draw first; <code>cancel</code> and
+          <code>archive</code> follow, because they need
+          <code>job.command</code> to reach the extension.
+        </li>
+        <li>
+          <strong>Offers.</strong> Last, because it is the only step that
+          touches the conversation store: the prompt kept host-side, and spent
+          recorded per offer id.
+        </li>
+      </ol>
+    </div>
+    <p class="caption">
+      Recorded in tasks/20260908-103406/DESIGN.md, with the rejected readings
+      and the protocol shape.
+    </p>
+  </section>
+
+  <footer>
+    Grounded in surfaces/desktop/ui/hud.css and hud.ts,
+    shared/control/src/service.rs, agent/extensions/scufris/service/protocol.ts
+    and index.ts, agent/extensions/scufris/response.ts and
+    workflow/orchestration.ts, and tools/jobs/scufris-jobs. Mockups are the real
+    window width, 760px. Task 20260908-103406.
+  </footer>
+</div>
+
+<script>
+  (() => {
+    const doc = document.getElementById("doc");
+    const clean = new Map();
+    for (const stage of document.querySelectorAll(".stage")) {
+      clean.set(stage, stage.innerHTML);
+    }
+
+    const sweeps = (rows) => {
+      const sweep = rows.querySelector(".sweep");
+      if (!sweep) return;
+      const filed = [...rows.querySelectorAll(".row")].filter(
+        (row) =>
+          !row.hidden &&
+          row.dataset.state !== "working" &&
+          row.dataset.state !== "blocked",
+      );
+      sweep.hidden = filed.length < 2;
+      sweep.textContent = `clear the ${filed.length} finished`;
+    };
+
+    const take = (offer) => {
+      if (offer.dataset.spent !== undefined) return;
+      offer.dataset.spent = "";
+      const reply = offer.dataset.reply;
+      if (!reply) return;
+      const stream = offer.closest(".stream");
+      const said = document.createElement("div");
+      said.className = "line";
+      said.dataset.speaker = "scufris";
+      said.innerHTML = `<span class="who">scufris</span><span class="what"></span>`;
+      said.querySelector(".what").textContent = reply;
+      stream.append(said);
+    };
+
+    const drop = (row) => {
+      const rows = row.parentElement;
+      row.hidden = true;
+      sweeps(rows);
+    };
+
+    doc.addEventListener("click", (event) => {
+      const offer = event.target.closest(".offer");
+      if (offer) return take(offer);
+
+      const sweep = event.target.closest(".sweep");
+      if (sweep) {
+        for (const row of sweep.parentElement.querySelectorAll(".row")) {
+          if (row.dataset.state === "done" || row.dataset.state === "failed")
+            row.hidden = true;
+        }
+        return sweeps(sweep.parentElement);
+      }
+
+      const control = event.target.closest(".do");
+      if (!control) return;
+      const row = control.closest(".row");
+      if (control.dataset.act === "archive") return drop(row);
+      if (control.dataset.armed !== undefined) return drop(row);
+      control.dataset.armed = "";
+      control.textContent = "sure?";
+      setTimeout(() => {
+        if (control.dataset.armed === undefined) return;
+        delete control.dataset.armed;
+        control.textContent = "x";
+      }, 3000);
+    });
+
+    document.getElementById("reset").addEventListener("click", () => {
+      for (const [stage, html] of clean) stage.innerHTML = html;
+      for (const rows of document.querySelectorAll(".rows")) sweeps(rows);
+    });
+
+    for (const rows of document.querySelectorAll(".rows")) sweeps(rows);
+  })();
+</script>

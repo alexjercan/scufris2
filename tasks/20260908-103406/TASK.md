@@ -40,25 +40,37 @@ comes after the rows, if at all.
 
 ## Direction
 
-- Add optional typed `receipts` and `offers` fields to the final response
-  and the protocol (next protocol version). `receipts` holds helper facts
-  only, bounded like `facts` in a briefing. `offers` holds an agent name
-  and a prompt. A surface that does not know a field ignores it.
-- Desktop and iOS draw receipts as a facts row under the prose, in the
-  briefing page's style, and draw an offer as one control that submits the
-  stored offer.
-- Replace the aggregate job notice with a job list frame read from durable
-  state: id, project, state, age, last verified fact, and the worker's
-  summary labeled as what it says. Replay on connect. Draw it as a row or
-  side panel in the conversation window, hidden when empty.
-- Keep the HUD minimal. No diff viewer, no transcript, no buttons beyond the
-  offer.
+Settled on 2026-09-09. `DESIGN.md` beside this file holds the decisions, the
+protocol shape, and what was rejected. In short:
+
+- Add an optional `receipts` field to the final response, grouped by job. Each
+  group draws as one wrapping rank of badges at the foot of the message, led
+  by the job id. Offers live inside the group and draw as the one control.
+- Every badge comes from the helper's receipt. Four states: `measured`,
+  `refuted`, `claimed`, `unknown`. The model writes only the offer.
+- Taking an offer sends an id. The host submits the prompt the extension
+  composed. No user line appears; the badge marks itself spent, recorded with
+  the conversation entry.
+- Replace the aggregate `agent.state` with `agent.jobs`, a list of rows read
+  from durable state and replayed on connect. A row outlives its job and holds
+  until it is filed. Live rows cancel behind an arming `x`; terminal rows
+  clear. The tray word is folded from the rows on the host.
+- The list is the last item in the conversation flow, hidden when empty. Keep
+  the HUD minimal: no diff viewer, no transcript, no control but the offer and
+  the row controls.
 
 ## Verification
 
-- Test: a final response with two receipts and one offer validates, and a
-  surface on the previous protocol version ignores the fields.
-- Test: two live jobs produce two rows on connect and zero rows after both
-  finish.
-- `cargo test` for the desktop and service, `npm run check`, one staging
-  run with a job in flight.
+- Test: a final response with two citations, four badges, and one offer
+  validates; a citation with seven badges or three offers does not.
+- Test: `offer.take` submits the stored prompt and adds no user entry, and a
+  second take of the same offer id is refused.
+- Test: two live jobs produce two rows on connect; both finishing leaves two
+  terminal rows, and archiving both leaves zero.
+- Test: the tray word stays `failed` while a failed row is unfiled.
+- `cargo test` for the desktop and service, `npm run check`, one staging run
+  with a job in flight.
+
+Protocol 6 surfaces cannot ignore the new fields: `read_exact`
+(`shared/control/src/service.rs:422`) rejects any version but its own. Desktop,
+iOS, and `scufris-ctl` ship together at version 7.

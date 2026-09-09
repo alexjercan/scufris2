@@ -23,9 +23,9 @@ flowchart TB
         Helper[jobs helper] --> Tmux[owned tmux session] --> Harness[Pi or Claude]
         Durable["prompt | report | events | workspace | transcript"]
     end
-    Desktop -->|protocol v6| Service
-    IOS -->|protocol v6| Service
-    Future -->|protocol v6| Service
+    Desktop -->|protocol v7| Service
+    IOS -->|protocol v7| Service
+    Future -->|protocol v7| Service
     Service --> Pi
     Pi --> Helper
 ```
@@ -77,7 +77,7 @@ Landing and cleanup are explicit.
 agent/extensions/scufris/   Pi lifecycle, tools, state, routing
 agent/skills/               model-facing workflow policy
 host/service/               headless conversation owner and scufris-ctl
-shared/control/             protocol v6 types, bounds, and socket paths
+shared/control/             protocol v7 types, bounds, and socket paths
 surfaces/desktop/           Linux/X11 surface, voice, windows, widgets
 surfaces/ios/               SwiftUI remote surface
 scripts/                    commands for people

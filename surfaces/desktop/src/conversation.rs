@@ -21,7 +21,8 @@
 use std::collections::VecDeque;
 
 use scufris_control::service::{
-    AttachmentDescriptor, ConversationMessage, ConversationRole, MAX_ATTACHMENTS, ScufrisState,
+    AttachmentDescriptor, ConversationMessage, ConversationRole, JobRow, MAX_ATTACHMENTS,
+    ScufrisState,
 };
 use serde::Serialize;
 
@@ -56,6 +57,12 @@ pub struct Submission {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Conversation {
     lines: VecDeque<ConversationMessage>,
+    /// Every delegated job, as the service last published it.
+    ///
+    /// Held beside the lines rather than in them: a row is not something that
+    /// was said, it is what is happening, and it is replaced whole every time
+    /// rather than appended to.
+    jobs: Vec<JobRow>,
     /// The identifier of the line the service has not answered for yet.
     sending: Option<String>,
     thinking: bool,
@@ -81,6 +88,7 @@ impl Conversation {
     pub fn new(prefix: impl Into<String>) -> Self {
         Self {
             lines: VecDeque::new(),
+            jobs: Vec::new(),
             sending: None,
             thinking: false,
             attachments: Vec::new(),
@@ -124,6 +132,46 @@ impl Conversation {
         self.lines.iter().cloned().collect()
     }
 
+    /// Every job row, in the order the service published them.
+    pub fn jobs(&self) -> Vec<JobRow> {
+        self.jobs.clone()
+    }
+
+    /// Takes the whole list of job rows, and says whether it changed.
+    ///
+    /// Whole rather than incremental for the reason the conversation replay
+    /// is: the service publishes the complete list on every change and on
+    /// connect, so merging would only be a way to disagree with it.
+    pub fn listed(&mut self, jobs: Vec<JobRow>) -> bool {
+        if self.jobs == jobs {
+            return false;
+        }
+        self.jobs = jobs;
+        true
+    }
+
+    /// Marks one offer spent wherever it is, and says whether it was open.
+    ///
+    /// The badge stays where it is. It is the only mark in the window saying
+    /// what the answer under it is answering, so removing it would leave a
+    /// reply with no antecedent.
+    pub fn offer_taken(&mut self, id: &str) -> bool {
+        let Some(offer) = self
+            .lines
+            .iter_mut()
+            .flat_map(|line| line.receipts.iter_mut())
+            .flat_map(|citation| citation.offers.iter_mut())
+            .find(|offer| offer.id == id)
+        else {
+            return false;
+        };
+        if offer.taken {
+            return false;
+        }
+        offer.taken = true;
+        true
+    }
+
     /// Forgets every line, because the ones about to arrive are all of them.
     ///
     /// The service replays its whole ring to a frontend that connects, so a
@@ -133,6 +181,7 @@ impl Conversation {
     /// the replay the two hold exactly the same lines.
     pub fn restart(&mut self) {
         self.lines.clear();
+        self.jobs.clear();
         self.thinking = false;
         self.trouble = "Loading conversation.".into();
     }
@@ -281,6 +330,7 @@ mod tests {
             details: None,
             widgets: None,
             attachments: vec![],
+            receipts: vec![],
         }
     }
 
@@ -294,6 +344,7 @@ mod tests {
             details: None,
             widgets: None,
             attachments: vec![],
+            receipts: vec![],
         });
         conversation.said(said("half past four"));
         let lines = conversation.lines();

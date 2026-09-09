@@ -60,8 +60,8 @@ use pending::{FilePendingStore, PendingStore};
 use scufris_control::{
     command::{Outcome, Verb},
     service::{
-        AttachmentDescriptor, ConversationMessage, ConversationRole, SurfaceRegistration,
-        WidgetCall,
+        AttachmentDescriptor, ConversationMessage, ConversationRole, JobAction,
+        SurfaceRegistration, WidgetCall,
     },
 };
 use speech::Speaker;
@@ -319,6 +319,14 @@ impl Backend for ServiceLink {
     fn abort(&self, id: String) -> Result<(), String> {
         ServiceLink::abort(self, id)
     }
+
+    fn job_command(&self, id: String, action: JobAction) -> Result<(), String> {
+        ServiceLink::job_command(self, id, action)
+    }
+
+    fn offer_take(&self, id: String) -> Result<(), String> {
+        ServiceLink::offer_take(self, id)
+    }
 }
 
 fn start(config: Config) -> Result<(), Box<dyn Error>> {
@@ -475,6 +483,8 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             hud_detach,
             hud_open_attachment,
             hud_open_link,
+            hud_job_command,
+            hud_offer_take,
             hud_save_attachment,
             hud_close,
             hud_toggle
@@ -674,6 +684,8 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                         observer.observe(LinkEvent::State(state, detail));
                         surfaces.assistant(observer.shown_assistant());
                     }
+                    LinkEvent::Jobs(jobs) => said.jobs(jobs),
+                    LinkEvent::OfferTaken(id) => said.offer_taken(&id),
                 },
             ));
             conversation.attach(Arc::clone(&link) as Arc<dyn Backend>);
@@ -1038,6 +1050,27 @@ fn hud_open_link(url: String) -> Result<(), String> {
     external::open(&url)
 }
 
+/// Stops or files one job row.
+///
+/// The window arms `cancel` before it fires, so what arrives here is already
+/// the second press. Stopping the wrong job costs an hour of an agent's work
+/// and the guard for that belongs where the mouse is, not on this side of an
+/// IPC hop.
+#[tauri::command]
+fn hud_job_command(
+    conversation: tauri::State<'_, Arc<Hud>>,
+    id: String,
+    action: JobAction,
+) -> Result<(), String> {
+    conversation.job_command(id, action)
+}
+
+/// Takes one offer the agent made.
+#[tauri::command]
+fn hud_offer_take(conversation: tauri::State<'_, Arc<Hud>>, id: String) -> Result<(), String> {
+    conversation.offer_take(id)
+}
+
 /// Saves one canonical attachment to a destination chosen by the person.
 #[tauri::command]
 async fn hud_save_attachment(
@@ -1243,6 +1276,7 @@ mod tests {
                 arguments: serde_json::json!({}),
             }]),
             attachments: vec![],
+            receipts: vec![],
         }
     }
 

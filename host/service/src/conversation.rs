@@ -98,6 +98,30 @@ impl ConversationHistory {
         self.persist()
     }
 
+    /// Marks one offer taken, and says whether this press was the one that
+    /// took it.
+    ///
+    /// The mark lives on the message that carries the badge, because that
+    /// message is what a reconnecting surface replays. Without it every
+    /// restart would hand back a live button for work already done.
+    ///
+    /// `Ok(false)` is an offer that was already taken, or one in a message the
+    /// ring has since dropped. Both mean the same thing to a caller: there is
+    /// nothing left to take.
+    pub fn take_offer(&mut self, id: &str) -> Result<bool, PersistError> {
+        let found = self
+            .entries
+            .iter_mut()
+            .flat_map(|entry| entry.message.receipts.iter_mut())
+            .flat_map(|citation| citation.offers.iter_mut())
+            .find(|offer| offer.id == id);
+        match found {
+            Some(offer) if !offer.taken => offer.taken = true,
+            _ => return Ok(false),
+        }
+        self.persist().map(|()| true)
+    }
+
     fn set_next_sequence(&mut self) {
         let maximum = self
             .entries
@@ -371,6 +395,7 @@ mod tests {
             } else {
                 Vec::new()
             },
+            receipts: Vec::new(),
         }
     }
 

@@ -3,17 +3,23 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { OFFER_TAKE_EVENT, type OfferTakeSignal } from "../shared/citations.ts";
 import {
-  ATTENTION_NOTICE_EVENT,
-  type AttentionNoticeSignal,
-} from "../shared/attention-notice.ts";
+  JOB_COMMAND_EVENT,
+  JOB_ROWS_EVENT,
+  type JobCommandSignal,
+} from "../shared/job-rows.ts";
 import {
   AGENT_RESPONSE_EVENT,
   AgentClient,
   type AtomicResponse,
 } from "./client.ts";
 import { registerAttachmentTool } from "./attachments.ts";
-import { AGENT_FILE_NAME, SOCKET_DIRECTORY_NAME } from "./protocol.ts";
+import {
+  AGENT_FILE_NAME,
+  SOCKET_DIRECTORY_NAME,
+  type JobRow,
+} from "./protocol.ts";
 
 export function resolveSocketPath(
   environment: NodeJS.ProcessEnv = process.env,
@@ -34,7 +40,10 @@ export default function service(pi: ExtensionAPI): void {
   if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
   registerAttachmentTool(pi);
   const socketPath = resolveSocketPath();
-  const notices = new Map<string, AttentionNoticeSignal>();
+  // The host keeps nothing for an agent that went away, and rows published
+  // while the socket was down were dropped. Holding the last list is what
+  // lets a reconnect say again that a job is still blocked.
+  let rows: JobRow[] = [];
   let context: ExtensionContext | undefined;
   let client: AgentClient | undefined;
 
@@ -43,37 +52,12 @@ export default function service(pi: ExtensionAPI): void {
     else if (level === "error") console.error(`scufris service: ${message}`);
   };
 
-  const publishState = () => {
-    const failed = [...notices.values()].find(
-      (notice) => notice.state === "error",
-    );
-    const blocked = [...notices.values()].find(
-      (notice) => notice.state === "attention",
-    );
-    const selected = failed ?? blocked;
-    client?.state(
-      failed ? "failed" : blocked ? "blocked" : "clear",
-      selected?.detail ?? "",
-    );
-  };
+  const publishRows = () => client?.jobs(rows);
 
-  pi.events.on(ATTENTION_NOTICE_EVENT, (value: unknown) => {
-    const signal = value as Partial<AttentionNoticeSignal> | undefined;
-    if (
-      typeof signal?.id !== "string" ||
-      (signal.state !== "attention" &&
-        signal.state !== "error" &&
-        signal.state !== "clear")
-    )
-      return;
-    if (signal.state === "clear") notices.delete(signal.id);
-    else
-      notices.set(signal.id, {
-        id: signal.id,
-        state: signal.state,
-        detail: typeof signal.detail === "string" ? signal.detail : "",
-      });
-    publishState();
+  pi.events.on(JOB_ROWS_EVENT, (value: unknown) => {
+    if (!Array.isArray(value)) return;
+    rows = value as JobRow[];
+    publishRows();
   });
 
   pi.events.on(AGENT_RESPONSE_EVENT, (value: unknown) => {
@@ -90,8 +74,18 @@ export default function service(pi: ExtensionAPI): void {
     client = new AgentClient({
       socketPath,
       busy: () => context?.isIdle() === false,
-      connected: publishState,
+      connected: publishRows,
       abort: () => context?.abort(),
+      // Both verbs are relayed, never acted on here. This module owns the
+      // socket; orchestration owns the jobs and the response tool owns the
+      // words behind an offer.
+      jobCommand: (id, action) =>
+        pi.events.emit(JOB_COMMAND_EVENT, {
+          id,
+          action,
+        } satisfies JobCommandSignal),
+      offerTake: (id) =>
+        pi.events.emit(OFFER_TAKE_EVENT, { id } satisfies OfferTakeSignal),
       sendUserMessage: (message, busy) => {
         if (busy) pi.sendUserMessage(message, { deliverAs: "steer" });
         else pi.sendUserMessage(message);
@@ -114,6 +108,6 @@ export default function service(pi: ExtensionAPI): void {
     client?.stop();
     client = undefined;
     context = undefined;
-    notices.clear();
+    rows = [];
   });
 }

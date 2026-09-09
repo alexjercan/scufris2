@@ -8,9 +8,12 @@ import test from "node:test";
 import {
   decodeAgentResponse,
   encodeAgentRequest,
-  MAX_DETAIL_BYTES,
+  jobSummary,
+  MAX_BADGE_BYTES,
+  MAX_DETAILS_BYTES,
+  MAX_JOB_ROWS,
+  MAX_JOB_SUMMARY_BYTES,
   REFUSAL,
-  stateDetail,
   surfacePrompt,
   takeLines,
 } from "../agent/extensions/scufris/service/protocol.ts";
@@ -34,7 +37,7 @@ test("the encoder holds the host's content rules so a violation is not a teardow
   // costs the answer in flight and says nothing. These have to match.
   const response = (details: string) =>
     encodeAgentRequest({
-      v: 6,
+      v: 7,
       type: "agent.response",
       text: "Done.",
       details,
@@ -42,60 +45,171 @@ test("the encoder holds the host's content rules so a violation is not a teardow
   assert.throws(() => response("bad\rline"), /details is invalid/);
   assert.throws(() => response("bad\0line"), /details is invalid/);
   assert.throws(() => response("   "), /details is invalid/);
+  assert.throws(() => response("x".repeat(MAX_DETAILS_BYTES + 1)), /invalid/);
   assert.throws(
     () =>
       encodeAgentRequest({
-        v: 6,
+        v: 7,
         type: "agent.response",
         text: "one\rtwo",
       }),
     /text is invalid/,
   );
-  // A state detail was never validated at all, and one carriage return from a
+  // A row summary was never validated at all, and one carriage return from a
   // worker's captured output was enough to close the channel.
-  const state = (detail: string) =>
+  const listed = (summary: string) =>
     encodeAgentRequest({
-      v: 6,
-      type: "agent.state",
-      state: "failed",
-      detail,
+      v: 7,
+      type: "agent.jobs",
+      jobs: [
+        {
+          id: "01ccbac98b97",
+          state: "failed",
+          since: 1_757_000_000,
+          summary,
+        },
+      ],
     });
-  assert.throws(() => state("job\rfailed"), /detail is invalid/);
-  assert.throws(() => state("x".repeat(MAX_DETAIL_BYTES + 1)), /invalid/);
-  // Empty is the cleared state and stays legal.
-  assert.ok(state(""));
+  assert.throws(() => listed("job\rfailed"), /job_summary is invalid/);
+  assert.throws(() => listed("x".repeat(MAX_JOB_SUMMARY_BYTES + 1)), /invalid/);
+  // A job that has said nothing yet is a row with no summary, and that row is
+  // worth drawing: it says the job started.
+  assert.ok(listed(""));
 });
 
-test("a state detail is clamped rather than lost", () => {
-  assert.equal(stateDetail("job\rfailed\0here"), "job failed here");
-  const long = stateDetail("x".repeat(MAX_DETAIL_BYTES * 2));
-  assert.equal(Buffer.byteLength(long, "utf8"), MAX_DETAIL_BYTES);
+test("a job row summary is clamped rather than lost", () => {
+  assert.equal(jobSummary("job\rfailed\0here"), "job failed here");
+  const long = jobSummary("x".repeat(MAX_JOB_SUMMARY_BYTES * 2));
+  assert.equal(Buffer.byteLength(long, "utf8"), MAX_JOB_SUMMARY_BYTES);
   // A cut that splits a codepoint must not leave a replacement character
-  // behind, or the clamped detail is refused for a different reason.
-  const wide = stateDetail("é".repeat(MAX_DETAIL_BYTES));
-  assert.ok(Buffer.byteLength(wide, "utf8") <= MAX_DETAIL_BYTES);
+  // behind, or the clamped summary is refused for a different reason.
+  const wide = jobSummary("é".repeat(MAX_JOB_SUMMARY_BYTES));
+  assert.ok(Buffer.byteLength(wide, "utf8") <= MAX_JOB_SUMMARY_BYTES);
   assert.doesNotMatch(wide, /�/);
   assert.ok(
     encodeAgentRequest({
-      v: 6,
-      type: "agent.state",
-      state: "failed",
-      detail: stateDetail(`${"x".repeat(MAX_DETAIL_BYTES * 2)}\rmore`),
+      v: 7,
+      type: "agent.jobs",
+      jobs: [
+        {
+          id: "01ccbac98b97",
+          state: "failed",
+          since: 1_757_000_000,
+          summary: jobSummary(`${"x".repeat(MAX_JOB_SUMMARY_BYTES * 2)}\rmore`),
+        },
+      ],
     }),
   );
 });
 
-test("agent v6 messages are bounded and channel-specific", () => {
+test("badges are grouped by job and an offer names one offer in the message", () => {
+  const badge = { label: "landed", value: "yes", state: "measured" } as const;
+  const cited = (job: string, offer: string) => ({
+    job_id: job,
+    badges: [badge],
+    offers: [{ id: offer, label: "push master" }],
+  });
+  assert.ok(
+    encodeAgentRequest({
+      v: 7,
+      type: "agent.response",
+      text: "Both finished.",
+      receipts: [
+        cited("750a4de8a80d", "offer-a"),
+        cited("01ccbac98b97", "offer-b"),
+      ],
+    }),
+  );
+  const refused = (receipts: ReturnType<typeof cited>[]) =>
+    encodeAgentRequest({
+      v: 7,
+      type: "agent.response",
+      text: "Both finished.",
+      receipts,
+    });
+  // One group per job: two strips under one message with the same label on
+  // both leaves no reading that says which badge belongs where.
+  assert.throws(
+    () =>
+      refused([
+        cited("750a4de8a80d", "offer-a"),
+        cited("750a4de8a80d", "offer-b"),
+      ]),
+    /duplicate citation/,
+  );
+  // The identifier is all a surface sends back, so it names one offer in the
+  // whole message and not one inside its own group.
+  assert.throws(
+    () =>
+      refused([
+        cited("750a4de8a80d", "offer-a"),
+        cited("01ccbac98b97", "offer-a"),
+      ]),
+    /duplicate offer/,
+  );
+  assert.throws(
+    () =>
+      refused([
+        {
+          job_id: "750a4de8a80d",
+          badges: [
+            {
+              ...badge,
+              value: "x".repeat(MAX_BADGE_BYTES + 1) as unknown as "yes",
+            },
+          ],
+          offers: [],
+        },
+      ]),
+    /receipt_value is invalid/,
+  );
+});
+
+test("a job list is bounded and every row names one job", () => {
+  const row = (id: string) => ({
+    id,
+    project: "personal/scufris2",
+    state: "working" as const,
+    since: 1_757_000_000,
+    summary: "reviewing G1",
+  });
+  // A project identifier is a relative path, so it keeps the slashes an
+  // identifier never may.
+  assert.ok(
+    encodeAgentRequest({
+      v: 7,
+      type: "agent.jobs",
+      jobs: [row("3f81c204b1e9")],
+    }),
+  );
+  const refused = (jobs: ReturnType<typeof row>[]) =>
+    encodeAgentRequest({ v: 7, type: "agent.jobs", jobs });
+  assert.throws(
+    () => refused([row("3f81c204b1e9"), row("3f81c204b1e9")]),
+    /duplicate job row/,
+  );
+  assert.throws(
+    () =>
+      refused(
+        Array.from({ length: MAX_JOB_ROWS + 1 }, (_value, index) =>
+          row(`3f81c204b1e${index}`),
+        ),
+      ),
+    /too many job rows/,
+  );
+});
+
+test("agent v7 messages are bounded and channel-specific", () => {
   assert.equal(
-    encodeAgentRequest({ v: 6, type: "agent.hello" }),
-    '{"v":6,"type":"agent.hello"}\n',
+    encodeAgentRequest({ v: 7, type: "agent.hello" }),
+    '{"v":7,"type":"agent.hello"}\n',
   );
   assert.deepEqual(
     decodeAgentResponse(
-      '{"v":6,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}',
+      '{"v":7,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}',
     ),
     {
-      v: 6,
+      v: 7,
       type: "agent.message",
       id: "m-1",
       text: "hello",
@@ -103,9 +217,9 @@ test("agent v6 messages are bounded and channel-specific", () => {
       attachments: [],
     },
   );
-  assert.throws(() => decodeAgentResponse('{"v":5,"type":"agent.ready"}'));
+  assert.throws(() => decodeAgentResponse('{"v":6,"type":"agent.ready"}'));
   assert.throws(() =>
-    decodeAgentResponse('{"v":6,"type":"surface.ready","surface":"desk"}'),
+    decodeAgentResponse('{"v":7,"type":"surface.ready","surface":"desk"}'),
   );
 });
 
@@ -118,7 +232,7 @@ test("attachment descriptors are strict and reach the surface prompt", () => {
   };
   const message = decodeAgentResponse(
     JSON.stringify({
-      v: 6,
+      v: 7,
       type: "agent.message",
       id: "m-1",
       text: "See it.",
@@ -141,7 +255,7 @@ test("attachment descriptors are strict and reach the surface prompt", () => {
     assert.throws(() =>
       decodeAgentResponse(
         JSON.stringify({
-          v: 6,
+          v: 7,
           type: "agent.message",
           id: "m-1",
           text: "See it.",
@@ -171,13 +285,13 @@ test("framing retains partial lines and rejects oversized input", () => {
 });
 
 test("the agent client sends messages through sendUserMessage and steers while busy", async () => {
-  const root = await mkdtemp(join(tmpdir(), "scufris-agent-v6-"));
+  const root = await mkdtemp(join(tmpdir(), "scufris-agent-v7-"));
   const socketPath = join(root, "agent.sock");
   const server = createServer((socket) => {
     socket.once("data", () => {
-      socket.write('{"v":6,"type":"agent.ready"}\n');
+      socket.write('{"v":7,"type":"agent.ready"}\n');
       socket.write(
-        '{"v":6,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}\n',
+        '{"v":7,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}\n',
       );
     });
   });
@@ -188,6 +302,8 @@ test("the agent client sends messages through sendUserMessage and steers while b
       busy: () => true,
       abort() {},
       wake() {},
+      jobCommand() {},
+      offerTake() {},
       sendUserMessage: (text, busy) => {
         resolve({ text, busy });
         client.stop();
@@ -213,6 +329,8 @@ test("handshake EOF produces the local update-together message", async () => {
       busy: () => false,
       abort() {},
       wake() {},
+      jobCommand() {},
+      offerTake() {},
       sendUserMessage() {},
       log(message) {
         resolve(message);
@@ -229,7 +347,7 @@ test("handshake EOF produces the local update-together message", async () => {
 test("a wake is decoded under its own kind with bounded details", () => {
   const wake = (fields: Record<string, unknown>) =>
     decodeAgentResponse(
-      JSON.stringify({ v: 6, type: "agent.wake", ...fields }),
+      JSON.stringify({ v: 7, type: "agent.wake", ...fields }),
     );
   assert.deepEqual(
     wake({
@@ -238,7 +356,7 @@ test("a wake is decoded under its own kind with bounded details", () => {
       details: { profile: "morning" },
     }),
     {
-      v: 6,
+      v: 7,
       type: "agent.wake",
       custom_type: "scufris-briefing",
       text: "The briefing is collected.",
@@ -246,7 +364,7 @@ test("a wake is decoded under its own kind with bounded details", () => {
     },
   );
   assert.deepEqual(wake({ custom_type: "scufris-wake", text: "Wake up." }), {
-    v: 6,
+    v: 7,
     type: "agent.wake",
     custom_type: "scufris-wake",
     text: "Wake up.",
@@ -271,9 +389,9 @@ test("a wake becomes a follow-up, never a user message", async () => {
   const socketPath = join(root, "agent.sock");
   const server = createServer((socket) => {
     socket.once("data", () => {
-      socket.write('{"v":6,"type":"agent.ready"}\n');
+      socket.write('{"v":7,"type":"agent.ready"}\n');
       socket.write(
-        '{"v":6,"type":"agent.wake","custom_type":"scufris-briefing","text":"Wake up.","details":{"profile":"morning"}}\n',
+        '{"v":7,"type":"agent.wake","custom_type":"scufris-briefing","text":"Wake up.","details":{"profile":"morning"}}\n',
       );
     });
   });
@@ -284,6 +402,8 @@ test("a wake becomes a follow-up, never a user message", async () => {
       socketPath,
       busy: () => false,
       abort() {},
+      jobCommand() {},
+      offerTake() {},
       sendUserMessage: () => {
         userMessages += 1;
       },

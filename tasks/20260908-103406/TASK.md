@@ -1,8 +1,8 @@
 # Draw receipts, offers, and live job rows in the conversation HUD
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 70
-- TAGS: desktop,ux
+- TAGS: desktop, ux
 
 ## Goal
 
@@ -74,3 +74,16 @@ protocol shape, and what was rejected. In short:
 Protocol 6 surfaces cannot ignore the new fields: `read_exact`
 (`shared/control/src/service.rs:422`) rejects any version but its own. Desktop,
 iOS, and `scufris-ctl` ship together at version 7.
+
+### Verified, 2026-09-09
+
+Built at protocol version 7 across the Rust service, the Pi extension, the
+desktop HUD, the iPhone app, and the jobs helper. `VERIFY.md` beside this file
+holds the commands, their results, and the test that stands behind each line
+of the verification above.
+
+What is left needs a machine this cannot reach: the iOS sources are not
+compiled, because no Swift toolchain is installed here, and there is no staging
+run with a job in flight. The Swift is held to the same wire shape by
+`surfaces/ios/Tests/ProtocolTests.swift` and the Rust validator; a run with a
+real worker is the one thing only a rebuilt desktop can produce.

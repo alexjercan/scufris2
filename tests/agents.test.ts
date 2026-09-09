@@ -3,27 +3,31 @@ import test from "node:test";
 import {
   ACKNOWLEDGED_ACTION_TOOLS,
   applySteerResult,
+  boundedRows,
   deliveredWorkerEventIds,
   deliverRuntimeFailure,
   deliverWorkerEvent,
+  EVENT_DRAIN_ROW,
   FINAL_RESPONSE_TOOL,
   foregroundActionPolicy,
   ForegroundAcknowledgmentGate,
   foregroundCommandWaits,
   JOB_OBSERVATION_TOOLS,
+  jobRow,
   literalDelegationPolicy,
   parseWorkerEvent,
   PLANNOTATOR_REVIEW_TOOL,
+  publishedRows,
   QUICK_REVIEW_TOOL,
   resolveWakeCommand,
-  restoredAttentionNotice,
   TERMINAL_OWNERSHIP_STATES,
   toolBatchAllowsAction,
   wakeModeFromEntries,
-  workerAttentionSignal,
   workerEventWakes,
 } from "../agent/extensions/scufris/workflow/orchestration.ts";
-import { ATTENTION_NOTICE_EVENT } from "../agent/extensions/scufris/shared/attention-notice.ts";
+import { JOB_CITATION_EVENT } from "../agent/extensions/scufris/shared/citations.ts";
+import { receiptBadges } from "../agent/extensions/scufris/workflow/citation.ts";
+import { MAX_JOB_ROWS } from "../agent/extensions/scufris/service/protocol.ts";
 import {
   WORKER_REPORT_EVENTS,
   WORKER_REPORT_TOOL,
@@ -289,61 +293,171 @@ test("wake mode restores the latest valid session entry", () => {
   );
 });
 
-test("worker notices are identified and clear on ordinary progress", () => {
-  const job = { job_id: "abcdef123456", project: "personal/scufris2" };
-  assert.deepEqual(
-    workerAttentionSignal(job as never, {
-      type: "blocked",
-      value: "needs mediation",
-    }),
-    {
-      id: "abcdef123456",
-      state: "attention",
-      detail: "Job abcdef123456 is blocked: needs mediation",
-    },
-  );
-  assert.deepEqual(
-    workerAttentionSignal(job as never, { type: "failed", value: "crashed" }),
-    {
-      id: "abcdef123456",
-      state: "error",
-      detail: "Job abcdef123456 failed: crashed",
-    },
-  );
-  assert.deepEqual(
-    workerAttentionSignal(job as never, { type: "done", value: "complete" }),
-    { id: "abcdef123456", state: "clear", detail: "" },
+test("a job is drawn as one row, and a row says what state it is in", () => {
+  const job = {
+    job_id: "abcdef123456",
+    project: "personal/scufris2",
+    summary: "needs mediation",
+    created_at: "2026-09-08T21:00:00Z",
+  };
+  assert.deepEqual(jobRow({ ...job, state: "blocked" }), {
+    id: "abcdef123456",
+    project: "personal/scufris2",
+    state: "blocked",
+    since: 1_788_901_200,
+    summary: "needs mediation",
+  });
+  // A workflow whose cleanup did not finish needs Alex, so it is not done.
+  assert.equal(jobRow({ ...job, state: "suspended" }).state, "failed");
+  assert.equal(jobRow({ ...job, state: "landed" }).state, "done");
+  assert.equal(jobRow({ ...job, state: "stopped" }).state, "done");
+  // A project is optional, and a row without one is still a row.
+  assert.equal(
+    jobRow({ ...job, project: null, state: "working" }).project,
+    undefined,
   );
 });
 
-test("a recovered job raises its own notice again", () => {
-  // The service keeps notices in memory. After a restart the tray is empty,
-  // and the terminal event that raised the notice was acknowledged before the
-  // restart, so it is never redelivered. Without this the tray was silent
-  // about a job that was still blocked.
-  const job = { job_id: "abcdef123456", project: "personal/scufris2" };
+test("live rows never drop and the oldest finished rows fall off first", () => {
+  const row = (id: string, since: number, state: "working" | "done") => ({
+    id,
+    state,
+    since,
+    summary: "",
+  });
+  const listed = [
+    ...Array.from({ length: 6 }, (_value, index) =>
+      row(`d${index}`, 100 + index, "done"),
+    ),
+    ...Array.from({ length: 5 }, (_value, index) =>
+      row(`w${index}`, 200 + index, "working"),
+    ),
+  ];
+  const kept = boundedRows(listed);
+  assert.equal(kept.length, MAX_JOB_ROWS);
+  // Oldest first, because that is the order they were started in.
   assert.deepEqual(
-    restoredAttentionNotice({ ...job, state: "blocked", summary: "needs me" }),
-    {
-      id: "abcdef123456",
-      state: "attention",
-      detail: "Job abcdef123456 is blocked: needs me",
-    },
+    kept.map((held) => held.id),
+    ["d3", "d4", "d5", "w0", "w1", "w2", "w3", "w4"],
+  );
+  // Past the cap in live rows alone the newest win: the job just started is
+  // never the one that vanishes.
+  const live = Array.from({ length: MAX_JOB_ROWS + 2 }, (_value, index) =>
+    row(`w${index}`, 300 + index, "working"),
   );
   assert.deepEqual(
-    restoredAttentionNotice({ ...job, state: "failed", summary: "crashed" }),
-    {
-      id: "abcdef123456",
-      state: "error",
-      detail: "Job abcdef123456 failed: crashed",
-    },
+    boundedRows(live).map((held) => held.id),
+    ["w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9"],
   );
-  // A job that needs nothing must not paint the tray on every restart.
-  for (const state of ["working", "done", "landed", "stopped", "suspended"])
-    assert.equal(
-      restoredAttentionNotice({ ...job, state, summary: "fine" }),
-      undefined,
-    );
+});
+
+test("a row outlives its job, and filing it is what clears it", () => {
+  const job = (id: string, state: string) => ({
+    job_id: id,
+    project: "personal/scufris2",
+    state,
+    summary: `job ${id}`,
+    created_at: "2026-09-08T21:00:00Z",
+  });
+  const live = [job("abcdef123456", "working"), job("123456abcdef", "working")];
+  const filed = new Set<string>();
+  assert.deepEqual(
+    publishedRows(live, filed).map((row) => [row.id, row.state]),
+    [
+      ["123456abcdef", "working"],
+      ["abcdef123456", "working"],
+    ],
+  );
+  // Finishing is not filing. Both rows stay, and say what became of them.
+  const done = [job("abcdef123456", "landed"), job("123456abcdef", "failed")];
+  assert.deepEqual(
+    publishedRows(done, filed).map((row) => [row.id, row.state]),
+    [
+      ["123456abcdef", "failed"],
+      ["abcdef123456", "done"],
+    ],
+  );
+  for (const row of done) filed.add(row.job_id);
+  assert.deepEqual(publishedRows(done, filed), []);
+});
+
+test("a drain that stopped is a row, because nothing else reports it", () => {
+  const drain = { since: 1_788_901_200, error: "permission denied" };
+  const [row] = publishedRows([], new Set(), drain);
+  assert.deepEqual(row, {
+    id: EVENT_DRAIN_ROW,
+    state: "failed",
+    since: 1_788_901_200,
+    summary: "Scufris cannot read worker events: permission denied",
+  });
+  // Filing it is the acknowledgement, exactly as it is for a job.
+  assert.deepEqual(publishedRows([], new Set([EVENT_DRAIN_ROW]), drain), []);
+});
+
+test("no model writes a badge: they are read off the measured receipt", () => {
+  const receipt = {
+    job_id: "abcdef123456",
+    measured_at: "2026-09-08T21:00:00Z",
+    trigger: "done",
+    commit: "75919d8",
+    facts: { landed: true, pushed: false, dirty: true },
+    claims: [],
+    sentences: [],
+    unavailable: {},
+  };
+  assert.deepEqual(receiptBadges(receipt), [
+    { label: "landed", value: "yes", state: "measured" },
+    { label: "pushed", value: "no", state: "refuted" },
+    { label: "worktree", value: "dirty", state: "refuted" },
+  ]);
+  // `unknown` is not a no. A fetch that failed leaves the fact unmeasured,
+  // and drawing that as "not pushed" invents what nobody measured.
+  assert.deepEqual(
+    receiptBadges({
+      ...receipt,
+      facts: { landed: true, pushed: null, dirty: false },
+      unavailable: { pushed: "the remote could not be reached" },
+    }),
+    [
+      { label: "landed", value: "yes", state: "measured" },
+      {
+        label: "pushed",
+        value: "the remote could not be reached",
+        state: "unknown",
+      },
+    ],
+  );
+  // A claim replaces the standing badge for its own field, because it carries
+  // both the measurement and what the worker said about it.
+  assert.deepEqual(
+    receiptBadges({
+      ...receipt,
+      facts: { landed: true, pushed: true, dirty: false, release_run: null },
+      claims: [
+        {
+          claim: "released",
+          said: "released v2.4.0",
+          field: "release_run",
+          measured: null,
+          reason: null,
+          verdict: "claimed, not verified",
+        },
+        {
+          claim: "pushed",
+          said: "pushed master",
+          field: "pushed",
+          measured: true,
+          reason: null,
+          verdict: "verified",
+        },
+      ],
+    }),
+    [
+      { label: "landed", value: "yes", state: "measured" },
+      { label: "pushed", value: "yes", state: "measured" },
+      { label: "released", value: "claimed, not verified", state: "claimed" },
+    ],
+  );
 });
 
 test("orchestration delivers exact worker wakes and quiet progress by mode", () => {
@@ -391,41 +505,39 @@ test("orchestration delivers exact worker wakes and quiet progress by mode", () 
       mode,
     );
 
-    // Waking and ambient notice delivery are independent. Every event updates
-    // this job's notice even when the wake mode keeps ordinary progress quiet.
-    assert.deepEqual(
-      signals.map(({ event, value }) => [event, value]),
-      [
-        [
-          ATTENTION_NOTICE_EVENT,
-          { id: job.job_id, state: "clear", detail: "" },
-        ],
-        [
-          ATTENTION_NOTICE_EVENT,
-          {
-            id: job.job_id,
-            state: "attention",
-            detail: `Job ${job.job_id} is blocked: needs mediation`,
-          },
-        ],
-        [
-          ATTENTION_NOTICE_EVENT,
-          { id: job.job_id, state: "clear", detail: "" },
-        ],
-        [
-          ATTENTION_NOTICE_EVENT,
-          {
-            id: job.job_id,
-            state: "error",
-            detail: `Job ${job.job_id} failed: worker harness exited unexpectedly`,
-          },
-        ],
-      ],
+    // Badges are measured, so they are published whether or not the event
+    // wakes a turn. An event with no receipt publishes nothing at all.
+    assert.deepEqual(signals, []);
+    deliverWorkerEvent(
+      pi as never,
+      context as never,
+      job,
+      { type: "done", value: "implementation complete" },
+      mode,
+      {
+        job_id: job.job_id,
+        measured_at: "2026-09-08T21:00:00Z",
+        trigger: "done",
+        commit: "75919d8",
+        facts: { landed: false },
+        claims: [],
+        sentences: ["not landed"],
+        unavailable: {},
+      },
     );
+    assert.deepEqual(signals, [
+      {
+        event: JOB_CITATION_EVENT,
+        value: {
+          job_id: job.job_id,
+          badges: [{ label: "landed", value: "no", state: "refuted" }],
+        },
+      },
+    ]);
     const expectedTypes =
       mode === "minimal"
-        ? ["blocked", "done", "failed"]
-        : ["working", "blocked", "done", "failed"];
+        ? ["blocked", "done", "failed", "done"]
+        : ["working", "blocked", "done", "failed", "done"];
     assert.deepEqual(
       messages.map(({ message }) => message.details.event.split(":", 1)[0]),
       expectedTypes,

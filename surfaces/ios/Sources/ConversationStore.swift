@@ -31,6 +31,8 @@ final class ConversationStore: NSObject, ObservableObject {
 
     @Published private(set) var connectionState: ConnectionState = .unconfigured
     @Published private(set) var conversation: [ConversationEntry] = []
+    /// Every delegated job, oldest row first. A row outlives its job.
+    @Published private(set) var jobs: [JobRow] = []
     @Published private(set) var serviceDetail = ""
     @Published private(set) var serviceState = "idle"
     @Published private(set) var settings = ConnectionSettings(backendURL: "", token: "")
@@ -69,7 +71,10 @@ final class ConversationStore: NSObject, ObservableObject {
         guard !serviceDetail.isEmpty, serviceDetail != "Ready" else { return false }
         switch connectionState {
         case .connected:
-            return serviceState != "idle" && serviceState != "working"
+            // The job list says which job is blocked or failed, and says it
+            // per job. This line was the aggregate of the same thing, in a
+            // place nothing could be done about it.
+            return false
         case .unconfigured:
             return false
         case .connecting, .disconnected:
@@ -243,6 +248,40 @@ final class ConversationStore: NSObject, ObservableObject {
             }
         }
         return true
+    }
+
+    /// Asks the service to stop one job, or to file its row.
+    ///
+    /// Nothing changes here. The row list the service publishes next is the
+    /// answer, the same way a typed line comes back as a transcript entry
+    /// rather than as this process's hopes about it.
+    func command(_ id: String, _ action: JobAction) {
+        guard case .connected = connectionState, let socket else { return }
+        let request = SurfaceJobCommandRequest(id: id, action: action)
+        Task {
+            do {
+                try await send(request, through: socket)
+            } catch {
+                failCurrentConnection(error)
+            }
+        }
+    }
+
+    /// Takes one offer, and lets the service settle whether it was open.
+    ///
+    /// The words behind it never reached this app: it sends the identifier
+    /// and the extension runs what it stored against it, so no control here
+    /// can put a sentence into the conversation.
+    func take(_ offer: String) {
+        guard case .connected = connectionState, let socket else { return }
+        let request = SurfaceOfferTakeRequest(id: offer)
+        Task {
+            do {
+                try await send(request, through: socket)
+            } catch {
+                failCurrentConnection(error)
+            }
+        }
     }
 
     func addDocument(_ url: URL) {
@@ -513,6 +552,7 @@ final class ConversationStore: NSObject, ObservableObject {
         socket = nil
         cancelDictation()
         conversation = []
+        jobs = []
         serviceDetail = ""
         serviceState = "starting"
         connectionTask = Task {
@@ -543,6 +583,7 @@ final class ConversationStore: NSObject, ObservableObject {
         connectionState = .connecting
         serviceState = "starting"
         conversation = []
+        jobs = []
         serviceDetail = "Connecting to \(url.host ?? "backend")"
         var request = URLRequest(url: url)
         request.setValue("Bearer \(settings.token)", forHTTPHeaderField: "Authorization")
@@ -612,13 +653,20 @@ final class ConversationStore: NSObject, ObservableObject {
             else {
                 throw ProtocolFailure.invalidMessage("attachments are outside their bounds")
             }
+            let receipts = message.receipts ?? []
+            guard receipts.count <= 4,
+                  receipts.allSatisfy({ ($0.badges ?? []).count <= 6 && ($0.offers ?? []).count <= 2 })
+            else {
+                throw ProtocolFailure.invalidMessage("receipts are outside their bounds")
+            }
             conversation.append(
                 ConversationEntry(
                     role: message.role,
                     surface: message.surface,
                     text: message.text,
                     details: message.details,
-                    attachments: attachments
+                    attachments: attachments,
+                    receipts: receipts
                 )
             )
             if message.role == .assistant {
@@ -633,6 +681,15 @@ final class ConversationStore: NSObject, ObservableObject {
             let state = try decoder.decode(IncomingState.self, from: data)
             serviceState = state.state
             serviceDetail = state.detail.isEmpty ? state.state.capitalized : state.detail
+        case "surface.jobs":
+            let listed = try decoder.decode(IncomingJobs.self, from: data)
+            guard listed.jobs.count <= 8 else {
+                throw ProtocolFailure.invalidMessage("the job list is outside its bounds")
+            }
+            jobs = listed.jobs
+        case "surface.offer_taken":
+            let taken = try decoder.decode(IncomingOfferTaken.self, from: data)
+            markTaken(taken.id)
         case "surface.rejected":
             let rejected = try decoder.decode(IncomingRejected.self, from: data)
             serviceState = "failed"
@@ -641,6 +698,22 @@ final class ConversationStore: NSObject, ObservableObject {
             break
         default:
             throw ProtocolFailure.invalidMessage("unknown type \(envelope.type)")
+        }
+    }
+
+    /// Marks one offer spent, in whichever message is carrying it.
+    ///
+    /// The mark is the only thing in the window that says what the answer
+    /// under it is answering: no user line appears for an offer.
+    private func markTaken(_ offer: String) {
+        for index in conversation.indices {
+            for citation in conversation[index].receipts.indices {
+                guard var offers = conversation[index].receipts[citation].offers,
+                      let found = offers.firstIndex(where: { $0.id == offer })
+                else { continue }
+                offers[found].taken = true
+                conversation[index].receipts[citation].offers = offers
+            }
         }
     }
 

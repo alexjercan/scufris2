@@ -12,7 +12,7 @@ local HTTP -> content.sock ----+
 
 `scufris-service` owns the Pi RPC process, canonical user-facing state, the
 latest 200 conversation messages, and managed attachment content. It exposes
-three protocol-v6 sockets and one private HTTP socket:
+three protocol-v7 sockets and one private HTTP socket:
 
 - `$XDG_RUNTIME_DIR/scufris/surface.sock`: registered desktop and synthetic
   surfaces;
@@ -29,7 +29,7 @@ coordinated staging stack.
 ## Typed channels
 
 Each socket has its own inbound and outbound message enum. Every line is one
-bounded LF-terminated JSON object with `"v":6`. A wrong version is logged and
+bounded LF-terminated JSON object with `"v":7`. A wrong version is logged and
 the connection closes without a response. Clients show a local message that
 asks the user to update the host and surface together.
 
@@ -66,10 +66,11 @@ every registered surface.
 Registration queues these under one lock:
 
 1. retained messages;
-2. current `surface.state`; and
-3. `surface.ready`.
+2. current `surface.state`;
+3. current `surface.jobs`; and
+4. `surface.ready`.
 
-The connection becomes eligible for live broadcasts only after all three are
+The connection becomes eligible for live broadcasts only after all four are
 queued. A surface clears its local copy when replay starts. It stores replayed
 messages but performs no speech, response animation, or widget calls before
 `surface.ready`.
@@ -169,12 +170,17 @@ the canonical conversation.
 
 ## State
 
-Pi lifecycle and agent attention are retained separately. The service computes
-one state with this precedence:
+Pi lifecycle and the job rows are retained separately. The service computes one
+state with this precedence:
 
 ```text
 failed > blocked > working > starting > idle
 ```
+
+`failed` and `blocked` are folded from the job rows rather than sent as their
+own field, and a row holds until it is filed. So the tray stays red after a job
+fails overnight and goes quiet when Alex archives it, not when the process
+happens to exit: acknowledgement, not timing.
 
 Surfaces layer local listening, transcription, and speaking presentation over
 that state.

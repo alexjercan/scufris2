@@ -44,6 +44,8 @@
   };
 
   const lines = element<HTMLOListElement>("lines");
+  const jobs = element<HTMLLIElement>("jobs");
+  const rows = element<HTMLElement>("rows");
   const notice = element<HTMLElement>("notice");
   const words = element<HTMLTextAreaElement>("words");
   const selected = element<HTMLElement>("selected");
@@ -59,8 +61,24 @@
     assistant: "scufris",
   };
 
+  /** What the row's state column says. Four words, one column wide. */
+  const STATE_WORDS: Record<string, string> = {
+    working: "work",
+    blocked: "block",
+    done: "done",
+    failed: "fail",
+  };
+
   /** What one line does to the notice line, when nothing is in flight. */
   const KEYS = "enter sends - + attaches - esc closes";
+  /**
+   * How long a stop stays armed before it forgets it was pressed.
+   *
+   * Stopping the wrong job costs an hour of an agent's work, so the control
+   * asks once. Three seconds is long enough to answer and short enough that
+   * an armed button is never still armed when the pointer comes back.
+   */
+  const ARMED_MS = 3000;
   /**
    * How near the bottom still counts as reading the newest line.
    *
@@ -70,6 +88,10 @@
    */
   const NEAR = 24;
   let thinkingLine: HTMLLIElement | null = null;
+  /** The stop control waiting for its second press, if one is. */
+  let armed: { button: HTMLButtonElement; timer: number } | null = null;
+  /** Every drawn offer, by identifier, so a spent one can be found again. */
+  const drawnOffers = new Map<string, HTMLButtonElement[]>();
   let selectedAttachments: AttachmentDescriptor[] = [];
   /** True while the window is to keep the newest line in view. */
   let following = true;
@@ -272,7 +294,197 @@
       window.scufrisMarkup.renderDetails(details, entry.details, openLink);
       line.append(details);
     }
+    // The badges go at the foot of the message, one rank per job, led by the
+    // job's own id. Nothing here reads the prose above them.
+    for (const citation of entry.receipts ?? []) line.append(strip(citation));
     return line;
+  };
+
+  /** One job's badges, as the rank drawn under the message that cites it. */
+  const strip = (citation: Citation): HTMLElement => {
+    const rank = document.createElement("span");
+    rank.className = "strip";
+    const cite = document.createElement("span");
+    cite.className = "cite";
+    cite.textContent = citation.job_id;
+    rank.append(cite);
+    for (const badge of citation.badges ?? []) {
+      const mark = document.createElement("span");
+      mark.className = "badge";
+      mark.dataset["state"] = badge.state;
+      const label = document.createElement("span");
+      label.className = "badge-label";
+      label.textContent = badge.label;
+      mark.append(label, document.createTextNode(badge.value));
+      rank.append(mark);
+    }
+    for (const offer of citation.offers ?? []) rank.append(drawOffer(offer));
+    return rank;
+  };
+
+  /**
+   * One offer, as the control it is.
+   *
+   * The words behind it never reached this page. A press sends the identifier
+   * and the extension runs what it stored against it, so no button in this
+   * window can put a sentence into the conversation.
+   */
+  const drawOffer = (offer: Offer): HTMLButtonElement => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "offer";
+    button.textContent = offer.label;
+    button.dataset["offer"] = offer.id;
+    if (offer.taken) button.dataset["spent"] = "";
+    drawnOffers.set(offer.id, [...(drawnOffers.get(offer.id) ?? []), button]);
+    button.addEventListener("click", () => {
+      if (button.dataset["spent"] !== undefined || button.disabled) return;
+      button.disabled = true;
+      // Spent is the service's to say. It answers with offer-taken, which is
+      // what marks every drawing of this offer, the replay included.
+      void invoke("hud_offer_take", { id: offer.id }).catch(
+        (error: unknown) => {
+          button.disabled = false;
+          notice.dataset["tone"] = "trouble";
+          notice.textContent = String(error);
+        },
+      );
+    });
+    return button;
+  };
+
+  /** Marks one offer spent wherever it is drawn. */
+  const spend = (id: string): void => {
+    for (const button of drawnOffers.get(id) ?? []) {
+      button.dataset["spent"] = "";
+      button.disabled = false;
+    }
+  };
+
+  // ---------- the job list ----------
+
+  /** How old the row is, in the largest unit that still says something. */
+  const age = (since: number): string => {
+    const seconds = Math.max(0, Math.floor(Date.now() / 1000) - since);
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+    return `${Math.floor(seconds / 86400)}d`;
+  };
+
+  const disarm = (): void => {
+    if (armed === null) return;
+    window.clearTimeout(armed.timer);
+    delete armed.button.dataset["armed"];
+    armed.button.textContent = "x";
+    armed = null;
+  };
+
+  const command = (id: string, act: "cancel" | "archive"): void => {
+    void invoke("hud_job_command", { id, action: act }).catch(
+      (error: unknown) => {
+        notice.dataset["tone"] = "trouble";
+        notice.textContent = String(error);
+      },
+    );
+  };
+
+  /**
+   * The one control a row has, and which one it is says what the row is.
+   *
+   * A live job can only be stopped and a finished one can only be filed.
+   * Stopping arms first: one press asks, a second inside three seconds does
+   * it. Stopping the wrong job costs an hour of an agent's work.
+   */
+  const rowControl = (row: JobRow): HTMLButtonElement => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "row-do";
+    const terminal = row.state === "done" || row.state === "failed";
+    button.dataset["act"] = terminal ? "archive" : "cancel";
+    button.textContent = terminal ? "clear" : "x";
+    button.title = terminal
+      ? `File job ${row.id}`
+      : `Stop job ${row.id}. Press twice.`;
+    button.addEventListener("click", () => {
+      if (terminal) {
+        command(row.id, "archive");
+        return;
+      }
+      if (armed?.button === button) {
+        disarm();
+        command(row.id, "cancel");
+        return;
+      }
+      disarm();
+      button.dataset["armed"] = "";
+      button.textContent = "sure?";
+      armed = { button, timer: window.setTimeout(disarm, ARMED_MS) };
+    });
+    return button;
+  };
+
+  const drawRow = (row: JobRow): HTMLElement => {
+    const drawn = document.createElement("div");
+    drawn.className = "row";
+    drawn.dataset["state"] = row.state;
+    const identity = document.createElement("span");
+    identity.className = "row-id";
+    identity.textContent = row.id;
+    const project = document.createElement("span");
+    project.textContent = row.project ?? "";
+    const state = document.createElement("span");
+    state.className = "row-state";
+    state.textContent = STATE_WORDS[row.state] ?? row.state;
+    const since = document.createElement("span");
+    since.textContent = age(row.since);
+    const said = document.createElement("span");
+    said.className = "row-said";
+    said.textContent = row.summary;
+    said.title = row.summary;
+    drawn.append(identity, project, state, since, said, rowControl(row));
+    return drawn;
+  };
+
+  /**
+   * Draws every row, and the way to file the finished ones at once.
+   *
+   * A row outlives its job: finishing does not remove it, so last night's run
+   * is still here this morning. Filing it is the acknowledgement, and is the
+   * only thing that clears it.
+   */
+  const list = (listed: JobRow[]): void => {
+    disarm();
+    const drawn = listed.map(drawRow);
+    const finished = listed.filter(
+      (row) => row.state === "done" || row.state === "failed",
+    );
+    if (finished.length >= 2) {
+      const sweep = document.createElement("button");
+      sweep.type = "button";
+      sweep.className = "sweep";
+      sweep.textContent = `clear the ${finished.length} finished`;
+      sweep.addEventListener("click", () => {
+        for (const row of finished) command(row.id, "archive");
+      });
+      drawn.push(sweep);
+    }
+    rows.replaceChildren(...drawn);
+    tail();
+  };
+
+  /**
+   * Keeps the job list at the end of the flow, whatever went in above it.
+   *
+   * Taken out of the list rather than hidden in it when there is nothing to
+   * show: an empty block still occupies the flow, and the rule that hangs a
+   * short conversation above the field reads the first child of the list.
+   */
+  const tail = (): void => {
+    jobs.remove();
+    if (rows.children.length === 0) return;
+    jobs.hidden = false;
+    lines.append(jobs);
   };
 
   const append = (entry: ConversationEntry): void => {
@@ -292,6 +504,7 @@
       lines.insertBefore(line, thinkingLine);
       mark(thinkingLine, entry.role);
     }
+    tail();
     if (following) pin();
     else unseen += 1;
     drawLatest();
@@ -299,6 +512,7 @@
 
   const replace = (entries: ConversationEntry[]): void => {
     thinkingLine = null;
+    drawnOffers.clear();
     let before: string | null = null;
     const drawn = entries.map((entry) => {
       const line = draw(entry, before);
@@ -306,6 +520,7 @@
       return line;
     });
     lines.replaceChildren(...drawn);
+    tail();
     // A whole conversation arriving is the service replaying itself, which
     // there is no reading position in: what was under the reader is gone.
     following = true;
@@ -332,6 +547,7 @@
       );
       thinkingLine.dataset["transient"] = "thinking";
       lines.append(thinkingLine);
+      tail();
     }
     if (follow) pin();
   };
@@ -505,6 +721,7 @@
   void listen("scufris://conversation", (event) => {
     const backlog = event.payload as Backlog;
     replace(backlog.lines);
+    list(backlog.jobs ?? []);
     say(backlog.notice);
   });
 
@@ -512,11 +729,23 @@
     say(event.payload as Notice);
   });
 
+  void listen("scufris://jobs", (event) => {
+    const follow = atBottom();
+    list(event.payload as JobRow[]);
+    if (follow) pin();
+    settle();
+  });
+
+  void listen("scufris://offer-taken", (event) => {
+    spend(event.payload as string);
+  });
+
   // The window is built at startup and filled whether it is on screen or not,
   // so there is usually a backlog by the time anybody opens it.
   void (async () => {
     const backlog = (await invoke("hud_ready")) as Backlog;
     replace(backlog.lines);
+    list(backlog.jobs ?? []);
     say(backlog.notice);
     fit();
     words.focus();

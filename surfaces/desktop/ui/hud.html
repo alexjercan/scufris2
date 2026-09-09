@@ -19,7 +19,15 @@
            control over it is the way back to the newest line, and it is on
            screen only while there is somewhere to go. -->
       <div class="stream">
-        <ol id="lines" class="lines" aria-label="Conversation"></ol>
+        <!-- The job list is the last item in the flow rather than a floor
+             pinned under it: it is part of the conversation and scrolls away
+             like any other line. -->
+        <ol id="lines" class="lines" aria-label="Conversation">
+          <li id="jobs" class="jobs" data-transient="jobs" hidden>
+            <span class="who">jobs</span>
+            <div id="rows" class="rows"></div>
+          </li>
+        </ol>
         <button
           id="latest"
           class="latest"

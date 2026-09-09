@@ -150,6 +150,10 @@ fn surface(service: Arc<Service>, stream: UnixStream, connection: u64) {
                     attachments,
                 } => service.surface_message(connection, id, text, attachments),
                 SurfaceRequestBody::Abort { id } => service.surface_abort(connection, id),
+                SurfaceRequestBody::JobCommand { id, action } => {
+                    service.surface_job_command(connection, id, action)
+                }
+                SurfaceRequestBody::OfferTake { id } => service.surface_offer_take(connection, id),
             },
             Err(MessageError::Empty) => break,
             Err(error) => {

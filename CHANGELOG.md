@@ -9,8 +9,34 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Added
+
+- An answer about a delegated job carries that job's receipt. The badges are
+  drawn at the foot of the message, grouped under the job they are about and
+  led by its ID, so nothing has to parse the prose to know what a fact belongs
+  to. A badge is measured, refuted, claimed, or unknown. No model writes one:
+  `workflow/citation.ts` reads what the jobs helper measured and maps it, so
+  the four words mean the same thing on every surface and a claim the worker
+  made is visibly a claim. `unknown` is a fact nobody could measure and is
+  never drawn as a no.
+- The next thing to do is a button. An answer may attach up to two offers to a
+  job it reports on, each a short label over a prompt the model composed. The
+  words never cross a socket: the extension keeps the prompt and the surface
+  sends only the offer's ID, so no surface control can put a sentence into the
+  conversation. Taking one runs it as a follow-up rather than as a line Alex
+  did not type, and the offer stays visible and goes quiet.
+- Delegated work has a list, and a row outlives its job. Every surface holds
+  up to eight rows carrying the job ID, project, state, age, and summary. A job
+  that finishes overnight is still on the list in the morning, and `archive` is
+  what clears it - acknowledgement, not timing. `cancel` stops a job and keeps
+  its unmerged branch. On the HUD the stop control arms first and asks once,
+  because stopping the wrong job costs an hour of an agent's work.
+
 ### Removed
 
+- `agent.state` and its attention notice are gone. A job that wants attention
+  is a row, and the one thing the notice reported that is not a job - a failed
+  event drain - is now a row too, which archiving acknowledges.
 - A briefing source no longer declares a `policy`. Every source runs with every
   tool its harness has. The ladder read as a guarantee it could not make:
   `bash` was in the reader's list as well as the repairer's, so `read` never
@@ -22,6 +48,12 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Changed
 
+- Surface protocol 7. The desktop, the iPhone app, and `scufris-ctl` are
+  replaced together, as every protocol change here is: a version is refused,
+  never negotiated.
+- The tray word is folded from the job rows on the host rather than sent as its
+  own field, so `failed` holds until the row is filed instead of clearing when
+  a process happens to exit.
 - Scufris reviews its own day. `scufris2` declares a `nightly` briefing source
   that groups the day's commits, runs `/scufris-review` over one group at a
   time and reports what is worth fixing, without changing anything. It is the

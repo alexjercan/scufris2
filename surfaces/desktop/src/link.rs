@@ -1,4 +1,4 @@
-//! Registered protocol v6 surface link.
+//! Registered protocol v7 surface link.
 
 use std::{
     io::BufReader,
@@ -13,8 +13,8 @@ use std::{
 };
 
 use scufris_control::service::{
-    ConversationMessage, ScufrisState, SurfaceRegistration, SurfaceRequest, SurfaceRequestBody,
-    SurfaceResponseBody, read_surface_response,
+    ConversationMessage, JobAction, JobRow, ScufrisState, SurfaceRegistration, SurfaceRequest,
+    SurfaceRequestBody, SurfaceResponseBody, read_surface_response,
 };
 use scufris_control::{MessageError, write_message};
 
@@ -33,6 +33,10 @@ pub enum LinkEvent {
     Accepted(String),
     Refused(String, String),
     State(ScufrisState, String),
+    /// Every job row at once, replacing what the surface holds.
+    Jobs(Vec<JobRow>),
+    /// One offer is spent, in whichever message carries it.
+    OfferTaken(String),
     Message {
         message: ConversationMessage,
         live: bool,
@@ -141,6 +145,20 @@ impl ServiceLink {
         send(&self.writer, SurfaceRequestBody::Abort { id })
     }
 
+    pub fn job_command(&self, id: String, action: JobAction) -> Result<(), String> {
+        if !self.ready.load(Ordering::Acquire) {
+            return Err("The Scufris surface is still loading.".into());
+        }
+        send(&self.writer, SurfaceRequestBody::JobCommand { id, action })
+    }
+
+    pub fn offer_take(&self, id: String) -> Result<(), String> {
+        if !self.ready.load(Ordering::Acquire) {
+            return Err("The Scufris surface is still loading.".into());
+        }
+        send(&self.writer, SurfaceRequestBody::OfferTake { id })
+    }
+
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::Relaxed);
         self.ready.store(false, Ordering::Release);
@@ -229,6 +247,7 @@ fn serve(
                 details,
                 widgets,
                 attachments,
+                receipts,
             } => observe(LinkEvent::Message {
                 message: ConversationMessage {
                     role,
@@ -237,6 +256,7 @@ fn serve(
                     details,
                     widgets,
                     attachments,
+                    receipts,
                 },
                 live: ready,
             }),
@@ -245,6 +265,8 @@ fn serve(
             SurfaceResponseBody::State { state, detail } => {
                 observe(LinkEvent::State(state, detail))
             }
+            SurfaceResponseBody::Jobs { jobs } => observe(LinkEvent::Jobs(jobs)),
+            SurfaceResponseBody::OfferTaken { id } => observe(LinkEvent::OfferTaken(id)),
             SurfaceResponseBody::Ready { surface } if surface == registration.id => {
                 tracing::info!(
                     surface = registration.id,

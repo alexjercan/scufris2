@@ -8,7 +8,7 @@ surface.message -> HUD
 assistant message -> text + optional speech + optional widgets
 ```
 
-`scufris-desktop` is a registered protocol v6 surface. It owns local windows,
+`scufris-desktop` is a registered protocol v7 surface. It owns local windows,
 keyboard controls, recording, transcription, speech playback, and widget
 presentation. It does not own Pi or the canonical conversation.
 
@@ -61,6 +61,25 @@ labeled file action is Save, which uses a native
 destination picker and an atomic mode-0600 write. Attachment bytes or host paths
 never enter logs or protocol messages.
 
+Receipts are drawn at the foot of the message that reports them, one strip per
+job and each strip led by that job's short ID. A badge is quartz when the fact
+was measured, red when it was measured and false, yellow when only the worker
+claimed it, and muted when nobody could measure it. A muted badge is never
+drawn as a no.
+
+An offer in the same strip is a button. Pressing it sends `offer.take` with the
+offer identifier and nothing else, and no user line appears: the words behind
+the offer stay with the agent, so the answer that follows is the only report of
+it. A taken offer stays where it is and goes quiet.
+
+The job list is the last item in the conversation flow and holds at most eight
+rows. A row draws the job ID, the project, one of `work`, `block`, `done`, and
+`fail`, the age, and the summary. A row outlives its job. `clear` files a
+finished row and touches nothing else. `x` stops a live job and keeps its
+unmerged branch; it arms on the first press, says `sure?`, and forgets after
+three seconds, because stopping the wrong job costs an hour of an agent's work.
+Two or more finished rows also offer one control that files all of them.
+
 Each message occupies two columns: the speaker marker in a fixed gutter and
 everything the message is made of - words, attachment cards, details - in one
 body column. A message longer than the window wraps inside that column and never
@@ -97,7 +116,7 @@ presentation only when the message's `surface` equals its persisted ID:
 
 A widget call opens the named installed widget as an exhibit and passes its
 arguments as initial data. Runtime outcomes stay local. No widget result,
-acknowledgement, asynchronous update, or close message crosses protocol v6.
+acknowledgement, asynchronous update, or close message crosses protocol v7.
 
 ## Pill and voice interaction
 
@@ -168,6 +187,8 @@ process matching.
 - response details: 32 KiB UTF-8;
 - widget definitions or calls: 32 per message;
 - attachments: 8 unique references per message and 16 MiB per object;
+- receipts: 4 job groups per message, 6 badges and 2 offers per group;
+- job rows: 8;
 - local speech paragraph: 1000 UTF-8 bytes; and
 - reconnect backoff: 250 ms to 5 seconds.
 

@@ -1,6 +1,6 @@
 import Foundation
 
-let scufrisProtocolVersion = 6
+let scufrisProtocolVersion = 7
 let scufrisMaximumMessageBytes = 64 * 1024
 let scufrisMaximumTextBytes = 8 * 1024
 let scufrisMaximumDetailsBytes = 32 * 1024
@@ -66,9 +66,89 @@ struct SurfaceMessageRequest: Encodable {
     let attachments: [String]
 }
 
+/// One row control, pressed. `cancel` stops the job; `archive` only files it.
+enum JobAction: String, Codable {
+    case cancel
+    case archive
+}
+
+struct SurfaceJobCommandRequest: Encodable {
+    let v = scufrisProtocolVersion
+    let type = "job.command"
+    let id: String
+    let action: JobAction
+}
+
+/// Taking one offer. The words behind it never leave the extension: this
+/// carries the identifier and the host submits what it stored against it.
+struct SurfaceOfferTakeRequest: Encodable {
+    let v = scufrisProtocolVersion
+    let type = "offer.take"
+    let id: String
+}
+
 struct IncomingEnvelope: Decodable {
     let v: Int
     let type: String
+}
+
+/// What one measured fact says, in the only four words a badge has.
+///
+/// `unknown` is not a no. A fetch that failed leaves the fact unmeasured, and
+/// drawing that as a refusal would invent the one thing the receipt was
+/// careful not to claim.
+enum ReceiptState: String, Codable, Equatable {
+    case measured
+    case refuted
+    case claimed
+    case unknown
+}
+
+struct ReceiptBadge: Codable, Equatable, Identifiable {
+    let label: String
+    let value: String
+    let state: ReceiptState
+
+    var id: String { "\(label)=\(value)" }
+}
+
+struct Offer: Codable, Equatable, Identifiable {
+    let id: String
+    let label: String
+    var taken: Bool?
+}
+
+/// Every badge one message carries about one job, led by that job's own id.
+struct Citation: Codable, Equatable, Identifiable {
+    let jobID: String
+    var badges: [ReceiptBadge]?
+    var offers: [Offer]?
+
+    var id: String { jobID }
+
+    enum CodingKeys: String, CodingKey {
+        case badges, offers
+        case jobID = "job_id"
+    }
+}
+
+/// One delegated job. A row outlives its job: filing it is what clears it.
+struct JobRow: Codable, Equatable, Identifiable {
+    let id: String
+    let project: String?
+    let state: JobRowState
+    /// Unix seconds the job started, which the row shows the age of.
+    let since: UInt64
+    let summary: String
+
+    var isTerminal: Bool { state == .done || state == .failed }
+}
+
+enum JobRowState: String, Codable, Equatable {
+    case working
+    case blocked
+    case done
+    case failed
 }
 
 struct IncomingConversationMessage: Decodable {
@@ -79,6 +159,19 @@ struct IncomingConversationMessage: Decodable {
     let text: String
     let details: String?
     let attachments: [AttachmentDescriptor]?
+    let receipts: [Citation]?
+}
+
+struct IncomingJobs: Decodable {
+    let v: Int
+    let type: String
+    let jobs: [JobRow]
+}
+
+struct IncomingOfferTaken: Decodable {
+    let v: Int
+    let type: String
+    let id: String
 }
 
 enum ConversationRole: String, Decodable {
@@ -113,6 +206,7 @@ struct ConversationEntry: Identifiable, Equatable {
     let text: String
     let details: String?
     let attachments: [AttachmentDescriptor]
+    var receipts: [Citation] = []
 }
 
 enum ProtocolFailure: LocalizedError {

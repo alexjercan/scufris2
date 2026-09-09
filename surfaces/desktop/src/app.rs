@@ -23,6 +23,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use scufris_control::service::JobAction;
 use serde::Serialize;
 use tracing::{debug, error, info, warn};
 
@@ -248,6 +249,14 @@ pub trait Backend: Send + Sync {
     }
     /// Ends the agent's current run.
     fn abort(&self, id: String) -> Result<(), String>;
+    /// Stops or files one job row.
+    fn job_command(&self, _id: String, _action: JobAction) -> Result<(), String> {
+        Err("This surface cannot act on jobs.".into())
+    }
+    /// Takes one offer the agent made.
+    fn offer_take(&self, _id: String) -> Result<(), String> {
+        Err("This surface cannot take offers.".into())
+    }
 }
 
 /// Where deferred work runs.
@@ -685,6 +694,10 @@ impl App {
                 debug!(id = %id, detail = %detail, "submission refused");
                 self.handle(Event::SubmissionFailed { id, reason: detail })
             }
+            // Both are the conversation window's, and the companion has
+            // nothing to show for either: a job row is not a state the pill
+            // wears, and a spent offer is a badge in a message.
+            LinkEvent::Jobs(_) | LinkEvent::OfferTaken(_) => {}
             LinkEvent::Message { .. } => {}
         }
     }

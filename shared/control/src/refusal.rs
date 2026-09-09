@@ -62,3 +62,6 @@ pub const NO_FREE_SLOT: &str = "no_free_slot";
 
 /// The window opened for a widget never reached the screen.
 pub const NOT_SHOWN: &str = "not_shown";
+
+/// The offer pressed has been taken already, or is no longer in the replay.
+pub const OFFER_UNAVAILABLE: &str = "offer_unavailable";

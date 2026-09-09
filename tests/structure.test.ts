@@ -72,8 +72,9 @@ test("package loads only capability-owned Scufris extensions", async () => {
     /if \(eventStranded && !shuttingDown\) void readEvents\(\)/,
   );
   // `hasUI` is false under the service, so a notification alone reported a
-  // stranded drain to nobody.
-  assert.match(orchestration, /id: EVENT_DRAIN_NOTICE/);
+  // stranded drain to nobody. It is published as a failed row instead, and
+  // filing that row is what acknowledges it.
+  assert.match(orchestration, /id: EVENT_DRAIN_ROW/);
   await access(
     join(
       root,

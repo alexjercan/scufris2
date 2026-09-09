@@ -26,7 +26,7 @@ struct ProtocolTests {
     }
 
     @Test
-    func helloUsesTheStrictProtocolV6SurfaceShape() throws {
+    func helloUsesTheStrictProtocolV7SurfaceShape() throws {
         let hello = SurfaceHello(
             surface: SurfaceRegistration(
                 id: "ios-test",
@@ -38,7 +38,7 @@ struct ProtocolTests {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(hello))
                 as? [String: Any]
         )
-        #expect(object["v"] as? Int == 6)
+        #expect(object["v"] as? Int == 7)
         #expect(object["type"] as? String == "surface.hello")
         let surface = try #require(object["surface"] as? [String: Any])
         #expect(surface["id"] as? String == "ios-test")
@@ -102,7 +102,7 @@ struct ProtocolTests {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
                 as? [String: Any]
         )
-        #expect(object["v"] as? Int == 6)
+        #expect(object["v"] as? Int == 7)
         #expect(object["type"] as? String == "surface.message")
         #expect(object["attachments"] as? [String] == ["att_one", "att_two"])
     }
@@ -178,23 +178,82 @@ struct ProtocolTests {
     @Test
     func conversationResponsesDecodeWithoutWidgetPresentation() throws {
         let data = Data(
-            #"{"v":6,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","details":"Passed.","attachments":[]}"#.utf8
+            #"{"v":7,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","details":"Passed.","attachments":[]}"#.utf8
         )
         let message = try JSONDecoder().decode(
             IncomingConversationMessage.self,
             from: data
         )
-        #expect(message.v == 6)
+        #expect(message.v == 7)
         #expect(message.role == .assistant)
         #expect(message.text == "Done.")
         #expect(message.details == "Passed.")
         #expect(message.attachments?.isEmpty == true)
 
         let omitted = Data(
-            #"{"v":6,"type":"surface.message","role":"user","surface":"ios","text":"Hello."}"#.utf8
+            #"{"v":7,"type":"surface.message","role":"user","surface":"ios","text":"Hello."}"#.utf8
         )
         let textOnly = try JSONDecoder().decode(IncomingConversationMessage.self, from: omitted)
         #expect(textOnly.details == nil)
         #expect(textOnly.attachments == nil)
+        #expect(textOnly.receipts == nil)
+    }
+
+    @Test
+    func badgesAreGroupedByTheJobTheyAreAbout() throws {
+        let data = Data(
+            #"{"v":7,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","receipts":[{"job_id":"750a4de8a80d","badges":[{"label":"landed","value":"yes","state":"measured"},{"label":"pushed","value":"no","state":"refuted"}],"offers":[{"id":"offer-a1","label":"push master"}]}]}"#.utf8
+        )
+        let message = try JSONDecoder().decode(
+            IncomingConversationMessage.self,
+            from: data
+        )
+        let citation = try #require(message.receipts?.first)
+        // The identifier does the binding: nothing reads the prose above it.
+        #expect(citation.jobID == "750a4de8a80d")
+        #expect(citation.badges?.map(\.state) == [.measured, .refuted])
+        #expect(citation.offers?.first?.label == "push master")
+        // Spent is the service's to say, and it has not said it yet.
+        #expect(citation.offers?.first?.taken == nil)
+    }
+
+    @Test
+    func jobRowsCarryEverythingOneRowDraws() throws {
+        let data = Data(
+            #"{"v":7,"type":"surface.jobs","jobs":[{"id":"01ccbac98b97","project":"personal/scufris2","state":"done","since":1788901200,"summary":"reviewed 9 commits"},{"id":"3f81c204b1e9","project":null,"state":"working","since":1788904800,"summary":""}]}"#.utf8
+        )
+        let listed = try JSONDecoder().decode(IncomingJobs.self, from: data)
+        #expect(listed.jobs.count == 2)
+        // A finished row is filed, a live one is stopped. The control a row
+        // has is what says which it is.
+        #expect(listed.jobs[0].isTerminal)
+        #expect(!listed.jobs[1].isTerminal)
+        // A project is optional, and a job that has said nothing yet is a row
+        // with no summary. Both are still rows.
+        #expect(listed.jobs[1].project == nil)
+        #expect(listed.jobs[1].summary.isEmpty)
+    }
+
+    @Test
+    func aRowControlAndAnOfferCarryOnlyTheirIdentifier() throws {
+        let command = try #require(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(
+                    SurfaceJobCommandRequest(id: "3f81c204b1e9", action: .cancel)
+                )
+            ) as? [String: Any]
+        )
+        #expect(command["v"] as? Int == 7)
+        #expect(command["type"] as? String == "job.command")
+        #expect(command["action"] as? String == "cancel")
+
+        let take = try #require(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(SurfaceOfferTakeRequest(id: "offer-a1"))
+            ) as? [String: Any]
+        )
+        #expect(take["type"] as? String == "offer.take")
+        // The words behind an offer never leave the extension.
+        #expect(take.keys.sorted() == ["id", "type", "v"])
     }
 }

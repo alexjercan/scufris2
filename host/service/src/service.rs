@@ -1,4 +1,4 @@
-//! Canonical protocol v6 service state.
+//! Canonical protocol v7 service state.
 
 use std::{
     collections::HashMap,
@@ -14,8 +14,8 @@ use std::{
 
 use scufris_control::refusal;
 use scufris_control::service::{
-    AgentRequestBody, AgentResponse, AgentResponseBody, AgentState, ControlResponseBody,
-    ConversationMessage, ConversationRole, MAX_DETAIL_BYTES, ScufrisState, SurfaceRegistration,
+    AgentRequestBody, AgentResponse, AgentResponseBody, ControlResponseBody, ConversationMessage,
+    ConversationRole, JobAction, JobRow, JobRowState, ScufrisState, SurfaceRegistration,
     SurfaceResponse, SurfaceResponseBody, UNPROMPTED_SURFACE, WidgetCall, WidgetDefinition,
 };
 use serde_json::Value;
@@ -76,8 +76,12 @@ struct Inner {
     failures: u32,
     lifecycle: Lifecycle,
     lifecycle_detail: String,
-    attention: AgentState,
-    attention_detail: String,
+    /// Every delegated job the agent owns, as the surfaces draw them.
+    ///
+    /// This is the only account of delegated work the service keeps. The tray
+    /// word is folded from it rather than sent alongside it, so the two cannot
+    /// disagree about whether anything needs Alex.
+    jobs: Vec<JobRow>,
     surfaces: HashMap<String, RegisteredSurface>,
     surface_by_connection: HashMap<u64, (String, u64)>,
     next_surface_generation: u64,
@@ -89,17 +93,34 @@ struct Inner {
 }
 
 impl Inner {
-    fn state(&self) -> (ScufrisState, String) {
-        if self.attention == AgentState::Failed || self.lifecycle == Lifecycle::Failed {
-            let detail = if self.attention == AgentState::Failed {
-                &self.attention_detail
-            } else {
-                &self.lifecycle_detail
-            };
-            return (ScufrisState::Failed, detail.clone());
+    /// The one word the tray wants, folded from the rows.
+    ///
+    /// A row outlives its job, so a failure keeps saying so until Alex files
+    /// it rather than until the process happens to exit. Filing is the
+    /// acknowledgement, and it is what puts the tray back to quiet.
+    fn attention(&self) -> Option<(ScufrisState, &str)> {
+        let worst = |wanted: JobRowState| {
+            self.jobs
+                .iter()
+                .find(|row| row.state == wanted)
+                .map(|row| row.summary.as_str())
+        };
+        if let Some(summary) = worst(JobRowState::Failed) {
+            return Some((ScufrisState::Failed, summary));
         }
-        if self.attention == AgentState::Blocked {
-            return (ScufrisState::Blocked, self.attention_detail.clone());
+        worst(JobRowState::Blocked).map(|summary| (ScufrisState::Blocked, summary))
+    }
+
+    fn state(&self) -> (ScufrisState, String) {
+        let attention = self.attention();
+        if let Some((ScufrisState::Failed, detail)) = attention {
+            return (ScufrisState::Failed, detail.to_string());
+        }
+        if self.lifecycle == Lifecycle::Failed {
+            return (ScufrisState::Failed, self.lifecycle_detail.clone());
+        }
+        if let Some((state, detail)) = attention {
+            return (state, detail.to_string());
         }
         match self.lifecycle {
             Lifecycle::Working => (ScufrisState::Working, self.lifecycle_detail.clone()),
@@ -173,6 +194,15 @@ impl Inner {
         self.broadcast(message.into());
     }
 
+    /// The surface this connection speaks for, if it still holds the name.
+    fn speaking_surface(&self, connection: u64) -> Option<String> {
+        let (surface, generation) = self.surface_by_connection.get(&connection)?;
+        self.surfaces
+            .get(surface)
+            .filter(|held| held.sender.generation == *generation)
+            .map(|_| surface.clone())
+    }
+
     fn publish_state(&mut self) {
         let (state, detail) = self.state();
         self.broadcast(SurfaceResponseBody::State { state, detail });
@@ -199,8 +229,7 @@ impl Service {
                 failures: 0,
                 lifecycle: Lifecycle::Starting,
                 lifecycle_detail: String::new(),
-                attention: AgentState::Clear,
-                attention_detail: String::new(),
+                jobs: Vec::new(),
                 surfaces: HashMap::new(),
                 surface_by_connection: HashMap::new(),
                 next_surface_generation: 0,
@@ -259,6 +288,12 @@ impl Service {
         let _ = outbox.try_send(SurfaceResponse::new(SurfaceResponseBody::State {
             state,
             detail,
+        }));
+        // A row outlives its job, so the list is backlog and not just news: a
+        // surface that joined this morning has to be told about the night's
+        // finished work as well as about what is running.
+        let _ = outbox.try_send(SurfaceResponse::new(SurfaceResponseBody::Jobs {
+            jobs: inner.jobs.clone(),
         }));
         let _ = outbox.try_send(SurfaceResponse::new(SurfaceResponseBody::Ready {
             surface: registration.id.clone(),
@@ -379,6 +414,7 @@ impl Service {
             details: None,
             widgets: None,
             attachments: descriptors,
+            receipts: Vec::new(),
         });
         inner.send_surface(&surface, SurfaceResponseBody::MessageAck { id });
     }
@@ -462,9 +498,9 @@ impl Service {
         debug!(connection, payload = ?body, "agent message received");
         match body {
             AgentRequestBody::Hello => {}
-            AgentRequestBody::State { state, detail } => {
-                inner.attention = state;
-                inner.attention_detail = scufris_control::truncate(&detail, MAX_DETAIL_BYTES);
+            AgentRequestBody::Jobs { jobs } => {
+                inner.jobs = jobs.clone();
+                inner.broadcast(SurfaceResponseBody::Jobs { jobs });
                 inner.publish_state();
             }
             AgentRequestBody::Response {
@@ -472,6 +508,7 @@ impl Service {
                 details,
                 widgets,
                 attachments,
+                receipts,
             } => {
                 // An answer belongs to the turn that asked for it. A surface
                 // owns its turn until the answer arrives; an answer nobody
@@ -533,8 +570,92 @@ impl Service {
                     details,
                     widgets,
                     attachments: descriptors,
+                    receipts,
                 });
             }
+        }
+    }
+
+    /// Relays one surface's request about a job row to the agent that owns it.
+    ///
+    /// Nothing is decided here. What stopping a job costs and what filing one
+    /// means both belong to the agent; the service only carries the verb, and
+    /// the row list it publishes next is the answer.
+    pub fn surface_job_command(&self, connection: u64, id: String, action: JobAction) {
+        let mut inner = self.lock();
+        let Some(surface) = inner.speaking_surface(connection) else {
+            return;
+        };
+        debug!(
+            connection,
+            surface,
+            job = id,
+            ?action,
+            "job command received"
+        );
+        if !inner.send_agent(AgentResponseBody::JobCommand {
+            id: id.clone(),
+            action,
+        }) {
+            inner.send_surface(
+                &surface,
+                SurfaceResponseBody::Rejected {
+                    id: Some(id),
+                    operation: "job".into(),
+                    code: refusal::AGENT_UNAVAILABLE.into(),
+                    detail: "The Scufris agent is unavailable.".into(),
+                },
+            );
+        }
+    }
+
+    /// Takes one offer, once.
+    ///
+    /// The words behind an offer are the agent's and never crossed, so the
+    /// identifier is the whole request. Spent is recorded against the message
+    /// that carries the badge, because that is what a reconnecting surface
+    /// replays: without it, every restart would hand back a live button for
+    /// work already done.
+    pub fn surface_offer_take(&self, connection: u64, id: String) {
+        let mut inner = self.lock();
+        let Some(surface) = inner.speaking_surface(connection) else {
+            return;
+        };
+        debug!(connection, surface, offer = id, "offer taken");
+        match inner.conversation.take_offer(&id) {
+            Ok(true) => {}
+            Ok(false) => {
+                // Already taken, or in a message the ring has dropped. Either
+                // way the work is not offered twice.
+                inner.send_surface(
+                    &surface,
+                    SurfaceResponseBody::Rejected {
+                        id: Some(id),
+                        operation: "offer".into(),
+                        code: refusal::OFFER_UNAVAILABLE.into(),
+                        detail: "That offer is no longer open.".into(),
+                    },
+                );
+                return;
+            }
+            Err(error) => {
+                // The offer is spent in memory whatever storage did, so the
+                // press still counts. Losing the snapshot costs the mark on a
+                // later restart, not the work.
+                warn!(%error, "the taken offer could not be stored");
+            }
+        }
+        inner.broadcast(SurfaceResponseBody::OfferTaken { id: id.clone() });
+        if !inner.send_agent(AgentResponseBody::OfferTake { id: id.clone() }) {
+            inner.send_surface(
+                &surface,
+                SurfaceResponseBody::Rejected {
+                    id: Some(id),
+                    operation: "offer".into(),
+                    code: refusal::AGENT_UNAVAILABLE.into(),
+                    detail: "The Scufris agent is unavailable.".into(),
+                },
+            );
         }
     }
 
@@ -863,7 +984,7 @@ mod tests {
         mpsc::{Receiver, sync_channel},
     };
 
-    use scufris_control::service::CONVERSATION_ENTRIES;
+    use scufris_control::service::{CONVERSATION_ENTRIES, Citation, Offer, Receipt, ReceiptState};
 
     static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
 
@@ -938,7 +1059,8 @@ mod tests {
         let replay = drain(&replay);
         assert!(matches!(replay[0], SurfaceResponseBody::Message { .. }));
         assert!(matches!(replay[1], SurfaceResponseBody::State { .. }));
-        assert!(matches!(replay[2], SurfaceResponseBody::Ready { .. }));
+        assert!(matches!(replay[2], SurfaceResponseBody::Jobs { .. }));
+        assert!(matches!(replay[3], SurfaceResponseBody::Ready { .. }));
     }
 
     #[test]
@@ -987,7 +1109,8 @@ mod tests {
                 SurfaceResponseBody::Message { text, .. } if text == "survives"
             ));
             assert!(matches!(replay[1], SurfaceResponseBody::State { .. }));
-            assert!(matches!(replay[2], SurfaceResponseBody::Ready { .. }));
+            assert!(matches!(replay[2], SurfaceResponseBody::Jobs { .. }));
+            assert!(matches!(replay[3], SurfaceResponseBody::Ready { .. }));
         }
         drop(restored);
         std::fs::remove_dir_all(runtime).unwrap();
@@ -1140,6 +1263,7 @@ mod tests {
                     arguments: serde_json::json!({"passed": 4}),
                 }]),
                 attachments: vec![],
+                receipts: vec![],
             },
         );
         assert!(drain(&inbox).iter().any(|body| matches!(body, SurfaceResponseBody::Message { role: ConversationRole::Assistant, surface, details: Some(_), widgets: Some(_), .. } if surface == "one")));
@@ -1183,6 +1307,7 @@ mod tests {
                     arguments: serde_json::json!({}),
                 }]),
                 attachments: vec![],
+                receipts: vec![],
             },
         );
         assert!(drain(&inbox).iter().any(|body| matches!(
@@ -1217,6 +1342,7 @@ mod tests {
                 details: None,
                 widgets: None,
                 attachments: vec!["gone".into()],
+                receipts: vec![],
             },
         );
         assert!(drain(&one).iter().any(|body| matches!(
@@ -1253,6 +1379,7 @@ mod tests {
                 details: None,
                 widgets: None,
                 attachments: vec![],
+                receipts: vec![],
             },
         );
         for inbox in [&one, &two] {
@@ -1282,6 +1409,7 @@ mod tests {
                 details: None,
                 widgets: None,
                 attachments: vec![],
+                receipts: vec![],
             },
         );
         assert!(drain(&two).iter().any(|body| matches!(
@@ -1331,6 +1459,7 @@ mod tests {
                     arguments: serde_json::json!({}),
                 }]),
                 attachments: vec![],
+                receipts: vec![],
             },
         );
         assert!(drain(&two).iter().any(|body| matches!(
@@ -1359,6 +1488,7 @@ mod tests {
                 details: None,
                 widgets: None,
                 attachments: vec!["att_missing".into()],
+                receipts: vec![],
             },
         );
         assert!(matches!(
@@ -1372,6 +1502,7 @@ mod tests {
                 details: None,
                 widgets: None,
                 attachments: vec![],
+                receipts: vec![],
             },
         );
         assert!(drain(&one).iter().any(|body| matches!(
@@ -1432,6 +1563,7 @@ mod tests {
                     details: None,
                     widgets: None,
                     attachments: vec![],
+                    receipts: vec![],
                 },
             );
         };
@@ -1504,6 +1636,7 @@ mod tests {
                     arguments: serde_json::json!({}),
                 }]),
                 attachments: vec![],
+                receipts: vec![],
             },
         );
         for inbox in [&one, &two] {
@@ -1531,6 +1664,7 @@ mod tests {
                 details: None,
                 widgets: None,
                 attachments: vec![],
+                receipts: vec![],
             },
         );
         assert!(drain(&one).iter().any(|body| matches!(
@@ -1541,5 +1675,169 @@ mod tests {
                 ..
             } if surface == "one"
         )));
+    }
+
+    fn row(id: &str, state: JobRowState, summary: &str) -> JobRow {
+        JobRow {
+            id: id.into(),
+            project: Some("scufris2".into()),
+            state,
+            since: 1_757_000_000,
+            summary: summary.into(),
+        }
+    }
+
+    #[test]
+    fn the_tray_word_is_folded_from_the_rows_and_a_failed_row_holds_it() {
+        // The aggregate this replaced was sent as its own field, so a surface
+        // could be told `clear` while a row said `failed`. There is one source
+        // now: filing the row is what puts the tray back to quiet, and nothing
+        // else can.
+        let service = service();
+        let (_, inbox) = surface(&service, 1, "one");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+
+        service.agent_request(
+            10,
+            AgentRequestBody::Jobs {
+                jobs: vec![
+                    row("3f81c204b1e9", JobRowState::Working, "reviewing G1"),
+                    row(
+                        "9ad0117e5c22",
+                        JobRowState::Blocked,
+                        "needs the display slot",
+                    ),
+                    row("16f0eceb1bb9", JobRowState::Failed, "the harness exited 1"),
+                ],
+            },
+        );
+        assert_eq!(
+            service.control_state(),
+            (ScufrisState::Failed, "the harness exited 1".into())
+        );
+        let published = drain(&inbox);
+        assert!(
+            published
+                .iter()
+                .any(|body| matches!(body, SurfaceResponseBody::Jobs { jobs } if jobs.len() == 3))
+        );
+
+        // The blocked job is still blocked, so filing the failure uncovers it
+        // rather than clearing the tray.
+        service.agent_request(
+            10,
+            AgentRequestBody::Jobs {
+                jobs: vec![
+                    row("3f81c204b1e9", JobRowState::Working, "reviewing G1"),
+                    row(
+                        "9ad0117e5c22",
+                        JobRowState::Blocked,
+                        "needs the display slot",
+                    ),
+                ],
+            },
+        );
+        assert_eq!(
+            service.control_state(),
+            (ScufrisState::Blocked, "needs the display slot".into())
+        );
+
+        // Filing the last row leaves nothing needing him, and the word falls
+        // back to whatever the service itself is doing.
+        service.agent_request(10, AgentRequestBody::Jobs { jobs: vec![] });
+        assert_eq!(service.control_state().0, ScufrisState::Starting);
+    }
+
+    #[test]
+    fn an_offer_is_taken_once_and_stays_taken_in_the_replay() {
+        // Spent lives on the message that carries the badge, because that
+        // message is what a reconnecting surface replays. Without it every
+        // restart would hand back a live button for work already done.
+        let service = service();
+        let (_, inbox) = surface(&service, 1, "one");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        service.surface_message(1, "m-1".into(), "land it".into(), vec![]);
+        agent_in.recv().unwrap();
+        service.agent_request(
+            10,
+            AgentRequestBody::Response {
+                text: "Landed it, and it is not pushed.".into(),
+                details: None,
+                widgets: None,
+                attachments: vec![],
+                receipts: vec![Citation {
+                    job_id: "750a4de8a80d".into(),
+                    badges: vec![Receipt {
+                        label: "pushed".into(),
+                        value: "no".into(),
+                        state: ReceiptState::Refuted,
+                    }],
+                    offers: vec![Offer {
+                        id: "offer-1".into(),
+                        label: "push master".into(),
+                        taken: false,
+                    }],
+                }],
+            },
+        );
+        while agent_in.try_recv().is_ok() {}
+        while inbox.try_recv().is_ok() {}
+
+        service.surface_offer_take(1, "offer-1".into());
+        assert!(matches!(
+            agent_in.try_recv().unwrap().body,
+            AgentResponseBody::OfferTake { id } if id == "offer-1"
+        ));
+        assert!(
+            drain(&inbox).iter().any(
+                |body| matches!(body, SurfaceResponseBody::OfferTaken { id } if id == "offer-1")
+            )
+        );
+
+        // Pressed twice, or pressed on a screen that had not heard yet.
+        service.surface_offer_take(1, "offer-1".into());
+        assert!(agent_in.try_recv().is_err());
+        assert!(drain(&inbox).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Rejected { code, .. } if code == refusal::OFFER_UNAVAILABLE
+        )));
+
+        let (outbox, replay) = sync_channel(256);
+        service.register_surface(
+            2,
+            SurfaceRegistration {
+                id: "two".into(),
+                name: "two".into(),
+                widgets: vec![],
+            },
+            outbox,
+        );
+        assert!(drain(&replay).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Message { receipts, .. }
+                if receipts.iter().any(|citation| citation.offers.iter().all(|offer| offer.taken))
+        )));
+    }
+
+    #[test]
+    fn a_job_command_reaches_the_agent_that_owns_the_job() {
+        let service = service();
+        let (_, inbox) = surface(&service, 1, "one");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        service.surface_job_command(1, "3f81c204b1e9".into(), JobAction::Cancel);
+        assert!(matches!(
+            agent_in.try_recv().unwrap().body,
+            AgentResponseBody::JobCommand { id, action }
+                if id == "3f81c204b1e9" && action == JobAction::Cancel
+        ));
+        // Nothing is decided here: what stopping costs belongs to the agent,
+        // and the row list it publishes next is the answer.
+        assert!(drain(&inbox).is_empty());
     }
 }

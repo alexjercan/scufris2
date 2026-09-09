@@ -502,14 +502,21 @@ function line(role: string, text: string): Record<string, string> {
  * `taken` is what the host answers `hud_submit` with: true when the line was
  * accepted, false when one was already in flight.
  */
-function hud(taken = true, lines: Record<string, string>[] = []): Page {
+function hud(
+  taken = true,
+  lines: Record<string, unknown>[] = [],
+  jobs: Record<string, unknown>[] = [],
+): Page {
   const page = new Page();
   page.answers["hud_ready"] = {
     lines,
+    jobs,
     notice: { sending: false, thinking: false, attachments: [], trouble: "" },
   };
   page.answers["hud_submit"] = taken;
   page.add("lines", "OL");
+  page.add("jobs", "LI");
+  page.add("rows", "DIV");
   page.add("notice", "SPAN");
   page.add("words", "TEXTAREA");
   page.add("selected", "DIV");
@@ -518,6 +525,22 @@ function hud(taken = true, lines: Record<string, string>[] = []): Page {
   page.add("fresh", "P");
   run(page, [], [pages().markdown, pages().hud]);
   return page;
+}
+
+/** One job row, as the service publishes it. */
+function job(
+  id: string,
+  state: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id,
+    project: "personal/scufris2",
+    state,
+    since: Math.floor(Date.now() / 1000) - 240,
+    summary: "reviewing G1",
+    ...extra,
+  };
 }
 
 /** A scroller with more in it than fits, parked at the bottom of itself. */
@@ -1159,6 +1182,221 @@ test("octet-stream videos use their filename for a clickable thumbnail", async (
     page.lastCall("hud_open_attachment")["descriptor"],
     descriptor,
   );
+});
+
+test("badges are grouped by job and led by the job they are about", async () => {
+  const page = hud(true, [
+    {
+      ...line("assistant", "Both finished."),
+      receipts: [
+        {
+          job_id: "750a4de8a80d",
+          badges: [
+            { label: "landed", value: "yes", state: "measured" },
+            { label: "pushed", value: "no", state: "refuted" },
+          ],
+          offers: [{ id: "offer-a1", label: "push master" }],
+        },
+        {
+          job_id: "01ccbac98b97",
+          badges: [
+            {
+              label: "released",
+              value: "claimed, not verified",
+              state: "claimed",
+            },
+          ],
+          offers: [],
+        },
+      ],
+    },
+  ]);
+  await settle();
+  const strips = page
+    .element("lines")
+    .children[0]!.children.filter((part) => part.className === "strip");
+  assert.equal(strips.length, 2);
+  // The identifier does the binding: nothing here reads the prose above it.
+  assert.deepEqual(
+    strips.map((strip) => strip.children[0]?.content),
+    ["750a4de8a80d", "01ccbac98b97"],
+  );
+  assert.deepEqual(
+    strips[0]!.children
+      .slice(1, 3)
+      .map((badge) => [badge.dataset["state"], badge.textContent]),
+    [
+      ["measured", "landedyes"],
+      ["refuted", "pushedno"],
+    ],
+  );
+  // An offer is a control and a receipt is not, so only one of them is a
+  // button.
+  const offer = strips[0]!.children[3];
+  assert.equal(offer?.tagName, "BUTTON");
+  assert.equal(strips[1]!.children.length, 2);
+});
+
+test("an offer sends its identifier and is marked spent by the service", async () => {
+  const page = hud(true, [
+    {
+      ...line("assistant", "It landed but never reached the remote."),
+      receipts: [
+        {
+          job_id: "750a4de8a80d",
+          badges: [{ label: "pushed", value: "no", state: "refuted" }],
+          offers: [{ id: "offer-a1", label: "push master" }],
+        },
+      ],
+    },
+  ]);
+  await settle();
+  const strip = page
+    .element("lines")
+    .children[0]!.children.find((part) => part.className === "strip");
+  const offer = strip?.children[2];
+  assert.ok(offer !== undefined);
+  offer.dispatch("click", {});
+  await settle();
+  // The words behind the offer never reached this page: it sends the id.
+  assert.equal(page.lastCall("hud_offer_take")["id"], "offer-a1");
+  assert.equal(offer.dataset["spent"], undefined);
+  // Spent is the service's to say, and it says so for every drawing of it.
+  page.publish("scufris://offer-taken", "offer-a1");
+  assert.equal(offer.dataset["spent"], "");
+
+  // A replay brings back what the store already knows was taken.
+  page.publish("scufris://conversation", {
+    lines: [
+      {
+        ...line("assistant", "It landed but never reached the remote."),
+        receipts: [
+          {
+            job_id: "750a4de8a80d",
+            badges: [],
+            offers: [{ id: "offer-a1", label: "push master", taken: true }],
+          },
+        ],
+      },
+    ],
+    jobs: [],
+    notice: { sending: false, thinking: false, attachments: [], trouble: "" },
+  });
+  const replayed = page
+    .element("lines")
+    .children[0]!.children.find((part) => part.className === "strip");
+  assert.equal(replayed?.children[1]?.dataset["spent"], "");
+});
+
+test("a job row outlives its job and the list is the last thing in the flow", async () => {
+  const page = hud(
+    true,
+    [line("assistant", "The night finished.")],
+    [job("01ccbac98b97", "done"), job("3f81c204b1e9", "working")],
+  );
+  await settle();
+  const lines = page.element("lines");
+  // The list is part of the conversation and scrolls away with it.
+  assert.equal(lines.children[lines.children.length - 1]?.id, "jobs");
+  const rows = page.element("rows");
+  assert.deepEqual(
+    rows.children.map((row) => row.dataset["state"]),
+    ["done", "working"],
+  );
+  assert.deepEqual(
+    rows.children.map((row) => row.children[2]?.content),
+    ["done", "work"],
+  );
+  assert.deepEqual(
+    rows.children.map((row) => row.children[3]?.content),
+    ["4m", "4m"],
+  );
+  // One control per row, and which one it is says what the row is.
+  assert.deepEqual(
+    rows.children.map((row) => [
+      row.children[5]?.dataset["act"],
+      row.children[5]?.content,
+    ]),
+    [
+      ["archive", "clear"],
+      ["cancel", "x"],
+    ],
+  );
+
+  // A line arriving keeps the list under everything that was said.
+  page.publish("scufris://said", line("assistant", "One more thing."));
+  assert.equal(
+    lines.children[lines.children.length - 1]?.id,
+    "jobs",
+    "the job list stayed at the end of the flow",
+  );
+
+  // Filing is the acknowledgement, and it is all it is.
+  rows.children[0]?.children[5]?.dispatch("click", {});
+  await settle();
+  assert.equal(page.lastCall("hud_job_command")["id"], "01ccbac98b97");
+  assert.equal(page.lastCall("hud_job_command")["action"], "archive");
+
+  // An empty list leaves the flow rather than sitting empty in it.
+  page.publish("scufris://jobs", []);
+  assert.equal(
+    lines.children.some((child) => child.id === "jobs"),
+    false,
+  );
+});
+
+test("stopping a job arms before it fires and forgets it was pressed", async () => {
+  const page = hud(true, [], [job("3f81c204b1e9", "working")]);
+  await settle();
+  const stop = page.element("rows").children[0]?.children[5];
+  assert.ok(stop !== undefined);
+  // Stopping the wrong job costs an hour of an agent's work, so it asks once.
+  stop.dispatch("click", {});
+  assert.equal(stop.content, "sure?");
+  assert.equal(stop.dataset["armed"], "");
+  assert.equal(page.commands().includes("hud_job_command"), false);
+  stop.dispatch("click", {});
+  await settle();
+  assert.equal(page.lastCall("hud_job_command")["id"], "3f81c204b1e9");
+  assert.equal(page.lastCall("hud_job_command")["action"], "cancel");
+  assert.equal(stop.content, "x");
+
+  // An armed control that is left alone forgets it was pressed.
+  stop.dispatch("click", {});
+  assert.equal(stop.dataset["armed"], "");
+  page.elapse();
+  assert.equal(stop.dataset["armed"], undefined);
+  assert.equal(stop.content, "x");
+});
+
+test("two or more finished rows can be filed at once", async () => {
+  const page = hud(
+    true,
+    [],
+    [
+      job("01ccbac98b97", "done"),
+      job("16f0eceb1bb9", "failed"),
+      job("3f81c204b1e9", "working"),
+    ],
+  );
+  await settle();
+  const rows = page.element("rows");
+  const sweep = rows.children[rows.children.length - 1];
+  assert.equal(sweep?.className, "sweep");
+  assert.equal(sweep?.content, "clear the 2 finished");
+  sweep?.dispatch("click", {});
+  await settle();
+  assert.deepEqual(
+    page.invocations
+      .filter((call) => call.command === "hud_job_command")
+      .map((call) => (call.args as Record<string, unknown>)["id"]),
+    ["01ccbac98b97", "16f0eceb1bb9"],
+  );
+
+  // One finished row is one control. The sweep is for a morning's backlog.
+  page.publish("scufris://jobs", [job("01ccbac98b97", "done")]);
+  assert.equal(rows.children.length, 1);
+  assert.equal(rows.children[0]?.className, "row");
 });
 
 test("a person who has scrolled up to read is not dragged back down", async () => {

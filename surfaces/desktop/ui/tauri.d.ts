@@ -48,12 +48,38 @@ interface Tick {
   level: number;
 }
 
-// Canonical protocol v6 conversation entry, relayed without reshaping.
+// Canonical protocol v7 conversation entry, relayed without reshaping.
 interface AttachmentDescriptor {
   id: string;
   name: string;
   media_type: string;
   size: number;
+}
+
+/** One measured fact, in the only four words a badge has.
+ *
+ * `unknown` is not a no: it is a fact nobody could measure, and drawing it as
+ * a refusal would invent the one thing the receipt was careful not to claim.
+ */
+interface ReceiptBadge {
+  label: string;
+  value: string;
+  state: "measured" | "refuted" | "claimed" | "unknown";
+}
+
+/** One thing Scufris offers to do next. The words behind it stay with the
+ * extension: this page sends the identifier and nothing else. */
+interface Offer {
+  id: string;
+  label: string;
+  taken?: boolean;
+}
+
+/** Every badge one message carries about one job, led by that job's id. */
+interface Citation {
+  job_id: string;
+  badges?: ReceiptBadge[];
+  offers?: Offer[];
 }
 
 interface ConversationEntry {
@@ -63,6 +89,17 @@ interface ConversationEntry {
   details?: string;
   widgets?: Array<{ id: string; name: string; arguments: unknown }>;
   attachments?: AttachmentDescriptor[];
+  receipts?: Citation[];
+}
+
+/** One delegated job. A row outlives its job: filing it is what clears it. */
+interface JobRow {
+  id: string;
+  project?: string;
+  state: "working" | "blocked" | "done" | "failed";
+  /** Unix seconds the job started, which the row shows the age of. */
+  since: number;
+  summary: string;
 }
 
 interface Notice {
@@ -74,6 +111,7 @@ interface Notice {
 
 interface Backlog {
   lines: ConversationEntry[];
+  jobs: JobRow[];
   notice: Notice;
 }
 

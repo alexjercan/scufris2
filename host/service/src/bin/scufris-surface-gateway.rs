@@ -345,7 +345,7 @@ async fn health(
     tag = "gateway",
     security(("bearer_token" = [])),
     responses(
-        (status = 101, description = "Upgrade to the strict protocol-v6 surface WebSocket"),
+        (status = 101, description = "Upgrade to the strict protocol-v7 surface WebSocket"),
         (status = 401, description = "Missing or invalid bearer token", body = ErrorEnvelope)
     )
 )]
@@ -1039,7 +1039,7 @@ mod tests {
     #[test]
     fn websocket_payloads_use_the_strict_surface_decoder() {
         let request = decode_request(
-            r#"{"v":6,"type":"surface.message","id":"ios-1","text":"hello","attachments":[]}"#,
+            r#"{"v":7,"type":"surface.message","id":"ios-1","text":"hello","attachments":[]}"#,
         )
         .unwrap();
         assert!(matches!(request.body, SurfaceRequestBody::Message { .. }));
@@ -1049,14 +1049,14 @@ mod tests {
         // can put on this channel expresses one.
         assert!(
             decode_request(
-                r#"{"v":6,"type":"control.wake","id":"wake-1","custom_type":"scufris-wake","text":"Wake up."}"#
+                r#"{"v":7,"type":"control.wake","id":"wake-1","custom_type":"scufris-wake","text":"Wake up."}"#
             )
             .is_err()
         );
     }
 
     #[tokio::test]
-    async fn authenticated_websocket_still_bridges_strict_surface_v6() {
+    async fn authenticated_websocket_still_bridges_strict_surface_v7() {
         let root =
             std::env::temp_dir().join(format!("scufris-async-gateway-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);

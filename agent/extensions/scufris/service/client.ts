@@ -4,10 +4,13 @@ import {
   SERVICE_VERSION,
   decodeAgentResponse,
   encodeAgentRequest,
-  stateDetail,
+  jobSummary,
   surfacePrompt,
   takeLines,
   type AgentRequest,
+  type Citation,
+  type JobAction,
+  type JobRow,
   type WidgetCall,
 } from "./protocol.ts";
 
@@ -22,6 +25,8 @@ export interface AtomicResponse {
   details?: string;
   widgets?: WidgetCall[];
   attachments?: string[];
+  /** Measured badges, grouped by the job each one is about. */
+  receipts?: Citation[];
 }
 
 /** One proactive message delivered from outside the agent process. */
@@ -41,6 +46,10 @@ export interface AgentClientOptions {
   wake: (wake: AgentWake) => void;
   abort: () => void;
   busy: () => boolean;
+  /** A surface asked one job row to stop, or to be filed. */
+  jobCommand: (id: string, action: JobAction) => void;
+  /** A surface took one offer. The words behind it stayed here. */
+  offerTake: (id: string) => void;
   /** Called on every completed handshake, including a reconnect. */
   connected?: () => void;
   log?: (message: string, level: "info" | "error") => void;
@@ -80,12 +89,17 @@ export class AgentClient {
     this.tell({ v: SERVICE_VERSION, type: "agent.response", ...response });
   }
 
-  state(state: "failed" | "blocked" | "clear", detail: string): void {
+  /** Publishes every delegated job, whole.
+   *
+   * Whole rather than incremental because a row outlives its job: the list is
+   * backlog as well as news, and a surface joining this morning has to be told
+   * about the night's finished work too.
+   */
+  jobs(rows: JobRow[]): void {
     this.tell({
       v: SERVICE_VERSION,
-      type: "agent.state",
-      state,
-      detail: stateDetail(detail),
+      type: "agent.jobs",
+      jobs: rows.map((row) => ({ ...row, summary: jobSummary(row.summary) })),
     });
   }
 
@@ -160,6 +174,10 @@ export class AgentClient {
           });
         } else if (message.type === "agent.abort") {
           this.options.abort();
+        } else if (message.type === "agent.job_command") {
+          this.options.jobCommand(message.id, message.action);
+        } else if (message.type === "agent.offer_take") {
+          this.options.offerTake(message.id);
         } else {
           this.log(`${message.code}: ${message.detail}`, "error");
         }

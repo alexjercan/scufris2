@@ -1,4 +1,4 @@
-//! Scufris protocol v6 typed channels.
+//! Scufris protocol v7 typed channels.
 //!
 //! Surface, agent, and control traffic use separate Unix sockets and separate
 //! enums. Each decoder accepts only its channel and direction.
@@ -9,10 +9,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    ControlPathError, MessageError, chosen_runtime_dir, in_runtime_dir, is_identifier, read_line,
+    ControlPathError, MAX_IDENTIFIER_LENGTH, MessageError, chosen_runtime_dir, in_runtime_dir,
+    is_identifier, read_line,
 };
 
-pub const SERVICE_VERSION: u32 = 6;
+pub const SERVICE_VERSION: u32 = 7;
 pub const SURFACE_FILE_NAME: &str = "surface.sock";
 pub const AGENT_FILE_NAME: &str = "agent.sock";
 pub const CONTROL_FILE_NAME: &str = "control.sock";
@@ -38,6 +39,21 @@ pub const MAX_ATTACHMENTS: usize = 8;
 pub const MAX_ATTACHMENT_NAME_BYTES: usize = 255;
 pub const MAX_MEDIA_TYPE_BYTES: usize = 127;
 pub const MAX_ATTACHMENT_BYTES: u64 = 16 * 1024 * 1024;
+/// One citation group per job, and what a group may carry.
+///
+/// A message that reports more than four jobs is a message nobody reads as
+/// evidence, and a group with more than six badges is a paragraph in a strip.
+pub const MAX_CITATIONS: usize = 4;
+pub const MAX_RECEIPTS: usize = 6;
+pub const MAX_OFFERS: usize = 2;
+pub const MAX_BADGE_BYTES: usize = 64;
+/// How many job rows a surface is asked to draw at once.
+///
+/// A row outlives its job and is cleared by hand, so this is a ceiling on a
+/// list that grows rather than on what is running. The extension drops the
+/// oldest finished rows to stay inside it and never a live one.
+pub const MAX_JOB_ROWS: usize = 8;
+pub const MAX_JOB_SUMMARY_BYTES: usize = 512;
 
 pub fn surface_socket_path() -> Result<PathBuf, ControlPathError> {
     socket_path(SURFACE_FILE_NAME)
@@ -92,6 +108,107 @@ pub struct SurfaceRegistration {
     pub widgets: Vec<WidgetDefinition>,
 }
 
+/// What one measured fact says, in the only four words a badge has.
+///
+/// `Unknown` is not a no. A fetch that failed leaves `pushed` unmeasured, and
+/// drawing that as "not pushed" would invent the one fact the receipt was
+/// careful not to claim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReceiptState {
+    /// The fact is true.
+    Measured,
+    /// The fact was measured and is false.
+    Refuted,
+    /// The worker said it and no fact backs it.
+    Claimed,
+    /// It could not be measured, and the receipt says why.
+    Unknown,
+}
+
+/// One measured fact about one job, as a badge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Receipt {
+    pub label: String,
+    pub value: String,
+    pub state: ReceiptState,
+}
+
+/// One thing the agent offers to do next about one job.
+///
+/// The words are the agent's and the prompt behind them never crosses: a
+/// surface sends the identifier back and the agent knows what it stored
+/// against it. `taken` is what stops a reconnection from handing back a live
+/// button for work already done.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Offer {
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub taken: bool,
+}
+
+/// Every badge one message carries about one job.
+///
+/// Grouped by job and labelled with it, so a message that reports two jobs
+/// binds each rank of badges to its own without the prose being parsed or
+/// broken.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Citation {
+    pub job_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub badges: Vec<Receipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub offers: Vec<Offer>,
+}
+
+/// What a delegated job is doing, for the list at the foot of the chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JobRowState {
+    Working,
+    Blocked,
+    Done,
+    Failed,
+}
+
+impl JobRowState {
+    /// Whether the job has stopped. A stopped row is filed rather than ended.
+    pub fn terminal(self) -> bool {
+        matches!(self, Self::Done | Self::Failed)
+    }
+}
+
+/// One delegated job, as a row.
+///
+/// The row outlives the job: finishing does not remove it, so an overnight run
+/// is still there in the morning and filing it is the acknowledgement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JobRow {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    pub state: JobRowState,
+    /// Unix seconds the job started, for the age the row shows.
+    pub since: u64,
+    pub summary: String,
+}
+
+/// What a surface asks of one job row.
+///
+/// A live job can only be stopped and a finished one can only be filed, so the
+/// two never apply to the same row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JobAction {
+    Cancel,
+    Archive,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ConversationRole {
@@ -111,6 +228,8 @@ pub struct ConversationMessage {
     pub widgets: Option<Vec<WidgetCall>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<AttachmentDescriptor>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub receipts: Vec<Citation>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,6 +284,19 @@ pub enum SurfaceRequestBody {
     },
     #[serde(rename = "surface.abort")]
     Abort { id: String },
+    /// Stop or file one job row.
+    ///
+    /// The surface names the row and the verb, and nothing else: what stopping
+    /// costs and what filing means both belong to the agent that owns the job.
+    #[serde(rename = "job.command")]
+    JobCommand { id: String, action: JobAction },
+    /// Take one offer the agent made.
+    ///
+    /// The identifier is the whole request. The prompt behind an offer was
+    /// written by the agent and stayed there, so a surface cannot put words
+    /// into the conversation by pressing a button.
+    #[serde(rename = "offer.take")]
+    OfferTake { id: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -197,6 +329,8 @@ pub enum SurfaceResponseBody {
         widgets: Option<Vec<WidgetCall>>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<AttachmentDescriptor>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        receipts: Vec<Citation>,
     },
     #[serde(rename = "surface.message_ack")]
     MessageAck { id: String },
@@ -204,6 +338,19 @@ pub enum SurfaceResponseBody {
     Aborted { id: String },
     #[serde(rename = "surface.state")]
     State { state: ScufrisState, detail: String },
+    /// Every job row at once, replacing whatever the surface holds.
+    ///
+    /// Sent whenever the list changes and replayed on connect, because a row
+    /// outlives its job: a surface that joined this morning has to be told
+    /// about the night's finished work as well as what is running.
+    #[serde(rename = "surface.jobs")]
+    Jobs { jobs: Vec<JobRow> },
+    /// One offer has been taken, and is not on offer again.
+    ///
+    /// Broadcast rather than sent to the surface that pressed it: the badge is
+    /// in a message every screen is showing.
+    #[serde(rename = "surface.offer_taken")]
+    OfferTaken { id: String },
     #[serde(rename = "surface.ready")]
     Ready { surface: String },
     #[serde(rename = "surface.rejected")]
@@ -225,6 +372,7 @@ impl From<ConversationMessage> for SurfaceResponseBody {
             details: message.details,
             widgets: message.widgets,
             attachments: message.attachments,
+            receipts: message.receipts,
         }
     }
 }
@@ -259,17 +407,18 @@ pub enum AgentRequestBody {
         widgets: Option<Vec<WidgetCall>>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        receipts: Vec<Citation>,
     },
-    #[serde(rename = "agent.state")]
-    State { state: AgentState, detail: String },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentState {
-    Failed,
-    Blocked,
-    Clear,
+    /// Every delegated job the agent owns, whole.
+    ///
+    /// This replaced one aggregate word and one detail string. The word was
+    /// all a surface got about any number of jobs, so a blocked job and three
+    /// blocked jobs read the same and neither said which. The tray still wants
+    /// one word, and the service folds these rows down to it: one source, two
+    /// readings.
+    #[serde(rename = "agent.jobs")]
+    Jobs { jobs: Vec<JobRow> },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -316,6 +465,12 @@ pub enum AgentResponseBody {
     },
     #[serde(rename = "agent.abort")]
     Abort { id: String },
+    /// A surface asked something of one job row.
+    #[serde(rename = "agent.job_command")]
+    JobCommand { id: String, action: JobAction },
+    /// A surface took one offer. The agent holds the words it stands for.
+    #[serde(rename = "agent.offer_take")]
+    OfferTake { id: String },
     #[serde(rename = "agent.rejected")]
     Rejected { code: String, detail: String },
 }
@@ -561,6 +716,70 @@ fn wake(custom_type: &str, body: &str, details: &Option<Value>) -> Result<(), Me
     }
     Ok(())
 }
+/// Validates the badges one message carries, grouped by job.
+///
+/// Every bound here is on presentation: a strip is read at a glance and a
+/// message that cites five jobs is not one. Nothing about the receipt itself
+/// is checked, because none of it was written by a model.
+fn citations(value: &[Citation]) -> Result<(), MessageError> {
+    if value.len() > MAX_CITATIONS {
+        return Err(MessageError::InvalidSubmission("receipts"));
+    }
+    for (index, citation) in value.iter().enumerate() {
+        id(&citation.job_id, "citation job id")?;
+        // One group per job. Two groups naming the same job would draw two
+        // strips under one message with the same label on both, and there
+        // would be no reading that says which badge belongs where.
+        if value[..index]
+            .iter()
+            .any(|previous| previous.job_id == citation.job_id)
+        {
+            return Err(MessageError::InvalidSubmission("receipts"));
+        }
+        if citation.badges.len() > MAX_RECEIPTS || citation.offers.len() > MAX_OFFERS {
+            return Err(MessageError::InvalidSubmission("receipts"));
+        }
+        for badge in &citation.badges {
+            text(&badge.label, MAX_BADGE_BYTES, "receipt label", false)?;
+            text(&badge.value, MAX_BADGE_BYTES, "receipt value", false)?;
+        }
+        for offer in &citation.offers {
+            id(&offer.id, "offer id")?;
+            text(&offer.label, MAX_BADGE_BYTES, "offer label", false)?;
+        }
+    }
+    // An offer identifier is what a surface sends back, so it names one offer
+    // in the whole message and not one inside its own group.
+    let mut offers = Vec::new();
+    for offer in value.iter().flat_map(|citation| &citation.offers) {
+        if offers.contains(&&offer.id) {
+            return Err(MessageError::InvalidSubmission("offers"));
+        }
+        offers.push(&offer.id);
+    }
+    Ok(())
+}
+fn job_rows(value: &[JobRow]) -> Result<(), MessageError> {
+    if value.len() > MAX_JOB_ROWS {
+        return Err(MessageError::InvalidSubmission("jobs"));
+    }
+    for (index, row) in value.iter().enumerate() {
+        id(&row.id, "job id")?;
+        if value[..index].iter().any(|previous| previous.id == row.id) {
+            return Err(MessageError::InvalidSubmission("jobs"));
+        }
+        // A project identifier is a relative path, so it carries slashes an
+        // identifier never may. It is drawn, not resolved, so bounded text
+        // with no control characters is the whole requirement.
+        if let Some(project) = &row.project {
+            text(project, MAX_IDENTIFIER_LENGTH, "job project", false)?;
+        }
+        // A row whose job has not said anything yet is a row with no summary,
+        // and that is worth drawing: it says the job started.
+        text(&row.summary, MAX_JOB_SUMMARY_BYTES, "job summary", true)?;
+    }
+    Ok(())
+}
 fn validate_registration(surface: &SurfaceRegistration) -> Result<(), MessageError> {
     id(&surface.id, "surface id")?;
     if surface.id == UNPROMPTED_SURFACE {
@@ -580,7 +799,8 @@ pub fn validate_conversation_message(message: &ConversationMessage) -> Result<()
         text(details, MAX_DETAILS_BYTES, "message details", false)?;
     }
     calls(&message.widgets)?;
-    attachment_descriptors(&message.attachments)
+    attachment_descriptors(&message.attachments)?;
+    citations(&message.receipts)
 }
 fn validate_surface_request(message: &SurfaceRequest) -> Result<(), MessageError> {
     match &message.body {
@@ -595,6 +815,8 @@ fn validate_surface_request(message: &SurfaceRequest) -> Result<(), MessageError
             attachment_ids(attachments)
         }
         SurfaceRequestBody::Abort { id: one } => id(one, "abort id"),
+        SurfaceRequestBody::JobCommand { id: one, .. } => id(one, "job id"),
+        SurfaceRequestBody::OfferTake { id: one } => id(one, "offer id"),
     }
 }
 fn validate_surface_response(message: &SurfaceResponse) -> Result<(), MessageError> {
@@ -606,6 +828,7 @@ fn validate_surface_response(message: &SurfaceResponse) -> Result<(), MessageErr
             details,
             widgets,
             attachments,
+            receipts,
         } => validate_conversation_message(&ConversationMessage {
             role: *role,
             surface: surface.clone(),
@@ -613,6 +836,7 @@ fn validate_surface_response(message: &SurfaceResponse) -> Result<(), MessageErr
             details: details.clone(),
             widgets: widgets.clone(),
             attachments: attachments.clone(),
+            receipts: receipts.clone(),
         }),
         SurfaceResponseBody::MessageAck { id: one } | SurfaceResponseBody::Aborted { id: one } => {
             id(one, "response id")
@@ -620,6 +844,8 @@ fn validate_surface_response(message: &SurfaceResponse) -> Result<(), MessageErr
         SurfaceResponseBody::State { detail, .. } => {
             text(detail, MAX_DETAIL_BYTES, "state detail", true)
         }
+        SurfaceResponseBody::Jobs { jobs } => job_rows(jobs),
+        SurfaceResponseBody::OfferTaken { id: one } => id(one, "offer id"),
         SurfaceResponseBody::Ready { surface } => id(surface, "surface id"),
         SurfaceResponseBody::Rejected {
             id: one,
@@ -644,17 +870,17 @@ fn validate_agent_request(message: &AgentRequest) -> Result<(), MessageError> {
             details,
             widgets,
             attachments,
+            receipts,
         } => {
             text(body, MAX_TEXT_BYTES, "response text", false)?;
             if let Some(details) = details {
                 text(details, MAX_DETAILS_BYTES, "response details", false)?;
             }
             calls(widgets)?;
-            attachment_ids(attachments)
+            attachment_ids(attachments)?;
+            citations(receipts)
         }
-        AgentRequestBody::State { detail, .. } => {
-            text(detail, MAX_DETAIL_BYTES, "state detail", true)
-        }
+        AgentRequestBody::Jobs { jobs } => job_rows(jobs),
     }
 }
 fn validate_agent_response(message: &AgentResponse) -> Result<(), MessageError> {
@@ -677,6 +903,8 @@ fn validate_agent_response(message: &AgentResponse) -> Result<(), MessageError> 
             details,
         } => wake(custom_type, body, details),
         AgentResponseBody::Abort { id: one } => id(one, "abort id"),
+        AgentResponseBody::JobCommand { id: one, .. } => id(one, "job id"),
+        AgentResponseBody::OfferTake { id: one } => id(one, "offer id"),
         AgentResponseBody::Rejected { code, detail } => {
             id(code, "rejection code")?;
             text(detail, MAX_DETAIL_BYTES, "rejection detail", true)
@@ -727,13 +955,13 @@ mod tests {
 
     #[test]
     fn channels_and_directions_are_distinct() {
-        let line = b"{\"v\":6,\"type\":\"agent.hello\"}\n";
+        let line = b"{\"v\":7,\"type\":\"agent.hello\"}\n";
         assert!(read_agent_request(&mut Cursor::new(line)).is_ok());
         assert!(matches!(
             read_surface_request(&mut Cursor::new(line)),
             Err(MessageError::InvalidJson(_))
         ));
-        let outbound = b"{\"v\":6,\"type\":\"surface.ready\",\"surface\":\"desk\"}\n";
+        let outbound = b"{\"v\":7,\"type\":\"surface.ready\",\"surface\":\"desk\"}\n";
         assert!(read_surface_response(&mut Cursor::new(outbound)).is_ok());
         assert!(read_surface_request(&mut Cursor::new(outbound)).is_err());
     }
@@ -745,7 +973,7 @@ mod tests {
         // would speak every briefing the owner never asked for.
         let hello = |id: &str| {
             format!(
-                "{{\"v\":6,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{id}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
+                "{{\"v\":7,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{id}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
             )
         };
         assert!(read_surface_request(&mut Cursor::new(hello("desk"))).is_ok());
@@ -757,7 +985,7 @@ mod tests {
 
     #[test]
     fn every_wrong_version_is_identified_before_body_decode() {
-        for version in [0, 4, 5, u32::MAX] {
+        for version in [0, 5, 6, u32::MAX] {
             let line = format!("{{\"v\":{version},\"type\":\"anything\"}}\n");
             assert!(
                 matches!(read_surface_request(&mut Cursor::new(line)), Err(MessageError::UnsupportedVersion(v)) if v == version)
@@ -843,6 +1071,7 @@ mod tests {
             ),
             widgets: None,
             attachments: vec![],
+            receipts: vec![],
         };
         assert!(validate_conversation_message(&message).is_ok());
         assert!(
@@ -919,7 +1148,7 @@ mod tests {
     fn only_the_control_channel_carries_a_wake() {
         // A wake is not a second way to drive the conversation, so the channel
         // the remote gateway speaks cannot express one.
-        let line = b"{\"v\":6,\"type\":\"control.wake\",\"id\":\"wake-1\",\"custom_type\":\"scufris-wake\",\"text\":\"Wake up.\"}\n";
+        let line = b"{\"v\":7,\"type\":\"control.wake\",\"id\":\"wake-1\",\"custom_type\":\"scufris-wake\",\"text\":\"Wake up.\"}\n";
         assert!(read_control_request(&mut Cursor::new(line)).is_ok());
         assert!(read_surface_request(&mut Cursor::new(line)).is_err());
         assert!(read_agent_request(&mut Cursor::new(line)).is_err());
@@ -936,6 +1165,7 @@ mod tests {
                 arguments: serde_json::json!({"passed": 4}),
             }]),
             attachments: vec![],
+            receipts: vec![],
         });
         let mut bytes = Vec::new();
         crate::write_message(&mut bytes, &response).unwrap();
@@ -943,5 +1173,178 @@ mod tests {
             read_agent_request(&mut Cursor::new(bytes)).unwrap(),
             response
         );
+    }
+
+    fn cited(job_id: &str) -> Citation {
+        Citation {
+            job_id: job_id.into(),
+            badges: vec![Receipt {
+                label: "landed".into(),
+                value: "yes".into(),
+                state: ReceiptState::Measured,
+            }],
+            offers: vec![Offer {
+                id: format!("offer-{job_id}"),
+                label: "push master".into(),
+                taken: false,
+            }],
+        }
+    }
+
+    #[test]
+    fn badges_are_grouped_by_job_and_one_job_gets_one_group() {
+        // Position binds nothing here: the job identifier is the whole of the
+        // binding, so two groups naming the same job would put two labelled
+        // strips under one message with no reading that says which is which.
+        let response = AgentRequest::new(AgentRequestBody::Response {
+            text: "Both jobs finished.".into(),
+            details: None,
+            widgets: None,
+            attachments: vec![],
+            receipts: vec![cited("750a4de8a80d"), cited("01ccbac98b97")],
+        });
+        let mut bytes = Vec::new();
+        crate::write_message(&mut bytes, &response).unwrap();
+        assert_eq!(
+            read_agent_request(&mut Cursor::new(bytes)).unwrap(),
+            response
+        );
+
+        let doubled = AgentRequest::new(AgentRequestBody::Response {
+            text: "One job, twice.".into(),
+            details: None,
+            widgets: None,
+            attachments: vec![],
+            receipts: vec![cited("750a4de8a80d"), cited("750a4de8a80d")],
+        });
+        let mut bytes = Vec::new();
+        crate::write_message(&mut bytes, &doubled).unwrap();
+        assert!(matches!(
+            read_agent_request(&mut Cursor::new(bytes)),
+            Err(MessageError::InvalidSubmission("receipts"))
+        ));
+    }
+
+    #[test]
+    fn an_offer_identifier_names_one_offer_in_the_whole_message() {
+        // The identifier is all a surface sends back. Two offers sharing one
+        // would make the press ambiguous, and the ambiguity would be resolved
+        // by whichever the agent looked up first.
+        let mut second = cited("01ccbac98b97");
+        second.offers[0].id = cited("750a4de8a80d").offers[0].id.clone();
+        let clashing = AgentRequest::new(AgentRequestBody::Response {
+            text: "Two offers, one name.".into(),
+            details: None,
+            widgets: None,
+            attachments: vec![],
+            receipts: vec![cited("750a4de8a80d"), second],
+        });
+        let mut bytes = Vec::new();
+        crate::write_message(&mut bytes, &clashing).unwrap();
+        assert!(matches!(
+            read_agent_request(&mut Cursor::new(bytes)),
+            Err(MessageError::InvalidSubmission("offers"))
+        ));
+    }
+
+    #[test]
+    fn a_citation_is_bounded_the_way_a_strip_is_read() {
+        let badge = Receipt {
+            label: "landed".into(),
+            value: "yes".into(),
+            state: ReceiptState::Measured,
+        };
+        let group = |badges: usize, offers: usize| {
+            let mut bytes = Vec::new();
+            crate::write_message(
+                &mut bytes,
+                &AgentRequest::new(AgentRequestBody::Response {
+                    text: "Done.".into(),
+                    details: None,
+                    widgets: None,
+                    attachments: vec![],
+                    receipts: vec![Citation {
+                        job_id: "750a4de8a80d".into(),
+                        badges: vec![badge.clone(); badges],
+                        offers: (0..offers)
+                            .map(|index| Offer {
+                                id: format!("offer-{index}"),
+                                label: "push master".into(),
+                                taken: false,
+                            })
+                            .collect(),
+                    }],
+                }),
+            )
+            .unwrap();
+            read_agent_request(&mut Cursor::new(bytes))
+        };
+        assert!(group(MAX_RECEIPTS, MAX_OFFERS).is_ok());
+        assert!(group(MAX_RECEIPTS + 1, 0).is_err());
+        assert!(group(1, MAX_OFFERS + 1).is_err());
+    }
+
+    #[test]
+    fn a_job_row_survives_the_job_and_keeps_its_own_name() {
+        let row = |id: &str, state: JobRowState| JobRow {
+            id: id.into(),
+            project: Some("personal/scufris2".into()),
+            state,
+            since: 1_757_000_000,
+            summary: "reviewed 9 commits".into(),
+        };
+        let listed = AgentRequest::new(AgentRequestBody::Jobs {
+            jobs: vec![
+                row("01ccbac98b97", JobRowState::Done),
+                row("3f81c204b1e9", JobRowState::Working),
+            ],
+        });
+        let mut bytes = Vec::new();
+        crate::write_message(&mut bytes, &listed).unwrap();
+        assert_eq!(read_agent_request(&mut Cursor::new(bytes)).unwrap(), listed);
+        assert!(JobRowState::Done.terminal());
+        assert!(JobRowState::Failed.terminal());
+        assert!(!JobRowState::Working.terminal());
+        assert!(!JobRowState::Blocked.terminal());
+
+        // A project identifier is a relative path and keeps its slashes.
+        for (invalid, field) in [
+            (vec![row("01ccbac98b97", JobRowState::Done); 2], "jobs"),
+            (vec![row("x", JobRowState::Done); MAX_JOB_ROWS + 1], "jobs"),
+            (
+                vec![JobRow {
+                    project: Some("p".repeat(MAX_IDENTIFIER_LENGTH + 1)),
+                    ..row("01ccbac98b97", JobRowState::Done)
+                }],
+                "job project",
+            ),
+        ] {
+            let mut bytes = Vec::new();
+            crate::write_message(
+                &mut bytes,
+                &AgentRequest::new(AgentRequestBody::Jobs { jobs: invalid }),
+            )
+            .unwrap();
+            assert!(matches!(
+                read_agent_request(&mut Cursor::new(bytes)),
+                Err(MessageError::InvalidSubmission(named)) if named == field
+            ));
+        }
+    }
+
+    #[test]
+    fn only_a_surface_asks_for_a_job_to_stop_or_be_filed() {
+        // The two verbs are the surface's, and the agent hears them relayed.
+        // Neither is a way to drive the conversation, so the request channel
+        // that carries them is the one a registered surface already speaks.
+        let line =
+            b"{\"v\":7,\"type\":\"job.command\",\"id\":\"3f81c204b1e9\",\"action\":\"cancel\"}\n";
+        assert!(read_surface_request(&mut Cursor::new(line)).is_ok());
+        assert!(read_agent_request(&mut Cursor::new(line)).is_err());
+        assert!(read_control_request(&mut Cursor::new(line)).is_err());
+
+        let take = b"{\"v\":7,\"type\":\"offer.take\",\"id\":\"offer-1\"}\n";
+        assert!(read_surface_request(&mut Cursor::new(take)).is_ok());
+        assert!(read_agent_request(&mut Cursor::new(take)).is_err());
     }
 }

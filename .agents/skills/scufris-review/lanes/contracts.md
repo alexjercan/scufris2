@@ -8,7 +8,7 @@ checks, and the documents that describe them.
 
 Grep both sides of every pair the change touches:
 
-- Protocol: version 6 is implemented twice.
+- Protocol: version 7 is implemented twice.
   `shared/control/src/service.rs` is the service and every native client, and
   `agent/extensions/scufris/service/protocol.ts` is the
   agent; `SERVICE_VERSION` lives in both, as do

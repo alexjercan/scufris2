@@ -21,7 +21,9 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
 };
 
-use scufris_control::service::{AttachmentDescriptor, ConversationMessage, ScufrisState};
+use scufris_control::service::{
+    AttachmentDescriptor, ConversationMessage, JobAction, JobRow, ScufrisState,
+};
 use serde::Serialize;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
@@ -49,6 +51,12 @@ pub const RESET_EVENT: &str = "scufris://conversation";
 /// What the window is waiting for, pushed when that changes.
 pub const NOTICE_EVENT: &str = "scufris://notice";
 
+/// Every job row at once, pushed when the list changes.
+pub const JOBS_EVENT: &str = "scufris://jobs";
+
+/// One offer is spent, pushed to whichever badge is showing it.
+pub const OFFER_TAKEN_EVENT: &str = "scufris://offer-taken";
+
 /// Window width in logical pixels.
 ///
 /// Wide enough for a paragraph at a comfortable measure and no wider: the
@@ -72,6 +80,8 @@ static WINDOW: AtomicU32 = AtomicU32::new(0);
 pub struct Backlog {
     /// Everything said so far, oldest first.
     pub lines: Vec<ConversationMessage>,
+    /// Every delegated job, newest state, oldest row first.
+    pub jobs: Vec<JobRow>,
     /// What the window is waiting for right now.
     pub notice: Notice,
 }
@@ -170,6 +180,46 @@ impl Hud {
         }
     }
 
+    /// Takes the whole list of job rows and shows it.
+    pub fn jobs(&self, jobs: Vec<JobRow>) {
+        if !self.lock().listed(jobs.clone()) {
+            return;
+        }
+        if let Err(error) = self.app.emit_to(LABEL, JOBS_EVENT, jobs) {
+            debug!("the HUD did not take the job rows: {error}");
+        }
+    }
+
+    /// Marks one offer spent, in whichever message is carrying it.
+    pub fn offer_taken(&self, id: &str) {
+        if !self.lock().offer_taken(id) {
+            return;
+        }
+        if let Err(error) = self.app.emit_to(LABEL, OFFER_TAKEN_EVENT, id) {
+            debug!("the HUD did not take a spent offer: {error}");
+        }
+    }
+
+    /// Asks the service to stop or file one job row.
+    ///
+    /// Nothing changes here. The row list the service publishes next is the
+    /// answer, the same way a typed line reaches the window as a transcript
+    /// entry rather than as this process's hopes about it.
+    pub fn job_command(&self, id: String, action: JobAction) -> Result<(), String> {
+        match self.backend.get() {
+            Some(backend) => backend.job_command(id, action),
+            None => Err("Scufris is not reachable.".into()),
+        }
+    }
+
+    /// Takes one offer, and lets the service settle whether it was open.
+    pub fn offer_take(&self, id: String) -> Result<(), String> {
+        match self.backend.get() {
+            Some(backend) => backend.offer_take(id),
+            None => Err("Scufris is not reachable.".into()),
+        }
+    }
+
     /// The service is back, and the replay of its ring is about to arrive.
     ///
     /// Everything held is thrown away first. The replay is the whole ring, so
@@ -206,6 +256,7 @@ impl Hud {
         let state = self.lock();
         Backlog {
             lines: state.lines(),
+            jobs: state.jobs(),
             notice: state.notice(),
         }
     }

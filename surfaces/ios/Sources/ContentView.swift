@@ -47,6 +47,7 @@ struct ContentView: View {
                 header
                 Divider().overlay(ScufrisPalette.line)
                 conversation
+                jobList
                 statusNotice
                 composer
             }
@@ -149,7 +150,8 @@ struct ContentView: View {
                                     entry: entry,
                                     loadAttachment: store.localCopy,
                                     onPreview: preview,
-                                    onSave: save
+                                    onSave: save,
+                                    onTakeOffer: store.take
                                 )
                                 .id(entry.id)
                             }
@@ -370,6 +372,46 @@ struct ContentView: View {
         // than at the bottom, where the scroll view's own anchor would put it.
         // The subtracted room is the padding the conversation is drawn inside.
         .containerRelativeFrame(.vertical) { height, _ in max(0, height - 44) }
+    }
+
+    /// Every delegated job, as a section above the composer.
+    ///
+    /// A row outlives its job, so an overnight run is still here in the
+    /// morning. The control is a swipe, because the row is read far more
+    /// often than it is acted on: swipe a live row to stop it, a finished one
+    /// to file it. Filing is the acknowledgement and is what clears it.
+    @ViewBuilder
+    private var jobList: some View {
+        if !store.jobs.isEmpty {
+            VStack(spacing: 0) {
+                Divider().overlay(ScufrisPalette.line)
+                List {
+                    ForEach(store.jobs) { row in
+                        JobRowView(row: row)
+                            .listRowBackground(ScufrisPalette.background)
+                            .listRowSeparatorTint(ScufrisPalette.line)
+                            .listRowInsets(
+                                EdgeInsets(top: 4, leading: 17, bottom: 4, trailing: 17)
+                            )
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if row.isTerminal {
+                                    Button("Clear") { store.command(row.id, .archive) }
+                                        .tint(ScufrisPalette.muted)
+                                } else {
+                                    Button("Stop", role: .destructive) {
+                                        store.command(row.id, .cancel)
+                                    }
+                                }
+                            }
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(ScufrisPalette.background)
+                .scrollDisabled(store.jobs.count <= 3)
+                .frame(height: min(CGFloat(store.jobs.count), 3.5) * 34)
+            }
+        }
     }
 
     @ViewBuilder
@@ -732,6 +774,7 @@ private struct ConversationRow: View {
     let loadAttachment: (AttachmentDescriptor) async throws -> URL
     let onPreview: (AttachmentDescriptor) -> Void
     let onSave: (AttachmentDescriptor) -> Void
+    let onTakeOffer: (String) -> Void
     // The words are what the phone is held up to read, so they follow the
     // reader's own text size. The markers around them do not: they are
     // furniture, and one that grew would take the column the words start at.
@@ -799,7 +842,214 @@ private struct ConversationRow: View {
                     }
                     .tint(ScufrisPalette.muted)
                 }
+
+                // The badges go at the foot of the message, one run per job,
+                // led by the job's own id. The id is what binds a badge to
+                // what it is about: nothing here reads the prose above it.
+                ForEach(entry.receipts) { citation in
+                    ReceiptStrip(citation: citation, onTakeOffer: onTakeOffer)
+                }
             }
+        }
+    }
+}
+
+/// One job's measured badges, as the run of capsules under the bubble.
+private struct ReceiptStrip: View {
+    let citation: Citation
+    let onTakeOffer: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(citation.jobID)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .tracking(0.5)
+                .foregroundStyle(ScufrisPalette.quartz)
+
+            WrappingRun {
+                ForEach(citation.badges ?? []) { badge in
+                    ReceiptCapsule(badge: badge)
+                }
+                ForEach(citation.offers ?? []) { offer in
+                    OfferButton(offer: offer, onTake: onTakeOffer)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Receipts for job \(citation.jobID)")
+    }
+}
+
+private struct ReceiptCapsule: View {
+    let badge: ReceiptBadge
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(badge.label)
+                .opacity(0.72)
+            Text(badge.value)
+        }
+        .font(.system(size: 9, weight: .medium, design: .monospaced))
+        .tracking(0.5)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .foregroundStyle(colour)
+        .overlay(Rectangle().stroke(colour, lineWidth: 1))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(badge.label): \(badge.value)")
+    }
+
+    /// `unknown` is muted and never red: a fact nobody could measure is not a
+    /// refusal, and colouring it as one invents what the receipt withheld.
+    private var colour: Color {
+        switch badge.state {
+        case .measured: ScufrisPalette.quartz
+        case .refuted: ScufrisPalette.red
+        case .claimed: ScufrisPalette.yellow
+        case .unknown: ScufrisPalette.muted
+        }
+    }
+}
+
+/// An offer is a control, so it does not share a receipt's silhouette.
+private struct OfferButton: View {
+    let offer: Offer
+    let onTake: (String) -> Void
+
+    var body: some View {
+        Button {
+            onTake(offer.id)
+        } label: {
+            HStack(spacing: 5) {
+                Text(spent ? "-" : ">")
+                    .foregroundStyle(spent ? ScufrisPalette.muted : ScufrisPalette.quartz)
+                Text(offer.label)
+            }
+            .font(.system(size: 9, weight: .medium, design: .monospaced))
+            .tracking(0.5)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .foregroundStyle(spent ? ScufrisPalette.muted : ScufrisPalette.niagara)
+            .background(
+                spent
+                    ? Color.clear
+                    : ScufrisPalette.niagara.opacity(0.09)
+            )
+            .overlay(
+                Rectangle().stroke(
+                    spent ? ScufrisPalette.muted : ScufrisPalette.niagara,
+                    lineWidth: 1
+                )
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(spent)
+        .accessibilityLabel(spent ? "\(offer.label), taken" : offer.label)
+    }
+
+    private var spent: Bool { offer.taken == true }
+}
+
+/// A run of capsules that wraps, which `HStack` will not do.
+private struct WrappingRun: Layout {
+    static let spacing: CGFloat = 5
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var rowWidth: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var total = CGSize(width: 0, height: 0)
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let lead = rowWidth == 0 ? 0 : Self.spacing
+            if rowWidth + lead + size.width > width, rowWidth > 0 {
+                total.width = max(total.width, rowWidth)
+                total.height += rowHeight + Self.spacing
+                rowWidth = size.width
+                rowHeight = size.height
+            } else {
+                rowWidth += lead + size.width
+                rowHeight = max(rowHeight, size.height)
+            }
+        }
+        total.width = max(total.width, rowWidth)
+        total.height += rowHeight
+        return total
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + Self.spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + Self.spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
+/// One delegated job, as one row of the section above the composer.
+private struct JobRowView: View {
+    let row: JobRow
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Text(row.id)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(ScufrisPalette.quartz)
+
+            Text(word)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .tracking(1.0)
+                .foregroundStyle(colour)
+
+            Text(row.summary)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(ScufrisPalette.foreground)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
+
+            if let project = row.project {
+                Text(project)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(ScufrisPalette.muted)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Job \(row.id), \(row.state.rawValue): \(row.summary)")
+    }
+
+    private var word: String {
+        switch row.state {
+        case .working: "WORK"
+        case .blocked: "BLOCK"
+        case .done: "DONE"
+        case .failed: "FAIL"
+        }
+    }
+
+    private var colour: Color {
+        switch row.state {
+        case .working: ScufrisPalette.wisteria
+        case .blocked: ScufrisPalette.yellow
+        case .done: ScufrisPalette.quartz
+        case .failed: ScufrisPalette.red
         }
     }
 }

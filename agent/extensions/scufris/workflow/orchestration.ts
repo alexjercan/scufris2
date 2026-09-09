@@ -12,10 +12,21 @@ import {
   type AcknowledgmentState,
 } from "../shared/acknowledgment.ts";
 import {
-  ATTENTION_NOTICE_EVENT,
-  type AttentionNoticeSignal,
-} from "../shared/attention-notice.ts";
+  JOB_CITATION_EVENT,
+  type JobCitationSignal,
+} from "../shared/citations.ts";
+import {
+  JOB_COMMAND_EVENT,
+  JOB_ROWS_EVENT,
+  type JobCommandSignal,
+} from "../shared/job-rows.ts";
 import { runPrivateHelper, toolPath, toolResult } from "../shared/runtime.ts";
+import {
+  MAX_JOB_ROWS,
+  type JobRow,
+  type JobRowState,
+} from "../service/protocol.ts";
+import { receiptBadges, type Receipt } from "./citation.ts";
 import {
   startQuickReviewAgent,
   type QuickReviewAgent,
@@ -36,9 +47,23 @@ export const TERMINAL_OWNERSHIP_STATES: ReadonlySet<string> = new Set([
   "stopped",
   "landed",
 ]);
-// A notice key for the event drain itself. Job notices are keyed by job ID, and
-// a job ID is twelve hex characters, so this cannot collide with one.
-export const EVENT_DRAIN_NOTICE = "scufris:event-drain";
+// How an ownership state is drawn. `suspended` is a workflow whose cleanup did
+// not finish, which needs Alex, so it draws as failed rather than as done.
+const JOB_ROW_STATES: Readonly<Record<string, JobRowState>> = {
+  working: "working",
+  blocked: "blocked",
+  done: "done",
+  failed: "failed",
+  suspended: "failed",
+  stopped: "done",
+  landed: "done",
+};
+
+// A row identifier for the event drain itself. Job rows are keyed by job ID,
+// and a job ID is twelve hex characters, so this cannot collide with one. The
+// drain is not a job, but a failed row is exactly what it needs: it holds the
+// tray red, and filing it is the acknowledgement.
+export const EVENT_DRAIN_ROW = "event-drain";
 // A drain failure wakes so the strand is reported and a settle follows. The cap
 // is what stops an error whose text changes every pass from waking forever.
 const MAX_DRAIN_WAKES = 3;
@@ -215,40 +240,76 @@ export function deliveredWorkerEventIds(
   return result;
 }
 
-/** Maps one worker event to the durable tray notice owned by that job. */
-export function workerAttentionSignal(
-  job: WorkerEventTarget,
-  event: WorkerEvent,
-): AttentionNoticeSignal {
-  if (event.type === "blocked") {
-    return {
-      id: job.job_id,
-      state: "attention",
-      detail: `Job ${job.job_id} is blocked: ${event.value}`,
-    };
-  }
-  if (event.type === "failed") {
-    return {
-      id: job.job_id,
-      state: "error",
-      detail: `Job ${job.job_id} failed: ${event.value}`,
-    };
-  }
-  return { id: job.job_id, state: "clear", detail: "" };
+/** Draws one owned job as the row the surfaces show.
+ *
+ * A row is the whole of what a surface knows about a job, so it replaces both
+ * the aggregate tray word and the per-job notice that used to carry it. The
+ * tray word is folded from these on the host.
+ */
+export function jobRow(job: {
+  job_id: string;
+  project: string | null;
+  state: string;
+  summary: string;
+  created_at: string;
+}): JobRow {
+  const started = Date.parse(job.created_at);
+  return {
+    id: job.job_id,
+    ...(job.project ? { project: job.project } : {}),
+    state: JOB_ROW_STATES[job.state] ?? "working",
+    since: Math.floor((Number.isNaN(started) ? Date.now() : started) / 1000),
+    summary: job.summary,
+  };
 }
 
-/**
- * The notice a recovered job has to raise again for itself.
+/** Orders the rows and drops what will not fit.
  *
- * The service holds notices in memory, so a restart starts with an empty tray.
- * A recovered job's terminal event was acknowledged before the restart and is
- * never redelivered, so nothing else would ever raise it.
+ * Oldest first, because that is the order they were started in and the order
+ * they are read in. Terminal rows go first at the cap: a finished row is
+ * backlog and is still in `scufris-jobs`, while a live row is the only place
+ * a running job is visible at all. Past eight live jobs the newest win, so
+ * the job just started is never the one that vanishes.
  */
-export function restoredAttentionNotice(
-  job: WorkerEventTarget & { state: string; summary: string },
-): AttentionNoticeSignal | undefined {
-  if (job.state !== "blocked" && job.state !== "failed") return undefined;
-  return workerAttentionSignal(job, { type: job.state, value: job.summary });
+export function boundedRows(rows: JobRow[]): JobRow[] {
+  const ordered = [...rows].sort(
+    (left, right) => left.since - right.since || (left.id < right.id ? -1 : 1),
+  );
+  let excess = ordered.length - MAX_JOB_ROWS;
+  if (excess <= 0) return ordered;
+  const kept = ordered.filter((row) => {
+    const terminal = row.state === "done" || row.state === "failed";
+    if (!terminal || excess <= 0) return true;
+    excess -= 1;
+    return false;
+  });
+  return kept.slice(-MAX_JOB_ROWS);
+}
+
+/** Every row the surfaces should hold, given the jobs and what is filed.
+ *
+ * A row outlives its job, so the archived set is the only thing that removes
+ * one. The drain is not a job, but a drain that has stopped is exactly as
+ * unattended as a failed one and has no other way to be seen: `hasUI` is
+ * false under the service, so the notification it used to raise reported it
+ * to nobody.
+ */
+export function publishedRows(
+  jobs: Iterable<Parameters<typeof jobRow>[0]>,
+  archived: ReadonlySet<string>,
+  drain?: { since: number; error?: string },
+): JobRow[] {
+  const rows = [...jobs]
+    .filter((job) => !archived.has(job.job_id))
+    .map((job) => jobRow(job));
+  if (drain && !archived.has(EVENT_DRAIN_ROW))
+    rows.push({
+      id: EVENT_DRAIN_ROW,
+      state: "failed",
+      since: drain.since,
+      summary: `Scufris cannot read worker events: ${drain.error ?? "unknown error"}`,
+    });
+  return boundedRows(rows);
 }
 
 export function deliverWorkerEvent(
@@ -259,7 +320,14 @@ export function deliverWorkerEvent(
   mode: WakeMode,
   receipt?: Receipt | null,
 ): void {
-  pi.events.emit(ATTENTION_NOTICE_EVENT, workerAttentionSignal(job, event));
+  // Badges are measured, so they are published whether or not the event wakes
+  // a turn. The next final response carries whichever ones a turn produced.
+  const badges = receipt ? receiptBadges(receipt) : [];
+  if (badges.length > 0)
+    pi.events.emit(JOB_CITATION_EVENT, {
+      job_id: job.job_id,
+      badges,
+    } satisfies JobCitationSignal);
   if (!workerEventWakes(event.type, mode)) {
     if (context.hasUI)
       context.ui.notify(`${job.job_id}: ${event.value}`, "info");
@@ -454,6 +522,8 @@ interface SpawnResult {
   parent_job: string | null;
   workflow_id: string;
   generation: number;
+  /** RFC 3339 UTC, from the durable job record. The row shows its age. */
+  created_at: string;
   workspace: "temporary" | "project" | "sprout" | "review";
   feature: string | null;
   harness: "pi" | "claude";
@@ -505,30 +575,6 @@ interface EventResult {
       line: string;
     }>;
   }>;
-}
-
-/** Measured git, remote, and CI facts for one job.
- *
- * `false` means measured and false. A fact that could not be measured is null
- * and its reason sits in `unavailable`, so a failed fetch never reads here as
- * "not pushed".
- */
-export interface Receipt {
-  job_id: string;
-  measured_at: string;
-  trigger: string;
-  commit: string | null;
-  facts: Record<string, unknown>;
-  claims: Array<{
-    claim: string;
-    said: string;
-    field: string;
-    measured: unknown;
-    reason: string | null;
-    verdict: string;
-  }>;
-  sentences: string[];
-  unavailable: Record<string, string>;
 }
 
 interface CleanupResult {
@@ -659,7 +705,12 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
 
   const contexts = new Map<string, ResolvedContext>();
   const jobs = new Map<string, OwnedJob>();
+  // A row outlives its job, so filing it is the only thing that clears it.
+  // Archiving never touches the workspace: it is an acknowledgement, and the
+  // job stays exactly where `scufris-jobs` keeps it.
+  const archived = new Set<string>();
   const deliveredEventIds = new Set<string>();
+  let drainFailedAt: number | undefined;
   let readingEvents = false;
   let readAgain = false;
   let eventReadController: AbortController | undefined;
@@ -670,6 +721,22 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   let drainWakes = 0;
   let wakeMode: WakeMode = "minimal";
   const acknowledgmentGate = registerForegroundAcknowledgmentLifecycle(pi);
+
+  const publishRows = () => {
+    pi.events.emit(
+      JOB_ROWS_EVENT,
+      publishedRows(
+        jobs.values(),
+        archived,
+        drainFailedAt === undefined
+          ? undefined
+          : {
+              since: drainFailedAt,
+              ...(eventError ? { error: eventError } : {}),
+            },
+      ),
+    );
+  };
 
   const persistWakeMode = () => {
     pi.appendEntry(wakeStateType, {
@@ -712,11 +779,10 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     eventStranded = true;
     if (message === eventError) return;
     if (extensionContext?.hasUI) extensionContext.ui.notify(message, "error");
-    pi.events.emit(ATTENTION_NOTICE_EVENT, {
-      id: EVENT_DRAIN_NOTICE,
-      state: "error",
-      detail: `Scufris cannot read worker events: ${message}`,
-    } satisfies AttentionNoticeSignal);
+    eventError = message;
+    drainFailedAt ??= Math.floor(Date.now() / 1000);
+    archived.delete(EVENT_DRAIN_ROW);
+    publishRows();
     if (drainWakes >= MAX_DRAIN_WAKES) return;
     drainWakes += 1;
     pi.sendMessage(
@@ -735,11 +801,9 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     if (!eventStranded) return;
     eventStranded = false;
     drainWakes = 0;
-    pi.events.emit(ATTENTION_NOTICE_EVENT, {
-      id: EVENT_DRAIN_NOTICE,
-      state: "clear",
-      detail: "",
-    } satisfies AttentionNoticeSignal);
+    drainFailedAt = undefined;
+    archived.delete(EVENT_DRAIN_ROW);
+    publishRows();
   };
 
   const readEvents = async () => {
@@ -760,6 +824,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             extensionContext.ui.setStatus("scufris", undefined);
           // Nothing left to strand: a drain that reads no job cannot lose one.
           drainRecovered();
+          publishRows();
           return;
         }
         const result = await runHelper<EventResult>(
@@ -831,6 +896,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
             job.status_watcher = undefined;
           }
         }
+        publishRows();
         const running = [...jobs.values()].filter(
           (job) => !TERMINAL_OWNERSHIP_STATES.has(job.state),
         ).length;
@@ -885,23 +951,62 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   };
 
   // Landing or stopping a job that had failed or blocked is exactly the act of
-  // attending to it. Dropping the job without clearing its notice left the tray
-  // red for a job that no longer exists, with nothing able to clear it.
+  // attending to it, so the row goes with the job and the tray word that was
+  // folded from it goes with the row.
   const forgetRemovedJobs = (removed: readonly string[]) => {
     for (const removedJob of removed) {
       jobs.delete(removedJob);
-      pi.events.emit(ATTENTION_NOTICE_EVENT, {
-        id: removedJob,
-        state: "clear",
-        detail: "",
-      } satisfies AttentionNoticeSignal);
+      archived.delete(removedJob);
+    }
+    publishRows();
+  };
+
+  // The two row controls. `archive` is the acknowledgement and touches
+  // nothing; `cancel` is the quick stop, and it keeps an unmerged branch
+  // because a surface press is never permission to throw work away.
+  const runJobCommand = async ({ id, action }: JobCommandSignal) => {
+    if (action === "archive") {
+      archived.add(id);
+      publishRows();
+      return;
+    }
+    const job = jobs.get(id);
+    if (!job) return;
+    try {
+      await closeWorkflowSurfaces(job.root_job);
+      const result = await runHelper<CleanupResult>(
+        "stop",
+        { job_id: id, remove_workspace: false, abandon: false },
+        undefined,
+        120_000,
+      );
+      forgetRemovedJobs(result.removed_jobs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // A control that failed must not read as a job that stopped, and the
+      // row alone cannot say so, so this is one of the few things worth a
+      // turn: the model is what tells Alex the job is still running.
+      pi.sendMessage(
+        {
+          customType: "scufris-job-event",
+          content: `Stopping Scufris job ${id} from the job list failed: ${message}. The job is still running. Tell the user plainly, then call scufris_final_response.`,
+          display: true,
+          details: { job_id: id, job_command: action, error: message },
+        },
+        { deliverAs: "followUp", triggerTurn: true },
+      );
     }
   };
 
-  const restoreAttentionNotice = (job: OwnedJob) => {
-    const notice = restoredAttentionNotice(job);
-    if (notice) pi.events.emit(ATTENTION_NOTICE_EVENT, notice);
-  };
+  pi.events.on(JOB_COMMAND_EVENT, (value: unknown) => {
+    const signal = value as Partial<JobCommandSignal> | undefined;
+    if (
+      typeof signal?.id !== "string" ||
+      (signal.action !== "cancel" && signal.action !== "archive")
+    )
+      return;
+    void runJobCommand({ id: signal.id, action: signal.action });
+  });
 
   pi.registerTool(
     defineTool({
@@ -1109,6 +1214,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           window_alive: true,
         };
         jobs.set(job.job_id, job);
+        publishRows();
         watchJob(job);
         acknowledgmentGate.markSuccessfulAction(
           "scufris_job_spawn",
@@ -1534,6 +1640,8 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     extensionContext = ctx;
     shuttingDown = false;
+    archived.clear();
+    drainFailedAt = undefined;
     wakeMode = restoredWakeMode(ctx);
     acknowledgmentGate.reset();
     deliveredEventIds.clear();
@@ -1557,9 +1665,12 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       for (const recovered of result.jobs) {
         const job: OwnedJob = { ...recovered };
         jobs.set(job.job_id, job);
-        restoreAttentionNotice(job);
         if (job.window_alive) watchJob(job);
       }
+      // A recovered job's terminal event was acknowledged before the restart
+      // and is never redelivered, so this publish is the only thing that puts
+      // last night's failed row back in front of Alex.
+      publishRows();
       await readEvents();
       await reportStrayWorkers(ctx.sessionManager.getSessionId());
     } catch (error) {

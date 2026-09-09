@@ -219,6 +219,245 @@ body {
   min-width: 0;
 }
 
+/* ---------- receipts and offers ---------- */
+
+/* One wrapping rank of badges per job, in the body column exactly where the
+ * attachments already sit, led by the job's own id. The id is what binds a
+ * badge to what it is about: nothing here parses the prose above it, and
+ * nothing breaks it. */
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  grid-column: 2;
+  min-width: 0;
+}
+
+.strip .cite {
+  padding-right: 2px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--quartz);
+}
+
+/* A receipt is inert evidence and an offer runs something, so they share a
+ * family and never a silhouette: a receipt is flat and bracketed, an offer
+ * carries the caret the typing line uses and lights under the pointer. */
+.badge {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 0 5px;
+  border: 1px solid currentcolor;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.badge .badge-label {
+  opacity: 0.72;
+}
+
+.badge[data-state="measured"] {
+  color: var(--quartz);
+}
+
+.badge[data-state="refuted"] {
+  color: var(--red);
+}
+
+.badge[data-state="claimed"] {
+  color: var(--yellow);
+}
+
+/* Muted, and never drawn as a no. A fetch that failed leaves the fact
+ * unmeasured, and red would invent the one thing nobody measured. */
+.badge[data-state="unknown"] {
+  color: var(--muted);
+}
+
+.offer {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 0 6px 0 5px;
+  border: 1px solid var(--niagara);
+  background: rgb(150 166 200 / 9%);
+  color: var(--niagara);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.offer::before {
+  content: ">";
+  color: var(--quartz);
+}
+
+.offer:hover {
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+
+.offer:focus-visible {
+  outline: 1px solid var(--yellow);
+  outline-offset: 1px;
+}
+
+/* Taken. The badge stays exactly where it was, because it is the only mark in
+ * the window that says what the answer under it is answering. */
+.offer[data-spent] {
+  border-color: var(--muted);
+  background: none;
+  color: var(--muted);
+  cursor: default;
+}
+
+.offer[data-spent]::before {
+  content: "-";
+  color: var(--muted);
+}
+
+.offer[data-spent]:hover {
+  border-color: var(--muted);
+  color: var(--muted);
+}
+
+/* ---------- the job list ---------- */
+
+/* The same two columns every line uses, so the rows begin on the column the
+ * conversation begins on. */
+.jobs {
+  display: grid;
+  grid-template-columns: var(--gutter) 1fr;
+  column-gap: var(--step);
+  padding-top: 13px;
+}
+
+/* `.jobs` sets its own display, which beats what the browser does for a
+ * hidden element. The first frame is drawn before the host has answered. */
+.jobs[hidden] {
+  display: none;
+}
+
+.jobs > .who {
+  align-self: start;
+  padding-top: 3px;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  grid-column: 2;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 8.1em 5em 3.4em 2.4em 1fr 3.6em;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.row + .row {
+  border-top: 1px solid #1d1c1b;
+}
+
+.row .row-id {
+  color: var(--quartz);
+}
+
+.row .row-state {
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.row[data-state="working"] .row-state {
+  color: var(--wisteria);
+}
+
+.row[data-state="blocked"] .row-state {
+  color: var(--yellow);
+}
+
+.row[data-state="failed"] .row-state {
+  color: var(--red);
+}
+
+.row[data-state="done"] .row-state {
+  color: var(--quartz);
+}
+
+.row .row-said {
+  overflow: hidden;
+  color: var(--fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row .row-said::before {
+  content: "says ";
+  color: var(--muted);
+}
+
+/* One control per row, and which one it is says what the row is: a live job
+ * can only be stopped, a finished one can only be filed. */
+.row .row-do {
+  justify-self: end;
+  padding: 0 3px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.row .row-do:focus-visible {
+  outline: 1px solid var(--yellow);
+  outline-offset: 1px;
+}
+
+.row .row-do[data-act="cancel"]:hover,
+.row .row-do[data-armed] {
+  color: var(--red);
+}
+
+.row .row-do[data-act="archive"]:hover {
+  color: var(--quartz);
+}
+
+.sweep {
+  padding: 5px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-align: right;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sweep:hover {
+  color: var(--quartz);
+}
+
+.sweep:focus-visible {
+  outline: 1px solid var(--yellow);
+  outline-offset: 1px;
+}
+
 .message-attachment {
   display: flex;
   flex-direction: column;

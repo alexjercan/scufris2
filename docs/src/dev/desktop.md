@@ -75,7 +75,8 @@ it. A taken offer stays where it is and goes quiet.
 The job list is the last item in the conversation flow and holds at most eight
 rows. A row draws the job ID, the project, one of `work`, `block`, `done`, and
 `fail`, the age, and the summary. A row outlives its job. `clear` files a
-finished row and touches nothing else. `x` stops a live job and keeps its
+finished row and touches nothing else: the filing survives a restart, and the
+job record stays where `scufris-jobs` keeps it until `stop` or `land`. `x` stops a live job and keeps its
 unmerged branch; it arms on the first press, says `sure?`, and forgets after
 three seconds, because stopping the wrong job costs an hour of an agent's work.
 Two or more finished rows also offer one control that files all of them.

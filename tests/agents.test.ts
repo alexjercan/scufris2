@@ -8,6 +8,7 @@ import {
   deliverRuntimeFailure,
   deliverWorkerEvent,
   EVENT_DRAIN_ROW,
+  filedRowsFromEntries,
   FINAL_RESPONSE_TOOL,
   foregroundActionPolicy,
   ForegroundAcknowledgmentGate,
@@ -379,6 +380,53 @@ test("a row outlives its job, and filing it is what clears it", () => {
   );
   for (const row of done) filed.add(row.job_id);
   assert.deepEqual(publishedRows(done, filed), []);
+});
+
+test("filing a row survives the restart that brings the job back", () => {
+  const entry = (filed: string[]) => ({
+    type: "custom",
+    customType: "scufris-filed-rows-v1",
+    data: { version: 1, filed },
+  });
+  // The service starts Pi with `--continue`, so `recover` hands back every
+  // job that was never stopped or landed. A row filed in memory alone came
+  // straight back, which is not what filing one means.
+  assert.deepEqual(
+    [...filedRowsFromEntries([entry(["abcdef123456", "123456abcdef"])])],
+    ["abcdef123456", "123456abcdef"],
+  );
+  // The whole set is written each time, so the last entry is the answer: a
+  // row can be unfiled, and a union would file it for good.
+  assert.deepEqual(
+    [
+      ...filedRowsFromEntries([
+        entry(["abcdef123456", "123456abcdef"]),
+        entry(["abcdef123456"]),
+      ]),
+    ],
+    ["abcdef123456"],
+  );
+  assert.deepEqual([...filedRowsFromEntries([])], []);
+  // Nothing else in the branch is read as a filing.
+  assert.deepEqual(
+    [
+      ...filedRowsFromEntries([
+        { type: "message", data: { version: 1, filed: ["abcdef123456"] } },
+        {
+          type: "custom",
+          customType: "scufris-wake-state-v1",
+          data: { version: 1, filed: ["123456abcdef"] },
+        },
+        entry(["0011aabbccdd"]),
+        {
+          type: "custom",
+          customType: "scufris-filed-rows-v1",
+          data: { version: 2, filed: ["from-a-later-shape"] },
+        },
+      ]),
+    ],
+    ["0011aabbccdd"],
+  );
 });
 
 test("a drain that stopped is a row, because nothing else reports it", () => {

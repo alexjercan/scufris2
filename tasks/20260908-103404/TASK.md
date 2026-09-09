@@ -1,6 +1,6 @@
 # Add a verify agent that runs after every done job and quotes the receipt
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 80
 - TAGS: workflow
 
@@ -46,3 +46,16 @@ the same prose the worker wrote.
 - Test: a worker that claims three items done with two present yields
   status `attention` and the foreground text carries the verdict.
 - `npm run check` and Python unit tests.
+
+### Closed, 2026-09-09
+
+Not needed. The receipt now does what this task wanted a second agent to do.
+`workflow/citation.ts` reads the helper's measured facts and claims and draws
+them as badges under the answer, so a claim the worker made is visibly a claim
+and a fact nobody could measure is visibly unmeasured. That is the verdict
+this asked for, measured rather than asked of another model, and it costs no
+child job, no envelope, and no time bound.
+
+What a verify agent would still add is checking that the asked thing was done
+at all, which no measurement can see. That belongs to more `CLAIM_RULES`
+entries rather than to a second agent.

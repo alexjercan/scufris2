@@ -124,6 +124,20 @@ interface WakeStateEntry {
   mode: WakeMode;
 }
 
+/** Which rows Alex has filed, written where a restart can read it.
+ *
+ * Filing a row is an acknowledgement, and an acknowledgement a restart
+ * forgets is not one: the service starts Pi with `--continue`, so `recover`
+ * hands back every job that was never stopped or landed, and a row filed in
+ * memory alone came straight back the next morning.
+ */
+const filedRowsType = "scufris-filed-rows-v1";
+
+interface FiledRowsEntry {
+  version: 1;
+  filed: string[];
+}
+
 export interface WorkerEvent {
   type: WorkerEventType;
   value: string;
@@ -208,6 +222,25 @@ export function wakeModeFromEntries(
 
 function restoredWakeMode(context: ExtensionContext): WakeMode {
   return wakeModeFromEntries(context.sessionManager.getBranch());
+}
+
+/** The rows a restarted session has to keep filed.
+ *
+ * Each entry carries the whole set as it stood, so the last one written is
+ * the answer: a row can be unfiled - by the job leaving, or by a drain that
+ * failed again - and a union would file it forever.
+ */
+export function filedRowsFromEntries(
+  entries: Iterable<{ type: string; customType?: string; data?: unknown }>,
+): Set<string> {
+  let filed = new Set<string>();
+  for (const entry of entries) {
+    if (entry.type !== "custom" || entry.customType !== filedRowsType) continue;
+    const data = entry.data as Partial<FiledRowsEntry> | undefined;
+    if (data?.version !== 1 || !Array.isArray(data.filed)) continue;
+    filed = new Set(data.filed.filter((id) => typeof id === "string"));
+  }
+  return filed;
 }
 
 export function deliveredWorkerEventIds(
@@ -745,6 +778,13 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     } satisfies WakeStateEntry);
   };
 
+  const persistFiledRows = () => {
+    pi.appendEntry(filedRowsType, {
+      version: 1,
+      filed: [...archived],
+    } satisfies FiledRowsEntry);
+  };
+
   pi.registerCommand("wake", {
     description: "Control delegated-worker progress wakes: minimal or all.",
     getArgumentCompletions: (prefix) => {
@@ -781,7 +821,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     if (extensionContext?.hasUI) extensionContext.ui.notify(message, "error");
     eventError = message;
     drainFailedAt ??= Math.floor(Date.now() / 1000);
-    archived.delete(EVENT_DRAIN_ROW);
+    if (archived.delete(EVENT_DRAIN_ROW)) persistFiledRows();
     publishRows();
     if (drainWakes >= MAX_DRAIN_WAKES) return;
     drainWakes += 1;
@@ -802,7 +842,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     eventStranded = false;
     drainWakes = 0;
     drainFailedAt = undefined;
-    archived.delete(EVENT_DRAIN_ROW);
+    if (archived.delete(EVENT_DRAIN_ROW)) persistFiledRows();
     publishRows();
   };
 
@@ -954,10 +994,12 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   // attending to it, so the row goes with the job and the tray word that was
   // folded from it goes with the row.
   const forgetRemovedJobs = (removed: readonly string[]) => {
+    let unfiled = false;
     for (const removedJob of removed) {
       jobs.delete(removedJob);
-      archived.delete(removedJob);
+      if (archived.delete(removedJob)) unfiled = true;
     }
+    if (unfiled) persistFiledRows();
     publishRows();
   };
 
@@ -966,7 +1008,10 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   // because a surface press is never permission to throw work away.
   const runJobCommand = async ({ id, action }: JobCommandSignal) => {
     if (action === "archive") {
-      archived.add(id);
+      if (!archived.has(id)) {
+        archived.add(id);
+        persistFiledRows();
+      }
       publishRows();
       return;
     }
@@ -1667,6 +1712,13 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         jobs.set(job.job_id, job);
         if (job.window_alive) watchJob(job);
       }
+      // What Alex filed before the restart, kept filed. Restored here rather
+      // than at the top of this handler because this is the first moment the
+      // jobs are known: an id no recovery returned names a job that has been
+      // stopped or landed since, and carrying it forever would grow the entry
+      // without bound.
+      for (const id of filedRowsFromEntries(ctx.sessionManager.getBranch()))
+        if (jobs.has(id) || id === EVENT_DRAIN_ROW) archived.add(id);
       // A recovered job's terminal event was acknowledged before the restart
       // and is never redelivered, so this publish is the only thing that puts
       // last night's failed row back in front of Alex.

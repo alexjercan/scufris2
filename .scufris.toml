@@ -103,9 +103,14 @@ A green master with a clean tree is a good morning. Use a short body rather
 than finding something to say. Do not propose work nobody asked for.
 """
 
+# `claude` and not `pi`, alone among this project's sources. The night's whole
+# method is `/scufris-review`, which fans out into reviewer lanes; pi's built-in
+# tools are `bash`, `edit`, `glob`, `grep`, `read` and `write`, subagents are an
+# extension, and a source runs with `--no-extensions`. A pi night could group
+# the commits and never review one.
 [briefings.nightly]
 description = "Review the day's commits and report what is worth fixing."
-keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "xhigh" }
+keywords = { harness = "claude", model = "Opus", thinking = "xhigh" }
 guidance = """
 Review the commits that landed today and report what is worth fixing. You have
 the night, and you change nothing: no edit, no commit, no push, no release, no
@@ -156,7 +161,9 @@ reviewing any of them.
 
 For each group, highest risk first:
 
-- `/scufris-review <base>..<head>` for the range.
+- `/scufris-review <base>..<head>` for the range. The skill is hidden from your
+  system prompt, so read `.agents/skills/scufris-review/SKILL.md` and follow it
+  if the command does not reach it.
 - Never `--live`. It adds the Feel lane, which wants a rendered harness run and
   the display slot. Nobody is at the desk, the graphical session may not exist
   at all, and a lane waiting for a display it will never get spends the night.

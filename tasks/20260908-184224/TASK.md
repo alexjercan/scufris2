@@ -250,6 +250,13 @@ empty. Keep that instruction first in any nightly guidance.
   component, `/scufris-review` over one group at a time, never `--live` because
   the Feel lane wants a display nobody is at. The tatr task comes first and is
   appended to as each group is adjudicated.
+- That source runs on `claude`, alone among this project's sources, which all
+  run on `pi`. The night's method is a review panel, and pi has no subagent:
+  its built-in tools are `bash`, `edit`, `glob`, `grep`, `read` and `write`,
+  subagents are an extension, and `harness_argv` passes `--no-extensions`. A pi
+  night would group the commits and never review one. `/scufris-review` also
+  sets `disable-model-invocation`, so the guidance names the SKILL.md path as
+  well as the command.
 - `nova-protocol` already declared its own. `parallel = 2` in `nix.dotfiles`
   covers both and no more.
 - Both `[briefings.morning]` sources now read yesterday's `nightly` run - the

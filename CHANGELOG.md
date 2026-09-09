@@ -24,7 +24,9 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 - Scufris reviews its own day. `scufris2` declares a `nightly` briefing source
   that groups the day's commits, runs `/scufris-review` over one group at a
-  time and reports what is worth fixing, without changing anything. The morning
+  time and reports what is worth fixing, without changing anything. It is the
+  one source here that runs on `claude`: the night's method is a review panel,
+  and a source runs with no extensions, which is where pi keeps subagents. The morning
   briefing in both reviewed projects reads the night's run and its task, and
   carries a finding that still stands into a numbered offer.
 - A source is told plainly that it holds every tool, that nothing is withheld

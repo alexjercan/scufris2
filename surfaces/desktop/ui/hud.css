@@ -358,13 +358,23 @@ body {
 
 .row {
   display: grid;
-  grid-template-columns: 8.1em 5em 3.4em 2.4em 1fr 3.6em;
+  grid-template-columns: 8.1em minmax(0, 7.5em) 3.4em 2.4em minmax(0, 1fr) 3.6em;
   gap: 10px;
   align-items: baseline;
   padding: 4px 0;
   font-size: 11.5px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* A grid track does not clip what does not fit it, so a project name longer
+ * than its column would be drawn straight over the state beside it. Every
+ * cell in a row ends in an ellipsis instead; the full text is in the title. */
+.row > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .row + .row {
@@ -397,10 +407,7 @@ body {
 }
 
 .row .row-said {
-  overflow: hidden;
   color: var(--fg);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .row .row-said::before {

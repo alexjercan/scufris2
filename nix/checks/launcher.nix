@@ -12,6 +12,7 @@
 }: let
   inherit (scufris) resources launcher piPackage;
   inherit (fixtures) systemPi;
+  python = import ../python.nix {inherit pkgs;};
 in {
   launcher-normal =
     pkgs.runCommand "scufris-launcher-normal-check" {
@@ -43,6 +44,16 @@ in {
       diff -u expected actual
       touch "$out"
     '';
+
+  # The briefing extension runs `tools/briefing` by resource path, so the
+  # `python3` the launcher puts on PATH is the one that has to import what
+  # those scripts import. A plain `pkgs.python3` there is a launcher that
+  # builds, installs, and then fails at the first briefing and nowhere earlier.
+  launcher-briefing-python = pkgs.runCommand "scufris-launcher-briefing-python-check" {} ''
+    grep -q ${python} ${launcher}/bin/scufris
+    ${python}/bin/python3 ${resources}/share/scufris/tools/briefing/cli.py --help > /dev/null
+    touch "$out"
+  '';
 
   launcher-fallback-pi = pkgs.runCommand "scufris-launcher-fallback-pi-check" {} ''
     export HOME="$TMPDIR/home"

@@ -19,8 +19,15 @@ pkgs.writeShellApplication {
   name = "scufris-staging";
   # `flock` for the one-stack-at-a-time lock and `git` for the seeded project.
   # `pi` is not among them: the agent finds the managed one on PATH, the same
-  # way `scufris-dev` does.
-  runtimeInputs = [pkgs.util-linux pkgs.git pkgs.tailscale];
+  # way `scufris-dev` does. The Python is here for the same reason the launcher
+  # carries it: the briefing extension runs `tools/briefing` by path, and a
+  # staging run with the ambient `python3` fails at its first import.
+  runtimeInputs = [
+    pkgs.util-linux
+    pkgs.git
+    pkgs.tailscale
+    (import ./python.nix {inherit pkgs;})
+  ];
   text = ''
     export SCUFRIS_STAGING_SERVICE=${pkgs.lib.getExe' service "scufris-service"}
     export SCUFRIS_STAGING_DESKTOP=${pkgs.lib.getExe' desktop "scufris-desktop"}

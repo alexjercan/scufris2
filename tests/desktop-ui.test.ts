@@ -93,6 +93,7 @@ class Stub {
   /** Upper case, the way the DOM spells it. */
   tagName = "DIV";
   className = "";
+  title = "";
   hidden = false;
   readOnly = false;
   value = "";
@@ -1311,6 +1312,11 @@ test("a job row outlives its job and the list is the last thing in the flow", as
     rows.children.map((row) => row.children[3]?.content),
     ["4m", "4m"],
   );
+  // A project is clipped to its column, so the whole of it is in the title.
+  assert.deepEqual(
+    rows.children.map((row) => row.children[1]?.title),
+    ["personal/scufris2", "personal/scufris2"],
+  );
   // One control per row, and which one it is says what the row is.
   assert.deepEqual(
     rows.children.map((row) => [
@@ -1816,6 +1822,29 @@ test("every part of a message begins in the same column", () => {
     rule(source, '.line[data-run="continued"]::before'),
     /left:\s*calc\(var\(--gutter\) \+ var\(--step\)\)/,
   );
+});
+
+test("a job row's columns clip rather than draw over each other", () => {
+  const source = readFileSync(join(ui, "hud.css"), "utf8");
+  // A grid track does not clip what does not fit it. A project is a relative
+  // path, so `projects/hello` is wider than its column and was drawn straight
+  // over the state word beside it.
+  assert.match(
+    rule(source, ".row > *"),
+    /overflow:\s*hidden/,
+    "a row cell wider than its column is not clipped",
+  );
+  assert.match(rule(source, ".row > *"), /text-overflow:\s*ellipsis/);
+  assert.match(rule(source, ".row > *"), /white-space:\s*nowrap/);
+  assert.match(rule(source, ".row > *"), /min-width:\s*0/);
+  // Every flexible track has to be allowed to shrink under its content too,
+  // or the row itself grows past the conversation column.
+  const columns = /grid-template-columns:\s*([^;]*);/.exec(
+    rule(source, ".row"),
+  )?.[1];
+  assert.ok(columns, ".row declares no columns");
+  for (const track of ["minmax(0, 7.5em)", "minmax(0, 1fr)"])
+    assert.ok(columns.includes(track), `.row is missing the ${track} column`);
 });
 
 test("Markdown hierarchy, links, and code use the existing Gruber grammar", () => {

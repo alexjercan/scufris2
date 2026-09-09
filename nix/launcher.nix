@@ -29,7 +29,10 @@ in
     # No speech inference here. The agent decides what is worth saying aloud and the
     # frontend synthesises it, so nothing in this process tree makes sound.
     runtimeInputs = [
-      pkgs.python3
+      # The briefing extension runs `tools/briefing` by resource path, so the
+      # `python3` this puts on PATH is the one that has to be able to import
+      # what those scripts import.
+      (import ./python.nix {inherit pkgs;})
       pkgs.tmux
       # The journal, which the den skill runs by name.
       den

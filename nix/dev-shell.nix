@@ -1,6 +1,6 @@
 {pkgs}: let
   inherit (pkgs) lib;
-  python = pkgs.python3.withPackages (pythonPackages: [pythonPackages.markdown-it-py]);
+  python = import ./python.nix {inherit pkgs;};
 in
   pkgs.mkShell {
     packages =

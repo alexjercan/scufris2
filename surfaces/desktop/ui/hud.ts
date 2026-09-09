@@ -432,7 +432,9 @@
     identity.className = "row-id";
     identity.textContent = row.id;
     const project = document.createElement("span");
+    project.className = "row-project";
     project.textContent = row.project ?? "";
+    project.title = row.project ?? "";
     const state = document.createElement("span");
     state.className = "row-state";
     state.textContent = STATE_WORDS[row.state] ?? row.state;

@@ -27,13 +27,17 @@ jobs:
       - name: Install locked JavaScript dependencies
         run: npm ci
 
-      - name: Run JavaScript checks
-        run: npm run check
-
       - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+
+      # In the development shell, not beside it. The briefing tests run
+      # `tools/briefing`, which imports markdown-it-py, and the shell is the
+      # one place that dependency is declared. A runner's own `python3` runs
+      # everything here until a briefing renders a page, and then stops.
+      - name: Run JavaScript checks
+        run: nix develop -c npm run check
 
       - name: Run Nix flake checks
         run: nix flake check -L

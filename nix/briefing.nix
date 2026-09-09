@@ -3,9 +3,7 @@
 # through its tools; this is the same thing for whoever is not the agent, and
 # it is what the checks run.
 let
-  # markdown-it-py is the single CommonMark and GFM table implementation used
-  # by collection, publish, and archived re-renders.
-  python = pkgs.python3.withPackages (pythonPackages: [pythonPackages.markdown-it-py]);
+  python = import ./python.nix {inherit pkgs;};
   # The briefing asks the jobs helper which projects declare a briefing, so
   # that one reader stays the only answer to what a project is. Both live in
   # the store under their own names or the relative path between them breaks.

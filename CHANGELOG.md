@@ -9,6 +9,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-09-09
+
 ### Added
 
 - An answer about a delegated job carries that job's receipt. The badges are
@@ -73,6 +75,16 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Fixed
 
+- The briefing runs again from a deployed Scufris. Rendering a page needs
+  markdown-it-py, and the launcher put a plain `python3` on the agent's PATH,
+  so every briefing tool failed at its first import and only there. The
+  interpreter the helpers run under is now written once, in `nix/python.nix`,
+  and the launcher, the staging run, the packaged command and the development
+  shell all take it from that one place.
+- A job row no longer draws its project over the state beside it. A project is
+  a relative path, so a name wider than its column overlapped what came next;
+  every cell in a row is now clipped to its own column, with the whole of it
+  in the title.
 - A briefing that is still collecting now names the sources it is waiting on.
   The manifest carried an empty `sources` until the last source returned, so an
   eight-hour night in flight read exactly like a night nothing had declared.
@@ -962,7 +974,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/alexjercan/scufris2/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/alexjercan/scufris2/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/alexjercan/scufris2/compare/v2.1.7...v2.2.0
 [2.1.7]: https://github.com/alexjercan/scufris2/compare/v2.1.6...v2.1.7

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from html.parser import HTMLParser
 from pathlib import Path
 from unittest import mock
 
@@ -21,6 +22,26 @@ sys.path.insert(0, str(REPOSITORY / "tools" / "briefing"))
 
 import briefing
 import page
+
+MORNING_FIXTURE = REPOSITORY / "tests" / "fixtures" / "briefing-morning-run.json"
+
+
+class RenderedDocument(HTMLParser):
+    """The semantic elements and attributes in one rendered briefing."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tags: list[str] = []
+        self.attributes: list[tuple[str, dict[str, str | None]]] = []
+        self.text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.tags.append(tag)
+        self.attributes.append((tag, dict(attrs)))
+
+    def handle_data(self, data: str) -> None:
+        self.text.append(data)
+
 
 ANSWERING = """#!/usr/bin/env python3
 import os
@@ -402,6 +423,7 @@ class Command(unittest.TestCase):
         self.assertIn("/home/x/the-den", prompt)
         self.assertIn("one fenced `json` block", prompt)
         self.assertIn("Never estimate a number you", prompt)
+        self.assertIn("GitHub-style tables", prompt)
         # Every tool is present, so the prompt is where the limit lives. A
         # source is told plainly that its guidance is the whole of what it
         # may do, because nothing else stops it.
@@ -1058,6 +1080,28 @@ class Run(unittest.TestCase):
         with self.assertRaises(briefing.Refused):
             briefing.publish("not-a-date", "morning", "Good morning.")
 
+    def test_an_archived_nightly_run_uses_the_same_markdown_renderer(self) -> None:
+        run = json.loads(MORNING_FIXTURE.read_text(encoding="utf-8"))
+        run["manifest"]["profile"] = "nightly"
+        directory = briefing.run_dir(run["manifest"]["date"], "nightly")
+        (directory / "contributions").mkdir(parents=True)
+        briefing.write_manifest(run["manifest"])
+        for contribution in run["contributions"]:
+            briefing.atomic_write(
+                directory / "contributions" / f"{contribution['slug']}.json",
+                json.dumps(contribution),
+            )
+        briefing.atomic_write(directory / "briefing.md", run["prose"])
+
+        rendered = Path(briefing.render(run["manifest"]["date"], "nightly")).read_text(
+            encoding="utf-8"
+        )
+        document = RenderedDocument()
+        document.feed(rendered)
+        self.assertIn("Nightly briefing", rendered)
+        self.assertEqual(document.tags.count("table"), 2)
+        self.assertNotIn("| Project | Result |", rendered)
+
     def test_two_profiles_on_one_date_are_two_runs_and_two_deliveries(self) -> None:
         # One date is not one briefing. A morning and an evening on the same
         # day are two runs, each with its own directory, page and prose.
@@ -1452,22 +1496,51 @@ class Page(unittest.TestCase):
             **overrides,
         }
 
-    def test_what_a_source_writes_can_never_become_markup(self) -> None:
-        rendered = page.render_page(
-            self.run_of(
-                self.contribution(
-                    title="<script>alert(1)</script>",
-                    headline="a & b <b>bold</b>",
-                    body="<img src=x onerror=alert(1)>\n\n[go](javascript:alert(1))",
-                )
-            )
+    def test_untrusted_html_and_links_stay_inert(self) -> None:
+        run = self.run_of(
+            self.contribution(
+                title="<script>alert(1)</script>",
+                status='ok" onclick="alert(1)',
+                headline="a & b <b>bold</b>",
+                body=(
+                    "<img src=x onerror=alert(1)>\n\n"
+                    "<script>alert(2)</script>\n\n"
+                    "[safe](https://example.invalid/good)\n\n"
+                    "[script](javascript:alert(3))\n\n"
+                    "[credentials](https://user:secret@example.invalid/private)\n\n"
+                    "[local](file:///etc/passwd)\n\n"
+                    "[payload](data:text/html;base64,PHNjcmlwdD4=)\n\n"
+                    "![tracker](https://example.invalid/tracker.gif)"
+                ),
+            ),
+            prose="<svg onload=alert(4)>raw prose</svg>",
         )
-        self.assertNotIn("<script>alert", rendered)
-        self.assertNotIn("<img src=x", rendered)
-        self.assertNotIn("javascript:", rendered)
+        run["manifest"]["offers"] = [
+            {
+                "number": "<script>alert(5)</script>",
+                "project": "personal/the-den",
+                "label": "Keep the label",
+                "detail": "Keep the detail.",
+            }
+        ]
+        rendered = page.render_page(run)
+        document = RenderedDocument()
+        document.feed(rendered)
+
+        self.assertFalse({"script", "img", "svg"} & set(document.tags))
         self.assertIn("&lt;script&gt;", rendered)
-        # The words of an unsafe link survive; only the link is dropped.
-        self.assertIn("go", rendered)
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", rendered)
+        self.assertIn("script", rendered)
+        self.assertIn("credentials", rendered)
+        self.assertIn("local", rendered)
+        self.assertIn("payload", rendered)
+        self.assertIn("tracker", rendered)
+        hrefs = [attrs["href"] for tag, attrs in document.attributes if tag == "a"]
+        self.assertEqual(hrefs, ["https://example.invalid/good"])
+        for _tag, attrs in document.attributes:
+            self.assertFalse(any(name.startswith("on") for name in attrs))
+            self.assertNotIn("src", attrs)
+        self.assertIn('class="pill failed"', rendered)
 
     def test_the_page_needs_nothing_from_the_network(self) -> None:
         rendered = page.render_page(self.run_of(self.contribution()))
@@ -1519,24 +1592,68 @@ class Page(unittest.TestCase):
         # Markdown inside a code span stays text.
         self.assertEqual(page.inline("`[x](y)`"), "<code>[x](y)</code>")
 
-    def test_the_markdown_a_briefing_writes(self) -> None:
-        rendered = page.markdown(
-            "## Yesterday\n\n"
-            "- one\n- two\n\n"
-            "1. first\n2. second\n\n"
-            "> a quote\n\n"
-            "---\n\n"
-            "```\nplain code\n```\n\n"
-            "A line with `code` and a [link](https://example.invalid/x)."
+    def test_a_realistic_morning_run_renders_all_supported_markdown(self) -> None:
+        run = json.loads(MORNING_FIXTURE.read_text(encoding="utf-8"))
+        rendered = page.render_page(run)
+        document = RenderedDocument()
+        document.feed(rendered)
+
+        self.assertEqual(document.tags.count("table"), 2)
+        self.assertEqual(document.tags.count("thead"), 2)
+        self.assertEqual(document.tags.count("tbody"), 2)
+        self.assertEqual(
+            sum(
+                attrs.get("class") == "table-scroll"
+                for tag, attrs in document.attributes
+                if tag == "div"
+            ),
+            2,
         )
-        self.assertIn("<h4>Yesterday</h4>", rendered)
-        self.assertIn("<ul>\n<li>one</li>", rendered)
-        self.assertIn("<ol>\n<li>first</li>", rendered)
-        self.assertIn("<blockquote>a quote</blockquote>", rendered)
-        self.assertIn("<hr>", rendered)
-        self.assertIn("<pre><code>plain code</code></pre>", rendered)
-        self.assertIn("<code>code</code>", rendered)
-        self.assertIn('href="https://example.invalid/x"', rendered)
+        self.assertTrue(
+            {
+                "h4",
+                "h5",
+                "p",
+                "strong",
+                "em",
+                "code",
+                "a",
+                "ul",
+                "ol",
+                "blockquote",
+                "pre",
+                "hr",
+            }
+            <= set(document.tags)
+        )
+        alignments = {
+            attrs.get("style")
+            for tag, attrs in document.attributes
+            if tag in ("th", "td")
+        }
+        self.assertTrue(
+            {"text-align:left", "text-align:center", "text-align:right"} <= alignments
+        )
+        self.assertNotIn("| Project | Result |", rendered)
+        self.assertIn("Plain source prose stays exactly as written.", rendered)
+        self.assertIn("Plain synthesized prose stays exactly as written.", rendered)
+        self.assertIn("Finished", rendered)
+        self.assertIn("2 jobs", rendered)
+        self.assertIn("Review the service fix", rendered)
+        self.assertIn("The calendar source had no current token.", rendered)
+
+    def test_tables_are_bordered_wrapped_and_locally_scrollable(self) -> None:
+        for rule in (
+            ".table-scroll {",
+            "overflow-x: auto;",
+            "border: 1px solid #4b4845;",
+            "background: #252321;",
+            "overflow-wrap: anywhere;",
+            "width: 100%;",
+            "min-width: 32rem;",
+            "@media (max-width: 620px)",
+        ):
+            self.assertIn(rule, page.STYLE)
 
 
 class Offers(unittest.TestCase):

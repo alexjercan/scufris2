@@ -135,7 +135,9 @@ One JSON envelope with a Markdown body:
 `status` is `ok`, `attention` or `stale`. `facts` is at most six measured
 values. Free Markdown would read well and lay out badly: the page needs a
 title, a state and a few values it can put in a row without a model in the
-loop.
+loop. The body and synthesized prose use the same CommonMark pipeline, with
+GitHub-style tables in addition to headings, paragraphs, emphasis, code,
+links, lists, block quotes, fenced code and horizontal rules.
 
 `offers` is at most three things the owner could do next about what this
 source found, each a label saying what to do and a detail saying what and why.
@@ -432,10 +434,12 @@ rather than fails when nothing is listening. `pending` is what an opening
 session reads.
 
 `tools/briefing/page.py` renders and asks nothing: given a finished run it
-writes the same page a year from now. Everything a source wrote is escaped
-before any markup is applied, and the page carries its own styling, so it
-opens from a state directory with no server, no fonts to fetch and no script to
-run.
+writes the same page a year from now. It uses markdown-it-py's CommonMark
+parser and table rule for every Markdown field. Raw HTML stays visible as text;
+only credential-free HTTP and HTTPS destinations with a host become links;
+and image syntax keeps its alt text without fetching a resource. The page
+carries its own styling, so it opens from a state directory with no server, no
+fonts to fetch and no script to run.
 
 ---
 

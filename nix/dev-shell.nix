@@ -1,5 +1,6 @@
 {pkgs}: let
   inherit (pkgs) lib;
+  python = pkgs.python3.withPackages (pythonPackages: [pythonPackages.markdown-it-py]);
 in
   pkgs.mkShell {
     packages =
@@ -9,7 +10,7 @@ in
         alejandra
         mdbook
         nodejs_22
-        python3
+        python
         typescript
         ruff
         shellcheck

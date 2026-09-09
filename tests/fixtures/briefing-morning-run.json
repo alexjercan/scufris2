@@ -1,0 +1,83 @@
+{
+  "manifest": {
+    "version": 1,
+    "profile": "morning",
+    "date": "2026-09-09",
+    "state": "delivered",
+    "started": "2026-09-09T07:30:00+03:00",
+    "finished": "2026-09-09T07:33:42+03:00",
+    "bounds": {
+      "source_deadline": 900.0,
+      "run_deadline": 1800.0,
+      "parallel": 1
+    },
+    "sources": [
+      {
+        "project": "@jobs",
+        "slug": "@jobs",
+        "title": "Overnight work",
+        "status": "attention",
+        "headline": "Two jobs finished and one still needs review.",
+        "facts": [
+          {
+            "label": "Finished",
+            "value": "2 jobs"
+          },
+          {
+            "label": "Needs review",
+            "value": "1 job"
+          }
+        ],
+        "harness": "pi",
+        "model": "openai-codex/gpt-5.6-sol",
+        "seconds": 42.1
+      }
+    ],
+    "offers": [
+      {
+        "number": 1,
+        "project": "@jobs",
+        "slug": "@jobs",
+        "label": "Review the service fix",
+        "detail": "The implementation is committed and its focused checks passed."
+      }
+    ],
+    "diagnostics": [
+      {
+        "project": "@calendar",
+        "diagnostic": "The calendar source had no current token."
+      }
+    ]
+  },
+  "contributions": [
+    {
+      "project": "@jobs",
+      "slug": "@jobs",
+      "title": "Overnight work",
+      "status": "attention",
+      "headline": "Two jobs finished and one still needs review.",
+      "facts": [
+        {
+          "label": "Finished",
+          "value": "2 jobs"
+        },
+        {
+          "label": "Needs review",
+          "value": "1 job"
+        }
+      ],
+      "body": "## Overnight jobs\n\nPlain source prose stays exactly as written.\n\n| Project | Result | Minutes | Receipt |\n| :--- | :---: | ---: | :--- |\n| `scufris2` | **passed** | 12 | [`report.md`](https://example.invalid/jobs/scufris2) |\n| `nova-protocol` | *review* | 47 | Long findings wrap inside this cell instead of widening the entire briefing page. |\n\n### Notes\n\n- The package check passed.\n- The review still needs a decision.\n\n> No source fact was synthesized.\n\n```text\nnpm run check: passed\nnix flake check: passed\n```\n\n---\n\nSee [the run receipt](https://example.invalid/jobs/receipt) for the measured details.",
+      "offers": [
+        {
+          "label": "Review the service fix",
+          "detail": "The implementation is committed and its focused checks passed."
+        }
+      ],
+      "harness": "pi",
+      "model": "openai-codex/gpt-5.6-sol",
+      "seconds": 42.1,
+      "raw": null
+    }
+  ],
+  "prose": "Good morning. **Two overnight jobs passed**, and one service fix is ready for review.\n\n## At a glance\n\n| Area | State | Next |\n| :--- | :---: | ---: |\n| Package | `clear` | 0 |\n| Service | *review* | 1 |\n\n1. Read the linked receipt.\n2. Review the service fix when convenient.\n\nPlain synthesized prose stays exactly as written."
+}

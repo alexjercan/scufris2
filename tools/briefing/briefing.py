@@ -439,7 +439,8 @@ Reply with exactly one fenced `json` block and nothing outside it:
   most {MAX_LABEL} characters and a value of at most {MAX_VALUE} characters.
   Leave it empty rather than filling it with prose.
 - `body` is Markdown of at most {body} characters: headings, paragraphs,
-  lists, links, and fenced code. Keep it to what a person reads over coffee.
+  emphasis, code, links, lists, block quotes, fenced code, horizontal rules,
+  and GitHub-style tables. Keep it to what a person reads over coffee.
 - `offers` is at most {offers} things the owner could do next about what you
   found, each a `label` of at most {MAX_OFFER_LABEL} characters saying what to
   do and a `detail` of at most {MAX_OFFER_DETAIL} characters saying what and

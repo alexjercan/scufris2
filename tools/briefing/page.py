@@ -22,16 +22,15 @@ import html
 import re
 from datetime import date as Date
 from typing import Any
+from urllib.parse import urlsplit
 
-SAFE_SCHEME = re.compile(r"^(?:https?|mailto|file):", re.IGNORECASE)
-#: One pass over a line: a code span, or a link. Whichever starts first wins,
-#: so a link inside backticks stays text and a path in backticks stays a label.
-SPAN = re.compile(r"`([^`]+)`|\[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)")
-BOLD = re.compile(r"\*\*([^*]+)\*\*")
-ITALIC = re.compile(r"(?<!\*)\*([^*\n]+)\*(?!\*)")
-BULLET = re.compile(r"^[-*]\s+(.*)$")
-NUMBERED = re.compile(r"^\d+[.)]\s+(.*)$")
-HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
+from markdown_it.utils import EnvType, OptionsDict
+
+CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+MAX_LINK = 8 * 1024
+HEADING_OFFSET = 2
 
 STATUS_WORDS = {
     "ok": "clear",
@@ -121,7 +120,8 @@ h1 {
 .fact dt { color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
 .fact dd { margin: 2px 0 0; color: var(--strong); font-size: 18px; }
 .body { margin-top: 16px; }
-.body h3, .body h4, .body h5 {
+.markdown { min-width: 0; max-width: 100%; }
+.markdown h3, .markdown h4, .markdown h5, .markdown h6 {
   margin: 20px 0 6px;
   font-size: 13px;
   font-weight: 500;
@@ -129,26 +129,62 @@ h1 {
   text-transform: uppercase;
   color: var(--muted);
 }
-.body p, .body ul, .body ol { margin: 8px 0; }
-.body ul, .body ol { padding-left: 20px; }
-.body li { margin: 3px 0; }
-.body a { color: var(--attention); }
-.body code, .headline code { background: #1e1e1e; border-radius: 3px; padding: 0 4px; font-size: 13px; }
-.body pre {
+.markdown p, .markdown ul, .markdown ol { margin: 8px 0; }
+.markdown ul, .markdown ol { padding-left: 20px; }
+.markdown li { margin: 3px 0; }
+.markdown a, .headline a { color: var(--attention); overflow-wrap: anywhere; }
+.markdown code, .headline code { background: #1e1e1e; border-radius: 3px; padding: 0 4px; font-size: 13px; }
+.markdown pre {
+  max-width: 100%;
   background: #1e1e1e;
   border: 1px solid var(--line);
   border-radius: 3px;
   padding: 12px 14px;
   overflow-x: auto;
 }
-.body pre code { background: none; padding: 0; }
-.body blockquote {
+.markdown pre code { background: none; padding: 0; }
+.markdown blockquote {
   margin: 8px 0;
   padding-left: 14px;
   border-left: 2px solid var(--line);
   color: var(--muted);
 }
-.body hr { border: none; border-top: 1px solid var(--line); margin: 20px 0; }
+.markdown hr { border: none; border-top: 1px solid var(--line); margin: 20px 0; }
+.table-scroll {
+  max-width: 100%;
+  margin: 16px 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-color: #5b5855 #1e1e1e;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll::-webkit-scrollbar { height: 8px; }
+.table-scroll::-webkit-scrollbar-track { background: #1e1e1e; }
+.table-scroll::-webkit-scrollbar-thumb { background: #5b5855; border-radius: 4px; }
+.markdown table {
+  width: 100%;
+  min-width: 32rem;
+  border-collapse: collapse;
+  border-spacing: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.markdown th, .markdown td {
+  min-width: 8rem;
+  max-width: 28rem;
+  padding: 8px 10px;
+  border: 1px solid #4b4845;
+  vertical-align: top;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.markdown th {
+  background: #252321;
+  color: var(--strong);
+  font-weight: 600;
+}
+.markdown tbody tr:nth-child(even) td { background: #1b1b1b; }
 .empty { color: var(--muted); }
 .offers ol { list-style: none; margin: 0; padding: 0; }
 .offers li { border-top: 1px solid var(--line); padding: 14px 0; }
@@ -169,140 +205,118 @@ footer {
 }
 footer ul { margin: 8px 0 0; padding-left: 18px; }
 @media (max-width: 620px) {
-  body { padding: 28px 16px 64px; }
+  body { padding: 28px 12px 64px; }
   h1 { font-size: 22px; }
+  .card { padding: 16px 14px; }
+  .markdown th, .markdown td { min-width: 7.5rem; max-width: 20rem; padding: 7px 8px; }
 }
 """
 
 
-def inline(text: str) -> str:
-    """Markdown inside one line, on text that is escaped first.
-
-    Escaping before markup, rather than after, is what keeps a source from
-    writing HTML into the page.
-
-    Code spans and links are found in one left-to-right pass rather than one
-    rule after another. Cutting the backticks out first would leave a link
-    whose label is a path in backticks - which is most of the links a briefing
-    writes - split across pieces no link rule could match again.
-    """
-    escaped = html.escape(text)
-    rendered: list[str] = []
-    end = 0
-    for match in SPAN.finditer(escaped):
-        rendered.append(emphasis(escaped[end : match.start()]))
-        code, label, target = match.groups()
-        if code is not None:
-            rendered.append(f"<code>{code}</code>")
-        else:
-            rendered.append(anchor(label, target))
-        end = match.end()
-    rendered.append(emphasis(escaped[end:]))
-    return "".join(rendered)
-
-
-def emphasis(text: str) -> str:
-    """The rules that hold no text of their own."""
-    return ITALIC.sub(r"<em>\1</em>", BOLD.sub(r"<strong>\1</strong>", text))
-
-
-def anchor(label: str, target: str) -> str:
-    """A link, or its words when the target is not one this page will follow.
-
-    The label is rendered whichever way it goes, so a dropped link costs the
-    reader the target and never the words.
-    """
-    inside = "".join(
-        f"<code>{piece}</code>" if index % 2 else emphasis(piece)
-        for index, piece in enumerate(label.split("`"))
+def safe_link(target: str) -> bool:
+    """Whether untrusted Markdown may turn this destination into a link."""
+    if len(target) > MAX_LINK or CONTROL.search(target):
+        return False
+    try:
+        parsed = urlsplit(target)
+        # Reading the port also rejects malformed and out-of-range values.
+        _ = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme.lower() in ("http", "https")
+        and parsed.hostname not in (None, "")
+        and parsed.username is None
+        and parsed.password is None
     )
-    if SAFE_SCHEME.match(target) or target.startswith(("/", "#", ".")):
-        return f'<a href="{target}" rel="noreferrer">{inside}</a>'
-    return inside
+
+
+def render_token(
+    tokens: list[Token], index: int, options: OptionsDict, env: EnvType
+) -> str:
+    return MARKDOWN.renderer.renderToken(tokens, index, options, env)
+
+
+def render_link_open(
+    tokens: list[Token], index: int, options: OptionsDict, env: EnvType
+) -> str:
+    """Keep a safe link, or render only its label when its target is unsafe."""
+    token = tokens[index]
+    allowed = safe_link(token.attrGet("href") or "")
+    depth = 1
+    for following in tokens[index + 1 :]:
+        if following.type == "link_open":
+            depth += 1
+        elif following.type == "link_close":
+            depth -= 1
+            if depth == 0:
+                following.meta["safe_link"] = allowed
+                break
+    if not allowed:
+        return ""
+    token.attrSet("rel", "noreferrer")
+    return render_token(tokens, index, options, env)
+
+
+def render_link_close(
+    tokens: list[Token], index: int, options: OptionsDict, env: EnvType
+) -> str:
+    return (
+        render_token(tokens, index, options, env)
+        if tokens[index].meta.get("safe_link")
+        else ""
+    )
+
+
+def render_heading(
+    tokens: list[Token], index: int, options: OptionsDict, env: EnvType
+) -> str:
+    """Keep the page title above headings supplied by briefing Markdown."""
+    token = tokens[index]
+    token.tag = f"h{min(int(token.tag[1:]) + HEADING_OFFSET, 6)}"
+    return render_token(tokens, index, options, env)
+
+
+def render_image(
+    tokens: list[Token], index: int, _options: OptionsDict, _env: EnvType
+) -> str:
+    """Keep image alt text without letting a page fetch untrusted resources."""
+    return html.escape(tokens[index].content)
+
+
+def markdown_parser() -> MarkdownIt:
+    """The one Markdown pipeline used by prose, contributions, and offers."""
+    parser = MarkdownIt(
+        "commonmark",
+        {"html": False, "linkify": False, "xhtmlOut": False},
+    ).enable("table")
+    # Parse every syntactically valid destination so the renderer can remove
+    # an unsafe target without also returning its Markdown delimiters.
+    parser.validateLink = lambda _target: True
+    parser.renderer.rules["link_open"] = render_link_open
+    parser.renderer.rules["link_close"] = render_link_close
+    parser.renderer.rules["heading_open"] = render_heading
+    parser.renderer.rules["heading_close"] = render_heading
+    parser.renderer.rules["image"] = render_image
+    parser.renderer.rules["table_open"] = lambda *_args: (
+        '<div class="table-scroll" role="region" aria-label="Scrollable table" '
+        'tabindex="0">\n<table>\n'
+    )
+    parser.renderer.rules["table_close"] = lambda *_args: "</table>\n</div>\n"
+    return parser
+
+
+MARKDOWN = markdown_parser()
+
+
+def inline(text: str) -> str:
+    """Inline Markdown through the same safe parser as every block."""
+    return MARKDOWN.renderInline(text)
 
 
 def markdown(text: str) -> str:
-    """The Markdown a briefing writes, and no more.
-
-    Headings, paragraphs, lists, quotes, rules, fenced code, and the inline
-    rules above. A source that reaches for a table or a footnote gets its
-    source text back as a paragraph, which reads badly and loses nothing.
-    """
-    lines = text.replace("\r\n", "\n").split("\n")
-    out: list[str] = []
-    paragraph: list[str] = []
-    listing: str | None = None
-    fence: list[str] | None = None
-
-    def close_paragraph() -> None:
-        nonlocal paragraph
-        if paragraph:
-            out.append(f"<p>{inline(' '.join(paragraph))}</p>")
-            paragraph = []
-
-    def close_list() -> None:
-        nonlocal listing
-        if listing:
-            out.append(f"</{listing}>")
-            listing = None
-
-    for line in lines:
-        stripped = line.strip()
-        if fence is not None:
-            if stripped.startswith("```"):
-                body = html.escape("\n".join(fence))
-                out.append(f"<pre><code>{body}</code></pre>")
-                fence = None
-            else:
-                fence.append(line)
-            continue
-        if stripped.startswith("```"):
-            close_paragraph()
-            close_list()
-            fence = []
-            continue
-        if not stripped:
-            close_paragraph()
-            close_list()
-            continue
-        heading = HEADING.match(stripped)
-        if heading:
-            close_paragraph()
-            close_list()
-            level = min(len(heading.group(1)) + 2, 6)
-            out.append(f"<h{level}>{inline(heading.group(2))}</h{level}>")
-            continue
-        if set(stripped) <= {"-", "*", "_"} and len(stripped) >= 3:
-            close_paragraph()
-            close_list()
-            out.append("<hr>")
-            continue
-        if stripped.startswith("> "):
-            close_paragraph()
-            close_list()
-            out.append(f"<blockquote>{inline(stripped[2:])}</blockquote>")
-            continue
-        bullet = BULLET.match(stripped)
-        numbered = NUMBERED.match(stripped)
-        if bullet or numbered:
-            close_paragraph()
-            wanted = "ul" if bullet else "ol"
-            if listing != wanted:
-                close_list()
-                out.append(f"<{wanted}>")
-                listing = wanted
-            item = (bullet or numbered).group(1)
-            out.append(f"<li>{inline(item)}</li>")
-            continue
-        close_list()
-        paragraph.append(stripped)
-    if fence is not None:
-        # An unterminated fence is still what the source wrote. Closing it here
-        # keeps the page valid and keeps the text visible.
-        out.append(f"<pre><code>{html.escape(chr(10).join(fence))}</code></pre>")
-    close_paragraph()
-    close_list()
-    return "\n".join(out)
+    """CommonMark plus GFM tables, with raw HTML and unsafe links inert."""
+    return MARKDOWN.render(text)
 
 
 def written_date(value: str) -> str:
@@ -325,17 +339,18 @@ def facts_block(facts: list[dict[str, Any]]) -> str:
 
 
 def card(contribution: dict[str, Any]) -> str:
-    status = contribution["status"]
+    status = str(contribution["status"])
+    status_class = status if status in STATUS_WORDS else "failed"
     word = STATUS_WORDS.get(status, status)
     body = markdown(contribution.get("body", "") or "")
     return (
         f'<section class="card">'
         f"<h2>{html.escape(contribution['title'])}"
-        f'<span class="pill {status}">{html.escape(word)}</span>'
+        f'<span class="pill {status_class}">{html.escape(word)}</span>'
         f'<span class="source">{html.escape(contribution["project"])}</span></h2>'
         f'<p class="headline">{inline(contribution["headline"])}</p>'
         f"{facts_block(contribution.get('facts', []))}"
-        f'<div class="body">{body}</div>'
+        f'<div class="body markdown">{body}</div>'
         f"</section>"
     )
 
@@ -351,7 +366,7 @@ def offers_block(offers: list[dict[str, Any]]) -> str:
         return ""
     items = "".join(
         f'<li><div class="pick">'
-        f'<span class="number">{offer["number"]}</span>'
+        f'<span class="number">{html.escape(str(offer["number"]))}</span>'
         f'<span class="label">{inline(offer["label"])}</span>'
         f'<span class="source">{html.escape(offer["project"])}</span>'
         f'</div><p class="detail">{inline(offer["detail"])}</p></li>'
@@ -364,8 +379,10 @@ def run_footer(manifest: dict[str, Any]) -> str:
     counted = len(manifest["sources"])
     failed = [item for item in manifest["sources"] if item["status"] == "failed"]
     collected = html.escape(str(manifest.get("finished") or "not yet"))
+    profile = html.escape(str(manifest["profile"]).capitalize())
+    date = html.escape(str(manifest["date"]))
     lines = [
-        f"{manifest['profile'].capitalize()} run of {manifest['date']}, "
+        f"{profile} run of {date}, "
         + f"{counted} source{'' if counted == 1 else 's'}, "
         + f"collected {collected}."
     ]
@@ -389,7 +406,7 @@ def render_page(run: dict[str, Any]) -> str:
     title = f"{manifest['profile'].capitalize()} briefing"
     prose = run.get("prose")
     lede = (
-        f'<div class="lede">{markdown(prose)}</div>'
+        f'<div class="lede markdown">{markdown(prose)}</div>'
         if prose
         else '<p class="lede empty">This run has no prose yet.</p>'
     )

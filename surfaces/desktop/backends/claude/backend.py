@@ -49,12 +49,15 @@ BETA = "oauth-2025-04-20"
 #: long, so polling faster than the floor only spends requests, and past the
 #: ceiling the panel is a screenshot.
 FLOOR = 15.0
-# The ceiling is what the widget's `cadence` buys: the companion marks a
-# backend stale after three of its widget's cadences of silence, and that
-# cadence is fixed in the manifest while this interval is the caller's. A
-# reading slower than the tolerance wears a STALE badge over numbers that are
-# current, for as long as the panel is open.
-CEILING = 180.0
+# The ceiling is what the widget's `cadence` buys, less what one reading costs.
+# The companion marks a backend stale after three of its widget's cadences of
+# silence, and the loop sleeps *around* the work rather than to a deadline: the
+# gap between two printed readings is the interval plus the reading itself.
+# Sitting the ceiling on the tolerance therefore made the advertised slowest
+# interval the one value that wears STALE over numbers that are current, every
+# cycle. `test_a_ceiling_leaves_room_for_its_own_reading` holds this to the
+# manifest.
+CEILING = 150.0
 
 #: How long one request has to answer.
 PATIENCE = 10.0

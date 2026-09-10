@@ -174,3 +174,67 @@ class CodexTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Staleness(unittest.TestCase):
+    """The ceiling a backend accepts against the cadence its widget declares.
+
+    `SILENCE = 3` in `surfaces/desktop/src/widgets/backends.rs` and the sweep
+    marks a backend stale on `quiet > cadence * SILENCE`. Each backend's
+    `CEILING` is hand-copied and nothing tied it to the manifest, so all three
+    sat exactly on the tolerance: the slowest interval the backend accepted -
+    and the one its description advertised to the model - was the one that wore
+    STALE over current numbers, every cycle, because the loop sleeps around the
+    work and `quiet` also over-counts by up to one 250 ms beat.
+    """
+
+    #: `SILENCE` in `surfaces/desktop/src/widgets/backends.rs`.
+    SILENCE = 3
+    #: `BEAT` in `surfaces/desktop/src/widgets/mod.rs`, in seconds.
+    BEAT = 0.25
+
+    PAIRS = (("claude", "claude"), ("codex", "codex"), ("cpu", "system"))
+
+    def cadence_seconds(self, widget: str) -> float:
+        manifest = (
+            Path(__file__).parents[1]
+            / "surfaces"
+            / "desktop"
+            / "widgets"
+            / widget
+            / "widget.toml"
+        ).read_text(encoding="utf-8")
+        for line in manifest.splitlines():
+            if line.startswith("cadence"):
+                return int(line.split("=", 1)[1].strip()) / 1000
+        raise AssertionError(f"{widget} declares no cadence")
+
+    def test_a_ceiling_leaves_room_for_its_own_reading(self) -> None:
+        for widget, backend_name in self.PAIRS:
+            with self.subTest(widget=widget):
+                tolerance = self.cadence_seconds(widget) * self.SILENCE
+                ceiling = backend(backend_name).CEILING
+                self.assertLess(
+                    ceiling + self.BEAT,
+                    tolerance,
+                    f"{backend_name} accepts {ceiling}s against a {tolerance}s "
+                    f"tolerance, so the slowest reading it allows is stale",
+                )
+
+    def test_a_description_advertises_the_ceiling_it_enforces(self) -> None:
+        for widget, backend_name in self.PAIRS:
+            with self.subTest(widget=widget):
+                manifest = (
+                    Path(__file__).parents[1]
+                    / "surfaces"
+                    / "desktop"
+                    / "widgets"
+                    / widget
+                    / "widget.toml"
+                ).read_text(encoding="utf-8")
+                ceiling = backend(backend_name).CEILING
+                self.assertIn(
+                    f"{int(ceiling)} seconds is the slowest",
+                    manifest,
+                    f"{widget} tells the model a number {backend_name} does not enforce",
+                )

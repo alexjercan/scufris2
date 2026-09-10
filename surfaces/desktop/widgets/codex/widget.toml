@@ -1,6 +1,6 @@
 id = "codex"
 name = "Codex"
-description = "Show how much of the Codex subscription is spent: every usage window as a meter, with the one closest to its limit as the headline and the time until it starts over. Data comes from the codex backend, which reads the token the Codex CLI keeps on this machine, rather than from the caller. The spawn payload is { every: number }, the poll interval in seconds, 60 is the usual answer, and 180 seconds is the slowest it polls: past that the panel marks itself stale over numbers that are current."
+description = "Show how much of the Codex subscription is spent: every usage window as a meter, with the one closest to its limit as the headline and the time until it starts over. Data comes from the codex backend, which reads the token the Codex CLI keeps on this machine, rather than from the caller. The spawn payload is { every: number }, the poll interval in seconds, 60 is the usual answer, and 150 seconds is the slowest it polls: past that the panel marks itself stale over numbers that are current."
 width = 320
 height = 195
 backend = "codex"

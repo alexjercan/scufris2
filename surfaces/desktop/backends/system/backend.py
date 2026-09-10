@@ -30,12 +30,15 @@ import time
 #: noise and the panel cannot keep up; above the ceiling nothing on screen
 #: would look alive.
 FLOOR = 0.25
-# The ceiling is what the widget's `cadence` buys: the companion marks a
-# backend stale after three of its widget's cadences of silence, and that
-# cadence is fixed in the manifest while this interval is the caller's. A
-# reading slower than the tolerance wears a STALE badge over numbers that are
-# current, for as long as the panel is open.
-CEILING = 3.0
+# The ceiling is what the widget's `cadence` buys, less what one reading costs.
+# The companion marks a backend stale after three of its widget's cadences of
+# silence, and the loop sleeps *around* the work rather than to a deadline: the
+# gap between two printed readings is the interval plus the reading itself.
+# Sitting the ceiling on the tolerance therefore made the advertised slowest
+# interval the one value that wears STALE over numbers that are current, every
+# cycle. `test_a_ceiling_leaves_room_for_its_own_reading` holds this to the
+# manifest.
+CEILING = 2.0
 
 #: The hwmon chips that report a processor temperature, best first. Anything
 #: else on the bus is a disk, a battery, or a board sensor.

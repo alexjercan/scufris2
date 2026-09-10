@@ -436,13 +436,21 @@ class Panel:
         database second: what was trained recently is what is most likely
         wanted, and the database is what can answer before anything has been
         trained at all.
+
+        Reading the trained window is guarded the way `foods` is. A day file
+        that cannot be decoded refuses the suggestion rather than leaving the
+        process: this runs on every keystroke in the form box, so an exception
+        here is a panel that dies mid-word and dies again on the next key.
         """
         self.choices = []
         if name == "search":
             found = [item.choice() for item in self.foods(words(action.get("name")))]
             self.choices = found[:CHOICES]
             return
-        history = lift_history(self.den, date.fromisoformat(self.chosen()), TRAINED)
+        try:
+            history = lift_history(self.den, date.fromisoformat(self.chosen()), TRAINED)
+        except (OSError, ValueError) as trouble:
+            raise Refused(str(trouble)) from None
         # Each field is typed into on its own, and the form box lays only that
         # field's own text into the action, so a movement is narrowed by what
         # was typed into its own field and by nothing else on the form.

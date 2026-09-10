@@ -643,6 +643,22 @@ class Trouble(Panel):
         self.assertEqual(reading["view"], self.view)
         self.assertIsNotNone(reading["trouble"])
 
+    def test_a_day_that_is_not_text_is_trouble_beside_a_suggestion(self) -> None:
+        # The sibling above widened `Panel.read`, which is what makes the panel
+        # exist to type into. `suggest` reads the same window through
+        # `lift_history` and was not widened, so the first keystroke in the
+        # exercise or split field took `UnicodeDecodeError` out of `main` and
+        # killed the process - then the restart tick brought back a panel that
+        # died on the next key. The fixture is a bounded regular file.
+        den.entry_path(self.den, YESTERDAY).write_bytes(b"# Sunday\n\xff\n")
+        for name in ("moves", "splits"):
+            reading = self.do({"action": name, "exercise": "be", "split": "be"})
+            self.assertIsNotNone(
+                reading["trouble"],
+                f"{name} did not say what went wrong",
+            )
+            self.assertEqual(reading["view"], self.view)
+
     def test_a_journal_that_cannot_be_written_refuses_one_click(self) -> None:
         # `change` reaches `mkdir`, `mkstemp`, `os.link` and `os.replace`, so a
         # full or read-only mount arrives as an `OSError` - which used to leave

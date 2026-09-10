@@ -1015,11 +1015,25 @@ def note_body(text: str, what: str) -> str:
 
 
 def _plain(cell: str, what: str) -> str:
+    """Checks one cell of free text that is written without a marker in front.
+
+    A comma is refused because a line with no comma is never read back as a
+    set, which is what keeps a split off the table below it.
+
+    A heading is refused for the same reason one line up: every caller here
+    puts the text on a line of its own, so `### Habits` as a split name becomes
+    a section header to `_sections`, `_header` and `_region`. The Workout split,
+    its table header and every set below it then stop being reachable through
+    any reader while the bytes stay in the file. `one_line` refuses the same
+    shape for the writers that hold it.
+    """
     cleaned = cell.strip()
     if not cleaned:
         raise ValueError(f"{what} must not be empty")
     if "," in cleaned or "\n" in cleaned or "\r" in cleaned:
         raise ValueError(f"{what} must be one line and hold no comma")
+    if _structure(cleaned):
+        raise ValueError(f"{what} must not be a Markdown heading")
     return cleaned
 
 

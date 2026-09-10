@@ -236,6 +236,23 @@ class Structure(unittest.TestCase):
         with self.assertRaises(ValueError):
             den.add_note(DAY, "#### 09:00", "body")
 
+    def test_a_heading_is_not_a_split_or_a_food_name(self) -> None:
+        # `one_line` was applied to the four writers that prefix their text and
+        # not to the two that do not. `set_split` writes its value as a line of
+        # its own inside the Workout region, so `### Habits` became a section
+        # header: the split, the table header and every set below it stopped
+        # being reachable through any reader while the bytes stayed in the file.
+        for bad in ("### Habits", "# Monday", "#### 09:00 - standup"):
+            with self.assertRaises(ValueError):
+                den.normalize_split(bad)
+            with self.assertRaises(ValueError):
+                den.normalize_food(f"{bad},10,20,30")
+            with self.assertRaises(ValueError):
+                den.normalize_lift(bad, "100", "5")
+        # An ordinary split and an ordinary movement are untouched.
+        self.assertEqual(den.normalize_split("Push"), "Push")
+        self.assertEqual(den.normalize_lift("Bench", "100", "5"), "Bench,100,5")
+
     def test_a_note_body_holding_a_heading_is_refused(self) -> None:
         # Note bodies are legitimately many lines and come from a form box and
         # from the model, so this is prose somebody would plausibly write.

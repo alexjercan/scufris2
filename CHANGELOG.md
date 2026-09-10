@@ -9,6 +9,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-09-10
+
 ### Added
 
 - Scheduled briefings now have durable lifecycle rows on desktop and iPhone.
@@ -20,6 +22,14 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   and becomes delivered only after its answer is in canonical conversation
   replay. Pending and in-progress delivery recover across service and agent
   restarts.
+- An instrument hangs from a corner and the next one on that corner hangs
+  below it, so a side of the desktop holds as many panels as its height has
+  room for. Four was the number of corners, and the fifth panel summoned from
+  the tray was refused with `no_free_slot` where nothing could say so, because
+  a summon carries no request ID. Every corner still takes its first panel
+  before any corner takes its second, so four panels read as four places and
+  not as two piles. Two of the tallest widget that ships still fill one side;
+  four claude panels now fit where two did.
 
 ### Changed
 
@@ -30,6 +40,13 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 - Briefing collection and delivery are independent state machines. Filesystem
   notifications are only latency hints; session startup and a one-minute
   systemd reconciliation timer authoritatively replay all retained runs.
+- One predicate now decides whether a worker's summary is fit to store or
+  print, and it is asked at all four doors that used to decide it differently.
+  The single-byte CSI U+009B is not under 32, so it was stored and every
+  reader downstream had to escape it forever, and U+2028 ended a line for a
+  JavaScript reader but not for a Python one. Text a worker controls is
+  refused at the door rather than escaped on the way out, so a summary that
+  reaches the record is one every reader can show.
 
 ### Fixed
 
@@ -48,6 +65,30 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   proactive slot is active, duplicate terminal ingress is idempotent, and the
   crash window between canonical replay and inbox acknowledgment cannot create
   a second visible answer.
+- A held exhibit no longer keeps its hold after its backend dies. The dead
+  panel stayed on the shelf and crowded out live ones. Releasing a hold now
+  restarts the panel's age too, so an exhibit held for hours is not
+  immediately as old as its hold, while a panel that was never held keeps
+  aging across a feed and stays the right one to retire.
+- The three usage backends no longer drift stale in normal operation. Each
+  slept for exactly the ceiling its widget advertises, so a reading always
+  arrived after the ceiling and spent its whole staleness budget on the sleep
+  alone. The ceilings move below the cadence they must fit inside: 180 to 150
+  seconds for claude and codex, 3 to 2 for system. The widget descriptions
+  move with them, because those are what the model reads to decide when a
+  number is old.
+- A den value written through `normalize_*` can no longer enter the day file
+  as a Markdown heading. A leading `#` passed the plain-text guard, and the
+  next read parsed it as a section the writer never made, so everything after
+  it landed under a heading that is not real. The den backend's `suggest` also
+  reports an unreadable directory or a malformed date as a refusal instead of
+  raising through the surface.
+- The briefing unit has a memory bound. It had a time bound and none for
+  memory, so one runaway read grew until the kernel stopped it, and because
+  the collector shares a control group with its sources, systemd stopped all
+  of them. `MemoryMax` stops the one process that is wrong before the machine
+  notices, and `MemoryHigh` throttles it first so an honest peak is slowed
+  rather than killed.
 
 ## [2.4.1] - 2026-09-09
 
@@ -1033,7 +1074,8 @@ is unavailable: job.json`. Every variable that says where things are is now
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.4.1...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/alexjercan/scufris2/compare/v2.4.1...v2.5.0
 [2.4.1]: https://github.com/alexjercan/scufris2/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/alexjercan/scufris2/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/alexjercan/scufris2/compare/v2.2.0...v2.3.0

@@ -9,6 +9,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-09-10
+
 ### Changed
 
 - Surface and agent protocol 10 adds a failed briefing-delivery state. Host,
@@ -1106,7 +1108,8 @@ is unavailable: job.json`. Every variable that says where things are is now
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/alexjercan/scufris2/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/alexjercan/scufris2/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/alexjercan/scufris2/compare/v2.4.1...v2.5.0
 [2.4.1]: https://github.com/alexjercan/scufris2/compare/v2.4.0...v2.4.1

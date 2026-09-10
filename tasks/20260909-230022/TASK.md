@@ -24,7 +24,7 @@ Run before any review, at `bbaabff` with a clean tree.
 
 - `npm run check`: typecheck and 121 node tests pass. `format:check` fails on
   exactly one file, `tasks/20260909-230022/TASK.md`, which is the file `tatr
-  new` created for this run. Every other `tasks/*/TASK.md` passes. Not a
+new` created for this run. Every other `tasks/*/TASK.md` passes. Not a
   master failure.
 - `python3 -m unittest discover -s tests -p 'test_*.py'`: 376 tests, 6
   failures, all in `tests/test_briefing.py`.
@@ -1153,3 +1153,173 @@ G2/G3 review were not run. A skip is not a pass.
 
 No implementation file, live briefing state, service, process, notification
 path, release, remote, or tag was changed. This task stays OPEN.
+
+## OOM diagnosis - 2026-09-10
+
+The owner asked what the `/dev/zero` incident actually was, and whether it was a
+defect in this project or a faulty command chosen by the agent. It was both,
+plus a missing guardrail. Three things had to line up; removing any one of them
+would have kept the night alive.
+
+### The exact command
+
+The G4 red-team child (`agent-a1d5c76f009952b9e.jsonl`, tool call 175) ran a
+single Bash block that ended with this Python, executed in-process. It is
+quoted exactly as the lane ran it, so the fence is `text`: a `python` fence
+would let `ruff format` rewrite the evidence.
+
+```text
+sys.path.insert(0, '/home/alex/personal/scufris2/tools/briefing')
+import briefing
+...
+f = p / "briefing-profiles.json"
+...
+# symlink to /dev/zero
+f.unlink(); os.symlink("/dev/zero", f)
+try:
+    briefing.apply_profile_bounds("nightly"); print("devzero symlink -> ok (no hang)")
+except Exception as e: print("devzero symlink -> ", type(e).__name__, e)
+```
+
+The preceding eleven cases in the same block are ordinary hostile-input
+fixtures: bad JSON, wrong types, negative and huge numbers, a `__proto__` key,
+a NUL in a key. All of those are safe and all of them returned. The twelfth
+case is the one that killed the machine.
+
+Note what the lane was actually testing: the comment it wrote for itself was
+`devzero symlink -> ok (no hang)`. It expected the call to return a refusal.
+The probe was written on the assumption that the product code was safe.
+
+### Contributing factor 1: a real defect in this project
+
+`tools/briefing/briefing.py:1195`:
+
+```python
+raw = (config_home() / PROFILE_BOUNDS_FILE).read_bytes()
+```
+
+`apply_profile_bounds` (`:1182`) reads the generated profile-bounds file with
+no `O_NOFOLLOW`, no `fstat` regular-file check, and no byte ceiling. The
+symlink was followed to `/dev/zero`, and `read_bytes()` on a character device
+that never reaches EOF grows the buffer until the allocator gives up. The
+Python process reached about 29.2 GB RSS and 28.3 GiB of swap.
+
+This is G4-R1, and it is genuine. The path is reachable without any agent: any
+process that can write `$XDG_CONFIG_HOME/scufris/briefing-profiles.json` can
+replace it with a symlink or a FIFO and take the host down the next time a
+briefing starts. Home Manager generates that file, but nothing in the reader
+requires that the file it finds is the file Home Manager wrote.
+
+### Contributing factor 2: an unsafe probe
+
+The lane was entitled to test hostile profile bounds; that is its job, and the
+other eleven cases were the right shape. Pointing product code at `/dev/zero`
+was not. A device that never returns EOF is not a bounded fixture, and the
+brief asks for "an oversized one", not an infinite one.
+
+The safe form of the same probe is metadata plus static reasoning: `os.lstat`
+the path, observe that the reader never calls `stat`, and report the missing
+guard. That proves the defect without executing it. This is now written into
+the lane instructions for the continued review.
+
+The deeper problem is that `.agents/skills/scufris-review/lanes/red-team.md`
+told the lane to drive states to their limits and never told it to bound its
+own blast radius. The lane ran the probe in the same control group as the live
+nightly collector, so the blast radius was the whole run.
+
+### Contributing factor 3: no memory guardrail on the unit
+
+`nix/home-manager.nix:639-652` builds the briefing service with `Type`,
+`ExecStart`, `TimeoutStartSec` and `WorkingDirectory`. There is no
+`MemoryMax`, no `MemoryHigh`, and no explicit `OOMPolicy`.
+
+The earlier recovery section says the unit has `OOMPolicy=stop` and
+`KillMode=control-group`. That is right about the behaviour and wrong about the
+provenance: both are systemd's defaults, not settings this project chose. The
+correction matters, because it means the containment that did eventually stop
+the bleeding was the kernel OOM killer, not a bound this project set.
+
+`TimeoutStartSec = deadline + 300` bounds time, not memory. The run had more
+than seven hours left on its deadline when it died. A time bound cannot stop a
+runaway allocation, and nothing else was watching.
+
+### Verdict
+
+A defect in this project, exposed by a probe that should not have been run the
+way it was, inside a unit with no memory ceiling to contain it.
+
+Fixing G4-R1 alone stops this exact incident. Fixing all three stops the class:
+the reader refuses a non-regular file, the lane proves such defects without
+executing them, and the unit caps what one bad allocation can take with it.
+
+## Fixes applied - 2026-09-10
+
+Working tree, uncommitted. Every check below was run after the last edit.
+
+### The OOM class, closed at all three points
+
+| What                                                                                                                                                                                                                                        | Where                                                                  | Proof                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The profile-bounds reader is bounded, no-follow, and regular-file only. New `read_profile_bounds` opens with `O_NOFOLLOW\|O_NONBLOCK`, settles the type from the descriptor with `fstat`, and reads at most `MAX_PROFILE_BOUNDS + 1` bytes. | `tools/briefing/briefing.py`                                           | Two new tests. A symlink, a FIFO and a directory all read as nothing; an oversized regular file reads as nothing; one under the bound still works. The FIFO case is proved not to block with a `SIGALRM`. |
+| `O_NONBLOCK` was added after the first attempt: `open()` on a FIFO with `O_RDONLY` blocks before `fstat` can run, so the guard against a FIFO would have been the hang it exists to prevent.                                                | same                                                                   | Alarm-guarded test.                                                                                                                                                                                       |
+| The unit has a memory ceiling. `MemoryMax=4G`, `MemoryHigh=3G`.                                                                                                                                                                             | `nix/home-manager.nix:656`                                             | Static. `TimeoutStartSec` bounds time, not memory; the run had seven hours left when it died.                                                                                                             |
+| Lanes must bound their own blast radius. A new "Bounded probes" section, written from the incident, plus a pointer at the top of the red-team brief.                                                                                        | `.agents/skills/scufris-review/lanes/reviewer.md`, `lanes/red-team.md` | The eight lanes this round carried the same rule in their prompts. One reached G4-R1 independently and recorded "Determined statically; not executed."                                                    |
+
+### Defects fixed
+
+| ID           | What changed                                                                                                                                                                                                                                                      |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| N1 BLOCKER   | `suggest` guards `lift_history` with `(OSError, ValueError) -> Refused`, matching `foods`. A corrupt day file now refuses on the badge instead of killing the backend on every keystroke. New test; proved to fail without the fix.                               |
+| G1-3 BLOCKER | One `displayable` predicate at all four job-event doors: `write_report`, `parse_event`, `valid_record_text`, and `scufris-report`. New test over seven code points that passed `ord < 32` and failed `isprintable`.                                               |
+| N4 MAJOR     | `_plain` refuses a Markdown heading, so `set_split`, `normalize_food` and `normalize_lift` can no longer forge a section header and orphan the Workout table. New test.                                                                                           |
+| N3 MAJOR     | Ceilings moved off the staleness tolerance: claude and codex 180 -> 150, system 3 -> 2, and the three model-facing descriptions follow. Two new tests bind each ceiling and each description to the widget's own `cadence`; both proved to fail at the old value. |
+| N6 MAJOR     | The three gateway refusal literals are now `refusal::` constants.                                                                                                                                                                                                 |
+| N13 MAJOR    | The four `protocol.ts` `invalid_widgets` literals are now `REFUSAL.INVALID_WIDGETS`.                                                                                                                                                                              |
+| N7 MAJOR     | The `attachment.rs` fixture is JSON again, and its status changed to `BAD_REQUEST` so the arm can only be reached through the code half.                                                                                                                          |
+| N8           | The `report_launch_failure` docstring no longer claims to report a capability refusal, and says why the gate stays outside the guarded region.                                                                                                                    |
+| N10          | `resolve`'s docstring corrected; a test pins the two-candidate behaviour rather than the old answer.                                                                                                                                                              |
+| G4-1 MAJOR   | `health()` clears `held`, `holding` and `aging` on `Health::Dead`. New test.                                                                                                                                                                                      |
+| G4-2 MAJOR   | `feed()` resets `aging` at the held-to-unheld transition only.                                                                                                                                                                                                    |
+| G4-R10       | The grace test now spends most of the grace before the hold begins, so it can fail. Proved: it fails with the G4-2 fix removed.                                                                                                                                   |
+| F0           | `setUpModule` in `tests/test_briefing.py` removes ambient `SCUFRIS_BRIEFING_*` and restores it after. 111 tests pass under the exact environment the timer unit exports, where six failed before.                                                                 |
+| F1           | `nix/checks/helpers.nix` imports `../python.nix` instead of building its own interpreter.                                                                                                                                                                         |
+
+### Also
+
+- `.agents/skills/scufris-review/SKILL.md` now dispatches at most two lanes at
+  a time. The old text said to send every lane in one message, which contradicts
+  the owner's standing two-agent cap.
+- A `python` fence around the verbatim OOM transcript in this file was changed
+  to `text`. `ruff` 0.16.3 formats Python inside Markdown, and it wanted to
+  rewrite `f.unlink(); os.symlink(...)` into two statements - silently
+  falsifying evidence. Anything quoted verbatim in a `tasks/` record needs a
+  `text` fence.
+
+### Checks
+
+- `cargo test -p scufris-desktop`: 331 passed.
+- `python3 -m unittest discover -s tests -p 'test_*.py'`: 384 passed.
+- `npm run check`: typecheck, 121 node tests, and `prettier --check` all pass.
+- `ruff format --check .`: 252 files formatted. `ruff check .`: passed.
+- `nix flake check` was NOT run. It is the slow integration gate and CI owns it.
+  The `nix` edits here are `nix/checks/helpers.nix` and two unit properties;
+  neither was evaluated. A skip is not a pass.
+
+### Not fixed, and why
+
+- The press and surface-ownership cluster (G5-1, G5-2, G5-4, G1-1, G1-2,
+  G1-M8) and N2/N5, which sit in the same code. These need one transaction rule
+  and one notice-slot decision written down first. N2 is a BLOCKER and is the
+  most user-visible thing still open.
+- Run identity and atomic publication (G4-R3, G4-R6), which gate G1-6 and
+  G4-R4. H regression risk, and stale-owner recovery has to be designed.
+- G4-R2, the fabricated green briefing. The parser change is the riskiest edit
+  in the slate and wants its own pass.
+- The stuck-pane half of N8: an orchestrator watch for a pane that exited with
+  no terminal event.
+- G5-3, which needs a WebKitGTK keyboard repro before anything touches focus.
+- G5-11 and G5-M2, an overflow presentation decision.
+- The remaining MINOR tail, including `identity.rs`'s fixed temporary name
+  (3 lanes), `one_line`'s over-refusal of prefixed writers, `_unadorned`'s
+  keycap regression, the `service.test.ts` regex that silently skips, and the
+  `desktop-ui.test.ts` service-state guard.

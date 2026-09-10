@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import unittest
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
 from pathlib import Path
@@ -650,7 +651,9 @@ class Run(unittest.TestCase):
         self.assertTrue(updates)
         terminal = [update for update in updates if "wake" in update]
         self.assertEqual(len(terminal), 1)
-        self.assertEqual(terminal[0]["briefing"]["id"], briefing.service_run_id(manifest))
+        self.assertEqual(
+            terminal[0]["briefing"]["id"], briefing.service_run_id(manifest)
+        )
 
     def test_two_sources_offers_become_one_numbered_list_on_the_run(self) -> None:
         # The numbers belong to the run, not to any source. They are assigned
@@ -1299,16 +1302,24 @@ class Run(unittest.TestCase):
                 real_write = briefing.atomic_write
                 failed = False
 
-                def interrupted(path: Path, data: str) -> None:
+                def interrupted(
+                    path: Path,
+                    data: str,
+                    *,
+                    failed_name: str = failed_name,
+                    real_write: Callable[[Path, str], None] = real_write,
+                ) -> None:
                     nonlocal failed
                     if path.name == failed_name and not failed:
                         failed = True
                         raise OSError("simulated process loss")
                     real_write(path, data)
 
-                with mock.patch.object(briefing, "atomic_write", interrupted):
-                    with self.assertRaises(OSError):
-                        briefing.publish(date, "morning", prose)
+                with (
+                    mock.patch.object(briefing, "atomic_write", interrupted),
+                    self.assertRaises(OSError),
+                ):
+                    briefing.publish(date, "morning", prose)
                 recovered = briefing.publish(date, "morning", prose)
                 self.assertEqual(recovered["outcome"], "recovered")
                 run = briefing.read_run(date, "morning")

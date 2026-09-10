@@ -716,12 +716,23 @@ impl Runtime {
         // Each reading says it again or stops saying it. A backend that goes
         // quiet stops holding by saying nothing, which is what makes a hold
         // survive nothing - not a crash, not a restart, not a paused timer.
+        let was_held = open.held;
         open.held = data
             .get(HOLD_KEY)
             .and_then(Value::as_bool)
             .unwrap_or_default();
         if !open.held {
             open.holding = Duration::ZERO;
+            // The grace starts over where the hold ends, and only there. A
+            // panel that dimmed with most of its minute already spent, then
+            // held for an hour, used to retire seconds after the timer
+            // finished - the one moment the person is most likely to look at
+            // it. Resetting on every reading instead would mean a dim panel
+            // that never ages, which is what the hold exists to be the
+            // exception to.
+            if was_held {
+                open.aging = Duration::ZERO;
+            }
         }
         vec![Act::Update { surface, data }]
     }
@@ -772,6 +783,16 @@ impl Runtime {
             return Vec::new();
         }
         open.health = health;
+        // A hold is a backend saying "not yet". A dead one is saying nothing at
+        // all, and nothing is what ends a hold everywhere else. Without this a
+        // frozen backend kept its panel - and one of the shelf's few slots -
+        // for the whole four-hour ceiling, and crowd-out then retired a live
+        // exhibit to make room for it.
+        if health == Health::Dead {
+            open.held = false;
+            open.holding = Duration::ZERO;
+            open.aging = Duration::ZERO;
+        }
         vec![Act::Health { surface, health }]
     }
 
@@ -1701,6 +1722,18 @@ cadence = 500
             Some(Life::Dim)
         );
 
+        // Spend most of the grace before the hold begins. Without this the
+        // surface enters the hold with zero `aging`, and the assertion below
+        // passes whether or not the grace actually starts over - which is what
+        // it did, so a broken timer notice would have shipped green.
+        let nearly = GRACE - Duration::from_secs(1);
+        assert!(
+            runtime
+                .apply(&catalog, Cmd::Sweep { elapsed: nearly })
+                .is_empty(),
+            "the panel retired before its grace was spent"
+        );
+
         runtime.apply(
             &catalog,
             Cmd::Feed {
@@ -1751,6 +1784,55 @@ cadence = 500
 
     /// A backend that says "not yet" and then stops answering must not own a
     /// slot for the rest of the day.
+    /// A hold is a backend saying "not yet". A dead one says nothing at all.
+    #[test]
+    fn a_dead_backend_gives_up_the_panel_it_was_holding() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let gauge = opened(&open(&mut runtime, &catalog, "gauge", Posture::Exhibit));
+        runtime.apply(&catalog, Cmd::TurnEnded);
+        runtime.apply(&catalog, Cmd::TurnEnded);
+
+        runtime.apply(
+            &catalog,
+            Cmd::Feed {
+                surface: gauge.clone(),
+                data: json!({ "left": 90, "_hold": true }),
+            },
+        );
+        assert!(
+            runtime
+                .apply(&catalog, Cmd::Sweep { elapsed: GRACE })
+                .is_empty(),
+            "the hold did not hold"
+        );
+
+        // The process behind it dies. The hold was the backend's claim on a
+        // scarce shelf slot, and a backend that is gone has no claim: without
+        // this the frozen panel kept the slot for the whole four-hour ceiling
+        // and crowd-out retired a live exhibit to make room for it.
+        runtime.apply(
+            &catalog,
+            Cmd::Health {
+                surface: gauge.clone(),
+                health: Health::Dead,
+            },
+        );
+        assert_eq!(
+            runtime.surface(&gauge).map(|open| open.held),
+            Some(false),
+            "a dead backend kept holding its panel"
+        );
+        assert!(
+            runtime
+                .apply(&catalog, Cmd::Sweep { elapsed: GRACE })
+                .contains(&Act::Retire {
+                    surface: gauge.clone()
+                }),
+            "the panel a dead backend held never aged out"
+        );
+    }
+
     #[test]
     fn a_hold_that_never_ends_still_runs_out() {
         let catalog = catalog();

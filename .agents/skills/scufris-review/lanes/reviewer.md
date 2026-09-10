@@ -31,6 +31,26 @@ Every lane obeys this. Read it with your lane brief.
   evidence; never flag or fix their history.
 - Say what you did not check. A skip is not a pass.
 
+## Bounded probes
+
+A probe must not be able to cost more than the finding is worth.
+
+- Never point product code at `/dev/zero`, `/dev/random`, a device node, a
+  FIFO, a socket, or a symlink to any of them.
+- Never create an unbounded stream, file, or pipe, and never create a file
+  that grows without a ceiling.
+- Fixtures are bounded regular files. Keep them under 1 MiB.
+- To show an unbounded read or allocation, use `os.lstat`/`os.stat` metadata
+  and the code itself. Do not execute the unbounded read to prove it.
+- Prefer static reasoning wherever it reaches the same conclusion.
+
+This is written from an incident. A red-team lane made a config file a symlink
+to `/dev/zero` and called the reader, which had no bound. The process reached
+29 GB, systemd stopped the whole control group, and the night lost its
+collector, every sibling source, and four completed lane reports. The defect
+was real and the lane was right to look for it. Reading `os.lstat` and the
+reader's own source would have found it for nothing.
+
 ## Severity
 
 - `BLOCKER`: a defect that ships, a broken lockstep pair, a lost

@@ -57,9 +57,15 @@ brief you edited against the tree as well.
 
 ## Dispatch the lanes
 
-Send every lane in ONE message so they run concurrently. Give each the
-range, the bundle paths, and two repo-relative brief paths to read: the
-shared `.agents/skills/scufris-review/lanes/reviewer.md`, and its own.
+Dispatch at most TWO lanes at a time, and wait for both before sending
+the next pair. Give each the range, the bundle paths, and two
+repo-relative brief paths to read: the shared
+`.agents/skills/scufris-review/lanes/reviewer.md`, and its own.
+
+The lanes are independent, so batching costs wall-clock time and
+nothing else. It also gives adjudication somewhere to start: a claim
+from the first pair can be re-derived while the second pair runs, which
+is where the budget below actually goes.
 
 | Lane        | Brief                  | When     |
 | ----------- | ---------------------- | -------- |
@@ -72,6 +78,9 @@ shared `.agents/skills/scufris-review/lanes/reviewer.md`, and its own.
 
 - Reviewers are read-only. They report; they never edit, stage, commit,
   or fix.
+- Every lane obeys the "Bounded probes" rule in `reviewer.md`. A lane
+  that has to point product code at a device to prove a finding has
+  already cost more than the finding is worth.
 - One lane owns the X display at a time. Desktop holds the display
   slot; red team and feel wait for it. Two harnesses on one machine
   fight over sockets, displays, and the keyboard they are measuring.

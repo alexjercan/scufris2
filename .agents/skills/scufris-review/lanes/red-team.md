@@ -6,6 +6,16 @@ Reason from the code by default. Take the display slot only after the
 desktop lane releases it, and only to confirm a repro you can already
 state.
 
+## Bound your own blast radius first
+
+Read the "Bounded probes" section of `reviewer.md` before you write a single
+fixture. It is not general advice; it is the rule this lane broke once, at the
+cost of a whole night's review.
+
+Driving a state to its limit means the product's limit, not the machine's. An
+oversized file is a bounded regular file that is bigger than the bound under
+test. It is never a device, a FIFO, or anything that does not end.
+
 ## Method
 
 Take the states the change touches and drive them to their limits. For

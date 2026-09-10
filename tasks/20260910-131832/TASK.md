@@ -1,6 +1,6 @@
 # Cut the v2.5.0 release
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 0
 - TAGS: release
 
@@ -80,3 +80,30 @@ release preparation must first describe the other user-facing work.
   8, and the gateway compares it with exact equality, so the phone is refused
   at its hello the moment the machine switches.
 - Deploy only after that build is installed on the phone.
+
+### Released
+
+- `1761adb` tagged `v2.5.0` and pushed. All five workflows green: `release`
+  and `TestFlight` on the tag, `check`, `Documentation`, and `iOS` on master.
+  The GitHub Release is source-only with no assets, as the process requires.
+- Deployed against the process note, by explicit decision. The TestFlight
+  build was uploaded but not yet installed on the phone, so the phone is
+  refused at its hello until it is. Desktop and service were switched anyway.
+- `nix.dotfiles` `76ea06e` bumps the `scufris` input to `v2.5.0`.
+  `nix flake check` passed there. `home-manager switch --flake .#alex` moved
+  `scufris-service`, `scufris-desktop`, and `scufris-surface-gateway` to
+  `scufris-service-2.5.0`, and installed `scufris-briefing-reconcile.timer`.
+
+### What the first reconciliation found
+
+The reconciler's first tick reported `finalized: 1, refused: 0, sent: 5`. The
+2026-09-09 nightly run, stuck in `collecting` since the OOM stopped its cgroup
+15 hours earlier, is now `failed` with delivery `prepared` and both
+contributions retained on disk. It carried a version-1 manifest, so legacy
+migration and ownerless finalization both ran on real state rather than on a
+fixture. This is the incident the slice was written for, cleared by the first
+scheduled run after deployment.
+
+`scufris-briefing-nightly.service` still carries its failed state from that
+night. The run is terminal in the manifest, so the systemd flag is only a
+leftover; it is left alone rather than reset, in case the record is wanted.

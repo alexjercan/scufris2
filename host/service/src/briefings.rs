@@ -90,7 +90,9 @@ impl BriefingStore {
             .collect()
     }
 
-    /// The complete service audit, used for retention checks and diagnostics.
+    /// The complete service audit, including the delivered successes and the
+    /// dismissed rows `rows` hides. Retention is asserted against it.
+    #[cfg(test)]
     pub fn audit_rows(&self) -> Vec<BriefingRow> {
         self.rows.clone()
     }

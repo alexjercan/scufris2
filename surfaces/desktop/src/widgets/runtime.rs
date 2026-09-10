@@ -7,8 +7,9 @@
 //!
 //! The runtime is a small slot-based window manager, not free pixels. Exhibits
 //! form a shelf directly above the pill, newest nearest the center, capped at
-//! three; instruments take one of the four edge slots. Every surface knows its
-//! slot, so every move is a step between two known places rather than a
+//! three; instruments hang from the four corners and stack inward along the
+//! side they are on, for as many as that side has room for. Every surface knows
+//! its slot, so every move is a step between two known places rather than a
 //! collision to solve.
 
 use std::{
@@ -28,12 +29,16 @@ use crate::{pill, textbox, widgets::catalog::Catalog};
 /// How many exhibits the shelf holds before the oldest one retires.
 pub const SHELF_SLOTS: usize = 3;
 
-/// The edge slots, in the order an instrument claims them.
+/// The corners an instrument hangs from, in the order it claims them.
 ///
 /// The top corners first: the shelf lives above the pill at the bottom center,
 /// so an instrument that lands high is an instrument the exhibits never reach.
 /// Then the sides alternate, so the first two instruments never share an edge
 /// and the taller ones are the last to have to.
+///
+/// A corner is where a column starts, not how many panels there are. Every
+/// corner takes its first instrument before any corner takes its second, so
+/// four panels still read as four places rather than as two piles.
 pub const EDGE_SLOTS: [EdgeSlot; 4] = [
     EdgeSlot::TopRight,
     EdgeSlot::TopLeft,
@@ -67,9 +72,23 @@ const SHELF_GAP: f64 = textbox::GAP + textbox::HEIGHT + textbox::GAP;
 const SHELF_LANE: f64 = 352.0;
 
 /// Distance from a screen edge to an instrument parked against it, in logical
-/// pixels. Also the gap between the two instruments on one edge, when both of
-/// them fit.
+/// pixels. Also the gap between two instruments stacked on one edge.
 const EDGE_MARGIN: f64 = 24.0;
+
+/// How much room one side of the screen offers a column of instruments, in
+/// logical pixels.
+///
+/// The span between the two margins on the desktop this is built for. Fixed
+/// rather than measured, for the reason the shelf's lane is: the runtime
+/// decides places and never opens a window, so it cannot ask which monitor a
+/// panel landed on. [`place`] is what knows that, and it clamps, so a screen
+/// shorter than this holds what it was given without pushing anything off it.
+///
+/// This is the number that says how many instruments a person can keep. It is
+/// not four: four was the count of corners, and a corner is where a column
+/// starts. Two of the tallest widget that ships still fit one side, which is
+/// what `every_shipped_widget_fits_the_places_it_can_be_put_in` holds it to.
+const EDGE_REACH: f64 = 1080.0 - EDGE_MARGIN * 2.0;
 
 /// How long a dim exhibit stays up before it retires.
 ///
@@ -99,14 +118,14 @@ pub const HOLD_CEILING: Duration = Duration::from_secs(4 * 60 * 60);
 /// A surface identifier, which doubles as the window label.
 pub type SurfaceId = String;
 
-/// One of the four instrument slots.
+/// One of the four corners a column of instruments hangs from.
 ///
-/// Two per side, one hanging from each end of the edge rather than one at the
-/// top and one at the middle. The middle was measured from the monitor and not
-/// from what was already standing above it, so a panel taller than a quarter of
-/// the screen stood on the one over it - which is every one of the journal
-/// panels. Hanging each from its own end is what makes the pair depend on both
-/// their heights without either one having to know the other's.
+/// Two per side, one at each end of the edge rather than one at the top and one
+/// at the middle. The middle was measured from the monitor and not from what
+/// was already standing above it, so a panel taller than a quarter of the
+/// screen stood on the one over it - which is every one of the journal panels.
+/// Anchoring each column to its own end is what lets the two grow toward each
+/// other and stop when they meet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EdgeSlot {
     /// The top left corner.
@@ -119,14 +138,36 @@ pub enum EdgeSlot {
     BottomRight,
 }
 
+impl EdgeSlot {
+    /// Returns the other corner of the same side.
+    ///
+    /// The two columns on one side share its height, so what fits at one corner
+    /// is decided against what already hangs at the other.
+    fn facing(self) -> Self {
+        match self {
+            Self::TopLeft => Self::BottomLeft,
+            Self::TopRight => Self::BottomRight,
+            Self::BottomLeft => Self::TopLeft,
+            Self::BottomRight => Self::TopRight,
+        }
+    }
+}
+
 /// Where one surface sits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Slot {
     /// The shelf above the pill, by recency: rank zero is the newest and sits
     /// at the center.
     Shelf(usize),
-    /// One of the four edges.
-    Edge(EdgeSlot),
+    /// A place in the column hanging from one corner: the corner, and how far
+    /// inward from it the window's near edge sits, in logical pixels.
+    ///
+    /// A distance rather than a rank, because the panels in a column are not
+    /// the same height and the place a rank names would depend on which widgets
+    /// happened to be above it. The runtime measures the column it keeps and
+    /// hands [`place`] the answer, so the placement math still reads one window
+    /// and one monitor.
+    Edge(EdgeSlot, u32),
 }
 
 /// A window size in logical pixels.
@@ -586,18 +627,18 @@ impl Runtime {
             width: f64::from(installed.width),
             height: f64::from(installed.height),
         };
-        // An instrument that has nowhere to go is refused rather than stacked
-        // on top of another one: the edges are named places, and two windows in
-        // one place is the collision the slots exist to avoid.
+        // An instrument that has nowhere left to hang is refused rather than
+        // put on top of another one: the columns are named places, and two
+        // windows in one place is the collision the slots exist to avoid.
         let slot = match posture {
             Posture::Exhibit => Slot::Shelf(0),
-            Posture::Instrument => match self.free_edge() {
-                Some(edge) => Slot::Edge(edge),
+            Posture::Instrument => match self.free_edge(size) {
+                Some(slot) => slot,
                 None => {
                     return refused(
                         id,
                         refusal::NO_FREE_SLOT,
-                        "every instrument slot is taken".to_string(),
+                        format!("no edge has {} logical pixels left", size.height),
                     );
                 }
             },
@@ -985,11 +1026,11 @@ impl Runtime {
     /// Hands one surface to the person, or takes it back.
     ///
     /// Pinning promotes an exhibit into an instrument. It leaves the shelf for
-    /// one of the four edge slots and stops being sticky, so it lands on the
-    /// workspace the person is on rather than following them everywhere. It has
-    /// to leave the shelf's columns and not merely leave the shelf: a column it
-    /// kept is a column the next reflow moves a live exhibit into, and two
-    /// windows in one place is the collision the slots exist to avoid.
+    /// a place in one of the edge columns and stops being sticky, so it lands
+    /// on the workspace the person is on rather than following them everywhere.
+    /// It has to leave the shelf's columns and not merely leave the shelf: a
+    /// column it kept is a column the next reflow moves a live exhibit into, and
+    /// two windows in one place is the collision the slots exist to avoid.
     ///
     /// The tick reads both ways. Using it again gives the surface back, and an
     /// exhibit that comes back is the current one - it is what the person just
@@ -1002,14 +1043,14 @@ impl Runtime {
             return self.release(surface);
         }
         // Only a surface still on the shelf has to be moved. An instrument the
-        // person pins is already standing in an edge slot of its own.
+        // person pins is already standing in a place of its own.
         let slot = if self.shelf.contains(&surface) {
-            match self.free_edge() {
-                Some(edge) => Slot::Edge(edge),
+            match self.free_edge(open.size) {
+                Some(slot) => slot,
                 None => {
                     return vec![Act::Refuse {
                         surface,
-                        detail: "every slot is taken".into(),
+                        detail: "the edges have no room left".into(),
                     }];
                 }
             }
@@ -1120,7 +1161,12 @@ impl Runtime {
         acts
     }
 
-    /// Puts every shelf surface back in the column its recency earns it.
+    /// Puts every shelf surface back in the column its recency earns it, and
+    /// closes up an edge column behind anything that left one.
+    ///
+    /// A panel that retires out of the middle of a column would otherwise leave
+    /// its room behind it, and the next instrument would hang past the gap
+    /// rather than in it.
     fn reflow(&mut self) -> Vec<Act> {
         let mut acts = Vec::new();
         for (rank, id) in self.shelf.iter().enumerate() {
@@ -1138,17 +1184,79 @@ impl Runtime {
                 size: surface.size,
             });
         }
+        for corner in EDGE_SLOTS {
+            let column: Vec<SurfaceId> = self
+                .column(corner)
+                .into_iter()
+                .map(|surface| surface.id.clone())
+                .collect();
+            let mut reach: f64 = 0.0;
+            for id in column {
+                let Some(surface) = self.surfaces.get_mut(&id) else {
+                    continue;
+                };
+                let slot = Slot::Edge(corner, reach.round() as u32);
+                reach += surface.size.height + EDGE_MARGIN;
+                if surface.slot == slot {
+                    continue;
+                }
+                surface.slot = slot;
+                acts.push(Act::Move {
+                    surface: id,
+                    slot,
+                    size: surface.size,
+                });
+            }
+        }
         acts
     }
 
-    /// Returns the first edge slot nothing is standing in.
-    fn free_edge(&self) -> Option<EdgeSlot> {
-        EDGE_SLOTS.into_iter().find(|edge| {
-            !self
-                .surfaces
-                .values()
-                .any(|surface| surface.slot == Slot::Edge(*edge))
+    /// Returns the instruments hanging from one corner, nearest the corner
+    /// first.
+    fn column(&self, corner: EdgeSlot) -> Vec<&Surface> {
+        let mut column: Vec<&Surface> = self
+            .surfaces
+            .values()
+            .filter(|surface| matches!(surface.slot, Slot::Edge(edge, _) if edge == corner))
+            .collect();
+        // By identifier under a tie, so a reflow never reorders a column on the
+        // strength of which surface the map happened to hand over first.
+        column.sort_by_key(|surface| match surface.slot {
+            Slot::Edge(_, reach) => (reach, surface.id.clone()),
+            _ => (0, surface.id.clone()),
+        });
+        column
+    }
+
+    /// Returns where a panel this size can hang, if any side still has room.
+    fn free_edge(&self, size: Size) -> Option<Slot> {
+        let mut corners = EDGE_SLOTS.to_vec();
+        // Shallowest first, and `sort_by_key` is stable, so an empty corner is
+        // taken in `EDGE_SLOTS` order and no column starts a second panel while
+        // another corner is still bare.
+        corners.sort_by_key(|corner| self.column(*corner).len());
+        corners.into_iter().find_map(|corner| {
+            let taken = self.claimed(corner);
+            (taken + size.height + self.claimed(corner.facing()) <= EDGE_REACH)
+                .then_some(Slot::Edge(corner, taken.round() as u32))
         })
+    }
+
+    /// Returns how much of a side's height the column at one corner holds, in
+    /// logical pixels, including the gap the next panel needs to clear it.
+    ///
+    /// Nothing at all when the corner is bare, so the first panel on a side
+    /// hangs on the corner itself rather than a margin in from it. The margin
+    /// off the screen edge is [`place`]'s, and it applies to every column.
+    fn claimed(&self, corner: EdgeSlot) -> f64 {
+        let column = self.column(corner);
+        if column.is_empty() {
+            return 0.0;
+        }
+        column
+            .into_iter()
+            .map(|surface| surface.size.height + EDGE_MARGIN)
+            .sum()
     }
 }
 
@@ -1164,8 +1272,8 @@ fn failed(id: String, code: &str, detail: String) -> Act {
 /// Refuses one open, and says so only when somebody asked for it.
 ///
 /// A summon from the tray that cannot land leaves the log line and nothing
-/// else. The person is looking at their own desktop, so the four full edge
-/// slots that refused it are already on screen in front of them.
+/// else. The person is looking at their own desktop, so the full edges that
+/// refused it are already on screen in front of them.
 fn refused(id: Option<String>, code: &str, detail: String) -> Vec<Act> {
     match id {
         Some(id) => vec![failed(id, code, detail)],
@@ -1200,10 +1308,16 @@ pub struct Monitor {
 /// Every place is measured from the window's own size and an edge of the
 /// monitor, never from a fixed point in the middle of it. That is what keeps
 /// two windows apart without either one being told about the other: on the
-/// shelf each holds a lane of its own, and on an edge the pair hang from
-/// opposite ends. Two that together are taller than the edge still meet in the
-/// middle - nothing can place them apart, and a window shoved off the screen
-/// would be worse than one that overlaps.
+/// shelf each holds a lane of its own, and on an edge each hangs its own
+/// distance in from the corner it belongs to. The runtime measured those
+/// distances against the panels already in the column, so nothing here has to
+/// know what else is on the screen.
+///
+/// Two columns that together are taller than the edge still meet in the middle.
+/// The runtime refuses to make that arrangement, but a monitor shorter than the
+/// one [`EDGE_REACH`] is written for can arrive at it anyway. Nothing here can
+/// place them apart, and a window shoved off the screen would be worse than one
+/// that overlaps.
 pub fn place(slot: Slot, size: Size, monitor: &Monitor) -> PhysicalPosition<i32> {
     let width = (size.width * monitor.scale).round() as i32;
     let height = (size.height * monitor.scale).round() as i32;
@@ -1222,11 +1336,12 @@ pub fn place(slot: Slot, size: Size, monitor: &Monitor) -> PhysicalPosition<i32>
             let center = monitor.x + monitor.width as i32 / 2 + shelf_column(rank) * lane;
             (center - width / 2, pill.y - gap - height)
         }
-        Slot::Edge(edge) => {
+        Slot::Edge(edge, reach) => {
+            let reach = (f64::from(reach) * monitor.scale).round() as i32;
             let left = monitor.x + margin;
             let right = monitor.x + monitor.width as i32 - width - margin;
-            let top = monitor.y + margin;
-            let bottom = monitor.y + monitor.height as i32 - height - margin;
+            let top = monitor.y + margin + reach;
+            let bottom = monitor.y + monitor.height as i32 - height - margin - reach;
             match edge {
                 EdgeSlot::TopLeft => (left, top),
                 EdgeSlot::TopRight => (right, top),
@@ -1284,6 +1399,16 @@ width = 200
 height = 90
 "#;
 
+    /// A panel as tall as the tallest one that ships, which is what makes a
+    /// side full at two of them.
+    const TOWER: &str = r#"
+id = "tower"
+name = "Tower"
+description = "Show a long column of numbers"
+width = 340
+height = 500
+"#;
+
     /// A widget with something feeding it, which the other two do not have.
     const GAUGE: &str = r#"
 id = "gauge"
@@ -1306,6 +1431,11 @@ cadence = 500
                 Source {
                     directory: "clock",
                     manifest: CLOCK,
+                    script: "export function mount() {}",
+                },
+                Source {
+                    directory: "tower",
+                    manifest: TOWER,
                     script: "export function mount() {}",
                 },
                 Source {
@@ -1390,8 +1520,10 @@ cadence = 500
     fn a_summon_that_cannot_land_says_nothing_either() {
         let catalog = catalog();
         let mut runtime = Runtime::new();
+        // Towers, because they are what actually fills the edges: four of them
+        // leave no side the room for a fifth panel of any height.
         for _ in 0..EDGE_SLOTS.len() {
-            open(&mut runtime, &catalog, "gauge", Posture::Instrument);
+            open(&mut runtime, &catalog, "tower", Posture::Instrument);
         }
         assert_eq!(summon(&mut runtime, &catalog, "gauge"), Vec::new());
     }
@@ -2036,7 +2168,7 @@ cadence = 500
     }
 
     #[test]
-    fn instruments_fill_the_edges_and_a_fifth_is_refused_rather_than_stacked() {
+    fn instruments_take_every_corner_before_any_column_takes_a_second() {
         let catalog = catalog();
         let mut runtime = Runtime::new();
         let mut slots = Vec::new();
@@ -2046,14 +2178,127 @@ cadence = 500
         }
         assert_eq!(
             slots,
-            EDGE_SLOTS.map(Slot::Edge).to_vec(),
-            "instruments claim the edges in a fixed order"
+            EDGE_SLOTS.map(|corner| Slot::Edge(corner, 0)).to_vec(),
+            "instruments claim the corners in a fixed order"
         );
-        let acts = open(&mut runtime, &catalog, "clock", Posture::Instrument);
+        // The fifth panel is the one a person used to be told nothing about. It
+        // hangs under the first, one clock and one margin in from its corner.
+        let fifth = opened(&open(&mut runtime, &catalog, "clock", Posture::Instrument));
+        assert_eq!(
+            runtime.surface(&fifth).expect("it is open").slot,
+            Slot::Edge(EDGE_SLOTS[0], 90 + EDGE_MARGIN as u32)
+        );
+    }
+
+    #[test]
+    fn an_instrument_no_side_has_room_for_is_refused_rather_than_stood_on_another() {
+        // Two towers fill one side, so four fill the screen. It is the room
+        // that refuses the fifth and not a count of corners - five clocks fit,
+        // and the test above opens them.
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        for _ in 0..EDGE_SLOTS.len() {
+            open(&mut runtime, &catalog, "tower", Posture::Instrument);
+        }
+        let acts = open(&mut runtime, &catalog, "tower", Posture::Instrument);
         assert!(matches!(
             acts.as_slice(),
             [Act::Report(WidgetReport::Failed { code, .. })] if code == refusal::NO_FREE_SLOT
         ));
+    }
+
+    /// The columns are only worth having if what the runtime agrees to open is
+    /// what a person can actually read. This is the assertion over every panel
+    /// it will hold at once, placed on the screen it is written for.
+    #[test]
+    fn every_instrument_the_runtime_admits_stands_clear_of_the_others() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        let mut standing = Vec::new();
+        // Past what any side can hold, and of mixed heights, so the refusals
+        // and the ragged columns are both part of what is under test.
+        for widget in ["clock", "note", "gauge", "tower"]
+            .into_iter()
+            .cycle()
+            .take(60)
+        {
+            if let Some(surface) = open(&mut runtime, &catalog, widget, Posture::Instrument)
+                .iter()
+                .find_map(|act| match act {
+                    Act::Adopt { surface, .. } => Some(surface.clone()),
+                    _ => None,
+                })
+            {
+                standing.push(surface);
+            }
+        }
+        assert!(
+            standing.len() > EDGE_SLOTS.len(),
+            "the corners are still the cap: only {} opened",
+            standing.len()
+        );
+        let panels: Vec<(PhysicalPosition<i32>, Size)> = standing
+            .iter()
+            .map(|id| {
+                let open = runtime.surface(id).expect("it is open");
+                (place(open.slot, open.size, &MONITOR), open.size)
+            })
+            .collect();
+        for (rank, (one, one_size)) in panels.iter().enumerate() {
+            for (other, other_size) in panels.iter().skip(rank + 1) {
+                let apart = one.x + one_size.width as i32 <= other.x
+                    || other.x + other_size.width as i32 <= one.x
+                    || one.y + one_size.height as i32 <= other.y
+                    || other.y + other_size.height as i32 <= one.y;
+                assert!(
+                    apart,
+                    "a {}x{} panel at {one:?} stands on a {}x{} panel at {other:?}",
+                    one_size.width, one_size.height, other_size.width, other_size.height
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_column_closes_up_behind_an_instrument_that_leaves_it() {
+        let catalog = catalog();
+        let mut runtime = Runtime::new();
+        // Two on one corner: the fifth clock is what lands under the first.
+        let mut clocks = Vec::new();
+        for _ in 0..=EDGE_SLOTS.len() {
+            clocks.push(opened(&open(
+                &mut runtime,
+                &catalog,
+                "clock",
+                Posture::Instrument,
+            )));
+        }
+        let corner = EDGE_SLOTS[0];
+        let under = clocks.pop().expect("the fifth clock");
+        assert_eq!(
+            runtime.surface(&under).expect("it is open").slot,
+            Slot::Edge(corner, 90 + EDGE_MARGIN as u32)
+        );
+        let acts = runtime.apply(
+            &catalog,
+            Cmd::Dismissed {
+                surface: clocks[0].clone(),
+            },
+        );
+        // Otherwise the room the first one held stays held, and the next
+        // instrument hangs past the hole rather than in it.
+        assert!(acts.contains(&Act::Move {
+            surface: under.clone(),
+            slot: Slot::Edge(corner, 0),
+            size: Size {
+                width: 200.0,
+                height: 90.0,
+            },
+        }));
+        assert_eq!(
+            runtime.surface(&under).expect("it is open").slot,
+            Slot::Edge(corner, 0)
+        );
     }
 
     #[test]
@@ -2152,7 +2397,7 @@ cadence = 500
         // slots exist to avoid.
         let kept = runtime.surface(&newer).expect("it is open").slot;
         let closed_up = runtime.surface(&older).expect("it is open").slot;
-        assert_eq!(kept, Slot::Edge(EDGE_SLOTS[0]));
+        assert_eq!(kept, Slot::Edge(EDGE_SLOTS[0], 0));
         assert_eq!(closed_up, Slot::Shelf(0));
         assert_ne!(kept, closed_up);
         assert!(acts.contains(&Act::Move {
@@ -2177,7 +2422,7 @@ cadence = 500
         let catalog = catalog();
         let mut runtime = Runtime::new();
         for _ in 0..EDGE_SLOTS.len() {
-            open(&mut runtime, &catalog, "clock", Posture::Instrument);
+            open(&mut runtime, &catalog, "tower", Posture::Instrument);
         }
         let crowded = opened(&open(&mut runtime, &catalog, "note", Posture::Exhibit));
         let acts = runtime.apply(
@@ -2655,15 +2900,15 @@ cadence = 500
         let width = (CARD.width * 2.0) as i32;
         let height = (CARD.height * 2.0) as i32;
         assert_eq!(
-            place(Slot::Edge(EdgeSlot::TopLeft), CARD, &monitor),
+            place(Slot::Edge(EdgeSlot::TopLeft, 0), CARD, &monitor),
             PhysicalPosition::new(1920 + margin, -120 + margin)
         );
         assert_eq!(
-            place(Slot::Edge(EdgeSlot::TopRight), CARD, &monitor),
+            place(Slot::Edge(EdgeSlot::TopRight, 0), CARD, &monitor),
             PhysicalPosition::new(1920 + 2560 - width - margin, -120 + margin)
         );
         assert_eq!(
-            place(Slot::Edge(EdgeSlot::BottomRight), CARD, &monitor),
+            place(Slot::Edge(EdgeSlot::BottomRight, 0), CARD, &monitor),
             PhysicalPosition::new(1920 + 2560 - width - margin, -120 + 1440 - height - margin)
         );
     }
@@ -2681,8 +2926,8 @@ cadence = 500
             width: 340.0,
             height: 420.0,
         };
-        let top = place(Slot::Edge(EdgeSlot::TopRight), tall, &MONITOR);
-        let under = place(Slot::Edge(EdgeSlot::BottomRight), shorter, &MONITOR);
+        let top = place(Slot::Edge(EdgeSlot::TopRight, 0), tall, &MONITOR);
+        let under = place(Slot::Edge(EdgeSlot::BottomRight, 0), shorter, &MONITOR);
         assert_eq!(top.x, under.x, "one edge, two columns");
         assert!(
             top.y + tall.height as i32 <= under.y,
@@ -2706,7 +2951,9 @@ cadence = 500
             &crate::widgets::backends::names(),
         )
         .expect("the shipped widgets install");
-        let edge = f64::from(MONITOR.height) - EDGE_MARGIN * 3.0;
+        // The reach is written for this monitor, so a change to either that
+        // parts them is a change that puts panels somewhere nobody measured.
+        assert_eq!(EDGE_REACH, f64::from(MONITOR.height) - EDGE_MARGIN * 2.0);
         for source in crate::widgets::INSTALLED {
             let installed = widgets.get(source.directory).expect("a shipped widget");
             let (wide, tall) = (f64::from(installed.width), f64::from(installed.height));
@@ -2715,13 +2962,15 @@ cadence = 500
                 "{} is {wide} wide and a shelf lane is {SHELF_LANE}",
                 installed.id
             );
-            // Two of the same widget, which is the tallest pair one edge can be
-            // asked to hold. A pair that does not fit is a pair that meets in
-            // the middle - see `place`. Measured against the desktop this is
-            // built for; a shorter screen holds fewer panels than four.
+            // Two of the same widget, one hanging from each corner of a side.
+            // Nothing shorter is worth having: the tallest panels that ship are
+            // the journal ones, and a side that cannot hold two of them is a
+            // side that holds one. Measured against the desktop this is built
+            // for; a shorter screen holds fewer panels, and `place` keeps them
+            // on it.
             assert!(
-                tall * 2.0 <= edge,
-                "two {} panels are {} tall and an edge holds {edge}",
+                tall * 2.0 <= EDGE_REACH,
+                "two {} panels are {} tall and a side holds {EDGE_REACH}",
                 installed.id,
                 tall * 2.0
             );
@@ -2740,8 +2989,8 @@ cadence = 500
         for slot in [
             Slot::Shelf(0),
             Slot::Shelf(2),
-            Slot::Edge(EdgeSlot::TopRight),
-            Slot::Edge(EdgeSlot::BottomLeft),
+            Slot::Edge(EdgeSlot::TopRight, 0),
+            Slot::Edge(EdgeSlot::BottomLeft, 0),
         ] {
             let position = place(slot, CARD, &monitor);
             assert_eq!(

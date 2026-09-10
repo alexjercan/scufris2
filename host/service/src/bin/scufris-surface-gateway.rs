@@ -605,7 +605,7 @@ fn validate_attachment_id(id: &str) -> Result<(), ApiError> {
 fn invalid_attachment() -> ApiError {
     ApiError::new(
         StatusCode::UNPROCESSABLE_ENTITY,
-        "invalid_attachment",
+        refusal::INVALID_ATTACHMENT,
         "The attachment is invalid.",
     )
 }
@@ -626,7 +626,7 @@ fn rejected_upload(rejection: BytesRejection) -> ApiError {
     }
     ApiError::new(
         StatusCode::BAD_REQUEST,
-        "attachment_incomplete",
+        refusal::ATTACHMENT_INCOMPLETE,
         "The attachment did not finish uploading.",
     )
 }
@@ -634,7 +634,7 @@ fn rejected_upload(rejection: BytesRejection) -> ApiError {
 fn attachment_unavailable() -> ApiError {
     ApiError::new(
         StatusCode::BAD_GATEWAY,
-        "attachment_unavailable",
+        refusal::ATTACHMENT_UNAVAILABLE,
         "Attachment storage is unavailable.",
     )
 }

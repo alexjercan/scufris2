@@ -351,8 +351,8 @@ mod tests {
     fn import_failures_do_not_expose_service_bodies() {
         assert_eq!(
             import_failure(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                br#"{"error":{"code":refusal::INVALID_ATTACHMENT,"message":"private"}}"#,
+                StatusCode::BAD_REQUEST,
+                br#"{"error":{"code":"invalid_attachment","message":"private"}}"#,
             ),
             "Choose a readable regular file with a valid name."
         );

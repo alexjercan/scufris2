@@ -344,7 +344,7 @@ export function encodeAgentRequest(message: AgentRequest): string {
     if (message.details !== undefined)
       bounded(message.details, MAX_DETAILS_BYTES, "details");
     if ((message.widgets?.length ?? 0) > MAX_WIDGETS)
-      throw new ProtocolError("too many widget calls", "invalid_widgets");
+      throw new ProtocolError("too many widget calls", REFUSAL.INVALID_WIDGETS);
     for (const call of message.widgets ?? []) {
       id(call.id, "widget_id");
       id(call.name, "widget_name");
@@ -354,7 +354,7 @@ export function encodeAgentRequest(message: AgentRequest): string {
       )
         throw new ProtocolError(
           "widget arguments are too large",
-          "invalid_widgets",
+          REFUSAL.INVALID_WIDGETS,
         );
     }
   }
@@ -428,10 +428,10 @@ export function decodeAgentResponse(line: string): AgentResponse {
   }
   if (message.type === "agent.message") {
     if (!Array.isArray(message.widgets) || message.widgets.length > MAX_WIDGETS)
-      throw new ProtocolError("invalid widgets", "invalid_widgets");
+      throw new ProtocolError("invalid widgets", REFUSAL.INVALID_WIDGETS);
     const widgets = message.widgets.map((entry) => {
       if (typeof entry !== "object" || entry === null || Array.isArray(entry))
-        throw new ProtocolError("invalid widget", "invalid_widgets");
+        throw new ProtocolError("invalid widget", REFUSAL.INVALID_WIDGETS);
       const widget = entry as Record<string, unknown>;
       return {
         name: id(widget.name, "widget_name"),

@@ -22,7 +22,7 @@ use std::sync::{
 };
 
 use scufris_control::service::{
-    AttachmentDescriptor, ConversationMessage, JobAction, JobRow, ScufrisState,
+    AttachmentDescriptor, BriefingRow, ConversationMessage, JobAction, JobRow, ScufrisState,
 };
 use serde::Serialize;
 use tauri::{
@@ -54,6 +54,9 @@ pub const NOTICE_EVENT: &str = "scufris://notice";
 /// Every job row at once, pushed when the list changes.
 pub const JOBS_EVENT: &str = "scufris://jobs";
 
+/// Every durable briefing generation at once.
+pub const BRIEFINGS_EVENT: &str = "scufris://briefings";
+
 /// One offer is spent, pushed to whichever badge is showing it.
 pub const OFFER_TAKEN_EVENT: &str = "scufris://offer-taken";
 
@@ -82,6 +85,8 @@ pub struct Backlog {
     pub lines: Vec<ConversationMessage>,
     /// Every delegated job, newest state, oldest row first.
     pub jobs: Vec<JobRow>,
+    /// Every durable scheduled briefing generation.
+    pub briefings: Vec<BriefingRow>,
     /// What the window is waiting for right now.
     pub notice: Notice,
 }
@@ -190,6 +195,16 @@ impl Hud {
         }
     }
 
+    /// Takes the complete quiet briefing list.
+    pub fn briefings(&self, briefings: Vec<BriefingRow>) {
+        if !self.lock().briefed(briefings.clone()) {
+            return;
+        }
+        if let Err(error) = self.app.emit_to(LABEL, BRIEFINGS_EVENT, briefings) {
+            debug!("the HUD did not take the briefing rows: {error}");
+        }
+    }
+
     /// Marks one offer spent, in whichever message is carrying it.
     pub fn offer_taken(&self, id: &str) {
         if !self.lock().offer_taken(id) {
@@ -257,6 +272,7 @@ impl Hud {
         Backlog {
             lines: state.lines(),
             jobs: state.jobs(),
+            briefings: state.briefings(),
             notice: state.notice(),
         }
     }

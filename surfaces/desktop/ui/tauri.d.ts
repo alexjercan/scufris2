@@ -48,7 +48,7 @@ interface Tick {
   level: number;
 }
 
-// Canonical protocol v7 conversation entry, relayed without reshaping.
+// Canonical protocol v8 conversation entry, relayed without reshaping.
 interface AttachmentDescriptor {
   id: string;
   name: string;
@@ -102,6 +102,20 @@ interface JobRow {
   summary: string;
 }
 
+/** One generation-fenced scheduled briefing. Lifecycle rows are inert. */
+interface BriefingRow {
+  id: string;
+  date: string;
+  profile: string;
+  collection: "collecting" | "collected" | "failed";
+  delivery: "pending" | "in_progress" | "delivered";
+  since: number;
+  completed: number;
+  total: number;
+  failed: number;
+  summary: string;
+}
+
 interface Notice {
   sending: boolean;
   thinking: boolean;
@@ -112,6 +126,7 @@ interface Notice {
 interface Backlog {
   lines: ConversationEntry[];
   jobs: JobRow[];
+  briefings: BriefingRow[];
   notice: Notice;
 }
 

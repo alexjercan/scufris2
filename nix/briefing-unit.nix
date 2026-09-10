@@ -23,7 +23,7 @@
   # needs and a source's own guidance often does.
   # The user profile and the system path come last, so a deployment that pins
   # its own `pi` or ships `claude` keeps working without this knowing.
-  binaries = lib.makeBinPath [briefing jobs ctl pi pkgs.git pkgs.python3];
+  binaries = lib.makeBinPath [briefing jobs ctl pi pkgs.coreutils pkgs.git pkgs.python3];
 in
   pkgs.runCommand "scufris-briefing-${name}" {
     nativeBuildInputs = [pkgs.systemd];
@@ -59,11 +59,21 @@ in
           export SCUFRIS_BRIEFING_PARALLEL=${toString profile.parallel}
         fi
       ''}
+      # The failure unit runs outside this collection cgroup. Record the
+      # generation before collection starts, so a delayed failure handler can
+      # never finalize a newer run for the same profile.
+      generation="$(python3 -c 'import secrets; print(secrets.token_hex(12))')"
+      runtime="$XDG_RUNTIME_DIR/scufris"
+      mkdir -p "$runtime"
+      chmod 0700 "$runtime"
+      printf '%s\n' "$generation" > "$runtime/briefing-${name}.generation"
+      chmod 0600 "$runtime/briefing-${name}.generation"
+
       # The run on disk is the durable half. It is written before anything is
       # said, so a wake nobody is there to take costs the delivery and not the
-      # briefing: the run stays gathered and the next session that opens reads
-      # it and asks for the writing.
-      scufris-briefing collect --profile ${quoted} --json > /dev/null
+      # briefing: the run stays gathered and the next reconciliation imports
+      # it into the service inbox.
+      scufris-briefing collect --profile ${quoted} --generation "$generation" --json > /dev/null
       exec scufris-briefing wake --profile ${quoted}
     '';
     meta = {

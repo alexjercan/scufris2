@@ -1,4 +1,4 @@
-//! Minimal protocol v7 control client.
+//! Minimal protocol v8 control client.
 
 use std::{io::BufReader, os::unix::net::UnixStream, process::ExitCode};
 
@@ -7,10 +7,11 @@ use scufris_control::command::{
     Answer, COMMAND_VERSION, Command as DesktopCommand, Outcome, Verb, command_socket_path,
 };
 use scufris_control::service::{
-    ControlRequest, ControlRequestBody, ControlResponseBody, control_socket_path,
-    read_control_response,
+    BriefingRow, BriefingWake, ControlRequest, ControlRequestBody, ControlResponseBody,
+    control_socket_path, read_control_response,
 };
 use scufris_control::{MessageError, read_message, write_message};
+use serde::Deserialize;
 use serde_json::Value;
 
 /// Custom message type a wake carries when the caller names none.
@@ -48,6 +49,19 @@ enum Command {
         #[arg(long)]
         details: Option<String>,
     },
+    /// Import a durable briefing lifecycle update and optional terminal wake.
+    Briefing {
+        /// JSON object with `briefing` and optional `wake` fields.
+        update: String,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BriefingUpdate {
+    briefing: BriefingRow,
+    #[serde(default)]
+    wake: Option<BriefingWake>,
 }
 
 fn main() -> ExitCode {
@@ -76,6 +90,15 @@ fn run(options: Options) -> Result<(), String> {
             text,
             details: details.as_deref().map(wake_details).transpose()?,
         },
+        Some(Command::Briefing { update }) => {
+            let update: BriefingUpdate = serde_json::from_str(&update)
+                .map_err(|error| format!("briefing update is not valid JSON: {error}"))?;
+            ControlRequestBody::Briefing {
+                id: WAKE_ID.into(),
+                briefing: update.briefing,
+                wake: update.wake,
+            }
+        }
         Some(Command::State) | None => ControlRequestBody::State {
             id: STATE_ID.into(),
         },
@@ -107,6 +130,10 @@ fn run(options: Options) -> Result<(), String> {
         // durable state is the fallback, and it can only keep one if it knows.
         ControlResponseBody::WakeAck { id: answered } if answered == WAKE_ID => {
             println!("woken");
+            Ok(())
+        }
+        ControlResponseBody::BriefingAck { id: answered } if answered == WAKE_ID => {
+            println!("recorded");
             Ok(())
         }
         ControlResponseBody::Rejected { code, detail, .. } => Err(format!("{code}: {detail}")),

@@ -21,8 +21,8 @@
 use std::collections::VecDeque;
 
 use scufris_control::service::{
-    AttachmentDescriptor, ConversationMessage, ConversationRole, JobRow, MAX_ATTACHMENTS,
-    ScufrisState,
+    AttachmentDescriptor, BriefingRow, ConversationMessage, ConversationRole, JobRow,
+    MAX_ATTACHMENTS, ScufrisState,
 };
 use serde::Serialize;
 
@@ -63,6 +63,8 @@ pub struct Conversation {
     /// was said, it is what is happening, and it is replaced whole every time
     /// rather than appended to.
     jobs: Vec<JobRow>,
+    /// Every scheduled briefing generation, as quiet surface state.
+    briefings: Vec<BriefingRow>,
     /// The identifier of the line the service has not answered for yet.
     sending: Option<String>,
     thinking: bool,
@@ -89,6 +91,7 @@ impl Conversation {
         Self {
             lines: VecDeque::new(),
             jobs: Vec::new(),
+            briefings: Vec::new(),
             sending: None,
             thinking: false,
             attachments: Vec::new(),
@@ -150,6 +153,18 @@ impl Conversation {
         true
     }
 
+    pub fn briefings(&self) -> Vec<BriefingRow> {
+        self.briefings.clone()
+    }
+
+    pub fn briefed(&mut self, briefings: Vec<BriefingRow>) -> bool {
+        if self.briefings == briefings {
+            return false;
+        }
+        self.briefings = briefings;
+        true
+    }
+
     /// Marks one offer spent wherever it is, and says whether it was open.
     ///
     /// The badge stays where it is. It is the only mark in the window saying
@@ -182,6 +197,7 @@ impl Conversation {
     pub fn restart(&mut self) {
         self.lines.clear();
         self.jobs.clear();
+        self.briefings.clear();
         self.thinking = false;
         self.trouble = "Loading conversation.".into();
     }

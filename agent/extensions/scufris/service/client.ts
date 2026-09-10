@@ -31,6 +31,7 @@ export interface AtomicResponse {
 
 /** One proactive message delivered from outside the agent process. */
 export interface AgentWake {
+  proactiveId?: string;
   customType: string;
   content: string;
   details?: unknown;
@@ -63,6 +64,8 @@ export class AgentClient {
   private backoff = MIN_BACKOFF_MS;
   private stopped = false;
   private ready = false;
+  /** Durable proactive item whose next atomic response must acknowledge it. */
+  private activeProactive?: string;
   private readonly log: NonNullable<AgentClientOptions["log"]>;
 
   constructor(options: AgentClientOptions) {
@@ -82,11 +85,19 @@ export class AgentClient {
     this.socket?.destroy();
     this.socket = undefined;
     this.ready = false;
+    this.activeProactive = undefined;
     this.buffer = "";
   }
 
   response(response: AtomicResponse): void {
-    this.tell({ v: SERVICE_VERSION, type: "agent.response", ...response });
+    const proactiveId = this.activeProactive;
+    this.tell({
+      v: SERVICE_VERSION,
+      type: "agent.response",
+      ...response,
+      ...(proactiveId === undefined ? {} : { proactive_id: proactiveId }),
+    });
+    this.activeProactive = undefined;
   }
 
   /** Publishes every delegated job, whole.
@@ -165,7 +176,15 @@ export class AgentClient {
             this.options.busy(),
           );
         } else if (message.type === "agent.wake") {
+          // A volatile wake may arrive while the durable response is being
+          // generated. It has no correlation of its own and must not erase
+          // the terminal item whose next atomic response acknowledges it.
+          if (message.proactive_id !== undefined)
+            this.activeProactive = message.proactive_id;
           this.options.wake({
+            ...(message.proactive_id === undefined
+              ? {}
+              : { proactiveId: message.proactive_id }),
             customType: message.custom_type,
             content: message.text,
             ...(message.details === undefined
@@ -194,6 +213,7 @@ export class AgentClient {
     const handshakeFailed = !this.ready;
     this.socket = undefined;
     this.ready = false;
+    this.activeProactive = undefined;
     this.buffer = "";
     socket.destroy();
     if (handshakeFailed) this.log(UPDATE_TOGETHER, "error");

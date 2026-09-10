@@ -3,6 +3,7 @@
 # generated from a typed option, so a malformed entry fails the build too.
 {
   pkgs,
+  scufris,
   homes,
   ...
 }: let
@@ -83,6 +84,21 @@ in
       touch "$out"
     '';
 
+    # A deployed Home Manager file is one final link into the immutable store.
+    # This is the only configuration link the reader follows.
+    briefing-generated-symlink = pkgs.runCommand "scufris-briefing-generated-symlink-check" {
+      nativeBuildInputs = [pkgs.jq];
+    } ''
+      mkdir -p home config/scufris
+      target="$(readlink -f ${configured})"
+      case "$target" in /nix/store/*) ;; *) exit 1 ;; esac
+      ln -s "$target" config/scufris/config.toml
+      HOME="$PWD/home" XDG_CONFIG_HOME="$PWD/config" SCUFRIS_PROJECT_ROOTS='[]' \
+        ${lib.getExe scufris.briefing} sources --profile morning --json > answer.json
+      jq -e '.sources | any(.project == "@jobs")' answer.json > /dev/null
+      touch "$out"
+    '';
+
     briefing-sources-are-typed = assert renders {
       morning.jobs = {
         description = "Report it.";
@@ -136,22 +152,41 @@ in
       for name in morning weekly; do
         test -f ${units}/scufris-briefing-$name.timer
         test -f ${units}/scufris-briefing-$name.service
+        test -f ${units}/scufris-briefing-$name-failure.service
+        grep -Fx "OnFailure=scufris-briefing-$name-failure.service" ${units}/scufris-briefing-$name.service
       done
+      test -f ${units}/scufris-briefing-reconcile.service
+      test -f ${units}/scufris-briefing-reconcile.timer
+      grep -Fx 'OnBootSec=2m' ${units}/scufris-briefing-reconcile.timer
+      grep -Fx 'OnUnitActiveSec=1m' ${units}/scufris-briefing-reconcile.timer
+      grep -Fx 'Persistent=true' ${units}/scufris-briefing-reconcile.timer
       grep -Fx 'OnCalendar=07:30' ${units}/scufris-briefing-morning.timer
       grep -Fx 'OnCalendar=Mon *-*-* 09:00' ${units}/scufris-briefing-weekly.timer
       grep -Fx 'Persistent=true' ${units}/scufris-briefing-morning.timer
       grep -Fx 'Persistent=false' ${units}/scufris-briefing-weekly.timer
       grep -Fx 'WantedBy=timers.target' ${units}/scufris-briefing-morning.timer
       grep -Fx 'Type=oneshot' ${units}/scufris-briefing-morning.service
+      grep -Fx 'MemoryHigh=3G' ${units}/scufris-briefing-morning.service
+      grep -Fx 'MemoryMax=4G' ${units}/scufris-briefing-morning.service
       # The unit outlives the run deadline the collection holds itself to.
       grep -Fx 'TimeoutStartSec=2100' ${units}/scufris-briefing-morning.service
       grep -Fx 'TimeoutStartSec=3900' ${units}/scufris-briefing-weekly.service
-      # Each profile collects into its own run and delivers it itself.
+      # Each profile records a generation before collection. Its external
+      # failure unit passes that exact ID back to the finalizer.
       runner="$(sed -n 's/^ExecStart=//p' ${units}/scufris-briefing-weekly.service)"
       grep -F -- "--profile weekly" "$runner"
       grep -F -- "collect --profile weekly" "$runner"
+      grep -F -- '--generation "$generation"' "$runner"
+      grep -F -- 'briefing-weekly.generation' "$runner"
       grep -F -- "wake --profile weekly" "$runner"
       ! grep -F -- "--profile morning" "$runner"
+      finalizer="$(sed -n 's/^ExecStart=//p' ${units}/scufris-briefing-weekly-failure.service)"
+      grep -F -- 'briefing-weekly.generation' "$finalizer"
+      grep -F -- '--generation "$generation"' "$finalizer"
+      grep -F -- '--property=Result' "$finalizer"
+      reconciler="$(sed -n 's/^ExecStart=//p' ${units}/scufris-briefing-reconcile.service)"
+      grep -F -- 'SCUFRIS_BRIEFING_KEEP_DAYS=30' "$reconciler"
+      grep -F -- 'briefing reconcile --json' "$reconciler"
 
       # A machine source reports on jobs, so the reader is a program on the
       # run's own PATH. A user manager inherits no login shell, and guidance

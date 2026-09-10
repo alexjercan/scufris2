@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from html.parser import HTMLParser
 from pathlib import Path
@@ -843,7 +844,9 @@ class Run(unittest.TestCase):
         self.declare("the-den", "pi", "morning")
         first = briefing.collect("2026-08-31", "morning")
         manifest = briefing.read_manifest("2026-08-31", "morning")
-        briefing.write_manifest({**manifest, "state": "collecting", "finished": None})
+        briefing.write_manifest(
+            {**manifest, "state": "collecting", "finished": None}, replace=True
+        )
         briefing.collect("2026-09-01", "morning")
         self.assertIn(
             f"The last morning briefing asked its sources at {first['started']}",
@@ -1364,13 +1367,21 @@ class Run(unittest.TestCase):
         answer = briefing.wake("2026-08-31", "morning")
         self.assertTrue(answer["woken"], answer)
         argv = json.loads(kept.read_text())
-        self.assertEqual(argv[0], "wake")
-        self.assertIn("morning briefing for 2026-08-31", argv[1])
-        self.assertEqual(argv[2:4], ["--custom-type", briefing.BRIEFING_WAKE])
+        self.assertEqual(argv[0], "briefing")
+        update = json.loads(argv[1])
+        self.assertEqual(update["briefing"]["collection"], "collected")
+        self.assertEqual(update["briefing"]["delivery"], "pending")
         self.assertEqual(
-            json.loads(argv[5]),
-            {"date": "2026-08-31", "profile": "morning", "sources": 1},
+            update["wake"]["event_id"], f"{update['briefing']['id']}-terminal"
         )
+        other_profile = briefing.lifecycle_update(
+            {**briefing.read_manifest("2026-08-31", "morning"), "profile": "evening"}
+        )
+        self.assertNotEqual(other_profile["briefing"]["id"], update["briefing"]["id"])
+        self.assertIn("morning briefing for 2026-08-31", update["wake"]["text"])
+        self.assertEqual(update["wake"]["custom_type"], briefing.BRIEFING_WAKE)
+        self.assertEqual(update["wake"]["details"]["date"], "2026-08-31")
+        self.assertEqual(update["wake"]["details"]["profile"], "morning")
 
     def test_a_run_where_every_source_failed_still_reaches_the_conversation(
         self,
@@ -1447,7 +1458,8 @@ class Run(unittest.TestCase):
             "2026-08-31", "morning", "No briefing: the-den could not answer."
         )
         self.assertEqual(briefing.pending("2026-08-31"), [])
-        self.assertEqual(briefing.run_state("2026-08-31", "morning"), "delivered")
+        self.assertEqual(briefing.run_state("2026-08-31", "morning"), "failed")
+        self.assertTrue(briefing.delivered("2026-08-31", "morning"))
 
     def test_a_refused_wake_leaves_the_run_gathered_for_later(self) -> None:
         # Losing a gathered briefing because the agent happened to be down is
@@ -1477,14 +1489,13 @@ class Run(unittest.TestCase):
         self.assertIn("could not be run", answer["reason"])
         self.assertEqual(briefing.run_state("2026-08-31", "morning"), "collected")
 
-    def test_a_delivered_run_is_never_woken_for_twice(self) -> None:
+    def test_a_prepared_run_can_be_reconciled_until_the_service_acknowledges(self) -> None:
         self.declare("the-den")
         briefing.collect("2026-08-31", "morning")
         briefing.publish("2026-08-31", "morning", "Good morning.")
         self.control("#!/usr/bin/env python3\nraise SystemExit(0)\n")
         answer = briefing.wake("2026-08-31", "morning")
-        self.assertFalse(answer["woken"])
-        self.assertIn("delivered", answer["reason"])
+        self.assertTrue(answer["woken"])
 
     def test_only_the_last_runs_are_kept(self) -> None:
         root = briefing.state_root()
@@ -1569,6 +1580,31 @@ class Run(unittest.TestCase):
             gathered = briefing.collect(profile="nightly")
         self.assertEqual(gathered["bounds"]["run_deadline"], 240.0)
 
+    def test_home_manager_profile_symlinks_are_bounded_and_special_targets_are_ignored(
+        self,
+    ) -> None:
+        directory = self.config / "scufris"
+        directory.mkdir(parents=True, exist_ok=True)
+        store = self.root / "nix-store"
+        store.mkdir()
+        generated = store / "generated-profiles.json"
+        generated.write_text(
+            json.dumps({"nightly": {"deadline": 7200}}), encoding="utf-8"
+        )
+        deployed = directory / briefing.PROFILE_BOUNDS_FILE
+        deployed.symlink_to(generated)
+        with mock.patch.object(briefing, "NIX_STORE", store):
+            briefing.apply_profile_bounds("nightly")
+        self.assertEqual(os.environ["SCUFRIS_BRIEFING_DEADLINE"], "7200")
+
+        os.environ.pop("SCUFRIS_BRIEFING_DEADLINE", None)
+        deployed.unlink()
+        deployed.symlink_to("/dev/zero")
+        began = time.monotonic()
+        briefing.apply_profile_bounds("nightly")
+        self.assertLess(time.monotonic() - began, 1)
+        self.assertNotIn("SCUFRIS_BRIEFING_DEADLINE", os.environ)
+
     def test_an_unusable_profile_file_reads_as_if_it_said_nothing(self) -> None:
         (self.config / "scufris").mkdir(parents=True, exist_ok=True)
         for written in ("", "not json", "[]", '{"nightly": 5}', '{"nightly": {}}'):
@@ -1587,6 +1623,99 @@ class Run(unittest.TestCase):
                 [],
                 f"a briefing refused to run over {written!r}",
             )
+
+    def test_run_artifacts_refuse_special_files_and_directory_links(self) -> None:
+        directory = briefing.run_dir("2026-08-31", "morning")
+        directory.mkdir(parents=True)
+        (directory / "manifest.json").symlink_to("/dev/zero")
+        began = time.monotonic()
+        with self.assertRaises(briefing.Refused):
+            briefing.read_manifest("2026-08-31", "morning")
+        self.assertLess(time.monotonic() - began, 1)
+
+        (directory / "manifest.json").unlink()
+        directory.rmdir()
+        directory.symlink_to(self.root)
+        with self.assertRaises(briefing.Refused):
+            briefing.collect("2026-08-31", "morning")
+
+    def test_legacy_delivery_imports_terminal_without_a_wake(self) -> None:
+        directory = briefing.run_dir("2026-08-31", "morning")
+        directory.mkdir(parents=True)
+        legacy = {
+            "version": 1,
+            "profile": "morning",
+            "date": "2026-08-31",
+            "state": "delivered",
+            "started": "2026-08-31T07:30:00+00:00",
+            "finished": "2026-08-31T07:31:00+00:00",
+            "sources": [
+                {
+                    "project": "projects/the-den",
+                    "slug": "projects-the-den",
+                    "status": "ok",
+                    "headline": "All clear.",
+                }
+            ],
+            "diagnostics": [],
+        }
+        (directory / "manifest.json").write_text(json.dumps(legacy), encoding="utf-8")
+        migrated = briefing.read_manifest("2026-08-31", "morning")
+        update = briefing.lifecycle_update(migrated)
+        self.assertEqual(migrated["state"], "collected")
+        self.assertEqual(migrated["delivery"], "prepared")
+        self.assertEqual(update["briefing"]["delivery"], "delivered")
+        self.assertNotIn("wake", update)
+
+    def test_stale_generations_cannot_finalize_or_reopen_the_current_run(self) -> None:
+        self.declare("the-den")
+        finished = briefing.collect(
+            "2026-08-31", "morning", generation="generation-current"
+        )
+        collecting = {
+            **finished,
+            "state": "collecting",
+            "finished": None,
+            "owner": {"pid": 999_999_999, "start": "missing"},
+            "sources": [briefing.asking_entry({"project": "projects/the-den", "slug": "projects-the-den"})],
+        }
+        briefing.write_manifest(collecting, replace=True)
+        with self.assertRaises(briefing.Refused):
+            briefing.finalize(
+                "2026-08-31", "morning", "generation-stale", "oom-kill"
+            )
+        closed = briefing.finalize(
+            "2026-08-31", "morning", "generation-current", "oom-kill"
+        )
+        self.assertEqual(closed["state"], "collected")
+        self.assertEqual(closed["sources"][0]["headline"], ENVELOPE["headline"])
+        asked = len(self.asked())
+        duplicate = briefing.collect(
+            "2026-08-31", "morning", generation="generation-stale"
+        )
+        self.assertEqual(duplicate["generation"], "generation-current")
+        self.assertEqual(len(self.asked()), asked)
+        with self.assertRaises(briefing.Refused):
+            briefing.write_manifest({**closed, "state": "collecting"})
+
+    def test_output_overflow_kills_a_source_that_ignores_term(self) -> None:
+        self.declare("the-den")
+        self.harness(
+            "#!/usr/bin/env python3\n"
+            "import signal, sys, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            f"sys.stdout.write('x' * {briefing.MAX_OUTPUT + 65536})\n"
+            "sys.stdout.flush()\n"
+            "while True: time.sleep(1)\n"
+        )
+        began = time.monotonic()
+        manifest = briefing.collect(
+            "2026-08-31", "morning", source_deadline=30
+        )
+        self.assertLess(time.monotonic() - began, 4)
+        source = manifest["sources"][0]
+        self.assertEqual(source["status"], "failed")
+        self.assertIn("more than", source["headline"])
 
     def test_a_date_owing_two_kinds_of_prose_asks_which_one(self) -> None:
         """A failed run and a collected run on one date are two answers.
@@ -1620,8 +1749,9 @@ class Run(unittest.TestCase):
         The generated file is a fixed name in a directory the run does not own
         exclusively. A nightly review lane once made it a symlink to
         `/dev/zero`; the unbounded read grew to 29 GB and the kernel stopped the
-        collector and every source with it. None of these fixtures opens a
-        device: the symlink points at an ordinary file, and the FIFO is only
+        collector and every source with it. Only a final link into the immutable
+        Nix store is a deployment. None of these fixtures opens a device: the
+        symlink points at an ordinary file outside the store, and the FIFO is only
         ever opened by the reader under test, which must not block on it.
         """
         directory = self.config / "scufris"

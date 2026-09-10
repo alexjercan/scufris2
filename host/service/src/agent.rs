@@ -195,6 +195,7 @@ mod tests {
             agent: PathBuf::from(agent),
             session_dir,
             conversation_file: PathBuf::from("/home/test/.local/share/scufris/conversation.json"),
+            briefing_file: PathBuf::from("/home/test/.local/share/scufris/briefings.json"),
             surface_socket: PathBuf::from("/run/user/1000/scufris/surface.sock"),
             agent_socket: PathBuf::from("/run/user/1000/scufris/agent.sock"),
             control_socket: PathBuf::from("/run/user/1000/scufris/control.sock"),

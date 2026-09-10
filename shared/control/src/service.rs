@@ -1,4 +1,4 @@
-//! Scufris protocol v7 typed channels.
+//! Scufris protocol v8 typed channels.
 //!
 //! Surface, agent, and control traffic use separate Unix sockets and separate
 //! enums. Each decoder accepts only its channel and direction.
@@ -13,7 +13,7 @@ use crate::{
     is_identifier, read_line,
 };
 
-pub const SERVICE_VERSION: u32 = 7;
+pub const SERVICE_VERSION: u32 = 8;
 pub const SURFACE_FILE_NAME: &str = "surface.sock";
 pub const AGENT_FILE_NAME: &str = "agent.sock";
 pub const CONTROL_FILE_NAME: &str = "control.sock";
@@ -54,6 +54,9 @@ pub const MAX_BADGE_BYTES: usize = 64;
 /// oldest finished rows to stay inside it and never a live one.
 pub const MAX_JOB_ROWS: usize = 8;
 pub const MAX_JOB_SUMMARY_BYTES: usize = 512;
+/// How many briefing generations a surface can be asked to draw.
+pub const MAX_BRIEFING_ROWS: usize = 128;
+pub const MAX_BRIEFING_SUMMARY_BYTES: usize = 256;
 
 pub fn surface_socket_path() -> Result<PathBuf, ControlPathError> {
     socket_path(SURFACE_FILE_NAME)
@@ -209,6 +212,54 @@ pub enum JobAction {
     Archive,
 }
 
+/// The collection half of one briefing generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BriefingCollectionState {
+    Collecting,
+    Collected,
+    Failed,
+}
+
+/// The independent terminal-delivery half of one briefing generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BriefingDeliveryState {
+    Pending,
+    InProgress,
+    Delivered,
+}
+
+/// Quiet lifecycle state for one generation-fenced scheduled briefing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BriefingRow {
+    /// Opaque generation identity. Date and profile are labels, not identity.
+    pub id: String,
+    pub date: String,
+    pub profile: String,
+    pub collection: BriefingCollectionState,
+    pub delivery: BriefingDeliveryState,
+    /// Unix seconds when collection began.
+    pub since: u64,
+    pub completed: u32,
+    pub total: u32,
+    pub failed: u32,
+    pub summary: String,
+}
+
+/// The terminal model turn attached to a briefing update.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BriefingWake {
+    /// Stable across retries and service restarts.
+    pub event_id: String,
+    pub custom_type: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ConversationRole {
@@ -345,6 +396,9 @@ pub enum SurfaceResponseBody {
     /// about the night's finished work as well as what is running.
     #[serde(rename = "surface.jobs")]
     Jobs { jobs: Vec<JobRow> },
+    /// Every durable briefing generation, replacing the surface's list.
+    #[serde(rename = "surface.briefings")]
+    Briefings { briefings: Vec<BriefingRow> },
     /// One offer has been taken, and is not on offer again.
     ///
     /// Broadcast rather than sent to the surface that pressed it: the badge is
@@ -401,6 +455,9 @@ pub enum AgentRequestBody {
     #[serde(rename = "agent.response")]
     Response {
         text: String,
+        /// Correlates only a service-owned proactive terminal turn.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        proactive_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         details: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -458,6 +515,9 @@ pub enum AgentResponseBody {
     /// wake a briefing already uses, under the caller's own custom type.
     #[serde(rename = "agent.wake")]
     Wake {
+        /// Present only for a durable service-owned proactive item.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        proactive_id: Option<String>,
         custom_type: String,
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -510,6 +570,15 @@ pub enum ControlRequestBody {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         details: Option<Value>,
     },
+    /// Upsert one generation-fenced briefing lifecycle event. A terminal wake
+    /// is queued durably before this request is acknowledged.
+    #[serde(rename = "control.briefing")]
+    Briefing {
+        id: String,
+        briefing: BriefingRow,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        wake: Option<BriefingWake>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -540,6 +609,8 @@ pub enum ControlResponseBody {
     },
     #[serde(rename = "control.wake_ack")]
     WakeAck { id: String },
+    #[serde(rename = "control.briefing_ack")]
+    BriefingAck { id: String },
     #[serde(rename = "control.rejected")]
     Rejected {
         id: String,
@@ -780,6 +851,50 @@ fn job_rows(value: &[JobRow]) -> Result<(), MessageError> {
     }
     Ok(())
 }
+
+pub fn validate_briefing_row(row: &BriefingRow) -> Result<(), MessageError> {
+    id(&row.id, "briefing id")?;
+    text(&row.date, 10, "briefing date", false)?;
+    if row.date.len() != 10
+        || !row.date.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 4 | 7) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        })
+    {
+        return Err(MessageError::InvalidSubmission("briefing date"));
+    }
+    id(&row.profile, "briefing profile")?;
+    if row.completed > row.total || row.failed > row.completed {
+        return Err(MessageError::InvalidSubmission("briefing counts"));
+    }
+    text(
+        &row.summary,
+        MAX_BRIEFING_SUMMARY_BYTES,
+        "briefing summary",
+        true,
+    )
+}
+
+fn briefing_rows(value: &[BriefingRow]) -> Result<(), MessageError> {
+    if value.len() > MAX_BRIEFING_ROWS {
+        return Err(MessageError::InvalidSubmission("briefings"));
+    }
+    for (index, row) in value.iter().enumerate() {
+        validate_briefing_row(row)?;
+        if value[..index].iter().any(|previous| previous.id == row.id) {
+            return Err(MessageError::InvalidSubmission("briefings"));
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_briefing_wake(value: &BriefingWake) -> Result<(), MessageError> {
+    id(&value.event_id, "briefing event id")?;
+    wake(&value.custom_type, &value.text, &value.details)
+}
 fn validate_registration(surface: &SurfaceRegistration) -> Result<(), MessageError> {
     id(&surface.id, "surface id")?;
     if surface.id == UNPROMPTED_SURFACE {
@@ -845,6 +960,7 @@ fn validate_surface_response(message: &SurfaceResponse) -> Result<(), MessageErr
             text(detail, MAX_DETAIL_BYTES, "state detail", true)
         }
         SurfaceResponseBody::Jobs { jobs } => job_rows(jobs),
+        SurfaceResponseBody::Briefings { briefings } => briefing_rows(briefings),
         SurfaceResponseBody::OfferTaken { id: one } => id(one, "offer id"),
         SurfaceResponseBody::Ready { surface } => id(surface, "surface id"),
         SurfaceResponseBody::Rejected {
@@ -867,11 +983,15 @@ fn validate_agent_request(message: &AgentRequest) -> Result<(), MessageError> {
         AgentRequestBody::Hello => Ok(()),
         AgentRequestBody::Response {
             text: body,
+            proactive_id,
             details,
             widgets,
             attachments,
             receipts,
         } => {
+            if let Some(one) = proactive_id {
+                id(one, "proactive id")?;
+            }
             text(body, MAX_TEXT_BYTES, "response text", false)?;
             if let Some(details) = details {
                 text(details, MAX_DETAILS_BYTES, "response details", false)?;
@@ -898,10 +1018,16 @@ fn validate_agent_response(message: &AgentResponse) -> Result<(), MessageError> 
             attachment_descriptors(attachments)
         }
         AgentResponseBody::Wake {
+            proactive_id,
             custom_type,
             text: body,
             details,
-        } => wake(custom_type, body, details),
+        } => {
+            if let Some(one) = proactive_id {
+                id(one, "proactive id")?;
+            }
+            wake(custom_type, body, details)
+        }
         AgentResponseBody::Abort { id: one } => id(one, "abort id"),
         AgentResponseBody::JobCommand { id: one, .. } => id(one, "job id"),
         AgentResponseBody::OfferTake { id: one } => id(one, "offer id"),
@@ -924,6 +1050,18 @@ fn validate_control_request(message: &ControlRequest) -> Result<(), MessageError
             id(one, "wake id")?;
             wake(custom_type, body, details)
         }
+        ControlRequestBody::Briefing {
+            id: one,
+            briefing,
+            wake: terminal,
+        } => {
+            id(one, "briefing request id")?;
+            validate_briefing_row(briefing)?;
+            if let Some(terminal) = terminal {
+                validate_briefing_wake(terminal)?;
+            }
+            Ok(())
+        }
     }
 }
 fn validate_control_response(message: &ControlResponse) -> Result<(), MessageError> {
@@ -936,6 +1074,7 @@ fn validate_control_response(message: &ControlResponse) -> Result<(), MessageErr
             text(detail, MAX_DETAIL_BYTES, "state detail", true)
         }
         ControlResponseBody::WakeAck { id: one } => id(one, "wake id"),
+        ControlResponseBody::BriefingAck { id: one } => id(one, "briefing request id"),
         ControlResponseBody::Rejected {
             id: one,
             code,
@@ -955,13 +1094,13 @@ mod tests {
 
     #[test]
     fn channels_and_directions_are_distinct() {
-        let line = b"{\"v\":7,\"type\":\"agent.hello\"}\n";
+        let line = b"{\"v\":8,\"type\":\"agent.hello\"}\n";
         assert!(read_agent_request(&mut Cursor::new(line)).is_ok());
         assert!(matches!(
             read_surface_request(&mut Cursor::new(line)),
             Err(MessageError::InvalidJson(_))
         ));
-        let outbound = b"{\"v\":7,\"type\":\"surface.ready\",\"surface\":\"desk\"}\n";
+        let outbound = b"{\"v\":8,\"type\":\"surface.ready\",\"surface\":\"desk\"}\n";
         assert!(read_surface_response(&mut Cursor::new(outbound)).is_ok());
         assert!(read_surface_request(&mut Cursor::new(outbound)).is_err());
     }
@@ -973,7 +1112,7 @@ mod tests {
         // would speak every briefing the owner never asked for.
         let hello = |id: &str| {
             format!(
-                "{{\"v\":7,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{id}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
+                "{{\"v\":8,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{id}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
             )
         };
         assert!(read_surface_request(&mut Cursor::new(hello("desk"))).is_ok());
@@ -1119,6 +1258,7 @@ mod tests {
             crate::write_message(
                 &mut bytes,
                 &AgentResponse::new(AgentResponseBody::Wake {
+                    proactive_id: None,
                     custom_type: "scufris-briefing".into(),
                     text,
                     details,
@@ -1148,7 +1288,7 @@ mod tests {
     fn only_the_control_channel_carries_a_wake() {
         // A wake is not a second way to drive the conversation, so the channel
         // the remote gateway speaks cannot express one.
-        let line = b"{\"v\":7,\"type\":\"control.wake\",\"id\":\"wake-1\",\"custom_type\":\"scufris-wake\",\"text\":\"Wake up.\"}\n";
+        let line = b"{\"v\":8,\"type\":\"control.wake\",\"id\":\"wake-1\",\"custom_type\":\"scufris-wake\",\"text\":\"Wake up.\"}\n";
         assert!(read_control_request(&mut Cursor::new(line)).is_ok());
         assert!(read_surface_request(&mut Cursor::new(line)).is_err());
         assert!(read_agent_request(&mut Cursor::new(line)).is_err());
@@ -1157,6 +1297,7 @@ mod tests {
     #[test]
     fn bounded_atomic_response_round_trips() {
         let response = AgentRequest::new(AgentRequestBody::Response {
+            proactive_id: None,
             text: "Done.".into(),
             details: Some("## Check\n\nPassed.".into()),
             widgets: Some(vec![WidgetCall {
@@ -1197,6 +1338,7 @@ mod tests {
         // binding, so two groups naming the same job would put two labelled
         // strips under one message with no reading that says which is which.
         let response = AgentRequest::new(AgentRequestBody::Response {
+            proactive_id: None,
             text: "Both jobs finished.".into(),
             details: None,
             widgets: None,
@@ -1211,6 +1353,7 @@ mod tests {
         );
 
         let doubled = AgentRequest::new(AgentRequestBody::Response {
+            proactive_id: None,
             text: "One job, twice.".into(),
             details: None,
             widgets: None,
@@ -1233,6 +1376,7 @@ mod tests {
         let mut second = cited("01ccbac98b97");
         second.offers[0].id = cited("750a4de8a80d").offers[0].id.clone();
         let clashing = AgentRequest::new(AgentRequestBody::Response {
+            proactive_id: None,
             text: "Two offers, one name.".into(),
             details: None,
             widgets: None,
@@ -1259,6 +1403,7 @@ mod tests {
             crate::write_message(
                 &mut bytes,
                 &AgentRequest::new(AgentRequestBody::Response {
+                    proactive_id: None,
                     text: "Done.".into(),
                     details: None,
                     widgets: None,
@@ -1338,12 +1483,12 @@ mod tests {
         // Neither is a way to drive the conversation, so the request channel
         // that carries them is the one a registered surface already speaks.
         let line =
-            b"{\"v\":7,\"type\":\"job.command\",\"id\":\"3f81c204b1e9\",\"action\":\"cancel\"}\n";
+            b"{\"v\":8,\"type\":\"job.command\",\"id\":\"3f81c204b1e9\",\"action\":\"cancel\"}\n";
         assert!(read_surface_request(&mut Cursor::new(line)).is_ok());
         assert!(read_agent_request(&mut Cursor::new(line)).is_err());
         assert!(read_control_request(&mut Cursor::new(line)).is_err());
 
-        let take = b"{\"v\":7,\"type\":\"offer.take\",\"id\":\"offer-1\"}\n";
+        let take = b"{\"v\":8,\"type\":\"offer.take\",\"id\":\"offer-1\"}\n";
         assert!(read_surface_request(&mut Cursor::new(take)).is_ok());
         assert!(read_agent_request(&mut Cursor::new(take)).is_err());
     }

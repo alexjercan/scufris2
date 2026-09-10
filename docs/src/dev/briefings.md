@@ -3,9 +3,13 @@
 [Previous: Messages](messaging.md)
 
 ```text
-systemd timer -> collect every declared source -> run directory -> Scufris writes it
-     |                                                          -> chat
-     +-> wake the conversation                                  -> page, when asked
+systemd timer -> bounded collectors -> generation-fenced run directory
+                       |                         |
+                       +-> quiet lifecycle rows +-> terminal wake
+                                                    |
+                           service durable inbox -> one correlated Pi turn
+                                                    |
+                                      canonical replay acknowledgment
 ```
 
 One briefing is one run. Every run is a directory named for its local date and
@@ -14,8 +18,10 @@ one contribution for each source, the prose Scufris wrote, and the page
 rendered from the same run. Chat and the page are two readings of one artifact,
 so neither can say something the other does not.
 
-The date and the profile together name a run, so a morning and an evening on
-one day are two runs and neither can write over the other.
+The date and profile locate the current run. An opaque generation ID is its
+identity. A morning and an evening on one day use different directories, and a
+late writer from an older generation cannot reopen, complete, or finalize the
+current generation.
 
 ## What a source is
 
@@ -215,10 +221,8 @@ turn ends, so anything a source dispatched and did not wait for dies with it.
 true.
 
 Both harnesses answer without asking on purpose. Nobody is watching a source
-run, so a question it cannot ask is a refusal. Under `claude`'s `dontAsk` the
-shell is sandboxed, and a source told to read CI or refresh its numbers spent
-its run reporting that `gh` or `python3` had been denied. A sandbox it cannot
-see decides nothing but whether the morning is empty.
+run, so a question it cannot ask is a refusal. A sandbox it cannot see decides
+nothing but whether the morning is empty.
 
 A source runs with every tool its harness has, the writing ones included, and
 nothing here narrows that. There was a tool allowlist once and it was never the
@@ -252,17 +256,21 @@ it, so a briefing asked for by hand is held to the same numbers as the one the
 timer starts. The environment still wins where it is set, which is how a run
 asking for a number on the command line keeps it. Without the file - an ordinary
 checkout - the built-in defaults hold, and a file that cannot be read or parsed
-reads as if it said nothing rather than refusing the morning.
+reads as if it said nothing rather than refusing the morning. Home Manager
+installs generated configuration as a symlink into the Nix store. The reader
+allows that deployment shape, but checks the opened target is a bounded regular
+file before reading it. A symlink to a device, FIFO, or oversized file is
+refused without consuming its contents.
 
 ## The run directory
 
 ```text
 $XDG_STATE_HOME/scufris/briefings/2026-08-31/
 ├── morning/
-│   ├── manifest.json          the index: state, the bounds the run was given,
-│   │                          every source, the numbered offers, every
-│   │                          diagnostic
-│   ├── contributions/*.json   one envelope for each source, with its body
+│   ├── .collect.lock          excludes a second collector for this run slot
+│   ├── manifest.json          generation, owner, collection/delivery state,
+│   │                          bounds, sources, offers, events, diagnostics
+│   ├── contributions/*.json   one durable envelope for each source
 │   ├── briefing.md            the prose Scufris wrote
 │   └── briefing.html          the page, written when the sources answer
 └── evening/
@@ -275,14 +283,22 @@ renders it again over the prose when there is some. Whether the day has a page
 is decided by code, so a write-up that never happens costs the day its prose and
 not its briefing.
 
-The manifest's `bounds` are the numbers that run was actually given: the source
-deadline, the run deadline, and how many sources were asked at once. A profile's
-own numbers live in its timer unit's environment, so a run started any other way
+A manifest is version 2. `generation` is an opaque identifier. `owner` is the
+collector PID plus its Linux process start tick, so PID reuse cannot make an
+abandoned run look live. Collection state is `collecting`, `collected`, or
+`failed`; artifact delivery is independently `pending` or `prepared`.
+`prepared` means `briefing.md` exists. It does not mean the conversation has
+durably recorded the answer.
 
-- the `scufris_briefing_run` tool under the service, or a shell - gets the code
-  defaults instead. Recording them is what makes a source cut off at fifteen
-  minutes distinguishable from one cut off at the eight hours the profile asks
-  for.
+Each valid contribution is atomically written before the manifest publishes
+its `source_finished` event. If the collector is killed after the write, an
+external finalizer can recover that contribution instead of marking it lost.
+The manifest event sequence moves only forward, terminal collection cannot be
+reopened, and every write checks that its generation still owns the run.
+
+The manifest's `bounds` are the source deadline, run deadline, and parallel
+limit the run actually used. This makes a cutoff explainable and confirms that
+a scheduled, tool-started, or shell-started run read the intended profile.
 
 Every source is in the manifest from the moment the run starts, with the status
 `asking` until it answers and its own entry written over that as it does. The
@@ -291,26 +307,26 @@ night in flight read exactly like a night nothing had declared. Only a
 `collecting` manifest carries `asking`; a run that is over has one entry for
 each source and nothing else.
 
-The last thirty dates are kept, with every profile that ran on them. The
-manifest state is the record of what happened, and it is what an opening
-session reads:
+The last thirty dates are kept, with every profile that ran on them. Collection
+and delivery are two state machines:
 
-| state        | what it means                  | what a session does |
-| ------------ | ------------------------------ | ------------------- |
-| `none`       | nothing was started            | nothing             |
-| `collecting` | a run no process owns any more | nothing             |
-| `collected`  | gathered, prose never written  | ask for the writing |
-| `delivered`  | the owner has it               | nothing             |
-| `failed`     | nothing answered               | say there is none   |
+| collection   | meaning                                       |
+| ------------ | --------------------------------------------- |
+| `collecting` | an identified owner is asking named sources   |
+| `collected`  | at least one source answered, or none existed |
+| `failed`     | every declared source failed                  |
 
-`collected` and `failed` ask a session for something, and only when the run has
-sources and no prose beside it. A failed run is asked about because the absence
-of a briefing is itself the news: one source failing out of five was reported
-and five out of five used to be silence. It closes the same way a collected run
-closes, by Scufris publishing the prose - which for a failed run is the
-sentence saying there is none. Everything else is the timer's business: a
-session never decides that a briefing is owed, so it can neither deliver one
-twice nor collect one nobody asked for.
+| service delivery | meaning                                         |
+| ---------------- | ----------------------------------------------- |
+| `pending`        | the terminal wake is durably queued             |
+| `in_progress`    | one correlated proactive model slot is reserved |
+| `delivered`      | the correlated answer is in canonical replay    |
+
+A failed run is delivered because the absence of a briefing is itself the
+news: one source failing out of five was reported and five out of five used to
+be silence. A run with no declared sources is terminal but creates no model
+turn. Historical version-1 `delivered` manifests import as already delivered,
+so an upgrade does not replay an old briefing.
 
 A caller that names a date and no profile is resolved against what is on disk:
 it means the one run that was gathered and is still waiting for its prose.
@@ -337,8 +353,17 @@ programs.scufris.agent.briefing.profiles = {
 ```
 
 Each one renders `scufris-briefing-<profile>.timer` and its `oneshot` service.
-The unit collects that profile and carries the result to the conversation with
-`scufris-ctl wake`. Nothing in the agent holds a clock, and nothing polls.
+The runner records the generation outside the collection process before it
+starts. Its `OnFailure` unit runs outside the failed collection cgroup, reads
+systemd's measured result (including `oom-kill`), and finalizes only that exact
+generation. Persisted contributions survive; unanswered sources become failed.
+A delayed failure handler cannot finalize a newer run.
+
+Collector announcements call `scufris-ctl briefing` after each durable event.
+They are latency hints, not the authority. Session startup scans every retained
+run, and `scufris-briefing-reconcile.timer` repeats the scan every minute. Thus
+a stopped service, a missed filesystem event, or a machine restart cannot
+strand terminal state. The agent extension holds no schedule or interval.
 
 `schedule` is a systemd `OnCalendar` specification, checked with
 `systemd-analyze calendar` while the module is built, so a schedule nobody can
@@ -392,20 +417,37 @@ and a pane to watch.
 
 ## Writing and delivery
 
-The collected run wakes the foreground once. The timer's own run does it from
-outside the agent, over `control.wake`; a briefing asked for by hand does it in
-process. Both send the same words, because both ask the helper for them.
-Scufris reads the run, writes one briefing in its own voice from what the
-sources reported, publishes that prose, and says it in chat.
+`control.briefing` carries one quiet row and, only on a terminal generation
+with sources, one stable terminal wake. The service atomically stores both at
+`$XDG_DATA_HOME/scufris/briefings.json` before it acknowledges the control
+request. No connected agent is required. Replaying the same event ID is
+idempotent.
 
-The run on disk is the durable half and the wake is only the delivery. A wake
-refused with `agent_unavailable` therefore leaves the run `collected`, and the
-next session that opens reads what is waiting and asks for the writing. Losing
-a gathered briefing because the agent happened to be down is the failure this
-does not have.
+Start and source-completion updates only replace `surface.briefings`; they never
+enter Pi and never create speech or a conversation line. The desktop HUD and
+iPhone draw the complete durable row list with profile, collection/delivery
+state, count, and summary. The rows have screen-reader labels and narrow-width
+layouts, and no surface action owns them.
 
-That session-start read is one file read and not a timer. It happens once, at
-`session_start`, and there is no interval behind it.
+When the terminal item is pending, the service waits until Pi is idle and no
+user turn owns the response association. It marks the item `in_progress` before
+sending `agent.wake` with its stable `proactive_id`. While that slot is held, a
+new surface message is refused and retained in the surface's composer rather
+than being captured by the briefing. The extension copies `proactive_id` onto
+exactly the next atomic `agent.response`.
+
+Scufris reads the run, writes one briefing in its own voice from measured
+contributions, publishes the same prose into the artifact, and returns the
+correlated response. The service first records that response in canonical
+conversation replay with its delivery ID. Only then does it mark the inbox item
+`delivered`. This is the acknowledgment boundary. A crash before the replay
+write retries the pending item; a crash after the replay write recovers it as
+delivered before an agent can connect, so no second visible answer is made.
+Duplicate or stale correlated responses are ignored.
+
+Filesystem state remains the collection authority and service state remains
+the delivery authority. Preparing `briefing.md` does not acknowledge delivery,
+and a service acknowledgment does not rewrite collection state.
 
 Everything before the prose is code. The schedule, the sources, the runs and
 the record are decided by systemd and `briefing.py`, and no model is asked
@@ -457,16 +499,19 @@ scufris-briefing sources --profile morning
 scufris-briefing sources --config ./config.toml
 scufris-briefing collect --profile morning
 scufris-briefing wake --profile morning
+scufris-briefing reconcile --json
+scufris-briefing finalize --profile morning --generation ID --cause "systemd result: oom-kill"
 scufris-briefing pending --json
 scufris-briefing show --json
 scufris-briefing publish < prose.md
 scufris-briefing open --date 2026-08-30 --profile morning
 ```
 
-Every subcommand takes `--profile` and `--config`. `wake` is what the timer
-runs after a collection: it carries the run to the conversation and reports
-rather than fails when nothing is listening. `pending` is what an opening
-session reads.
+Every subcommand takes `--profile` and `--config`. `wake` replays one terminal
+row into the durable service inbox. `reconcile` scans all retained runs, and
+`finalize --generation ... --cause ...` closes one dead collector without ever
+touching a newer generation. `pending` remains a local artifact query for runs
+whose prose has not been prepared.
 
 `tools/briefing/page.py` renders and asks nothing: given a finished run it
 writes the same page a year from now. It uses markdown-it-py's CommonMark

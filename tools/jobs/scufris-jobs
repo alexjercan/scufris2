@@ -45,6 +45,10 @@ CLAUDE_DENIED_REVIEW_TOOLS = "Bash,Edit,Write,NotebookEdit,Task,WebFetch,WebSear
 RECORD_VERSION = 2
 MAX_REQUEST = 2 * 1024 * 1024
 MAX_JOB_RECORD = 64 * 1024
+# Project and machine declarations are prose, not datasets. This also makes a
+# special-file or replacement probe fail before any content is read.
+MAX_CONFIG_FILE = 256 * 1024
+NIX_STORE = Path("/nix/store")
 MAX_STATUS_DETAIL = 256 * 1024
 MAX_REPORT_DETAIL = 512 * 1024
 MAX_EVENT_LINE = 4096
@@ -579,16 +583,16 @@ def render_menu(project: str, raw: bytes) -> list[str]:
 
 
 def render_context(project: str, source: Path) -> dict[str, Any]:
-    if not source.exists():
-        return {
-            "project": project,
-            "configured": False,
-            "fingerprint": hashlib.sha256(b"").hexdigest(),
-            "markdown": f"# Project context: {project}\n\nNo .scufris.toml was found. Infer the conventions from the request and project instructions, and delegate only to what the request names.\n",
-            "diagnostic": None,
-        }
     try:
-        raw = source.read_bytes()
+        raw = read_regular(source, MAX_CONFIG_FILE, optional=True)
+        if raw is None:
+            return {
+                "project": project,
+                "configured": False,
+                "fingerprint": hashlib.sha256(b"").hexdigest(),
+                "markdown": f"# Project context: {project}\n\nNo .scufris.toml was found. Infer the conventions from the request and project instructions, and delegate only to what the request names.\n",
+                "diagnostic": None,
+            }
         return {
             "project": project,
             "configured": True,
@@ -597,6 +601,7 @@ def render_context(project: str, source: Path) -> dict[str, Any]:
             "diagnostic": None,
         }
     except (
+        JobError,
         OSError,
         TypeError,
         UnicodeError,
@@ -708,15 +713,17 @@ def user_briefing_sources(
     """
     path, demanded = user_config_path(named)
     try:
-        # Read the way a project file is read. Home Manager writes this one as
-        # a symlink into the store, so a reader that refused a link would
-        # refuse the ordinary way of having one.
-        raw = path.read_bytes()
-    except FileNotFoundError:
-        if demanded:
-            raise JobError(f"no configuration file at {path}") from None
-        return [], []
-    except OSError as error:
+        raw = read_regular(
+            path,
+            MAX_CONFIG_FILE,
+            optional=True,
+            generated_symlink=True,
+        )
+        if raw is None:
+            if demanded:
+                raise JobError(f"no configuration file at {path}")
+            return [], []
+    except JobError as error:
         if demanded:
             raise JobError(f"unreadable configuration file: {error}") from None
         return [], [{"project": str(path), "diagnostic": f"ignored: {error}"}]
@@ -776,10 +783,11 @@ def briefing_sources(
     sources, diagnostics = user_briefing_sources(profile, config)
     for project, root in sorted(discover_projects().items()):
         source = root / ".scufris.toml"
-        if not source.is_file():
-            continue
         try:
-            document = tomllib.loads(source.read_bytes().decode("utf-8"))
+            raw = read_regular(source, MAX_CONFIG_FILE, optional=True)
+            if raw is None:
+                continue
+            document = tomllib.loads(raw.decode("utf-8"))
             declared = document.get("briefings", {})
             if not isinstance(declared, dict):
                 raise ValueError("briefings must be a table")
@@ -796,6 +804,7 @@ def briefing_sources(
                 }
             )
         except (
+            JobError,
             OSError,
             TypeError,
             UnicodeError,
@@ -1371,9 +1380,21 @@ def spawn(request: dict[str, Any]) -> dict[str, Any]:
         raise
 
 
-def open_regular(path: Path) -> int:
+def open_regular(path: Path, *, generated_symlink: bool = False) -> int:
+    opened = path
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        if generated_symlink and path.is_symlink():
+            linked = Path(os.readlink(path))
+            if not linked.is_absolute():
+                linked = path.parent / linked
+            opened = Path(os.path.abspath(linked))
+            try:
+                opened.relative_to(NIX_STORE)
+            except ValueError:
+                raise JobError(
+                    f"job artifact has an unsafe symlink: {path.name}"
+                ) from None
+        descriptor = os.open(opened, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError as error:
         raise JobError(f"job artifact is unavailable: {path.name}") from error
     try:
@@ -1403,9 +1424,17 @@ def read_regular(
     *,
     optional: bool = False,
     truncate: bool = False,
+    generated_symlink: bool = False,
 ) -> bytes | None:
+    """Read a bounded regular file without a path race.
+
+    Job artifacts and project configuration never follow their final path
+    component. Home Manager's generated user configuration may use one final
+    symlink into the immutable Nix store; its lexical target is opened directly
+    with `O_NOFOLLOW`. The descriptor is checked before any byte is read.
+    """
     try:
-        descriptor = open_regular(path)
+        descriptor = open_regular(path, generated_symlink=generated_symlink)
     except JobError:
         if optional:
             try:

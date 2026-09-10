@@ -259,6 +259,10 @@ fn control(service: Arc<Service>, stream: UnixStream, connection: u64) {
                         let answer = service.control_wake(id, custom_type, text, details);
                         let _ = outbox.try_send(ControlResponse::new(answer));
                     }
+                    ControlRequestBody::Briefing { id, briefing, wake } => {
+                        let answer = service.control_briefing(id, briefing, wake);
+                        let _ = outbox.try_send(ControlResponse::new(answer));
+                    }
                 }
             }
             Err(MessageError::Empty) => break,

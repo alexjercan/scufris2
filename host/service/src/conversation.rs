@@ -23,6 +23,9 @@ const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 #[serde(deny_unknown_fields)]
 struct StoredEntry {
     sequence: u64,
+    /// Stable identity of a durable proactive item, when this message closes one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    delivery_id: Option<String>,
     message: ConversationMessage,
 }
 
@@ -86,6 +89,42 @@ impl ConversationHistory {
     /// new bound. The in-memory replay remains current if storage fails, so a
     /// later message retries the complete snapshot.
     pub fn record(&mut self, message: ConversationMessage) -> Result<(), PersistError> {
+        self.push(message, None);
+        self.persist()
+    }
+
+    /// Records one terminal proactive answer exactly once.
+    ///
+    /// Unlike an ordinary live message, failure rolls the in-memory insertion
+    /// back. The caller may acknowledge its durable inbox only after this
+    /// snapshot succeeds, and a restart can identify the crash window between
+    /// the conversation write and that acknowledgement by `delivery_id`.
+    pub fn record_delivery(
+        &mut self,
+        delivery_id: &str,
+        message: ConversationMessage,
+    ) -> Result<bool, PersistError> {
+        if self.contains_delivery(delivery_id) {
+            return Ok(false);
+        }
+        let entries = self.entries.clone();
+        let next_sequence = self.next_sequence;
+        self.push(message, Some(delivery_id.to_string()));
+        if let Err(error) = self.persist() {
+            self.entries = entries;
+            self.next_sequence = next_sequence;
+            return Err(error);
+        }
+        Ok(true)
+    }
+
+    pub fn contains_delivery(&self, delivery_id: &str) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.delivery_id.as_deref() == Some(delivery_id))
+    }
+
+    fn push(&mut self, message: ConversationMessage, delivery_id: Option<String>) {
         if self.next_sequence == u64::MAX {
             self.resequence();
         }
@@ -94,8 +133,11 @@ impl ConversationHistory {
         if self.entries.len() == CONVERSATION_ENTRIES {
             self.entries.pop_front();
         }
-        self.entries.push_back(StoredEntry { sequence, message });
-        self.persist()
+        self.entries.push_back(StoredEntry {
+            sequence,
+            delivery_id,
+            message,
+        });
     }
 
     /// Marks one offer taken, and says whether this press was the one that
@@ -197,12 +239,17 @@ impl ConversationHistory {
 }
 
 fn read_snapshot(path: &Path) -> Result<Option<(VecDeque<StoredEntry>, bool)>, LoadError> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
+    let file = match OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
-    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+    let metadata = file.metadata()?;
+    if !metadata.file_type().is_file() {
         return Err(LoadError::Malformed(
             "the snapshot is not a regular file".into(),
         ));
@@ -210,11 +257,9 @@ fn read_snapshot(path: &Path) -> Result<Option<(VecDeque<StoredEntry>, bool)>, L
     if metadata.len() > MAX_FILE_BYTES {
         return Err(LoadError::TooLarge);
     }
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))?;
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    File::open(path)?
-        .take(MAX_FILE_BYTES + 1)
-        .read_to_end(&mut bytes)?;
+    file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_FILE_BYTES {
         return Err(LoadError::TooLarge);
     }
@@ -459,14 +504,17 @@ mod tests {
             entries: vec![
                 StoredEntry {
                     sequence: 8,
+                    delivery_id: None,
                     message: repeated.clone(),
                 },
                 StoredEntry {
                     sequence: 8,
+                    delivery_id: None,
                     message: repeated.clone(),
                 },
                 StoredEntry {
                     sequence: 9,
+                    delivery_id: None,
                     message: repeated.clone(),
                 },
             ],

@@ -9,6 +9,46 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Added
+
+- Scheduled briefings now have durable lifecycle rows on desktop and iPhone.
+  Collection progress, source counts, failures, and delivery state stay visible
+  without speaking or starting a model turn. The rows adapt at narrow widths
+  and expose one complete accessibility label.
+- The service now owns a durable proactive briefing inbox. A terminal
+  generation waits for an idle model slot, carries a stable correlation ID,
+  and becomes delivered only after its answer is in canonical conversation
+  replay. Pending and in-progress delivery recover across service and agent
+  restarts.
+
+### Changed
+
+- Surface and agent protocol 8 adds `surface.briefings`,
+  `control.briefing`, `control.briefing_ack`, and proactive response
+  correlation. Host, agent, desktop, gateway, control client, and iPhone must
+  be updated together.
+- Briefing collection and delivery are independent state machines. Filesystem
+  notifications are only latency hints; session startup and a one-minute
+  systemd reconciliation timer authoritatively replay all retained runs.
+
+### Fixed
+
+- A scheduled briefing can no longer stay `collecting` forever after its
+  collector cgroup fails. Each source contribution is stored before completion
+  is announced, and a generation-fenced `OnFailure` unit runs outside that
+  cgroup to retain completed sources and mark the rest failed, including after
+  an OOM kill.
+- Briefing configuration, manifests, contributions, prose, and child output
+  are bounded before they are consumed. Devices, FIFOs, unsafe artifact
+  symlinks, and oversized files are refused. Home Manager's generated config
+  symlinks remain supported after their opened target is verified as a bounded
+  regular file.
+- A terminal briefing no longer races an active user turn or disappears while
+  no agent is connected. User text is refused and retained while the one
+  proactive slot is active, duplicate terminal ingress is idempotent, and the
+  crash window between canonical replay and inbox acknowledgment cannot create
+  a second visible answer.
+
 ## [2.4.1] - 2026-09-09
 
 ### Fixed

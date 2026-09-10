@@ -60,7 +60,32 @@
       projectRoots = agentCfg.projectRoots;
       inherit (briefingCfg) keepDays;
     };
-  briefingProfileName = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
+  # Runs in a separate unit after the collection cgroup has failed. It reads
+  # systemd's measured result, including oom-kill, and generation-fences the
+  # run before marking unanswered sources failed.
+  briefingFinalizer = name:
+    pkgs.writeShellApplication {
+      name = "scufris-briefing-${name}-finalize";
+      runtimeInputs = [pkgs.systemd defaults.briefingPackage];
+      text = ''
+        generation_file="$XDG_RUNTIME_DIR/scufris/briefing-${name}.generation"
+        if ! IFS= read -r generation < "$generation_file"; then
+          echo "no generation was recorded for the failed ${name} briefing" >&2
+          exit 1
+        fi
+        result="$(systemctl --user show --property=Result --value ${lib.escapeShellArg "${briefingUnitName name}.service"})"
+        exec scufris-briefing finalize --profile ${lib.escapeShellArg name} --generation "$generation" --cause "systemd result: $result" --json
+      '';
+    };
+  briefingReconciler = pkgs.writeShellApplication {
+    name = "scufris-briefing-reconcile";
+    runtimeInputs = [defaults.briefingPackage cfg.ctlPackage];
+    text = ''
+      export SCUFRIS_BRIEFING_KEEP_DAYS=${toString briefingCfg.keepDays}
+      exec scufris-briefing reconcile --json
+    '';
+  };
+  briefingProfileName = "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$";
   # The helper reads a TOML path and does not know Nix exists. This is one way
   # to produce that file: a typed option so a malformed entry fails the build
   # instead of costing a morning. Anyone not on NixOS writes the same file by
@@ -636,42 +661,76 @@ in {
         }
       ];
 
-      systemd.user.services = lib.mapAttrs' (name: profile:
-        lib.nameValuePair (briefingUnitName name) {
-          Unit.Description = "Scufris ${name} briefing";
-          Service = {
-            Type = "oneshot";
-            ExecStart = lib.getExe (briefingRunner name profile);
-            # Above the deadline the collection holds itself to, so a run
-            # still asking its sources is never killed halfway. What it has
-            # gathered by then is published either way.
-            TimeoutStartSec = profile.deadline + 300;
-            # A deadline bounds time, not memory, and the two fail differently.
-            # A review lane once made the generated bounds file a symlink to
-            # `/dev/zero`; the reader grew to 29 GB and the kernel stopped the
-            # whole control group seven hours before the deadline, taking the
-            # collector and every source with it. The reader is bounded now, so
-            # this is the second wall rather than the first: whatever runs away
-            # next is stopped while the machine is still usable.
-            MemoryMax = "4G";
-            MemoryHigh = "3G";
-            WorkingDirectory = "%h";
+      systemd.user.services = lib.mkMerge [
+        (lib.mapAttrs' (name: profile:
+          lib.nameValuePair (briefingUnitName name) {
+            Unit = {
+              Description = "Scufris ${name} briefing";
+              OnFailure = ["${briefingUnitName name}-failure.service"];
+            };
+            Service = {
+              Type = "oneshot";
+              ExecStart = lib.getExe (briefingRunner name profile);
+              # Above the deadline the collection holds itself to, so a run
+              # still asking its sources is never killed halfway. What it has
+              # gathered by then is published either way.
+              TimeoutStartSec = profile.deadline + 300;
+              # A deadline bounds time, not memory, and the two fail
+              # differently. This is the second wall behind bounded readers:
+              # a future runaway is stopped while the machine stays usable.
+              MemoryMax = "4G";
+              MemoryHigh = "3G";
+              WorkingDirectory = "%h";
+            };
+          })
+        briefingCfg.profiles)
+        (lib.mapAttrs' (name: _profile:
+          lib.nameValuePair "${briefingUnitName name}-failure" {
+            Unit.Description = "Finalize failed Scufris ${name} briefing";
+            Service = {
+              Type = "oneshot";
+              ExecStart = lib.getExe (briefingFinalizer name);
+              WorkingDirectory = "%h";
+            };
+          })
+        briefingCfg.profiles)
+        {
+          scufris-briefing-reconcile = {
+            Unit.Description = "Reconcile durable Scufris briefing state";
+            Service = {
+              Type = "oneshot";
+              ExecStart = lib.getExe briefingReconciler;
+              WorkingDirectory = "%h";
+            };
           };
-        })
-      briefingCfg.profiles;
+        }
+      ];
 
-      systemd.user.timers = lib.mapAttrs' (name: profile:
-        lib.nameValuePair (briefingUnitName name) {
-          Unit.Description = "Scufris ${name} briefing schedule";
-          Timer = {
-            OnCalendar = profile.schedule;
-            # One catch-up, by the clock systemd keeps, instead of a rule
-            # written here about what a late session owes the day.
-            Persistent = profile.persistent;
+      systemd.user.timers = lib.mkMerge [
+        (lib.mapAttrs' (name: profile:
+          lib.nameValuePair (briefingUnitName name) {
+            Unit.Description = "Scufris ${name} briefing schedule";
+            Timer = {
+              OnCalendar = profile.schedule;
+              # One catch-up, by the clock systemd keeps, instead of a rule
+              # written here about what a late session owes the day.
+              Persistent = profile.persistent;
+            };
+            Install.WantedBy = ["timers.target"];
+          })
+        briefingCfg.profiles)
+        {
+          scufris-briefing-reconcile = {
+            Unit.Description = "Periodic Scufris briefing reconciliation";
+            Timer = {
+              OnBootSec = "2m";
+              OnUnitActiveSec = "1m";
+              Persistent = true;
+            };
+            Install.WantedBy = ["timers.target"];
           };
-          Install.WantedBy = ["timers.target"];
-        })
-      briefingCfg.profiles;
+        }
+      ];
     })
     (lib.mkIf (cfg.enable && managedApiCfg.enable) {
       assertions = [

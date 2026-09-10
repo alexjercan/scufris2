@@ -1,6 +1,6 @@
 import Foundation
 
-let scufrisProtocolVersion = 7
+let scufrisProtocolVersion = 8
 let scufrisMaximumMessageBytes = 64 * 1024
 let scufrisMaximumTextBytes = 8 * 1024
 let scufrisMaximumDetailsBytes = 32 * 1024
@@ -151,6 +151,42 @@ enum JobRowState: String, Codable, Equatable {
     case failed
 }
 
+/// One generation-fenced scheduled briefing. It is quiet surface state.
+struct BriefingRow: Codable, Equatable, Identifiable {
+    let id: String
+    let date: String
+    let profile: String
+    let collection: BriefingCollectionState
+    let delivery: BriefingDeliveryState
+    let since: UInt64
+    let completed: UInt32
+    let total: UInt32
+    let failed: UInt32
+    let summary: String
+
+    var isProtocolValid: Bool {
+        let identifier = #"^[A-Za-z0-9._-]{1,64}$"#
+        return id.range(of: identifier, options: .regularExpression) != nil
+            && profile.range(of: identifier, options: .regularExpression) != nil
+            && date.range(of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"#, options: .regularExpression) != nil
+            && completed <= total && failed <= completed
+            && summary.utf8.count <= 256
+            && !summary.contains("\0") && !summary.contains("\r")
+    }
+}
+
+enum BriefingCollectionState: String, Codable, Equatable {
+    case collecting
+    case collected
+    case failed
+}
+
+enum BriefingDeliveryState: String, Codable, Equatable {
+    case pending
+    case inProgress = "in_progress"
+    case delivered
+}
+
 struct IncomingConversationMessage: Decodable {
     let v: Int
     let type: String
@@ -166,6 +202,12 @@ struct IncomingJobs: Decodable {
     let v: Int
     let type: String
     let jobs: [JobRow]
+}
+
+struct IncomingBriefings: Decodable {
+    let v: Int
+    let type: String
+    let briefings: [BriefingRow]
 }
 
 struct IncomingOfferTaken: Decodable {

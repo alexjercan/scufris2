@@ -812,6 +812,26 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         self.assertEqual(len(broken["diagnostics"]), 1)
         self.assertEqual(broken["diagnostics"][0]["project"], str(config))
 
+    def test_non_store_user_config_symlinks_are_refused_before_toml_is_read(self) -> None:
+        config = self.root / "config" / "scufris" / "config.toml"
+        config.parent.mkdir(parents=True)
+        generated = self.root / "generated-config.toml"
+        generated.write_text(
+            "[briefings.morning.jobs]\n"
+            'description = "Job history."\n'
+            'guidance = "Read the history."\n'
+        )
+        config.symlink_to(generated)
+        listed = self.call("briefings", {"profile": "morning"})["result"]
+        self.assertEqual(listed["sources"], [])
+        self.assertIn("unsafe symlink", listed["diagnostics"][0]["diagnostic"])
+
+        config.unlink()
+        config.symlink_to("/dev/zero")
+        listed = self.call("briefings", {"profile": "morning"})["result"]
+        self.assertEqual(listed["sources"], [])
+        self.assertIn("unsafe symlink", listed["diagnostics"][0]["diagnostic"])
+
     def test_the_history_listing_answers_for_jobs_no_other_listing_can(self) -> None:
         # Archiving is what happens to a workflow that finished, and every
         # other listing skips the archive. Nothing could answer what landed.

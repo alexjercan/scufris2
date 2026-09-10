@@ -26,7 +26,7 @@ struct ProtocolTests {
     }
 
     @Test
-    func helloUsesTheStrictProtocolV7SurfaceShape() throws {
+    func helloUsesTheStrictProtocolV8SurfaceShape() throws {
         let hello = SurfaceHello(
             surface: SurfaceRegistration(
                 id: "ios-test",
@@ -38,7 +38,7 @@ struct ProtocolTests {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(hello))
                 as? [String: Any]
         )
-        #expect(object["v"] as? Int == 7)
+        #expect(object["v"] as? Int == 8)
         #expect(object["type"] as? String == "surface.hello")
         let surface = try #require(object["surface"] as? [String: Any])
         #expect(surface["id"] as? String == "ios-test")
@@ -102,7 +102,7 @@ struct ProtocolTests {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
                 as? [String: Any]
         )
-        #expect(object["v"] as? Int == 7)
+        #expect(object["v"] as? Int == 8)
         #expect(object["type"] as? String == "surface.message")
         #expect(object["attachments"] as? [String] == ["att_one", "att_two"])
     }
@@ -178,20 +178,20 @@ struct ProtocolTests {
     @Test
     func conversationResponsesDecodeWithoutWidgetPresentation() throws {
         let data = Data(
-            #"{"v":7,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","details":"Passed.","attachments":[]}"#.utf8
+            #"{"v":8,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","details":"Passed.","attachments":[]}"#.utf8
         )
         let message = try JSONDecoder().decode(
             IncomingConversationMessage.self,
             from: data
         )
-        #expect(message.v == 7)
+        #expect(message.v == 8)
         #expect(message.role == .assistant)
         #expect(message.text == "Done.")
         #expect(message.details == "Passed.")
         #expect(message.attachments?.isEmpty == true)
 
         let omitted = Data(
-            #"{"v":7,"type":"surface.message","role":"user","surface":"ios","text":"Hello."}"#.utf8
+            #"{"v":8,"type":"surface.message","role":"user","surface":"ios","text":"Hello."}"#.utf8
         )
         let textOnly = try JSONDecoder().decode(IncomingConversationMessage.self, from: omitted)
         #expect(textOnly.details == nil)
@@ -202,7 +202,7 @@ struct ProtocolTests {
     @Test
     func badgesAreGroupedByTheJobTheyAreAbout() throws {
         let data = Data(
-            #"{"v":7,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","receipts":[{"job_id":"750a4de8a80d","badges":[{"label":"landed","value":"yes","state":"measured"},{"label":"pushed","value":"no","state":"refuted"}],"offers":[{"id":"offer-a1","label":"push master"}]}]}"#.utf8
+            #"{"v":8,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","receipts":[{"job_id":"750a4de8a80d","badges":[{"label":"landed","value":"yes","state":"measured"},{"label":"pushed","value":"no","state":"refuted"}],"offers":[{"id":"offer-a1","label":"push master"}]}]}"#.utf8
         )
         let message = try JSONDecoder().decode(
             IncomingConversationMessage.self,
@@ -220,7 +220,7 @@ struct ProtocolTests {
     @Test
     func jobRowsCarryEverythingOneRowDraws() throws {
         let data = Data(
-            #"{"v":7,"type":"surface.jobs","jobs":[{"id":"01ccbac98b97","project":"personal/scufris2","state":"done","since":1788901200,"summary":"reviewed 9 commits"},{"id":"3f81c204b1e9","project":null,"state":"working","since":1788904800,"summary":""}]}"#.utf8
+            #"{"v":8,"type":"surface.jobs","jobs":[{"id":"01ccbac98b97","project":"personal/scufris2","state":"done","since":1788901200,"summary":"reviewed 9 commits"},{"id":"3f81c204b1e9","project":null,"state":"working","since":1788904800,"summary":""}]}"#.utf8
         )
         let listed = try JSONDecoder().decode(IncomingJobs.self, from: data)
         #expect(listed.jobs.count == 2)
@@ -235,6 +235,19 @@ struct ProtocolTests {
     }
 
     @Test
+    func briefingRowsKeepCollectionAndDeliveryIndependent() throws {
+        let data = Data(
+            #"{"v":8,"type":"surface.briefings","briefings":[{"id":"generation-a","date":"2026-09-10","profile":"nightly","collection":"collected","delivery":"in_progress","since":1788901200,"completed":3,"total":3,"failed":1,"summary":"2 of 3 sources answered; 1 failed"}]}"#.utf8
+        )
+        let listed = try JSONDecoder().decode(IncomingBriefings.self, from: data)
+        let row = try #require(listed.briefings.first)
+        #expect(row.isProtocolValid)
+        #expect(row.collection == .collected)
+        #expect(row.delivery == .inProgress)
+        #expect(row.failed == 1)
+    }
+
+    @Test
     func aRowControlAndAnOfferCarryOnlyTheirIdentifier() throws {
         let command = try #require(
             JSONSerialization.jsonObject(
@@ -243,7 +256,7 @@ struct ProtocolTests {
                 )
             ) as? [String: Any]
         )
-        #expect(command["v"] as? Int == 7)
+        #expect(command["v"] as? Int == 8)
         #expect(command["type"] as? String == "job.command")
         #expect(command["action"] as? String == "cancel")
 

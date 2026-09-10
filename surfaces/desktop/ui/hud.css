@@ -415,6 +415,67 @@ body {
   color: var(--muted);
 }
 
+/* A briefing row is status, not a job. It has no action and keeps the measured
+ * count visible when the summary has to yield at a narrow width. */
+.briefing-row {
+  display: grid;
+  grid-template-columns: minmax(0, 9em) 4.5em 3.5em minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.briefing-row > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.briefing-row + .briefing-row {
+  border-top: 1px solid #1d1c1b;
+}
+
+.briefing-profile,
+.briefing-count {
+  color: var(--quartz);
+}
+
+.briefing-state {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.briefing-summary {
+  color: var(--fg);
+}
+
+.briefing-row[data-state="collecting"] .briefing-state,
+.briefing-row[data-state="collected"] .briefing-state {
+  color: var(--wisteria);
+}
+
+.briefing-row[data-state="failed"] .briefing-state {
+  color: var(--red);
+}
+
+.briefing-row[data-state="delivered"] .briefing-state {
+  color: var(--quartz);
+}
+
+@media (max-width: 520px) {
+  .briefing-row {
+    grid-template-columns: minmax(0, 1fr) 4.5em 3.5em;
+  }
+
+  .briefing-summary {
+    grid-column: 1 / -1;
+  }
+}
+
 /* One control per row, and which one it is says what the row is: a live job
  * can only be stopped, a finished one can only be filed. */
 .row .row-do {

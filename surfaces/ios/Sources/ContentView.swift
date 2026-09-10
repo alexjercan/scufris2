@@ -47,6 +47,7 @@ struct ContentView: View {
                 header
                 Divider().overlay(ScufrisPalette.line)
                 conversation
+                briefingList
                 jobList
                 statusNotice
                 composer
@@ -372,6 +373,31 @@ struct ContentView: View {
         // than at the bottom, where the scroll view's own anchor would put it.
         // The subtracted room is the padding the conversation is drawn inside.
         .containerRelativeFrame(.vertical) { height, _ in max(0, height - 44) }
+    }
+
+    /// Quiet scheduled work. These rows have no swipe action because a
+    /// surface neither owns nor cancels a schedule generation.
+    @ViewBuilder
+    private var briefingList: some View {
+        if !store.briefings.isEmpty {
+            VStack(spacing: 0) {
+                Divider().overlay(ScufrisPalette.line)
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(store.briefings) { row in
+                            BriefingRowView(row: row)
+                                .padding(.horizontal, 17)
+                                .padding(.vertical, 6)
+                            if row.id != store.briefings.last?.id {
+                                Divider().overlay(ScufrisPalette.line)
+                            }
+                        }
+                    }
+                }
+                .scrollDisabled(store.briefings.count <= 3)
+                .frame(height: min(CGFloat(store.briefings.count), 3.5) * 42)
+            }
+        }
     }
 
     /// Every delegated job, as a section above the composer.
@@ -997,6 +1023,58 @@ private struct WrappingRun: Layout {
             x += size.width + Self.spacing
             rowHeight = max(rowHeight, size.height)
         }
+    }
+}
+
+/// One scheduled briefing generation, with measured progress kept visible.
+private struct BriefingRowView: View {
+    let row: BriefingRow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 9) {
+                Text(row.profile)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(ScufrisPalette.quartz)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(word.uppercased())
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(colour)
+                    .fixedSize()
+                Text("\(row.completed)/\(row.total)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(ScufrisPalette.quartz)
+                    .fixedSize()
+            }
+            Text(row.summary)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(ScufrisPalette.foreground)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(row.profile) briefing for \(row.date), \(word), \(row.completed) of \(row.total) sources: \(row.summary)"
+        )
+    }
+
+    private var word: String {
+        if row.delivery == .delivered { return "done" }
+        if row.delivery == .inProgress { return "write" }
+        switch row.collection {
+        case .collecting: return "gather"
+        case .collected: return "ready"
+        case .failed: return "fail"
+        }
+    }
+
+    private var colour: Color {
+        if row.collection == .failed { return ScufrisPalette.red }
+        if row.delivery == .delivered { return ScufrisPalette.quartz }
+        return ScufrisPalette.wisteria
     }
 }
 

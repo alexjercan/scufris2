@@ -4,8 +4,9 @@
 
 ```text
 worker event -> wake gate -> Pi turn -> final response -> service -> surfaces
-control.wake -> agent.wake -> follow-up wake -> Pi turn
-quiet working event -> transient notification only
+control.wake -> volatile agent.wake -> follow-up wake -> Pi turn
+control.briefing -> durable inbox -> correlated Pi turn -> canonical ack
+quiet lifecycle update -> surface state only
 ```
 
 Foreground Scufris coordinates three message flows: worker events into the
@@ -21,14 +22,19 @@ with no user turn open is recorded against `unprompted`.
 
 ## Wakes from outside the agent process
 
-Worker events, briefings, and review outcomes wake the conversation from
-extensions inside the agent process. A process outside it uses the
-`control.wake` verb on the service control socket, which the service forwards
-as `agent.wake` and the service extension delivers as the same follow-up under
-the `custom_type` the caller named. A wake with no agent connected is refused
-with `agent_unavailable`, never dropped, so the caller keeps its own durable
-state as the fallback. See
-[Background service](service.md#unprompted-wake-ingress).
+Worker events and review outcomes wake the conversation from extensions inside
+the agent process. A process outside it can use the volatile `control.wake`
+verb, which the service forwards as `agent.wake` under the caller's
+`custom_type`. With no agent connected it is refused with `agent_unavailable`,
+so the caller must retain its own fallback.
+
+Scheduled briefings use the durable path instead. `control.briefing` stores a
+quiet row and optional terminal wake before acknowledgment. Collection progress
+only updates `surface.briefings`. One terminal generation reserves one
+`proactive_id`; its correlated atomic response is marked delivered only after
+it enters canonical replay. Startup and systemd reconciliation replay retained
+run files, so filesystem notifications improve latency but are never the
+recovery authority. See [Briefings](briefings.md#writing-and-delivery).
 
 ## Worker event delivery
 

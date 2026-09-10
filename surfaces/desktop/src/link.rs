@@ -1,4 +1,4 @@
-//! Registered protocol v7 surface link.
+//! Registered protocol v8 surface link.
 
 use std::{
     io::BufReader,
@@ -13,8 +13,8 @@ use std::{
 };
 
 use scufris_control::service::{
-    ConversationMessage, JobAction, JobRow, ScufrisState, SurfaceRegistration, SurfaceRequest,
-    SurfaceRequestBody, SurfaceResponseBody, read_surface_response,
+    BriefingRow, ConversationMessage, JobAction, JobRow, ScufrisState, SurfaceRegistration,
+    SurfaceRequest, SurfaceRequestBody, SurfaceResponseBody, read_surface_response,
 };
 use scufris_control::{MessageError, write_message};
 
@@ -35,6 +35,8 @@ pub enum LinkEvent {
     State(ScufrisState, String),
     /// Every job row at once, replacing what the surface holds.
     Jobs(Vec<JobRow>),
+    /// Every durable scheduled briefing generation.
+    Briefings(Vec<BriefingRow>),
     /// One offer is spent, in whichever message carries it.
     OfferTaken(String),
     Message {
@@ -266,6 +268,9 @@ fn serve(
                 observe(LinkEvent::State(state, detail))
             }
             SurfaceResponseBody::Jobs { jobs } => observe(LinkEvent::Jobs(jobs)),
+            SurfaceResponseBody::Briefings { briefings } => {
+                observe(LinkEvent::Briefings(briefings))
+            }
             SurfaceResponseBody::OfferTaken { id } => observe(LinkEvent::OfferTaken(id)),
             SurfaceResponseBody::Ready { surface } if surface == registration.id => {
                 tracing::info!(

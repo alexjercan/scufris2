@@ -23,9 +23,9 @@ flowchart TB
         Helper[jobs helper] --> Tmux[owned tmux session] --> Harness[Pi or Claude]
         Durable["prompt | report | events | workspace | transcript"]
     end
-    Desktop -->|protocol v7| Service
-    IOS -->|protocol v7| Service
-    Future -->|protocol v7| Service
+    Desktop -->|protocol v8| Service
+    IOS -->|protocol v8| Service
+    Future -->|protocol v8| Service
     Service --> Pi
     Pi --> Helper
 ```
@@ -77,7 +77,7 @@ Landing and cleanup are explicit.
 agent/extensions/scufris/   Pi lifecycle, tools, state, routing
 agent/skills/               model-facing workflow policy
 host/service/               headless conversation owner and scufris-ctl
-shared/control/             protocol v7 types, bounds, and socket paths
+shared/control/             protocol v8 types, bounds, and socket paths
 surfaces/desktop/           Linux/X11 surface, voice, windows, widgets
 surfaces/ios/               SwiftUI remote surface
 scripts/                    commands for people
@@ -115,6 +115,7 @@ local.
 | Agent output   | One validated atomic response                                    |
 | Worker reports | Fresh capability for each generation                             |
 | Job files      | Bounded reads, regular files, `O_NOFOLLOW` where required        |
+| Briefing files | Bounded config/artifacts, generation fence, external finalizer   |
 | Reviewer tools | Harness-specific read allowlist; not an OS sandbox               |
 | Remote surface | Loopback gateway, private token, owned Tailscale Serve TLS route |
 
@@ -167,6 +168,8 @@ the journal, and either can be pointed elsewhere with a variable.
 ```text
 $XDG_RUNTIME_DIR/scufris/         sockets; disappears with the login session
 $XDG_DATA_HOME/scufris/sessions/  canonical Pi conversation
+$XDG_DATA_HOME/scufris/conversation.json canonical surface replay
+$XDG_DATA_HOME/scufris/briefings.json durable delivery inbox and quiet rows
 $XDG_STATE_HOME/scufris/jobs/     jobs and archived workflows
 $XDG_STATE_HOME/scufris/briefings/ one directory for each day's briefing run
 $XDG_STATE_HOME/scufris-desktop/  pending transcript + stable surface ID

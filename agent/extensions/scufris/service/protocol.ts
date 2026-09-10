@@ -1,6 +1,6 @@
-/** Protocol v7 agent channel. */
+/** Protocol v8 agent channel. */
 
-export const SERVICE_VERSION = 7;
+export const SERVICE_VERSION = 8;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
 export const SOCKET_DIRECTORY_NAME = "scufris";
 export const AGENT_FILE_NAME = "agent.sock";
@@ -21,6 +21,8 @@ export const MAX_OFFERS = 2;
 export const MAX_BADGE_BYTES = 64;
 export const MAX_JOB_ROWS = 8;
 export const MAX_JOB_SUMMARY_BYTES = 512;
+export const MAX_BRIEFING_ROWS = 128;
+export const MAX_BRIEFING_SUMMARY_BYTES = 256;
 
 export interface WidgetDefinition {
   name: string;
@@ -87,23 +89,40 @@ export interface JobRow {
 
 export type JobAction = "cancel" | "archive";
 
+export type BriefingCollectionState = "collecting" | "collected" | "failed";
+export type BriefingDeliveryState = "pending" | "in_progress" | "delivered";
+
+export interface BriefingRow {
+  id: string;
+  date: string;
+  profile: string;
+  collection: BriefingCollectionState;
+  delivery: BriefingDeliveryState;
+  since: number;
+  completed: number;
+  total: number;
+  failed: number;
+  summary: string;
+}
+
 export type AgentRequest =
-  | { v: 7; type: "agent.hello" }
+  | { v: 8; type: "agent.hello" }
   | {
-      v: 7;
+      v: 8;
       type: "agent.response";
       text: string;
+      proactive_id?: string;
       details?: string;
       widgets?: WidgetCall[];
       attachments?: string[];
       receipts?: Citation[];
     }
-  | { v: 7; type: "agent.jobs"; jobs: JobRow[] };
+  | { v: 8; type: "agent.jobs"; jobs: JobRow[] };
 
 export type AgentResponse =
-  | { v: 7; type: "agent.ready" }
+  | { v: 8; type: "agent.ready" }
   | {
-      v: 7;
+      v: 8;
       type: "agent.message";
       id: string;
       text: string;
@@ -111,16 +130,17 @@ export type AgentResponse =
       attachments: AttachmentDescriptor[];
     }
   | {
-      v: 7;
+      v: 8;
       type: "agent.wake";
+      proactive_id?: string;
       custom_type: string;
       text: string;
       details?: unknown;
     }
-  | { v: 7; type: "agent.abort"; id: string }
-  | { v: 7; type: "agent.job_command"; id: string; action: JobAction }
-  | { v: 7; type: "agent.offer_take"; id: string }
-  | { v: 7; type: "agent.rejected"; code: string; detail: string };
+  | { v: 8; type: "agent.abort"; id: string }
+  | { v: 8; type: "agent.job_command"; id: string; action: JobAction }
+  | { v: 8; type: "agent.offer_take"; id: string }
+  | { v: 8; type: "agent.rejected"; code: string; detail: string };
 
 /**
  * Every stable refusal code, mirroring `shared/control/src/refusal.rs`.
@@ -331,6 +351,8 @@ export function encodeAgentRequest(message: AgentRequest): string {
   if (message.type === "agent.jobs") checkJobRows(message.jobs);
   if (message.type === "agent.response") {
     if (message.receipts) checkCitations(message.receipts);
+    if (message.proactive_id !== undefined)
+      id(message.proactive_id, "proactive_id");
     bounded(message.text, MAX_TEXT_BYTES, "text");
     if ((message.attachments?.length ?? 0) > MAX_ATTACHMENTS)
       throw new ProtocolError("too many attachments", "invalid_attachments");
@@ -381,12 +403,12 @@ export function decodeAgentResponse(line: string): AgentResponse {
       "unsupported protocol version",
       "unsupported_version",
     );
-  if (message.type === "agent.ready") return { v: 7, type: "agent.ready" };
+  if (message.type === "agent.ready") return { v: 8, type: "agent.ready" };
   if (message.type === "agent.abort")
-    return { v: 7, type: "agent.abort", id: id(message.id, "id") };
+    return { v: 8, type: "agent.abort", id: id(message.id, "id") };
   if (message.type === "agent.rejected")
     return {
-      v: 7,
+      v: 8,
       type: "agent.rejected",
       code: id(message.code, "code"),
       detail: typeof message.detail === "string" ? message.detail : "",
@@ -397,14 +419,14 @@ export function decodeAgentResponse(line: string): AgentResponse {
     if (message.action !== "cancel" && message.action !== "archive")
       throw new ProtocolError("invalid job action", "invalid_action");
     return {
-      v: 7,
+      v: 8,
       type: "agent.job_command",
       id: id(message.id, "id"),
       action: message.action,
     };
   }
   if (message.type === "agent.offer_take")
-    return { v: 7, type: "agent.offer_take", id: id(message.id, "id") };
+    return { v: 8, type: "agent.offer_take", id: id(message.id, "id") };
   if (message.type === "agent.wake") {
     // A wake is words from outside the agent process, carried under the
     // caller's own custom type so an existing wake handler still matches.
@@ -419,8 +441,11 @@ export function decodeAgentResponse(line: string): AgentResponse {
         throw new ProtocolError("invalid wake details", "invalid_details");
     }
     return {
-      v: 7,
+      v: 8,
       type: "agent.wake",
+      ...(message.proactive_id === undefined
+        ? {}
+        : { proactive_id: id(message.proactive_id, "proactive_id") }),
       custom_type: id(message.custom_type, "custom_type"),
       text: bounded(message.text, MAX_TEXT_BYTES, "text"),
       ...(details === undefined ? {} : { details }),
@@ -453,7 +478,7 @@ export function decodeAgentResponse(line: string): AgentResponse {
     )
       throw new ProtocolError("duplicate attachment", "invalid_attachments");
     return {
-      v: 7,
+      v: 8,
       type: "agent.message",
       id: id(message.id, "id"),
       text: bounded(message.text, MAX_TEXT_BYTES, "text"),

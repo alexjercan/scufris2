@@ -24,9 +24,13 @@ kept, and is named in the briefing rather than quietly dropped.
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import json
 import os
 import re
+import secrets
+import signal
 import stat
 import subprocess
 import sys
@@ -44,7 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import page
 
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-PROFILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+PROFILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 #: A contribution is kept in a file named for its source, so a slug the reader
 #: hands over is held to one path component before it becomes one.
@@ -71,9 +75,10 @@ REPORTED = ("ok", "attention", "stale")
 ASKING = "asking"
 STATUSES = (*REPORTED, "failed", ASKING)
 
-#: A run's states. `collecting` survives a crash, so a directory left in it is
-#: an incomplete run and not a delivered one.
-RUN_STATES = ("collecting", "collected", "delivered", "failed")
+#: Collection and delivery are separate records. `collecting` survives a
+#: crash; writing prose prepares delivery but does not acknowledge it.
+RUN_STATES = ("collecting", "collected", "failed")
+DELIVERY_STATES = ("pending", "prepared")
 
 MAX_FACTS = 6
 MAX_TITLE = 80
@@ -86,6 +91,9 @@ MAX_OFFER_LABEL = 60
 MAX_OFFER_DETAIL = 400
 MAX_OUTPUT = 512 * 1024
 MAX_PROSE = 64 * 1024
+MAX_MANIFEST = 512 * 1024
+MAX_CONFIG = 256 * 1024
+MAX_CONTRIBUTION = MAX_OUTPUT + MAX_BODY + 64 * 1024
 KEEP_DAYS = 30
 
 SOURCE_DEADLINE = 900.0
@@ -161,11 +169,11 @@ def profiles_for(date: str) -> list[str]:
     runs by which is newer: a caller that means one of them says which.
     """
     directory = state_root() / validated_date(date)
-    if not directory.is_dir():
+    if directory.is_symlink() or not directory.is_dir():
         return []
     found = []
     for path in sorted(directory.iterdir()):
-        if not path.is_dir() or not PROFILE.fullmatch(path.name):
+        if path.is_symlink() or not path.is_dir() or not PROFILE.fullmatch(path.name):
             continue
         try:
             read_manifest(date, path.name)
@@ -278,7 +286,10 @@ def previous_started(date: str, profile: str) -> str | None:
         (
             path.name
             for path in root.iterdir()
-            if path.is_dir() and DATE.fullmatch(path.name) and path.name <= date
+            if not path.is_symlink()
+            and path.is_dir()
+            and DATE.fullmatch(path.name)
+            and path.name <= date
         ),
         reverse=True,
     )
@@ -293,6 +304,49 @@ def previous_started(date: str, profile: str) -> str | None:
     return None
 
 
+def read_regular(
+    path: Path,
+    maximum: int,
+    *,
+    optional: bool = False,
+) -> bytes | None:
+    """Read one bounded regular file through one already-open descriptor.
+
+    Run artifacts never follow their final component. The opened target is
+    checked before any byte is read: a device, FIFO, or oversized file is
+    refused.
+    """
+    flags = os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except FileNotFoundError:
+        if optional:
+            return None
+        raise Refused(f"{path} is unavailable") from None
+    except OSError as trouble:
+        raise Refused(f"{path} is unavailable: {trouble}") from None
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise Refused(f"{path} is not a regular file")
+        if metadata.st_size > maximum:
+            raise Refused(f"{path} is larger than {maximum} bytes")
+        chunks: list[bytes] = []
+        remaining = maximum + 1
+        while remaining:
+            chunk = os.read(descriptor, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b"".join(chunks)
+        if len(data) > maximum:
+            raise Refused(f"{path} is larger than {maximum} bytes")
+        return data
+    finally:
+        os.close(descriptor)
+
+
 def atomic_write(path: Path, data: str) -> None:
     handle, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=".briefing-")
     try:
@@ -302,6 +356,11 @@ def atomic_write(path: Path, data: str) -> None:
             os.fsync(stream.fileno())
         os.chmod(temporary, 0o600)
         os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
@@ -309,23 +368,79 @@ def atomic_write(path: Path, data: str) -> None:
 
 def read_manifest(date: str, profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
     named = f"{profile} run for {date}"
-    path = run_dir(date, profile) / "manifest.json"
+    directory = run_dir(date, profile)
+    if directory.is_symlink() or directory.parent.is_symlink():
+        raise Refused(f"the {named} uses an unsafe directory link")
+    path = directory / "manifest.json"
     try:
-        found = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        raise Refused(f"no {named}") from None
-    except (OSError, json.JSONDecodeError) as trouble:
+        raw = read_regular(path, MAX_MANIFEST, optional=True)
+        if raw is None:
+            raise Refused(f"no {named}")
+        found = json.loads(raw.decode("utf-8"))
+    except (Refused, UnicodeDecodeError, json.JSONDecodeError) as trouble:
+        if isinstance(trouble, Refused) and str(trouble) == f"no {named}":
+            raise
         raise Refused(f"the {named} is unreadable: {trouble}") from None
-    if not isinstance(found, dict) or found.get("version") != 1:
+    if not isinstance(found, dict) or found.get("version") not in (1, 2):
         raise Refused(f"the {named} is not a briefing manifest")
+    if found["version"] == 1:
+        # Historical runs had no generation or independent delivery state.
+        # Their stable identity is derived from immutable labels and start.
+        material = f"{date}\0{profile}\0{found.get('started', '')}".encode()
+        found = {
+            **found,
+            "generation": hashlib.sha256(material).hexdigest()[:24],
+            "delivery": "prepared" if found.get("state") == "delivered" else "pending",
+            "legacy_delivered": found.get("state") == "delivered",
+            "state": "collected" if found.get("state") == "delivered" else found.get("state"),
+            "events": [],
+        }
+    generation = found.get("generation")
+    sources = found.get("sources")
+    if (
+        found.get("date") != date
+        or found.get("profile") != profile
+        or not isinstance(generation, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", generation)
+        or found.get("state") not in RUN_STATES
+        or found.get("delivery") not in DELIVERY_STATES
+        or not isinstance(sources, list)
+        or not isinstance(found.get("diagnostics"), list)
+        or not isinstance(found.get("events"), list)
+    ):
+        raise Refused(f"the {named} is not a valid briefing manifest")
+    for source in sources:
+        if (
+            not isinstance(source, dict)
+            or not isinstance(source.get("project"), str)
+            or source.get("status") not in STATUSES
+            or not isinstance(source.get("slug"), str)
+            or not SLUG.fullmatch(source["slug"])
+        ):
+            raise Refused(f"the {named} has an invalid source")
     return found
 
 
-def write_manifest(manifest: dict[str, Any]) -> None:
+def write_manifest(manifest: dict[str, Any], *, replace: bool = False) -> None:
+    """Store one generation, refusing a late writer from an older run."""
     directory = run_dir(manifest["date"], manifest["profile"])
-    atomic_write(
-        directory / "manifest.json", json.dumps(manifest, indent=2, sort_keys=True)
-    )
+    path = directory / "manifest.json"
+    if not replace:
+        absent = f"no {manifest['profile']} run for {manifest['date']}"
+        try:
+            current = read_manifest(manifest["date"], manifest["profile"])
+        except Refused as trouble:
+            if str(trouble) != absent:
+                raise
+            current = None
+        if current is not None:
+            if current.get("generation") != manifest.get("generation"):
+                raise Refused("a newer generation owns this briefing run")
+            if current.get("state") != "collecting" and manifest.get("state") == "collecting":
+                raise Refused("a terminal briefing generation cannot be reopened")
+            if len(manifest.get("events", [])) < len(current.get("events", [])):
+                raise Refused("a briefing event cannot move backward")
+    atomic_write(path, json.dumps(manifest, indent=2, sort_keys=True))
 
 
 def declared_sources(
@@ -341,13 +456,16 @@ def declared_sources(
     request: dict[str, Any] = {"profile": profile}
     if config is not None:
         request["config"] = config
-    done = subprocess.run(
+    done = bounded_process(
         [sys.executable, str(JOBS_HELPER), "briefings"],
-        input=json.dumps(request),
-        text=True,
-        capture_output=True,
-        check=False,
+        str(Path.home()),
+        30.0,
+        stdin=json.dumps(request).encode("utf-8"),
     )
+    if done.oversized:
+        raise Refused("the project reader answered with too much output")
+    if done.timed_out:
+        raise Refused("the project reader did not answer within 30 seconds")
     try:
         envelope = json.loads(done.stdout)
     except json.JSONDecodeError:
@@ -751,6 +869,111 @@ def decoded(output: bytes | str | None) -> str:
     return output
 
 
+class ProcessResult(NamedTuple):
+    returncode: int
+    stdout: str
+    stderr: str
+    timed_out: bool
+    oversized: bool
+    seconds: float
+
+
+def bounded_process(
+    argv: list[str], cwd: str, deadline: float, *, stdin: bytes | None = None
+) -> ProcessResult:
+    """Run one source while retaining at most `MAX_OUTPUT` bytes total.
+
+    Both pipes are drained concurrently. The first byte over the bound stops
+    the recorded process group, so an answer cannot consume memory until the
+    deadline merely because the child keeps writing.
+    """
+    started = time.monotonic()
+    child = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    lock = threading.Lock()
+    remaining = MAX_OUTPUT
+    oversized = False
+    chunks: dict[str, list[bytes]] = {"stdout": [], "stderr": []}
+
+    def stop() -> None:
+        try:
+            os.killpg(child.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+    def drain(name: str, stream: Any) -> None:
+        nonlocal remaining, oversized
+        while True:
+            chunk = stream.read(65536)
+            if not chunk:
+                return
+            with lock:
+                kept = chunk[:remaining]
+                if kept:
+                    chunks[name].append(kept)
+                    remaining -= len(kept)
+                if len(chunk) > len(kept) and not oversized:
+                    oversized = True
+                    stop()
+
+    readers = [
+        threading.Thread(target=drain, args=(name, stream), daemon=True)
+        for name, stream in (("stdout", child.stdout), ("stderr", child.stderr))
+    ]
+    for reader in readers:
+        reader.start()
+    if stdin is not None and child.stdin is not None:
+        try:
+            child.stdin.write(stdin)
+            child.stdin.close()
+        except BrokenPipeError:
+            child.stdin.close()
+    timed_out = False
+    expires = started + max(0.001, deadline)
+    while child.poll() is None:
+        left = expires - time.monotonic()
+        if left <= 0:
+            timed_out = True
+            stop()
+            break
+        if oversized:
+            stop()
+            break
+        try:
+            child.wait(timeout=min(0.1, left))
+        except subprocess.TimeoutExpired:
+            continue
+    if child.poll() is None:
+        try:
+            child.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            child.wait()
+    for reader in readers:
+        reader.join(timeout=5)
+    if child.stdout is not None:
+        child.stdout.close()
+    if child.stderr is not None:
+        child.stderr.close()
+    return ProcessResult(
+        child.returncode,
+        decoded(b"".join(chunks["stdout"])),
+        decoded(b"".join(chunks["stderr"])),
+        timed_out,
+        oversized,
+        time.monotonic() - started,
+    )
+
+
 def attempt(
     source: dict[str, Any], prompt: str, deadline: float, *, tools: bool = True
 ) -> Attempt:
@@ -761,33 +984,9 @@ def attempt(
     """
     started = time.monotonic()
     try:
-        done = subprocess.run(
-            harness_argv(source, prompt, tools=tools),
-            cwd=source["root"],
-            text=True,
-            errors="replace",
-            capture_output=True,
-            check=False,
-            timeout=deadline,
+        done = bounded_process(
+            harness_argv(source, prompt, tools=tools), source["root"], deadline
         )
-    except subprocess.TimeoutExpired as cut:
-        seconds = time.monotonic() - started
-        # What it had already written. A source that spent the whole deadline
-        # is the one whose words are worth most, and this used to throw them
-        # away: an eight-hour night that answered slowly left nothing at all.
-        answer = decoded(cut.stdout)[:MAX_OUTPUT]
-        try:
-            # A source can finish its envelope and still not exit. Then the
-            # answer is there and only the process was late, so read it.
-            return Attempt(parse_contribution(answer), "", answer, True, seconds)
-        except Unusable:
-            return Attempt(
-                None,
-                f"the source did not answer within {int(deadline)} seconds",
-                answer or None,
-                False,
-                seconds,
-            )
     except (OSError, ValueError) as trouble:
         return Attempt(
             None,
@@ -796,18 +995,42 @@ def attempt(
             False,
             time.monotonic() - started,
         )
-    seconds = time.monotonic() - started
-    answer = (done.stdout or "")[:MAX_OUTPUT]
+    answer = done.stdout
+    if done.oversized:
+        return Attempt(
+            None,
+            f"the source wrote more than {MAX_OUTPUT} bytes",
+            answer or None,
+            False,
+            done.seconds,
+        )
+    if done.timed_out:
+        try:
+            # A source can finish its envelope and still not exit. Then the
+            # answer is there and only the process was late, so read it.
+            return Attempt(parse_contribution(answer), "", answer, True, done.seconds)
+        except Unusable:
+            return Attempt(
+                None,
+                f"the source did not answer within {int(deadline)} seconds",
+                answer or None,
+                False,
+                done.seconds,
+            )
     if done.returncode != 0:
-        detail = " ".join((done.stderr or "").split())[:MAX_HEADLINE]
+        detail = " ".join(done.stderr.split())[:MAX_HEADLINE]
         said = f": {detail}" if detail else ""
         return Attempt(
-            None, f"the harness exited {done.returncode}{said}", answer, False, seconds
+            None,
+            f"the harness exited {done.returncode}{said}",
+            answer,
+            False,
+            done.seconds,
         )
     try:
-        return Attempt(parse_contribution(answer), "", answer, True, seconds)
+        return Attempt(parse_contribution(answer), "", answer, True, done.seconds)
     except Unusable as trouble:
-        return Attempt(None, str(trouble), answer, True, seconds)
+        return Attempt(None, str(trouble), answer, True, done.seconds)
 
 
 def ask(
@@ -959,6 +1182,53 @@ def index_entry(contribution: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def process_identity(pid: int) -> str | None:
+    """Linux process start tick, which fences PID reuse for stale ownership."""
+    try:
+        raw = read_regular(Path(f"/proc/{pid}/stat"), 4096)
+        # The command name in parentheses may contain spaces. Fields after its
+        # final `)` begin at proc field 3; start time is field 22.
+        tail = (raw or b"").decode("ascii", errors="replace").rsplit(") ", 1)[1]
+        fields = tail.split()
+        return fields[19] if len(fields) > 19 else None
+    except Refused:
+        return None
+
+
+def owner_is_live(manifest: dict[str, Any]) -> bool:
+    owner = manifest.get("owner")
+    return (
+        isinstance(owner, dict)
+        and isinstance(owner.get("pid"), int)
+        and isinstance(owner.get("start"), str)
+        and process_identity(owner["pid"]) == owner["start"]
+    )
+
+
+def event_counts(sources: list[dict[str, Any]]) -> tuple[int, int]:
+    complete = [source for source in sources if source.get("status") != ASKING]
+    failed = [source for source in complete if source.get("status") == "failed"]
+    return len(complete), len(failed)
+
+
+def with_event(
+    manifest: dict[str, Any], kind: str, *, source: str | None = None
+) -> dict[str, Any]:
+    events = list(manifest.get("events", []))
+    completed, failed = event_counts(manifest.get("sources", []))
+    event: dict[str, Any] = {
+        "sequence": len(events) + 1,
+        "kind": kind,
+        "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "completed": completed,
+        "total": len(manifest.get("sources", [])),
+        "failed": failed,
+    }
+    if source is not None:
+        event["source"] = source
+    return {**manifest, "events": [*events, event]}
+
+
 def collect(
     date: str | None = None,
     profile: str = DEFAULT_PROFILE,
@@ -966,6 +1236,52 @@ def collect(
     config: str | None = None,
     source_deadline: float | None = None,
     run_deadline: float | None = None,
+    generation: str | None = None,
+) -> dict[str, Any]:
+    """Hold one run owner, so two collectors cannot replace each other."""
+    profile = validated_profile(profile)
+    date = local_date() if date is None else validated_date(date)
+    directory = run_dir(date, profile)
+    if directory.is_symlink() or directory.parent.is_symlink():
+        raise Refused(f"the {profile} briefing uses an unsafe directory link")
+    directory.mkdir(parents=True, exist_ok=True)
+    state_root().chmod(0o700)
+    directory.parent.chmod(0o700)
+    directory.chmod(0o700)
+    lock_path = directory / ".collect.lock"
+    try:
+        descriptor = os.open(
+            lock_path,
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600,
+        )
+    except OSError as trouble:
+        raise Refused(f"the {profile} briefing lock is unavailable: {trouble}") from None
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Refused(f"the {profile} briefing is already collecting") from None
+        return _collect_owned(
+            date,
+            profile,
+            config=config,
+            source_deadline=source_deadline,
+            run_deadline=run_deadline,
+            generation=generation,
+        )
+    finally:
+        os.close(descriptor)
+
+
+def _collect_owned(
+    date: str,
+    profile: str,
+    *,
+    config: str | None,
+    source_deadline: float | None,
+    run_deadline: float | None,
+    generation: str | None,
 ) -> dict[str, Any]:
     """Ask every declared source at once and write the run.
 
@@ -985,6 +1301,32 @@ def collect(
         if run_deadline is None
         else run_deadline
     )
+    generation = secrets.token_hex(12) if generation is None else generation
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", generation):
+        raise Refused("a briefing generation is a simple identifier")
+    directory = run_dir(date, profile)
+    absent = f"no {profile} run for {date}"
+    try:
+        prior = read_manifest(date, profile)
+    except Refused as trouble:
+        if str(trouble) != absent:
+            raise
+        prior = None
+    if prior is not None:
+        if prior.get("state") != "collecting":
+            # One date and profile identify one generation. A duplicate timer
+            # or stale collector reconciles that generation instead of
+            # replacing terminal work with a second run.
+            return prior
+        if owner_is_live(prior):
+            raise Refused(f"the {profile} briefing is already collecting")
+        return finalize(
+            date,
+            profile,
+            str(prior.get("generation", "")),
+            "the previous collector no longer owns a live process",
+        )
+
     sources, diagnostics = declared_sources(profile, config)
     # Resolved before the manifest is written, so the run records what it was
     # given rather than what it would have been given.
@@ -995,18 +1337,22 @@ def collect(
     # and a profile name one directory. Every source is told the same moment,
     # so a run is one window and not one for each source.
     since = previous_started(date, profile)
-    directory = run_dir(date, profile)
-    (directory / "contributions").mkdir(parents=True, exist_ok=True)
+    contributions_directory = directory / "contributions"
+    contributions_directory.mkdir(parents=True, exist_ok=True)
+    contributions_directory.chmod(0o700)
     directory.parent.chmod(0o700)
     directory.chmod(0o700)
     started = datetime.now().astimezone()
     manifest: dict[str, Any] = {
-        "version": 1,
+        "version": 2,
+        "generation": generation,
         "profile": profile,
         "date": date,
         "state": "collecting",
+        "delivery": "pending",
         "started": started.isoformat(timespec="seconds"),
         "finished": None,
+        "owner": {"pid": os.getpid(), "start": process_identity(os.getpid()) or "unknown"},
         # Named before the first question rather than after the last answer, so
         # a run in flight says which projects it is waiting on.
         "sources": [asking_entry(source) for source in sources],
@@ -1021,33 +1367,43 @@ def collect(
             "run_deadline": run_deadline,
             "parallel": workers,
         },
+        "events": [],
     }
-    write_manifest(manifest)
+    manifest = with_event(manifest, "started")
+    write_manifest(manifest, replace=True)
+    announce(manifest)
     if not sources:
         return finish(manifest, [])
     clock = time.monotonic()
     # The live index. One entry per source, written over as each one answers,
     # and read by whoever opens the run before it is over.
     asked = [dict(entry) for entry in manifest["sources"]]
+    current = manifest
     stumbles: list[dict[str, str]] = []
     keeping = threading.Lock()
 
     def note(place: int, contribution: dict[str, Any]) -> None:
-        """Put one answer in the manifest as it arrives.
-
-        Under a lock because the sources run together. A progress write that
-        fails must not cost the run the answer it was writing down, so it is
-        caught and named here; `finish` writes the record either way.
-        """
+        """Persist one answer before publishing its source completion."""
+        nonlocal current
         with keeping:
-            asked[place] = index_entry(contribution)
             try:
-                write_manifest({**manifest, "sources": list(asked)})
-            except (OSError, TypeError, ValueError) as trouble:
+                atomic_write(
+                    directory / "contributions" / f"{contribution['slug']}.json",
+                    json.dumps(contribution, indent=2, sort_keys=True),
+                )
+                asked[place] = index_entry(contribution)
+                current = with_event(
+                    {**current, "sources": list(asked)},
+                    "source_finished",
+                    source=str(contribution.get("project", "")),
+                )
+                write_manifest(current)
+                announce(current)
+            except (OSError, Refused, TypeError, ValueError, KeyError) as trouble:
                 stumbles.append(
                     {
                         "project": str(contribution.get("project", "")),
-                        "diagnostic": f"the run's progress could not be written: {trouble!r}",
+                        "diagnostic": f"the contribution progress could not be written: {trouble!r}",
                     }
                 )
 
@@ -1076,7 +1432,7 @@ def collect(
     with ThreadPoolExecutor(max_workers=workers) as pool:
         contributions = list(pool.map(bounded, range(len(sources)), sources))
     return finish(
-        {**manifest, "diagnostics": [*manifest["diagnostics"], *stumbles]},
+        {**current, "diagnostics": [*current["diagnostics"], *stumbles]},
         contributions,
     )
 
@@ -1119,7 +1475,9 @@ def finish(
     manifest = {
         **manifest,
         "state": "collected" if answered or not contributions else "failed",
+        "delivery": "pending",
         "finished": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "owner": None,
         "sources": [index_entry(item) for item in contributions],
         # The numbered list is the manifest's own, not any source's. It is
         # written once, here, and every reader after this - the page, the wake,
@@ -1127,7 +1485,9 @@ def finish(
         # again.
         "offers": numbered_offers(contributions),
     }
+    manifest = with_event(manifest, "terminal")
     write_manifest(manifest)
+    announce(manifest)
     # The record is written before the page and the pruning, and neither of
     # them may take it back. A morning that was collected stays collected even
     # if it cannot be laid out or the old runs cannot be swept.
@@ -1177,6 +1537,7 @@ PROFILE_BOUNDS_FILE = "briefing-profiles.json"
 #: with a symlink to `/dev/zero`, and an unbounded read grew to 29 GB before the
 #: kernel stopped it, taking the collector and every source with it.
 MAX_PROFILE_BOUNDS = 65536
+NIX_STORE = Path("/nix/store")
 
 #: What a profile may set, and the variable each one is read through.
 PROFILE_BOUNDS = {
@@ -1195,26 +1556,35 @@ def config_home() -> Path:
 
 
 def read_profile_bounds(path: Path) -> bytes | None:
-    """Reads the generated bounds file, or answers `None` if it is not one.
+    """Read one generated bounds file without trusting a replacement path.
 
-    `O_NOFOLLOW` because the path is a fixed name in a directory the run does
-    not own exclusively, and a symlink there is not the deployment's file. The
-    regular-file check because a character device never reaches EOF. The size
-    check because a regular file can still be larger than any honest set of
-    numbers.
+    A direct file is opened with `O_NOFOLLOW`. Home Manager deploys this file
+    as one final symlink into the immutable Nix store. For that case, read the
+    link first, require its lexical target to be in `/nix/store`, and open that
+    target directly with `O_NOFOLLOW`. Replacing the user-owned link after it
+    is read cannot redirect the descriptor. Any other link reads as absent.
 
-    `O_NONBLOCK` because the type check cannot run until the open returns, and
-    opening a FIFO for reading blocks until someone writes to it. Without it the
-    guard against a FIFO would itself be the hang it exists to prevent. It has
-    no effect on the regular file this expects.
-
-    The order matters: the file type is settled from the open descriptor with
-    `fstat` rather than from the path, so nothing can be swapped between the
-    check and the read.
+    `O_NONBLOCK` makes opening a FIFO safe. `fstat` then requires a bounded
+    regular file through the descriptor before any content is consumed.
     """
-    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    opened = path
     try:
-        handle = os.open(path, flags | getattr(os, "O_CLOEXEC", 0))
+        if path.is_symlink():
+            linked = Path(os.readlink(path))
+            if not linked.is_absolute():
+                linked = path.parent / linked
+            opened = Path(os.path.abspath(linked))
+            try:
+                opened.relative_to(NIX_STORE)
+            except ValueError:
+                return None
+        handle = os.open(
+            opened,
+            os.O_RDONLY
+            | os.O_NOFOLLOW
+            | os.O_NONBLOCK
+            | getattr(os, "O_CLOEXEC", 0),
+        )
     except OSError:
         return None
     try:
@@ -1247,11 +1617,10 @@ def apply_profile_bounds(profile: str) -> None:
     briefing that refuses to run over a generated file is worse than one held to
     its defaults, and the manifest records the numbers it actually used.
 
-    The file is opened without following a symlink and is read only when it is
-    a regular file no larger than `MAX_PROFILE_BOUNDS`. Nothing generates a
-    device, a FIFO, or a megabyte here, so anything else is a replaced file
-    rather than a deployment, and reading it is how one bad path takes the whole
-    run down with it.
+    The file is opened without following an untrusted symlink and is read only
+    when it is a regular file no larger than `MAX_PROFILE_BOUNDS`. The one
+    exception is Home Manager's final link into the immutable Nix store.
+    Devices, FIFOs, other links, and oversized files read as absent.
     """
     raw = read_profile_bounds(config_home() / PROFILE_BOUNDS_FILE)
     if raw is None:
@@ -1339,7 +1708,7 @@ def prune(keep: int | None = None) -> None:
         (
             path
             for path in root.iterdir()
-            if path.is_dir() and DATE.fullmatch(path.name)
+            if not path.is_symlink() and path.is_dir() and DATE.fullmatch(path.name)
         ),
         reverse=True,
     )
@@ -1372,11 +1741,16 @@ def read_run(date: str, profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
     for entry in manifest["sources"]:
         path = directory / f"{entry['slug']}.json"
         try:
-            contributions.append(json.loads(path.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError):
+            raw = read_regular(path, MAX_CONTRIBUTION)
+            contributions.append(json.loads((raw or b"").decode("utf-8")))
+        except (Refused, UnicodeDecodeError, json.JSONDecodeError):
             contributions.append({**entry, "body": "", "raw": None})
     prose_path = run_dir(date, profile) / "briefing.md"
-    prose = prose_path.read_text(encoding="utf-8") if prose_path.is_file() else None
+    try:
+        raw_prose = read_regular(prose_path, MAX_PROSE + 1, optional=True)
+        prose = None if raw_prose is None else raw_prose.decode("utf-8")
+    except (Refused, UnicodeDecodeError):
+        prose = None
     return {"manifest": manifest, "contributions": contributions, "prose": prose}
 
 
@@ -1394,7 +1768,9 @@ def publish(date: str, profile: str, prose: str) -> dict[str, Any]:
         raise Refused(f"the prose is longer than {MAX_PROSE} characters")
     directory = run_dir(date, profile)
     atomic_write(directory / "briefing.md", prose.strip() + "\n")
-    manifest = {**manifest, "state": "delivered"}
+    # This says the artifact is ready. Only the service may mark terminal
+    # delivery done, after the correlated answer is in canonical replay.
+    manifest = {**manifest, "delivery": "prepared"}
     write_manifest(manifest)
     run = read_run(date, profile)
     atomic_write(directory / "briefing.html", page.render_page(run))
@@ -1402,6 +1778,7 @@ def publish(date: str, profile: str, prose: str) -> dict[str, Any]:
         "date": date,
         "profile": profile,
         "state": manifest["state"],
+        "delivery": manifest["delivery"],
         "markdown": str(directory / "briefing.md"),
         "page": str(directory / "briefing.html"),
     }
@@ -1416,9 +1793,9 @@ def render(date: str, profile: str = DEFAULT_PROFILE) -> str:
 
 
 def delivered(date: str, profile: str = DEFAULT_PROFILE) -> bool:
-    """Whether this run already has a briefing the owner has been given."""
+    """Whether this run has prose prepared for service acknowledgment."""
     try:
-        return read_manifest(date, profile)["state"] == "delivered"
+        return read_manifest(date, profile).get("delivery") == "prepared"
     except Refused:
         return False
 
@@ -1489,44 +1866,181 @@ def failure_message(manifest: dict[str, Any]) -> str:
     )
 
 
-def wake(date: str, profile: str, *, ctl: str | None = None) -> dict[str, Any]:
-    """Carry one gathered run to the foreground conversation.
+def service_run_id(manifest: dict[str, Any]) -> str:
+    """A bounded global identity for one date, profile, and generation."""
+    material = (
+        f"{manifest['date']}\0{manifest['profile']}\0{manifest['generation']}".encode()
+    )
+    return f"briefing-{hashlib.sha256(material).hexdigest()[:32]}"
 
-    The run on disk is the durable half and this is the delivery. A refused
-    wake therefore leaves the run exactly as it was: the session-start read
-    finds it later, and a morning gathered while the agent was down is still
-    written up.
-    """
+
+def lifecycle_update(manifest: dict[str, Any]) -> dict[str, Any]:
+    """The bounded service ingress derived only from durable run facts."""
+    completed, failed = event_counts(manifest.get("sources", []))
+    total = len(manifest.get("sources", []))
+    collection = manifest.get("state")
+    if collection not in RUN_STATES:
+        collection = "failed"
+    started = manifest.get("started", "")
+    try:
+        since = int(datetime.fromisoformat(started).timestamp())
+    except (TypeError, ValueError):
+        since = 0
+    if collection == "collecting":
+        summary = f"{completed} of {total} sources finished"
+    elif collection == "failed":
+        summary = f"all {failed} sources failed"
+    else:
+        answered = completed - failed
+        summary = f"{answered} of {total} sources answered"
+        if failed:
+            summary += f"; {failed} failed"
+    generation = str(manifest["generation"])
+    run_id = service_run_id(manifest)
+    row = {
+        "id": run_id,
+        "date": str(manifest["date"]),
+        "profile": str(manifest["profile"]),
+        "collection": collection,
+        # The service owns forward progress from pending through delivered.
+        # A v1 `delivered` run predates that service boundary and is imported
+        # terminal without replaying what was already said.
+        "delivery": "delivered"
+        if total == 0 or manifest.get("legacy_delivered") is True
+        else "pending",
+        "since": since,
+        "completed": completed,
+        "total": total,
+        "failed": failed,
+        "summary": summary[:256],
+    }
+    update: dict[str, Any] = {"briefing": row}
+    if (
+        collection in ("collected", "failed")
+        and total
+        and manifest.get("legacy_delivered") is not True
+    ):
+        update["wake"] = {
+            "event_id": f"{run_id}-terminal",
+            "custom_type": BRIEFING_WAKE,
+            "text": failure_message(manifest)
+            if collection == "failed"
+            else wake_message(manifest),
+            "details": {
+                "generation": generation,
+                "date": manifest["date"],
+                "profile": manifest["profile"],
+                "completed": completed,
+                "total": total,
+                "failed": failed,
+            },
+        }
+    return update
+
+
+def announce(
+    manifest: dict[str, Any], *, ctl: str | None = None
+) -> tuple[bool, str]:
+    """Best-effort latency hint backed by later full reconciliation."""
+    command = [
+        ctl or os.environ.get("SCUFRIS_CTL") or CTL,
+        "briefing",
+        json.dumps(lifecycle_update(manifest), sort_keys=True),
+    ]
+    try:
+        done = bounded_process(command, str(Path.home()), 30.0)
+    except (OSError, ValueError) as trouble:
+        return False, f"{command[0]} could not be run: {trouble}"
+    if done.returncode != 0:
+        return False, done.stderr.strip() or f"{command[0]} exited {done.returncode}"
+    return True, ""
+
+
+def finalize(date: str, profile: str, generation: str, cause: str) -> dict[str, Any]:
+    """Close an ownerless collection, retaining every persisted answer."""
+    manifest = read_manifest(date, profile)
+    if manifest.get("generation") != generation:
+        raise Refused("that briefing generation no longer owns the run")
+    if manifest.get("state") != "collecting":
+        return manifest
+    if owner_is_live(manifest):
+        raise Refused("the briefing collector still owns a live process")
+    directory = run_dir(date, profile) / "contributions"
+    contributions: list[dict[str, Any]] = []
+    for entry in manifest.get("sources", []):
+        path = directory / f"{entry.get('slug', 'unknown')}.json"
+        try:
+            raw = read_regular(path, MAX_CONTRIBUTION, optional=True)
+            if raw is not None:
+                contribution = json.loads(raw.decode("utf-8"))
+                if isinstance(contribution, dict):
+                    contributions.append(contribution)
+                    continue
+        except (Refused, UnicodeDecodeError, json.JSONDecodeError):
+            pass
+        contributions.append(
+            failed_contribution(
+                entry,
+                f"the collector stopped before this source was kept: {cause}",
+            )
+        )
+    closed = {
+        **manifest,
+        "diagnostics": [
+            *manifest.get("diagnostics", []),
+            {"project": "", "diagnostic": f"collector stopped: {cause}"},
+        ],
+    }
+    return finish(closed, contributions)
+
+
+def reconcile(*, ctl: str | None = None) -> dict[str, int]:
+    """Authoritatively replay kept rows and close stale ownerless runs."""
+    root = state_root()
+    sent = 0
+    refused = 0
+    finalized = 0
+    if not root.is_dir():
+        return {"sent": 0, "refused": 0, "finalized": 0}
+    keep = environment_int("SCUFRIS_BRIEFING_KEEP_DAYS", KEEP_DAYS)
+    days = [
+        path
+        for path in sorted(root.iterdir(), reverse=True)
+        if not path.is_symlink() and path.is_dir() and DATE.fullmatch(path.name)
+    ][:keep]
+    for day in reversed(days):
+        for profile in profiles_for(day.name):
+            manifest = read_manifest(day.name, profile)
+            if manifest.get("state") == "collecting" and not owner_is_live(manifest):
+                try:
+                    started = datetime.fromisoformat(str(manifest.get("started", "")))
+                    deadline = float(manifest.get("bounds", {}).get("run_deadline", RUN_DEADLINE))
+                    stale = (datetime.now().astimezone() - started).total_seconds() > deadline + 300
+                except (TypeError, ValueError):
+                    stale = True
+                if stale:
+                    manifest = finalize(
+                        day.name,
+                        profile,
+                        str(manifest.get("generation", "")),
+                        "no matching collector remained after its deadline",
+                    )
+                    finalized += 1
+            ok, _reason = announce(manifest, ctl=ctl)
+            if ok:
+                sent += 1
+            else:
+                refused += 1
+    return {"sent": sent, "refused": refused, "finalized": finalized}
+
+
+def wake(date: str, profile: str, *, ctl: str | None = None) -> dict[str, Any]:
+    """Durably hand one terminal generation to the service."""
     manifest = read_manifest(date, profile)
     answer = {"date": date, "profile": profile, "woken": False, "reason": ""}
-    # A failed run is delivered too. It is the one state where the absence of
-    # a briefing is itself the news, and refusing to carry it made a total
-    # failure quieter than a partial one.
     if manifest["state"] not in ("collected", "failed"):
         return {**answer, "reason": f"the run is {manifest['state']}"}
     if not manifest["sources"]:
         return {**answer, "reason": "no project declared this briefing"}
-    command = [
-        ctl or os.environ.get("SCUFRIS_CTL") or CTL,
-        "wake",
-        failure_message(manifest)
-        if manifest["state"] == "failed"
-        else wake_message(manifest),
-        "--custom-type",
-        BRIEFING_WAKE,
-        "--details",
-        json.dumps(
-            {"date": date, "profile": profile, "sources": len(manifest["sources"])},
-            sort_keys=True,
-        ),
-    ]
-    try:
-        done = subprocess.run(command, capture_output=True, text=True, check=False)
-    except OSError as trouble:
-        return {**answer, "reason": f"{command[0]} could not be run: {trouble}"}
-    if done.returncode != 0:
-        return {
-            **answer,
-            "reason": done.stderr.strip() or f"{command[0]} exited {done.returncode}",
-        }
-    return {**answer, "woken": True}
+    accepted, reason = announce(manifest, ctl=ctl)
+    return {**answer, "woken": accepted, "reason": reason}

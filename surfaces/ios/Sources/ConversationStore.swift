@@ -33,6 +33,8 @@ final class ConversationStore: NSObject, ObservableObject {
     @Published private(set) var conversation: [ConversationEntry] = []
     /// Every delegated job, oldest row first. A row outlives its job.
     @Published private(set) var jobs: [JobRow] = []
+    /// Durable scheduled briefing state. It never becomes a conversation row.
+    @Published private(set) var briefings: [BriefingRow] = []
     @Published private(set) var serviceDetail = ""
     @Published private(set) var serviceState = "idle"
     @Published private(set) var settings = ConnectionSettings(backendURL: "", token: "")
@@ -584,6 +586,7 @@ final class ConversationStore: NSObject, ObservableObject {
         serviceState = "starting"
         conversation = []
         jobs = []
+        briefings = []
         serviceDetail = "Connecting to \(url.host ?? "backend")"
         var request = URLRequest(url: url)
         request.setValue("Bearer \(settings.token)", forHTTPHeaderField: "Authorization")
@@ -687,6 +690,15 @@ final class ConversationStore: NSObject, ObservableObject {
                 throw ProtocolFailure.invalidMessage("the job list is outside its bounds")
             }
             jobs = listed.jobs
+        case "surface.briefings":
+            let listed = try decoder.decode(IncomingBriefings.self, from: data)
+            guard listed.briefings.count <= 128,
+                  listed.briefings.allSatisfy(\.isProtocolValid),
+                  Set(listed.briefings.map(\.id)).count == listed.briefings.count
+            else {
+                throw ProtocolFailure.invalidMessage("the briefing list is outside its bounds")
+            }
+            briefings = listed.briefings
         case "surface.offer_taken":
             let taken = try decoder.decode(IncomingOfferTaken.self, from: data)
             markTaken(taken.id)

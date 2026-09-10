@@ -507,15 +507,19 @@ function hud(
   taken = true,
   lines: Record<string, unknown>[] = [],
   jobs: Record<string, unknown>[] = [],
+  briefings: Record<string, unknown>[] = [],
 ): Page {
   const page = new Page();
   page.answers["hud_ready"] = {
     lines,
     jobs,
+    briefings,
     notice: { sending: false, thinking: false, attachments: [], trouble: "" },
   };
   page.answers["hud_submit"] = taken;
   page.add("lines", "OL");
+  page.add("briefings", "LI");
+  page.add("briefing-rows", "DIV");
   page.add("jobs", "LI");
   page.add("rows", "DIV");
   page.add("notice", "SPAN");
@@ -1287,6 +1291,53 @@ test("an offer sends its identifier and is marked spent by the service", async (
     .element("lines")
     .children[0]!.children.find((part) => part.className === "strip");
   assert.equal(replayed?.children[1]?.dataset["spent"], "");
+});
+
+test("briefing progress is a quiet accessible row in the conversation flow", async () => {
+  const collecting = {
+    id: "generation-a",
+    date: "2026-09-10",
+    profile: "nightly",
+    collection: "collecting",
+    delivery: "pending",
+    since: Math.floor(Date.now() / 1000) - 60,
+    completed: 1,
+    total: 3,
+    failed: 0,
+    summary: "1 of 3 sources finished",
+  };
+  const page = hud(true, [line("assistant", "Earlier.")], [], [collecting]);
+  await settle();
+  const lines = page.element("lines");
+  assert.equal(lines.children[lines.children.length - 1]?.id, "briefings");
+  const row = page.element("briefing-rows").children[0]!;
+  assert.equal(row.dataset["state"], "collecting");
+  assert.deepEqual(
+    row.children.map((part) => part.content),
+    ["nightly", "gather", "1/3", "1 of 3 sources finished"],
+  );
+  assert.match(
+    row.getAttribute("aria-label") ?? "",
+    /nightly briefing for 2026-09-10, gather, 1 of 3 sources/,
+  );
+
+  page.publish("scufris://briefings", [
+    {
+      ...collecting,
+      collection: "collected",
+      delivery: "delivered",
+      completed: 3,
+      summary: "3 of 3 sources answered",
+    },
+  ]);
+  const done = page.element("briefing-rows").children[0]!;
+  assert.equal(done.dataset["state"], "delivered");
+  assert.equal(done.children[1]?.content, "done");
+  assert.equal(
+    lines.children.filter((child) => child.className === "line").length,
+    1,
+    "a lifecycle update did not create a conversation line",
+  );
 });
 
 test("a job row outlives its job and the list is the last thing in the flow", async () => {

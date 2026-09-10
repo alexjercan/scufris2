@@ -697,7 +697,7 @@ impl App {
             // Both are the conversation window's, and the companion has
             // nothing to show for either: a job row is not a state the pill
             // wears, and a spent offer is a badge in a message.
-            LinkEvent::Jobs(_) | LinkEvent::OfferTaken(_) => {}
+            LinkEvent::Jobs(_) | LinkEvent::Briefings(_) | LinkEvent::OfferTaken(_) => {}
             LinkEvent::Message { .. } => {}
         }
     }

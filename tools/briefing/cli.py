@@ -86,14 +86,30 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser(
         "sources", parents=[common], help="the sources that declare this briefing"
     )
-    commands.add_parser(
+    collector = commands.add_parser(
         "collect", parents=[common], help="ask every source and keep what it said"
+    )
+    collector.add_argument("--generation")
+    commands.add_parser(
+        "bounds", parents=[common], help="show the configured bounds for one profile"
     )
     commands.add_parser(
         "wake",
         parents=[common],
-        help="carry a gathered run to the foreground conversation",
+        help="durably carry a gathered run to the foreground conversation",
     )
+    commands.add_parser(
+        "reconcile",
+        parents=[common],
+        help="replay durable lifecycle state into the service",
+    )
+    finalizer = commands.add_parser(
+        "finalize",
+        parents=[common],
+        help="close one collector generation that no longer owns a process",
+    )
+    finalizer.add_argument("--generation", required=True)
+    finalizer.add_argument("--cause", required=True)
     commands.add_parser(
         "pending",
         parents=[common],
@@ -215,14 +231,40 @@ def main(argv: list[str] | None = None) -> int:
                 wanted_date(options),
                 wanted_profile(options),
                 config=named_config(options),
+                generation=options.generation,
             )
             say(options, manifest, run_lines({"manifest": manifest}))
+        elif options.command == "bounds":
+            profile = wanted_profile(options)
+            bounds = {
+                "profile": profile,
+                "deadline": briefing.environment_seconds(
+                    "SCUFRIS_BRIEFING_DEADLINE", briefing.RUN_DEADLINE
+                ),
+                "source_deadline": briefing.environment_seconds(
+                    "SCUFRIS_BRIEFING_SOURCE_DEADLINE", briefing.SOURCE_DEADLINE
+                ),
+            }
+            say(options, bounds, [str(bounds["deadline"])])
         elif options.command == "wake":
             date, profile = wanted_run(options)
             result = briefing.wake(
                 date, profile, ctl=getattr(options, "ctl", None) or None
             )
             say(options, result, [wake_line(result)])
+        elif options.command == "reconcile":
+            result = briefing.reconcile(ctl=getattr(options, "ctl", None) or None)
+            say(options, result, [f"{result['sent']} briefing rows reconciled"])
+        elif options.command == "finalize":
+            date = wanted_date(options)
+            profile = wanted_profile(options)
+            manifest = briefing.finalize(
+                date,
+                profile,
+                options.generation,
+                options.cause,
+            )
+            say(options, manifest, run_lines({"manifest": manifest}))
         elif options.command == "pending":
             date = wanted_date(options)
             runs = [

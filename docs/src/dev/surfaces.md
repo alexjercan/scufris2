@@ -23,7 +23,7 @@ loopback listener and bearer-token boundary:
 
 | Method       | Path                    | Purpose                                          |
 | ------------ | ----------------------- | ------------------------------------------------ |
-| `GET`        | `/` or `/surface`       | Upgrade to a protocol-v7 surface WebSocket       |
+| `GET`        | `/` or `/surface`       | Upgrade to a protocol-v8 surface WebSocket       |
 | `GET`        | `/health`               | Read the authenticated gateway identity          |
 | `POST`       | `/audio/transcription`  | Forward a bounded mono PCM WAV to host inference |
 | `POST`       | `/attachments?name=...` | Upload one bounded object                        |
@@ -39,7 +39,7 @@ The transcription route accepts at most 2 MiB and 60 seconds of audio. It sends
 multipart `file`, `model=whisper-1`, and `response_format=json` to the loopback
 `ai-tools-api`. Its bounded `{ "text": "..." }` response is presentation data,
 not a surface message. The iOS app places it in the editable composer and sends
-it only through an ordinary protocol-v7 `surface.message` after confirmation.
+it only through an ordinary protocol-v8 `surface.message` after confirmation.
 
 ## Surface lifecycle
 
@@ -49,7 +49,8 @@ flowchart TB
     Hello --> Replay["replayed surface.message entries<br/>0 to 200"]
     Replay --> State[surface.state]
     State --> Jobs["surface.jobs<br/>0 to 8 rows"]
-    Jobs --> Ready["surface.ready<br/>matching stable ID"]
+    Jobs --> Briefings["surface.briefings<br/>0 to 16 rows"]
+    Briefings --> Ready["surface.ready<br/>matching stable ID"]
     Ready --> Live[enable live speech + widget effects]
 ```
 
@@ -68,6 +69,7 @@ sequenceDiagram
     Service-->>Client: replay messages
     Service-->>Client: surface.state
     Service-->>Client: surface.jobs
+    Service-->>Client: surface.briefings
     Service-->>Client: surface.ready
     Client->>Service: surface.message
     Service-->>Others: canonical user message
@@ -87,16 +89,16 @@ surface.abort {id} -> surface.aborted {id}
 
 ## Messages a client sends
 
-All messages include `"v": 7`. Surface submissions carry only managed
+All messages include `"v": 8`. Surface submissions carry only managed
 attachment IDs. The service resolves them into canonical descriptors before a
 message reaches the agent, another surface, or replay.
 
 ```json
-{"v":7,"type":"surface.hello","surface":{"id":"laptop-a","name":"Laptop A","widgets":[]}}
-{"v":7,"type":"surface.message","id":"message-1","text":"What changed?","attachments":["att_opaque"]}
-{"v":7,"type":"surface.abort","id":"abort-1"}
-{"v":7,"type":"job.command","id":"3f81c204b1e9","action":"cancel"}
-{"v":7,"type":"offer.take","id":"offer-a1"}
+{"v":8,"type":"surface.hello","surface":{"id":"laptop-a","name":"Laptop A","widgets":[]}}
+{"v":8,"type":"surface.message","id":"message-1","text":"What changed?","attachments":["att_opaque"]}
+{"v":8,"type":"surface.abort","id":"abort-1"}
+{"v":8,"type":"job.command","id":"3f81c204b1e9","action":"cancel"}
+{"v":8,"type":"offer.take","id":"offer-a1"}
 ```
 
 `job.command` is the one control a job row has. `cancel` stops the job and
@@ -113,6 +115,7 @@ behind an offer stay with the agent, so no surface can compose a prompt.
 | `surface.aborted`     | Settle the matching abort                                                                                                 |
 | `surface.state`       | Show `failed`, `blocked`, `working`, `starting`, or `idle`; conversation views present working as transient `thinking...` |
 | `surface.jobs`        | Replace the whole job list with these 0 to 8 rows                                                                         |
+| `surface.briefings`   | Replace 0 to 16 quiet briefing rows; never speak them or create a conversation line                                       |
 | `surface.offer_taken` | Mark that offer spent wherever it is drawn                                                                                |
 | `surface.ready`       | End replay; enable live effects                                                                                           |
 | `surface.rejected`    | Show the bounded code/detail; keep user data when relevant                                                                |
@@ -138,6 +141,13 @@ Filing a row says it has been seen and nothing more: the job record is
 untouched, and `cancel`, `stop` or `land` is what ends the work itself. The list is whole on every send, live rows are
 never dropped at the cap, and the aggregate `surface.state` word is folded from
 these rows.
+
+A briefing row carries an opaque generation ID, date and profile labels,
+independent collection and delivery states, start time, completed/total/failed
+counts, and a bounded measured summary. Draw it as quiet state outside the
+conversation messages. Desktop and iPhone retain the count at narrow widths and
+expose the complete row as one accessibility label. There is no surface action
+for a briefing row.
 
 `text` is literal plain prose on every surface. Markdown delimiters in it stay
 literal, while safe bare HTTP and HTTPS URLs can become native links. Only
@@ -211,6 +221,8 @@ surface the owner used last and whether or not it is still connected.
 | Badge or offer label        | 64 bytes                       |
 | Job rows                    | 8                              |
 | Job summary                 | 512 bytes                      |
+| Briefing rows               | 16 generations                 |
+| Briefing summary            | 256 bytes                      |
 | Retained conversation       | 200 messages                   |
 
 Reject wrong versions, unknown message types, invalid enum values, oversized

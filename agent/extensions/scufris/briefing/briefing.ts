@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 import { Type } from "@earendil-works/pi-ai";
 import {
   defineTool,
@@ -14,9 +13,8 @@ const helperPath = toolPath("briefing/cli.py", import.meta.url);
 
 export const BRIEFING_WAKE = "scufris-briefing";
 const DATE = "^\\d{4}-\\d{2}-\\d{2}$";
-const PROFILE = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
+const PROFILE = "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$";
 const READ_TIMEOUT = 30_000;
-const RUN_DEADLINE = 1800;
 const COLLECT_SLACK = 120_000;
 const MAX_HELPER_OUTPUT = 4 * 1024 * 1024;
 
@@ -26,59 +24,6 @@ interface Manifest {
   state: RunState;
   sources: Array<{ project: string; status: string; headline: string }>;
   diagnostics: Array<{ project: string; diagnostic: string }>;
-}
-
-/** A run that was gathered and whose prose was never written. */
-interface Pending {
-  date: string;
-  profile: string;
-  sources: number;
-  message: string;
-}
-
-/** Seconds the deployment allows this profile's whole collection.
- *
- * The same generated file the helper reads. Without it this waited the built-in
- * half hour on a profile that allows its sources eight, and killed a run the
- * helper was still within its own deadline for - which looked to the helper
- * like the collection being cut off for no reason it could name.
- *
- * Anything that can go wrong reads as if the file said nothing. A briefing that
- * refuses to start over a generated file is worse than one held to defaults.
- */
-function profileDeadline(profile: string): number | undefined {
-  const home =
-    process.env.XDG_CONFIG_HOME ??
-    (process.env.HOME === undefined
-      ? undefined
-      : join(process.env.HOME, ".config"));
-  if (home === undefined) return undefined;
-  let declared: unknown;
-  try {
-    declared = JSON.parse(
-      readFileSync(join(home, "scufris", "briefing-profiles.json"), "utf8"),
-    );
-  } catch {
-    return undefined;
-  }
-  if (typeof declared !== "object" || declared === null) return undefined;
-  const bounds = (declared as Record<string, unknown>)[profile];
-  if (typeof bounds !== "object" || bounds === null) return undefined;
-  const deadline = (bounds as Record<string, unknown>).deadline;
-  return typeof deadline === "number" &&
-    Number.isFinite(deadline) &&
-    deadline > 0
-    ? deadline
-    : undefined;
-}
-
-function collectTimeout(profile: string): number {
-  const raw = Number(process.env.SCUFRIS_BRIEFING_DEADLINE);
-  const deadline =
-    Number.isFinite(raw) && raw > 0
-      ? raw
-      : (profileDeadline(profile) ?? RUN_DEADLINE);
-  return deadline * 1000 + COLLECT_SLACK;
 }
 
 /** Run the briefing helper and read its JSON answer.
@@ -140,108 +85,28 @@ export async function runHelper<T>(
 export default function briefing(pi: ExtensionAPI): void {
   if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
 
-  // No timer and nothing that polls. A profile's schedule is a systemd timer
-  // that collects out of process and wakes the conversation through the
-  // control socket; the one thing left here is a single file read when a
-  // session opens, for a run gathered while no agent was connected.
+  // Collection stays in systemd. Session startup reconciles durable run files
+  // with the service inbox; the systemd reconciliation timer covers long-lived
+  // sessions without putting a clock inside the capability extension.
   let extensionContext: ExtensionContext | undefined;
   let running = false;
-  let stopped = false;
 
   const notify = (message: string, level: "info" | "error" = "info") => {
     if (extensionContext?.hasUI) extensionContext.ui.notify(message, level);
   };
 
-  /** Every run for a date that is gathered and still needs its prose. */
-  const pending = async (date: string): Promise<Pending[]> => {
-    const answer = await runHelper<{ runs: Pending[] }>([
-      "pending",
-      "--date",
-      date,
-      "--json",
-    ]);
-    return answer.runs;
-  };
-
-  /** Ask for the writing, in the helper's own words.
+  /** Replay all retained generations into the durable service store.
    *
-   * The message is the helper's because the timer sends the same one over the
-   * control socket. A briefing asked for by hand and one the clock asked for
-   * must be asked for identically, and two copies of that prose would drift.
+   * Collector announcements are latency hints. This startup scan and the
+   * external periodic scan are authoritative, so a stopped service or a
+   * missed event does not make a terminal generation disappear.
    */
-  const wake = (run: Pending) => {
-    if (stopped) return;
-    pi.sendMessage(
-      {
-        customType: BRIEFING_WAKE,
-        content: run.message,
-        display: true,
-        details: {
-          date: run.date,
-          profile: run.profile,
-          sources: run.sources,
-        },
-      },
-      { deliverAs: "followUp", triggerTurn: true },
-    );
-  };
-
-  /** Ask for anything gathered while nothing was listening.
-   *
-   * A collection whose wake was refused leaves its run `collected`, so this is
-   * the fallback that keeps a briefing gathered while the agent was down. It
-   * is one read at session start and never repeats.
-   */
-  const readWhatIsWaiting = async (): Promise<void> => {
-    // Yesterday as well as today. A nightly collects at 23:00, and if nothing
-    // was connected its run is pending under yesterday's date by the time the
-    // next session opens. Reading one date lost every such run, which is every
-    // nightly, and the docs promised the opposite.
-    const now = new Date();
-    const earlier = new Date(now);
-    earlier.setDate(earlier.getDate() - 1);
-    // Both reads start before this yields. Session start hands the read off
-    // rather than holding the session open, so anything read after the first
-    // await is read against whatever the environment has become by then.
-    //
-    // The catch is per date: the helper refuses a date it has never seen, and
-    // most sessions open on exactly one such date, so letting that refusal
-    // escape would hide whichever date did have a run waiting.
-    const found = await Promise.all(
-      [localDate(earlier), localDate(now)].map(async (date) => {
-        try {
-          return await pending(date);
-        } catch (error) {
-          notify(
-            error instanceof Error ? error.message : String(error),
-            "error",
-          );
-          return [];
-        }
-      }),
-    );
-    for (const runs of found) for (const run of runs) wake(run);
-  };
-
-  /** Report a collection that failed after the tool already returned.
-   *
-   * `scufris_briefing_run` answers `started: true` and collects detached, so
-   * every later failure had only `notify`, and `hasUI` is false under the
-   * service. Alex was told the briefing was coming and then waited for
-   * nothing.
-   */
-  const reportRunFailure = (profile: string, reason: string) => {
-    if (stopped) return;
-    notify(reason, "error");
-    pi.sendMessage(
-      {
-        customType: BRIEFING_WAKE,
-        content: `The ${profile} briefing you were asked to collect did not arrive: ${reason}. Tell the user plainly what failed, claim nothing about what the sources would have said, then call scufris_final_response. Do not collect it again unless he asks.`,
-        display: true,
-        details: { profile, error: reason },
-      },
-      { deliverAs: "followUp", triggerTurn: true },
-    );
+  const reconcile = async (): Promise<void> => {
+    try {
+      await runHelper(["reconcile", "--json"]);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : String(error), "error");
+    }
   };
 
   pi.registerTool(
@@ -267,33 +132,67 @@ export default function briefing(pi: ExtensionAPI): void {
           });
         const date = localDate(new Date());
         const wanted = params.profile ?? DEFAULT_PROFILE;
+        const generation = randomBytes(12).toString("hex");
         running = true;
         void (async () => {
           try {
-            const manifest = await runHelper<Manifest>(
-              ["collect", "--date", date, "--profile", wanted, "--json"],
-              { timeoutMs: collectTimeout(wanted) },
-            );
-            // A briefing nothing declared is not an event, and the helper
-            // leaves such a run out of what is pending. Waking the foreground
-            // to say that no project asked for anything would be the only
-            // noise the briefing ever made.
-            const waiting = (await pending(date)).find(
-              (run) => run.profile === wanted,
-            );
-            if (waiting) wake(waiting);
-            // A run nothing declared stays silent; a run where every source
-            // failed does not. Alex asked for this one and is waiting on it.
-            else if (manifest.state === "failed")
-              reportRunFailure(
-                wanted,
-                `every source failed (${manifest.sources.map((source) => source.project).join(", ")})`,
-              );
-          } catch (error) {
-            reportRunFailure(
+            const bounds = await runHelper<{ deadline: number }>([
+              "bounds",
+              "--profile",
               wanted,
-              error instanceof Error ? error.message : String(error),
+              "--json",
+            ]);
+            const manifest = await runHelper<Manifest>(
+              [
+                "collect",
+                "--date",
+                date,
+                "--profile",
+                wanted,
+                "--generation",
+                generation,
+                "--json",
+              ],
+              { timeoutMs: bounds.deadline * 1000 + COLLECT_SLACK },
             );
+            // The helper has already announced each durable state. Repeat the
+            // terminal upsert so a service restart in the last instant still
+            // gets it. The control acknowledgement does not require an agent.
+            if (manifest.sources.length > 0)
+              await runHelper([
+                "wake",
+                "--date",
+                date,
+                "--profile",
+                wanted,
+                "--json",
+              ]);
+          } catch (error) {
+            const reason =
+              error instanceof Error ? error.message : String(error);
+            notify(reason, "error");
+            // If collection wrote a generation before it stopped, close that
+            // generation and let the durable service path produce the one
+            // correlated terminal turn. A helper failure never injects a
+            // second model turn directly.
+            try {
+              await runHelper([
+                "finalize",
+                "--date",
+                date,
+                "--profile",
+                wanted,
+                "--generation",
+                generation,
+                "--cause",
+                reason,
+                "--json",
+              ]);
+              await reconcile();
+            } catch {
+              // No run was started, or its collector is still live. The tool
+              // notification is the complete result in either case.
+            }
           } finally {
             running = false;
           }
@@ -389,12 +288,10 @@ export default function briefing(pi: ExtensionAPI): void {
   // through included.
   pi.on("session_start", (_event, ctx) => {
     extensionContext = ctx;
-    stopped = false;
-    void readWhatIsWaiting();
+    void reconcile();
   });
 
   pi.on("session_shutdown", () => {
-    stopped = true;
     extensionContext = undefined;
   });
 }

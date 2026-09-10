@@ -37,7 +37,7 @@ test("the encoder holds the host's content rules so a violation is not a teardow
   // costs the answer in flight and says nothing. These have to match.
   const response = (details: string) =>
     encodeAgentRequest({
-      v: 7,
+      v: 8,
       type: "agent.response",
       text: "Done.",
       details,
@@ -49,7 +49,7 @@ test("the encoder holds the host's content rules so a violation is not a teardow
   assert.throws(
     () =>
       encodeAgentRequest({
-        v: 7,
+        v: 8,
         type: "agent.response",
         text: "one\rtwo",
       }),
@@ -59,7 +59,7 @@ test("the encoder holds the host's content rules so a violation is not a teardow
   // worker's captured output was enough to close the channel.
   const listed = (summary: string) =>
     encodeAgentRequest({
-      v: 7,
+      v: 8,
       type: "agent.jobs",
       jobs: [
         {
@@ -88,7 +88,7 @@ test("a job row summary is clamped rather than lost", () => {
   assert.doesNotMatch(wide, /�/);
   assert.ok(
     encodeAgentRequest({
-      v: 7,
+      v: 8,
       type: "agent.jobs",
       jobs: [
         {
@@ -111,7 +111,7 @@ test("badges are grouped by job and an offer names one offer in the message", ()
   });
   assert.ok(
     encodeAgentRequest({
-      v: 7,
+      v: 8,
       type: "agent.response",
       text: "Both finished.",
       receipts: [
@@ -122,7 +122,7 @@ test("badges are grouped by job and an offer names one offer in the message", ()
   );
   const refused = (receipts: ReturnType<typeof cited>[]) =>
     encodeAgentRequest({
-      v: 7,
+      v: 8,
       type: "agent.response",
       text: "Both finished.",
       receipts,
@@ -177,13 +177,13 @@ test("a job list is bounded and every row names one job", () => {
   // identifier never may.
   assert.ok(
     encodeAgentRequest({
-      v: 7,
+      v: 8,
       type: "agent.jobs",
       jobs: [row("3f81c204b1e9")],
     }),
   );
   const refused = (jobs: ReturnType<typeof row>[]) =>
-    encodeAgentRequest({ v: 7, type: "agent.jobs", jobs });
+    encodeAgentRequest({ v: 8, type: "agent.jobs", jobs });
   assert.throws(
     () => refused([row("3f81c204b1e9"), row("3f81c204b1e9")]),
     /duplicate job row/,
@@ -199,17 +199,17 @@ test("a job list is bounded and every row names one job", () => {
   );
 });
 
-test("agent v7 messages are bounded and channel-specific", () => {
+test("agent v8 messages are bounded and channel-specific", () => {
   assert.equal(
-    encodeAgentRequest({ v: 7, type: "agent.hello" }),
-    '{"v":7,"type":"agent.hello"}\n',
+    encodeAgentRequest({ v: 8, type: "agent.hello" }),
+    '{"v":8,"type":"agent.hello"}\n',
   );
   assert.deepEqual(
     decodeAgentResponse(
-      '{"v":7,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}',
+      '{"v":8,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}',
     ),
     {
-      v: 7,
+      v: 8,
       type: "agent.message",
       id: "m-1",
       text: "hello",
@@ -219,7 +219,7 @@ test("agent v7 messages are bounded and channel-specific", () => {
   );
   assert.throws(() => decodeAgentResponse('{"v":6,"type":"agent.ready"}'));
   assert.throws(() =>
-    decodeAgentResponse('{"v":7,"type":"surface.ready","surface":"desk"}'),
+    decodeAgentResponse('{"v":8,"type":"surface.ready","surface":"desk"}'),
   );
 });
 
@@ -232,7 +232,7 @@ test("attachment descriptors are strict and reach the surface prompt", () => {
   };
   const message = decodeAgentResponse(
     JSON.stringify({
-      v: 7,
+      v: 8,
       type: "agent.message",
       id: "m-1",
       text: "See it.",
@@ -255,7 +255,7 @@ test("attachment descriptors are strict and reach the surface prompt", () => {
     assert.throws(() =>
       decodeAgentResponse(
         JSON.stringify({
-          v: 7,
+          v: 8,
           type: "agent.message",
           id: "m-1",
           text: "See it.",
@@ -285,13 +285,13 @@ test("framing retains partial lines and rejects oversized input", () => {
 });
 
 test("the agent client sends messages through sendUserMessage and steers while busy", async () => {
-  const root = await mkdtemp(join(tmpdir(), "scufris-agent-v7-"));
+  const root = await mkdtemp(join(tmpdir(), "scufris-agent-v8-"));
   const socketPath = join(root, "agent.sock");
   const server = createServer((socket) => {
     socket.once("data", () => {
-      socket.write('{"v":7,"type":"agent.ready"}\n');
+      socket.write('{"v":8,"type":"agent.ready"}\n');
       socket.write(
-        '{"v":7,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}\n',
+        '{"v":8,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}\n',
       );
     });
   });
@@ -347,7 +347,7 @@ test("handshake EOF produces the local update-together message", async () => {
 test("a wake is decoded under its own kind with bounded details", () => {
   const wake = (fields: Record<string, unknown>) =>
     decodeAgentResponse(
-      JSON.stringify({ v: 7, type: "agent.wake", ...fields }),
+      JSON.stringify({ v: 8, type: "agent.wake", ...fields }),
     );
   assert.deepEqual(
     wake({
@@ -356,7 +356,7 @@ test("a wake is decoded under its own kind with bounded details", () => {
       details: { profile: "morning" },
     }),
     {
-      v: 7,
+      v: 8,
       type: "agent.wake",
       custom_type: "scufris-briefing",
       text: "The briefing is collected.",
@@ -364,7 +364,7 @@ test("a wake is decoded under its own kind with bounded details", () => {
     },
   );
   assert.deepEqual(wake({ custom_type: "scufris-wake", text: "Wake up." }), {
-    v: 7,
+    v: 8,
     type: "agent.wake",
     custom_type: "scufris-wake",
     text: "Wake up.",
@@ -389,9 +389,9 @@ test("a wake becomes a follow-up, never a user message", async () => {
   const socketPath = join(root, "agent.sock");
   const server = createServer((socket) => {
     socket.once("data", () => {
-      socket.write('{"v":7,"type":"agent.ready"}\n');
+      socket.write('{"v":8,"type":"agent.ready"}\n');
       socket.write(
-        '{"v":7,"type":"agent.wake","custom_type":"scufris-briefing","text":"Wake up.","details":{"profile":"morning"}}\n',
+        '{"v":8,"type":"agent.wake","custom_type":"scufris-briefing","text":"Wake up.","details":{"profile":"morning"}}\n',
       );
     });
   });
@@ -421,6 +421,58 @@ test("a wake becomes a follow-up, never a user message", async () => {
   });
   assert.equal(userMessages, 0);
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  await rm(root, { recursive: true, force: true });
+});
+
+test("a durable wake correlates exactly the next atomic response", async () => {
+  const root = await mkdtemp(join(tmpdir(), "scufris-agent-proactive-"));
+  const socketPath = join(root, "agent.sock");
+  const response = new Promise<Record<string, unknown>>((resolve) => {
+    const server = createServer((socket) => {
+      let buffer = "";
+      socket.setEncoding("utf8");
+      socket.on("data", (chunk: string) => {
+        buffer += chunk;
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const message = JSON.parse(line) as Record<string, unknown>;
+          if (message.type === "agent.hello") {
+            socket.write('{"v":8,"type":"agent.ready"}\n');
+            socket.write(
+              '{"v":8,"type":"agent.wake","proactive_id":"briefing-generation-a-terminal","custom_type":"scufris-briefing","text":"Wake up."}\n',
+            );
+          } else if (message.type === "agent.response") {
+            resolve(message);
+          }
+        }
+      });
+    });
+    void new Promise<void>((listening) =>
+      server.listen(socketPath, listening),
+    ).then(() => {
+      const client = new AgentClient({
+        socketPath,
+        busy: () => false,
+        abort() {},
+        jobCommand() {},
+        offerTake() {},
+        sendUserMessage() {},
+        wake(value) {
+          assert.equal(value.proactiveId, "briefing-generation-a-terminal");
+          client.response({ text: "The briefing." });
+        },
+      });
+      client.start();
+      void response.finally(() => {
+        client.stop();
+        server.close();
+      });
+    });
+  });
+  const sent = await response;
+  assert.equal(sent.proactive_id, "briefing-generation-a-terminal");
+  assert.equal(sent.text, "The briefing.");
   await rm(root, { recursive: true, force: true });
 });
 

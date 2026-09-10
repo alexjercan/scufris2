@@ -11,8 +11,9 @@ local HTTP -> content.sock ----+
 ```
 
 `scufris-service` owns the Pi RPC process, canonical user-facing state, the
-latest 200 conversation messages, and managed attachment content. It exposes
-three protocol-v7 sockets and one private HTTP socket:
+latest 200 conversation messages, a durable scheduled-briefing inbox, and
+managed attachment content. It exposes
+three protocol-v8 sockets and one private HTTP socket:
 
 - `$XDG_RUNTIME_DIR/scufris/surface.sock`: registered desktop and synthetic
   surfaces;
@@ -29,7 +30,7 @@ coordinated staging stack.
 ## Typed channels
 
 Each socket has its own inbound and outbound message enum. Every line is one
-bounded LF-terminated JSON object with `"v":7`. A wrong version is logged and
+bounded LF-terminated JSON object with `"v":8`. A wrong version is logged and
 the connection closes without a response. Clients show a local message that
 asks the user to update the host and surface together.
 
@@ -39,9 +40,9 @@ connection. A later `surface.message` or `surface.abort` does not repeat the
 surface ID. Registering the same ID replaces only the previous generation.
 
 An agent starts with `agent.hello`. A second agent receives `agent.rejected` and
-is disconnected. Control supports only `control.hello`, `control.state`, and
-`control.wake`. There is no control watch, abort, debug, event stream, or
-prompt command.
+is disconnected. Control supports `control.hello`, `control.state`,
+`control.wake`, and durable `control.briefing` upserts. There is no control
+watch, abort, debug, event stream, or prompt command.
 
 ## Replay and broadcast
 
@@ -67,10 +68,11 @@ Registration queues these under one lock:
 
 1. retained messages;
 2. current `surface.state`;
-3. current `surface.jobs`; and
-4. `surface.ready`.
+3. current `surface.jobs`;
+4. durable `surface.briefings`; and
+5. `surface.ready`.
 
-The connection becomes eligible for live broadcasts only after all four are
+The connection becomes eligible for live broadcasts only after all five are
 queued. A surface clears its local copy when replay starts. It stores replayed
 messages but performs no speech, response animation, or widget calls before
 `surface.ready`.
@@ -96,11 +98,41 @@ open the next answer is `unprompted`, and so is an answer whose owner
 disconnected before it arrived, widgets stripped. An answer is never refused
 for want of a surface to attribute it to.
 
+## Durable briefing ingress
+
+`control.briefing` upserts one generation-fenced `BriefingRow` and may include
+one terminal `BriefingWake`. The service writes the complete row and wake queue
+to `$XDG_DATA_HOME/scufris/briefings.json` before returning
+`control.briefing_ack`. The update is accepted with no agent or surface
+connected. The service broadcasts the complete `surface.briefings` list, so
+collection progress is quiet state and never a model turn.
+
+A terminal wake has a stable event ID. The service queues it once, waits for Pi
+to be idle and for no user turn to own the response association, writes
+`in_progress`, then sends `agent.wake` with that event ID as `proactive_id`.
+While this one proactive slot is reserved, surface submissions receive
+`no_free_slot` and remain in their composer. They are never steered into the
+briefing.
+
+The agent copies `proactive_id` to its next atomic response. The service accepts
+only the active correlation. It first atomically records the assistant message
+and delivery ID in canonical conversation replay, then marks the briefing
+`delivered` and removes its queued wake. A restart resets an unrecorded
+`in_progress` item to pending. If replay was written but the second snapshot was
+not, startup finds the delivery ID in replay and closes the inbox before an
+agent can connect. Duplicate terminal upserts therefore do not produce a
+second visible answer.
+
+Collection and delivery never overwrite each other. The filesystem helper owns
+`collecting`, `collected`, and `failed`; the service owns `pending`,
+`in_progress`, and `delivered`.
+
 ## Unprompted wake ingress
 
-`control.wake` is the only way a process outside the agent reaches the
-foreground with words. A systemd timer, a finished collection, or any other
-out-of-process event sends one over `control.sock`; the service forwards it to
+`control.wake` is the volatile way a process outside the agent reaches the
+foreground with words. Durable scheduled briefings use `control.briefing`
+instead. Other out-of-process events send a wake over `control.sock`; the
+service forwards it to
 the agent connection as `agent.wake`, and the Pi extension delivers it with
 `pi.sendMessage()` using `deliverAs: "followUp"` and `triggerTurn: true` under
 the `custom_type` the caller named, so an existing wake handler keeps working.
@@ -126,8 +158,9 @@ and exits non-zero when it did not land. The default custom type is
 
 ## Atomic responses
 
-The agent emits one `agent.response` with mandatory bounded plain `text`,
-optional bounded Markdown `details`, and optional bounded `widgets` calls. The
+The agent emits one `agent.response` with mandatory bounded plain `text`, an
+optional proactive correlation ID, optional bounded Markdown `details`, and
+optional bounded `widgets` calls. The
 service validates widget names and arguments against the selected surface's
 registration before it records and broadcasts the response. An answer with no
 selected surface carries no widget calls: a widget belongs to the surface that

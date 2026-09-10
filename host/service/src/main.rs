@@ -18,6 +18,7 @@
 
 mod agent;
 mod attachment;
+mod briefings;
 mod config;
 mod conversation;
 mod logging;
@@ -141,6 +142,7 @@ fn main() -> ExitCode {
         content = %config.content_socket.display(),
         sessions = %config.session_dir.display(),
         conversation = %config.conversation_file.display(),
+        briefings = %config.briefing_file.display(),
         attachments = %config.attachment_dir.display(),
         "the service is listening"
     );

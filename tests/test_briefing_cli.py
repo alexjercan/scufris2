@@ -184,7 +184,8 @@ class Command(unittest.TestCase):
 
         published = self.answered("publish", stdin="Good morning. Nothing is waiting.")
         assert isinstance(published, dict)
-        self.assertEqual(published["state"], "delivered")
+        self.assertEqual(published["state"], "collected")
+        self.assertEqual(published["delivery"], "prepared")
         rendered = Path(published["page"]).read_text(encoding="utf-8")
         self.assertIn("Good morning. Nothing is waiting.", rendered)
         self.assertIn("Yesterday closed clean.", rendered)

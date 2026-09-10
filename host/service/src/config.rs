@@ -44,6 +44,8 @@ pub struct Config {
     pub session_dir: PathBuf,
     /// Durable canonical conversation replay snapshot.
     pub conversation_file: PathBuf,
+    /// Durable briefing lifecycle rows and proactive inbox.
+    pub briefing_file: PathBuf,
     /// Surface socket the service binds.
     pub surface_socket: PathBuf,
     /// Agent socket the service binds.
@@ -143,10 +145,12 @@ impl Config {
             }
             None => data_home.join(DEFAULT_CONVERSATION_FILE),
         };
+        let briefing_file = conversation_file.with_file_name("briefings.json");
         Ok(Self {
             agent,
             session_dir,
             conversation_file,
+            briefing_file,
             surface_socket: PathBuf::new(),
             agent_socket: PathBuf::new(),
             control_socket: PathBuf::new(),
@@ -177,6 +181,7 @@ impl Config {
             agent: PathBuf::from("/nonexistent/scufris"),
             session_dir: PathBuf::from("/srv/sessions"),
             conversation_file: runtime.join("data/conversation.json"),
+            briefing_file: runtime.join("data/briefings.json"),
             surface_socket: runtime.join("surface.sock"),
             agent_socket: runtime.join("agent.sock"),
             control_socket: runtime.join("control.sock"),

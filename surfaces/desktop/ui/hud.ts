@@ -44,6 +44,8 @@
   };
 
   const lines = element<HTMLOListElement>("lines");
+  const briefings = element<HTMLLIElement>("briefings");
+  const briefingRows = element<HTMLElement>("briefing-rows");
   const jobs = element<HTMLLIElement>("jobs");
   const rows = element<HTMLElement>("rows");
   const notice = element<HTMLElement>("notice");
@@ -67,6 +69,15 @@
     blocked: "block",
     done: "done",
     failed: "fail",
+  };
+
+  const BRIEFING_WORDS: Record<string, string> = {
+    collecting: "gather",
+    collected: "ready",
+    failed: "fail",
+    pending: "ready",
+    in_progress: "write",
+    delivered: "done",
   };
 
   /** What one line does to the notice line, when nothing is in flight. */
@@ -475,18 +486,58 @@
     tail();
   };
 
-  /**
-   * Keeps the job list at the end of the flow, whatever went in above it.
-   *
-   * Taken out of the list rather than hidden in it when there is nothing to
-   * show: an empty block still occupies the flow, and the rule that hangs a
-   * short conversation above the field reads the first child of the list.
-   */
+  /** Draws durable scheduled briefing state. It has no controls: collection
+   * and delivery ownership stay outside every foreground surface. */
+  const listBriefings = (listed: BriefingRow[]): void => {
+    briefingRows.replaceChildren(
+      ...listed.map((row) => {
+        const drawn = document.createElement("div");
+        drawn.className = "briefing-row";
+        drawn.dataset["state"] =
+          row.delivery === "delivered" ? "delivered" : row.collection;
+        const profile = document.createElement("span");
+        profile.className = "briefing-profile";
+        profile.textContent = row.profile;
+        profile.title = `${row.profile} for ${row.date}`;
+        const state = document.createElement("span");
+        state.className = "briefing-state";
+        const key =
+          row.delivery === "in_progress" || row.delivery === "delivered"
+            ? row.delivery
+            : row.delivery === "pending" && row.collection !== "collecting"
+              ? "pending"
+              : row.collection;
+        state.textContent = BRIEFING_WORDS[key] ?? key;
+        const count = document.createElement("span");
+        count.className = "briefing-count";
+        count.textContent = `${row.completed}/${row.total}`;
+        const summary = document.createElement("span");
+        summary.className = "briefing-summary";
+        summary.textContent = row.summary;
+        summary.title = row.summary;
+        drawn.setAttribute(
+          "aria-label",
+          `${row.profile} briefing for ${row.date}, ${state.textContent}, ${row.completed} of ${row.total} sources: ${row.summary}`,
+        );
+        drawn.append(profile, state, count, summary);
+        return drawn;
+      }),
+    );
+    tail();
+  };
+
+  /** Keeps quiet lifecycle lists at the end of the conversation flow. */
   const tail = (): void => {
+    briefings.remove();
     jobs.remove();
-    if (rows.children.length === 0) return;
-    jobs.hidden = false;
-    lines.append(jobs);
+    if (briefingRows.children.length > 0) {
+      briefings.hidden = false;
+      lines.append(briefings);
+    }
+    if (rows.children.length > 0) {
+      jobs.hidden = false;
+      lines.append(jobs);
+    }
   };
 
   const append = (entry: ConversationEntry): void => {
@@ -723,6 +774,7 @@
   void listen("scufris://conversation", (event) => {
     const backlog = event.payload as Backlog;
     replace(backlog.lines);
+    listBriefings(backlog.briefings ?? []);
     list(backlog.jobs ?? []);
     say(backlog.notice);
   });
@@ -738,6 +790,13 @@
     settle();
   });
 
+  void listen("scufris://briefings", (event) => {
+    const follow = atBottom();
+    listBriefings(event.payload as BriefingRow[]);
+    if (follow) pin();
+    settle();
+  });
+
   void listen("scufris://offer-taken", (event) => {
     spend(event.payload as string);
   });
@@ -747,6 +806,7 @@
   void (async () => {
     const backlog = (await invoke("hud_ready")) as Backlog;
     replace(backlog.lines);
+    listBriefings(backlog.briefings ?? []);
     list(backlog.jobs ?? []);
     say(backlog.notice);
     fit();

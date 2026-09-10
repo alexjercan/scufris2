@@ -685,6 +685,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                         surfaces.assistant(observer.shown_assistant());
                     }
                     LinkEvent::Jobs(jobs) => said.jobs(jobs),
+                    LinkEvent::Briefings(briefings) => said.briefings(briefings),
                     LinkEvent::OfferTaken(id) => said.offer_taken(&id),
                 },
             ));

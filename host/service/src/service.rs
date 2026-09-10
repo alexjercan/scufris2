@@ -1,4 +1,4 @@
-//! Canonical protocol v7 service state.
+//! Canonical protocol v8 service state.
 
 use std::{
     collections::HashMap,
@@ -14,9 +14,10 @@ use std::{
 
 use scufris_control::refusal;
 use scufris_control::service::{
-    AgentRequestBody, AgentResponse, AgentResponseBody, ControlResponseBody, ConversationMessage,
-    ConversationRole, JobAction, JobRow, JobRowState, ScufrisState, SurfaceRegistration,
-    SurfaceResponse, SurfaceResponseBody, UNPROMPTED_SURFACE, WidgetCall, WidgetDefinition,
+    AgentRequestBody, AgentResponse, AgentResponseBody, BriefingDeliveryState, BriefingRow,
+    BriefingWake, ControlResponseBody, ConversationMessage, ConversationRole, JobAction, JobRow,
+    JobRowState, ScufrisState, SurfaceRegistration, SurfaceResponse, SurfaceResponseBody,
+    UNPROMPTED_SURFACE, WidgetCall, WidgetDefinition,
 };
 use serde_json::Value;
 use tracing::{debug, error, info, warn};
@@ -24,6 +25,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     agent::{Agent, described},
     attachment::AttachmentStore,
+    briefings::BriefingStore,
     config::Config,
     conversation::ConversationHistory,
     rpc::{self, Command, DialogAnswer, Event, SessionState},
@@ -82,6 +84,10 @@ struct Inner {
     /// word is folded from it rather than sent alongside it, so the two cannot
     /// disagree about whether anything needs Alex.
     jobs: Vec<JobRow>,
+    /// Durable quiet briefing rows and terminal proactive inbox.
+    briefings: BriefingStore,
+    /// Terminal event currently holding the one proactive model slot.
+    active_proactive: Option<String>,
     surfaces: HashMap<String, RegisteredSurface>,
     surface_by_connection: HashMap<u64, (String, u64)>,
     next_surface_generation: u64,
@@ -207,6 +213,44 @@ impl Inner {
         let (state, detail) = self.state();
         self.broadcast(SurfaceResponseBody::State { state, detail });
     }
+
+    fn publish_briefings(&mut self) {
+        self.broadcast(SurfaceResponseBody::Briefings {
+            briefings: self.briefings.rows(),
+        });
+    }
+
+    /// Gives one durable terminal item the model slot only while no user turn
+    /// owns it. The row is stored as in progress before the wake crosses the
+    /// volatile agent connection.
+    fn dispatch_briefing(&mut self) {
+        if self.lifecycle != Lifecycle::Idle
+            || self.associated_surface.is_some()
+            || self.active_proactive.is_some()
+            || self.agent.is_none()
+        {
+            return;
+        }
+        let Some((_run_id, wake)) = self.briefings.next() else {
+            return;
+        };
+        let wake = wake.clone();
+        if let Err(error) = self.briefings.in_progress(&wake.event_id) {
+            warn!(%error, event = wake.event_id, "briefing delivery could not be reserved");
+            return;
+        }
+        if self.send_agent(AgentResponseBody::Wake {
+            proactive_id: Some(wake.event_id.clone()),
+            custom_type: wake.custom_type,
+            text: wake.text,
+            details: wake.details,
+        }) {
+            self.active_proactive = Some(wake.event_id);
+        } else if let Err(error) = self.briefings.retry(&wake.event_id) {
+            warn!(%error, event = wake.event_id, "briefing delivery could not be returned to pending");
+        }
+        self.publish_briefings();
+    }
 }
 
 pub struct Service {
@@ -218,6 +262,12 @@ pub struct Service {
 impl Service {
     pub fn new(config: Config, attachments: Arc<AttachmentStore>) -> Arc<Self> {
         let conversation = ConversationHistory::open(config.conversation_file.clone());
+        let mut briefings = BriefingStore::open(config.briefing_file.clone());
+        if let Err(error) =
+            briefings.recover_delivered(|event_id| conversation.contains_delivery(event_id))
+        {
+            warn!(%error, "canonical briefing delivery recovery could not be stored");
+        }
         Arc::new(Self {
             config,
             attachments,
@@ -230,6 +280,8 @@ impl Service {
                 lifecycle: Lifecycle::Starting,
                 lifecycle_detail: String::new(),
                 jobs: Vec::new(),
+                briefings,
+                active_proactive: None,
                 surfaces: HashMap::new(),
                 surface_by_connection: HashMap::new(),
                 next_surface_generation: 0,
@@ -294,6 +346,9 @@ impl Service {
         // finished work as well as about what is running.
         let _ = outbox.try_send(SurfaceResponse::new(SurfaceResponseBody::Jobs {
             jobs: inner.jobs.clone(),
+        }));
+        let _ = outbox.try_send(SurfaceResponse::new(SurfaceResponseBody::Briefings {
+            briefings: inner.briefings.rows(),
         }));
         let _ = outbox.try_send(SurfaceResponse::new(SurfaceResponseBody::Ready {
             surface: registration.id.clone(),
@@ -361,6 +416,21 @@ impl Service {
             return;
         };
         if held.sender.generation != generation {
+            return;
+        }
+        // A durable proactive turn reserves its own slot. Refuse rather than
+        // steer user words into it; every surface keeps a refused submission
+        // in its field, so no user turn is lost or captured by the briefing.
+        if inner.active_proactive.is_some() {
+            inner.send_surface(
+                &surface,
+                SurfaceResponseBody::Rejected {
+                    id: Some(id),
+                    operation: "message".into(),
+                    code: refusal::NO_FREE_SLOT.into(),
+                    detail: "A briefing is finishing. Send this again when it is done.".into(),
+                },
+            );
             return;
         }
         let definitions = held.registration.widgets.clone();
@@ -470,6 +540,7 @@ impl Service {
         inner.agent_joined = true;
         info!("agent connected");
         debug!(connection, "agent registration accepted");
+        inner.dispatch_briefing();
         true
     }
 
@@ -481,6 +552,12 @@ impl Service {
             .is_some_and(|agent| agent.connection == connection)
         {
             inner.agent = None;
+            if let Some(event_id) = inner.active_proactive.take()
+                && let Err(error) = inner.briefings.retry(&event_id)
+            {
+                warn!(%error, event = event_id, "interrupted briefing delivery could not be returned to pending");
+            }
+            inner.publish_briefings();
             info!("agent disconnected");
             debug!(connection, "agent registration removed");
         }
@@ -505,11 +582,65 @@ impl Service {
             }
             AgentRequestBody::Response {
                 text,
+                proactive_id,
                 details,
                 widgets,
                 attachments,
                 receipts,
             } => {
+                if let Some(event_id) = proactive_id {
+                    if inner.active_proactive.as_deref() != Some(&event_id) {
+                        warn!(event = event_id, "stale proactive response was ignored");
+                        return;
+                    }
+                    let descriptors = match self.attachments.resolve(&attachments, true) {
+                        Ok(descriptors) => descriptors,
+                        Err(_) => {
+                            inner.send_agent(AgentResponseBody::Rejected {
+                                code: refusal::ATTACHMENTS_UNAVAILABLE.into(),
+                                detail: "One or more attachments are unavailable.".into(),
+                            });
+                            Vec::new()
+                        }
+                    };
+                    let message = ConversationMessage {
+                        role: ConversationRole::Assistant,
+                        surface: UNPROMPTED_SURFACE.to_string(),
+                        text,
+                        details,
+                        // A proactive item has no surface widget registry.
+                        widgets: None,
+                        attachments: descriptors,
+                        receipts,
+                    };
+                    let recorded = match inner
+                        .conversation
+                        .record_delivery(&event_id, message.clone())
+                    {
+                        Ok(recorded) => recorded,
+                        Err(error) => {
+                            warn!(%error, event = event_id, "briefing response was not durably recorded");
+                            return;
+                        }
+                    };
+                    if recorded {
+                        inner.broadcast(message.into());
+                    }
+                    match inner.briefings.acknowledge(&event_id) {
+                        Ok(_) => {
+                            inner.active_proactive = None;
+                            inner.publish_briefings();
+                        }
+                        Err(error) => {
+                            warn!(%error, event = event_id, "briefing delivery acknowledgement was not stored")
+                        }
+                    }
+                    return;
+                }
+                if inner.active_proactive.is_some() {
+                    warn!("an uncorrelated response arrived while a proactive slot was reserved");
+                    return;
+                }
                 // An answer belongs to the turn that asked for it. A surface
                 // owns its turn until the answer arrives; an answer nobody
                 // asked for - a morning briefing, a finished job - is recorded
@@ -663,6 +794,34 @@ impl Service {
         self.lock().state()
     }
 
+    /// Durably imports one generation-fenced briefing lifecycle update.
+    ///
+    /// Collection writes its own run before calling this. The service then
+    /// stores the quiet row and any terminal wake before acknowledging the
+    /// control request. No connected agent is required.
+    pub fn control_briefing(
+        &self,
+        id: String,
+        briefing: BriefingRow,
+        wake: Option<BriefingWake>,
+    ) -> ControlResponseBody {
+        let mut inner = self.lock();
+        let delivered = wake
+            .as_ref()
+            .is_some_and(|wake| inner.conversation.contains_delivery(&wake.event_id))
+            || (wake.is_none() && briefing.delivery == BriefingDeliveryState::Delivered);
+        if let Err(error) = inner.briefings.upsert(briefing, wake, delivered) {
+            return ControlResponseBody::Rejected {
+                id,
+                code: refusal::NO_FREE_SLOT.into(),
+                detail: error.to_string(),
+            };
+        }
+        inner.publish_briefings();
+        inner.dispatch_briefing();
+        ControlResponseBody::BriefingAck { id }
+    }
+
     /// Hands one proactive wake to the agent, or says why it did not land.
     ///
     /// A wake is words from outside the agent process, not a turn the owner
@@ -689,7 +848,15 @@ impl Service {
             text_bytes = text.len(),
             "control wake received"
         );
+        if inner.active_proactive.is_some() {
+            return ControlResponseBody::Rejected {
+                id,
+                code: refusal::NO_FREE_SLOT.into(),
+                detail: "A durable proactive response is already in progress.".into(),
+            };
+        }
         if inner.send_agent(AgentResponseBody::Wake {
+            proactive_id: None,
             custom_type,
             text,
             details,
@@ -783,6 +950,7 @@ impl Service {
                     inner.lifecycle_detail.clear();
                 }
                 inner.publish_state();
+                inner.dispatch_briefing();
             }
             Event::AgentStart => {
                 let mut inner = self.lock();
@@ -795,6 +963,7 @@ impl Service {
                 inner.lifecycle = Lifecycle::Idle;
                 inner.lifecycle_detail.clear();
                 inner.publish_state();
+                inner.dispatch_briefing();
             }
             Event::ExtensionUiRequest {
                 id,
@@ -984,7 +1153,10 @@ mod tests {
         mpsc::{Receiver, sync_channel},
     };
 
-    use scufris_control::service::{CONVERSATION_ENTRIES, Citation, Offer, Receipt, ReceiptState};
+    use scufris_control::service::{
+        BriefingCollectionState, BriefingDeliveryState, BriefingWake, CONVERSATION_ENTRIES,
+        Citation, Offer, Receipt, ReceiptState,
+    };
 
     static NEXT_TEST: AtomicU64 = AtomicU64::new(1);
 
@@ -1028,6 +1200,142 @@ mod tests {
             .collect()
     }
 
+    fn briefing_row(id: &str) -> BriefingRow {
+        BriefingRow {
+            id: id.into(),
+            date: "2026-09-10".into(),
+            profile: "nightly".into(),
+            collection: BriefingCollectionState::Collected,
+            delivery: BriefingDeliveryState::Pending,
+            since: 1_789_000_000,
+            completed: 2,
+            total: 2,
+            failed: 0,
+            summary: "2 of 2 sources answered".into(),
+        }
+    }
+
+    fn briefing_wake(id: &str) -> BriefingWake {
+        BriefingWake {
+            event_id: format!("briefing-{id}-terminal"),
+            custom_type: "scufris-briefing".into(),
+            text: "Write the measured nightly briefing.".into(),
+            details: Some(serde_json::json!({"generation": id})),
+        }
+    }
+
+    #[test]
+    fn one_terminal_generation_waits_for_the_user_and_is_recorded_once() {
+        let runtime = test_runtime();
+        let config = Config::test(runtime.clone());
+        let service = service_at(config.clone());
+        let (_, surface_in) = surface(&service, 1, "one");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        assert!(matches!(
+            agent_in.recv().unwrap().body,
+            AgentResponseBody::Ready
+        ));
+        service.apply(Event::AgentSettled);
+
+        service.surface_message(1, "owner-turn".into(), "First answer me.".into(), vec![]);
+        assert!(matches!(
+            agent_in.recv().unwrap().body,
+            AgentResponseBody::Message { .. }
+        ));
+        assert!(matches!(
+            service.control_briefing(
+                "update-a".into(),
+                briefing_row("generation-a"),
+                Some(briefing_wake("generation-a")),
+            ),
+            ControlResponseBody::BriefingAck { .. }
+        ));
+        assert!(
+            agent_in.try_recv().is_err(),
+            "the owner turn kept the model slot"
+        );
+        assert!(
+            drain(&surface_in)
+                .iter()
+                .any(|body| matches!(body, SurfaceResponseBody::Briefings { .. }))
+        );
+
+        service.agent_request(
+            10,
+            AgentRequestBody::Response {
+                proactive_id: None,
+                text: "The owner's answer.".into(),
+                details: None,
+                widgets: None,
+                attachments: vec![],
+                receipts: vec![],
+            },
+        );
+        service.apply(Event::AgentSettled);
+        let event_id = "briefing-generation-a-terminal";
+        assert!(matches!(
+            agent_in.recv().unwrap().body,
+            AgentResponseBody::Wake {
+                proactive_id: Some(ref id),
+                ..
+            } if id == event_id
+        ));
+
+        service.surface_message(1, "held".into(), "Do not capture this.".into(), vec![]);
+        assert!(
+            drain(&surface_in).iter().any(|body| matches!(
+                body,
+                SurfaceResponseBody::Rejected { code, .. } if code == refusal::NO_FREE_SLOT
+            )),
+            "a user submission was refused while the proactive slot was reserved"
+        );
+        assert!(agent_in.try_recv().is_err());
+
+        service.agent_request(
+            10,
+            AgentRequestBody::Response {
+                proactive_id: Some(event_id.into()),
+                text: "The nightly briefing.".into(),
+                details: None,
+                widgets: None,
+                attachments: vec![],
+                receipts: vec![],
+            },
+        );
+        assert_eq!(
+            drain(&surface_in)
+                .iter()
+                .filter(|body| matches!(body, SurfaceResponseBody::Message { text, .. } if text == "The nightly briefing."))
+                .count(),
+            1
+        );
+        drop(service);
+
+        let restored = service_at(config);
+        let (agent, agent_in) = sync_channel(8);
+        restored.register_agent(20, agent);
+        agent_in.recv().unwrap();
+        restored.apply(Event::AgentSettled);
+        assert!(
+            agent_in.try_recv().is_err(),
+            "canonical replay suppressed retry"
+        );
+        assert!(matches!(
+            restored.control_briefing(
+                "update-again".into(),
+                briefing_row("generation-a"),
+                Some(briefing_wake("generation-a")),
+            ),
+            ControlResponseBody::BriefingAck { .. }
+        ));
+        assert!(
+            agent_in.try_recv().is_err(),
+            "duplicate terminal ingress stayed done"
+        );
+        std::fs::remove_dir_all(runtime).unwrap();
+    }
+
     #[test]
     fn two_surfaces_receive_identical_live_messages_and_replay() {
         let service = service();
@@ -1060,7 +1368,8 @@ mod tests {
         assert!(matches!(replay[0], SurfaceResponseBody::Message { .. }));
         assert!(matches!(replay[1], SurfaceResponseBody::State { .. }));
         assert!(matches!(replay[2], SurfaceResponseBody::Jobs { .. }));
-        assert!(matches!(replay[3], SurfaceResponseBody::Ready { .. }));
+        assert!(matches!(replay[3], SurfaceResponseBody::Briefings { .. }));
+        assert!(matches!(replay[4], SurfaceResponseBody::Ready { .. }));
     }
 
     #[test]
@@ -1110,7 +1419,8 @@ mod tests {
             ));
             assert!(matches!(replay[1], SurfaceResponseBody::State { .. }));
             assert!(matches!(replay[2], SurfaceResponseBody::Jobs { .. }));
-            assert!(matches!(replay[3], SurfaceResponseBody::Ready { .. }));
+            assert!(matches!(replay[3], SurfaceResponseBody::Briefings { .. }));
+            assert!(matches!(replay[4], SurfaceResponseBody::Ready { .. }));
         }
         drop(restored);
         std::fs::remove_dir_all(runtime).unwrap();
@@ -1255,6 +1565,7 @@ mod tests {
         service.agent_request(
             10,
             AgentRequestBody::Response {
+                proactive_id: None,
                 text: "Passed.".into(),
                 details: Some("## Results".into()),
                 widgets: Some(vec![WidgetCall {
@@ -1299,6 +1610,7 @@ mod tests {
         service.agent_request(
             10,
             AgentRequestBody::Response {
+                proactive_id: None,
                 text: "Passed.".into(),
                 details: None,
                 widgets: Some(vec![WidgetCall {
@@ -1338,6 +1650,7 @@ mod tests {
         service.agent_request(
             10,
             AgentRequestBody::Response {
+                proactive_id: None,
                 text: "Here it is.".into(),
                 details: None,
                 widgets: None,
@@ -1375,6 +1688,7 @@ mod tests {
         service.agent_request(
             10,
             AgentRequestBody::Response {
+                proactive_id: None,
                 text: "Done.".into(),
                 details: None,
                 widgets: None,
@@ -1405,6 +1719,7 @@ mod tests {
         service.agent_request(
             10,
             AgentRequestBody::Response {
+                proactive_id: None,
                 text: "Done.".into(),
                 details: None,
                 widgets: None,
@@ -1451,6 +1766,7 @@ mod tests {
         service.agent_request(
             10,
             AgentRequestBody::Response {
+                proactive_id: None,
                 text: "Done.".into(),
                 details: None,
                 widgets: Some(vec![WidgetCall {
@@ -1484,6 +1800,7 @@ mod tests {
         service.agent_request(
             10,
             AgentRequestBody::Response {
+                proactive_id: None,
                 text: "Done.".into(),
                 details: None,
                 widgets: None,
@@ -1498,6 +1815,7 @@ mod tests {
         service.agent_request(
             10,
             AgentRequestBody::Response {
+                proactive_id: None,
                 text: "Done.".into(),
                 details: None,
                 widgets: None,
@@ -1538,6 +1856,7 @@ mod tests {
                 custom_type,
                 text,
                 details,
+                ..
             } if custom_type == "scufris-briefing"
                 && text == "The morning briefing is collected."
                 && details == Some(serde_json::json!({"profile": "morning"}))
@@ -1559,6 +1878,7 @@ mod tests {
             service.agent_request(
                 10,
                 AgentRequestBody::Response {
+                    proactive_id: None,
                     text: "Looked.".into(),
                     details: None,
                     widgets: None,
@@ -1628,6 +1948,7 @@ mod tests {
         service.agent_request(
             10,
             AgentRequestBody::Response {
+                proactive_id: None,
                 text: "Good morning.".into(),
                 details: None,
                 widgets: Some(vec![WidgetCall {
@@ -1660,6 +1981,7 @@ mod tests {
         service.agent_request(
             10,
             AgentRequestBody::Response {
+                proactive_id: None,
                 text: "Good morning again.".into(),
                 details: None,
                 widgets: None,
@@ -1765,6 +2087,7 @@ mod tests {
         service.agent_request(
             10,
             AgentRequestBody::Response {
+                proactive_id: None,
                 text: "Landed it, and it is not pushed.".into(),
                 details: None,
                 widgets: None,

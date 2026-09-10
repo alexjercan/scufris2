@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -40,6 +42,7 @@ function session(state: string): {
   start: (expected: number) => Promise<void>;
   shutdown: () => void;
   sent: Sent[];
+  updates: () => Array<Record<string, unknown>>;
 } {
   const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
   const sent: Sent[] = [];
@@ -52,6 +55,13 @@ function session(state: string): {
       handlers.set(name, handler);
     },
   };
+  const ctl = join(state, "scufris-ctl");
+  const log = join(state, "control.jsonl");
+  writeFileSync(
+    ctl,
+    '#!/bin/sh\nprintf "%s\\n" "$2" >> "$SCUFRIS_TEST_CTL_LOG"\n',
+  );
+  chmodSync(ctl, 0o755);
   const role = process.env.SCUFRIS_ROLE;
   const home = process.env.XDG_STATE_HOME;
   process.env.SCUFRIS_ROLE = "orchestrator";
@@ -67,7 +77,11 @@ function session(state: string): {
   return {
     async start(expected: number) {
       const previous = process.env.XDG_STATE_HOME;
+      const previousCtl = process.env.SCUFRIS_CTL;
+      const previousLog = process.env.SCUFRIS_TEST_CTL_LOG;
       process.env.XDG_STATE_HOME = state;
+      process.env.SCUFRIS_CTL = ctl;
+      process.env.SCUFRIS_TEST_CTL_LOG = log;
       try {
         const answer = handlers.get("session_start")?.(
           { reason: "startup" },
@@ -82,18 +96,33 @@ function session(state: string): {
       } finally {
         if (previous === undefined) delete process.env.XDG_STATE_HOME;
         else process.env.XDG_STATE_HOME = previous;
+        if (previousCtl === undefined) delete process.env.SCUFRIS_CTL;
+        else process.env.SCUFRIS_CTL = previousCtl;
+        if (previousLog === undefined) delete process.env.SCUFRIS_TEST_CTL_LOG;
+        else process.env.SCUFRIS_TEST_CTL_LOG = previousLog;
       }
       // A session expected to ask for nothing is watched for the whole
       // silence: the read has to have happened for the absence to mean
       // anything.
       const until = Date.now() + (expected ? ANSWER_WITHIN : SILENCE_FOR);
-      while (Date.now() < until && (expected === 0 || sent.length < expected))
+      const count = () =>
+        existsSync(log)
+          ? readFileSync(log, "utf8").split("\n").filter(Boolean).length
+          : 0;
+      while (Date.now() < until && (expected === 0 || count() < expected))
         await new Promise((resolve) => setTimeout(resolve, 25));
     },
     shutdown() {
       handlers.get("session_shutdown")?.(undefined, undefined);
     },
     sent,
+    updates: () =>
+      existsSync(log)
+        ? readFileSync(log, "utf8")
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => JSON.parse(line) as Record<string, unknown>)
+        : [],
   };
 }
 
@@ -109,9 +138,11 @@ function run(
   writeFileSync(
     join(directory, "manifest.json"),
     JSON.stringify({
-      version: 1,
+      version: 2,
+      generation: `${date}-${profile}`,
       date,
       profile,
+      delivery: "pending",
       started: `${date}T08:00:00+00:00`,
       finished: `${date}T08:02:00+00:00`,
       sources: [
@@ -128,6 +159,7 @@ function run(
         },
       ],
       diagnostics: [],
+      events: [],
       ...manifest,
     }),
   );
@@ -143,23 +175,22 @@ test("a run is named for the local date", () => {
   assert.equal(DEFAULT_PROFILE, "morning");
 });
 
-test("a session that opens on a gathered run asks for the writing once", async () => {
+test("startup reconciles a gathered run without injecting a model turn", async () => {
   const state = room();
   const today = localDate(new Date());
   run(state, today, "morning", { state: "collected" });
   const opened = session(state);
   try {
     await opened.start(1);
-    assert.equal(opened.sent.length, 1);
-    const message = opened.sent[0]!;
-    assert.equal(message.customType, "scufris-briefing");
-    assert.deepEqual(message.details, {
-      date: today,
-      profile: "morning",
-      sources: 1,
-    });
-    assert.match(message.content, /morning briefing for /);
-    assert.match(message.content, /scufris_briefing_publish/);
+    assert.deepEqual(opened.sent, []);
+    const update = opened.updates()[0]!;
+    const row = update.briefing as Record<string, unknown>;
+    const wake = update.wake as Record<string, unknown>;
+    assert.equal(row.profile, "morning");
+    assert.equal(row.collection, "collected");
+    assert.equal(row.delivery, "pending");
+    assert.match(String(wake.text), /morning briefing for /);
+    assert.match(String(wake.text), /scufris_briefing_publish/);
   } finally {
     opened.shutdown();
     rmSync(state, { recursive: true, force: true });
@@ -180,12 +211,10 @@ test("a nightly gathered before midnight is still asked for in the morning", asy
   const opened = session(state);
   try {
     await opened.start(1);
-    assert.equal(opened.sent.length, 1);
-    assert.deepEqual(opened.sent[0]!.details, {
-      date: yesterday,
-      profile: "nightly",
-      sources: 1,
-    });
+    assert.deepEqual(opened.sent, []);
+    const row = opened.updates()[0]!.briefing as Record<string, unknown>;
+    assert.equal(row.date, yesterday);
+    assert.equal(row.profile, "nightly");
   } finally {
     opened.shutdown();
     rmSync(state, { recursive: true, force: true });
@@ -195,11 +224,22 @@ test("a nightly gathered before midnight is still asked for in the morning", asy
 test("a session that opens on a delivered run asks for nothing", async () => {
   const state = room();
   const today = localDate(new Date());
-  run(state, today, "morning", { state: "delivered" });
+  run(state, today, "morning", {
+    version: 1,
+    state: "delivered",
+    delivery: undefined,
+    generation: undefined,
+  });
   const opened = session(state);
   try {
-    await opened.start(0);
+    await opened.start(1);
     assert.deepEqual(opened.sent, []);
+    const update = opened.updates()[0]!;
+    assert.equal(update.wake, undefined);
+    assert.equal(
+      (update.briefing as Record<string, unknown>).delivery,
+      "delivered",
+    );
   } finally {
     opened.shutdown();
     rmSync(state, { recursive: true, force: true });
@@ -217,14 +257,20 @@ test("two profiles gathered on one date are two askings, each naming its own", a
   const opened = session(state);
   try {
     await opened.start(2);
-    assert.equal(opened.sent.length, 2);
-    const profiles = opened.sent.map((message) => message.details?.profile);
+    assert.deepEqual(opened.sent, []);
+    const updates = opened.updates();
+    assert.equal(updates.length, 2);
+    const profiles = updates.map(
+      (update) => (update.briefing as Record<string, unknown>).profile,
+    );
     assert.deepEqual([...profiles].sort(), ["evening", "morning"]);
-    for (const message of opened.sent)
+    for (const update of updates) {
+      const profile = (update.briefing as Record<string, unknown>).profile;
       assert.match(
-        message.content,
-        new RegExp(`profile ${message.details?.profile as string}`),
+        String((update.wake as Record<string, unknown>).text),
+        new RegExp(`profile ${String(profile)}`),
       );
+    }
   } finally {
     opened.shutdown();
     rmSync(state, { recursive: true, force: true });
@@ -237,8 +283,14 @@ test("a session that opens on a briefing nothing declared asks for nothing", asy
   run(state, today, "morning", { state: "collected", sources: [] });
   const opened = session(state);
   try {
-    await opened.start(0);
+    await opened.start(1);
     assert.deepEqual(opened.sent, []);
+    const update = opened.updates()[0]!;
+    assert.equal(update.wake, undefined);
+    assert.equal(
+      (update.briefing as Record<string, unknown>).delivery,
+      "delivered",
+    );
   } finally {
     opened.shutdown();
     rmSync(state, { recursive: true, force: true });

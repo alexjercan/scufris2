@@ -23,6 +23,16 @@
              pinned under it: it is part of the conversation and scrolls away
              like any other line. -->
         <ol id="lines" class="lines" aria-label="Conversation">
+          <li
+            id="briefings"
+            class="jobs"
+            data-transient="briefings"
+            aria-label="Scheduled briefings"
+            hidden
+          >
+            <span class="who">brief</span>
+            <div id="briefing-rows" class="rows"></div>
+          </li>
           <li id="jobs" class="jobs" data-transient="jobs" hidden>
             <span class="who">jobs</span>
             <div id="rows" class="rows"></div>

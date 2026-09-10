@@ -911,7 +911,6 @@ impl Service {
             AgentRequestBody::ProactiveSettled { proactive_id } => {
                 drop(inner);
                 self.proactive_settled(proactive_id);
-                return;
             }
             AgentRequestBody::Jobs { jobs } => {
                 inner.jobs = jobs.clone();

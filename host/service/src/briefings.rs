@@ -345,6 +345,7 @@ impl BriefingStore {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn delivery_failed(&mut self, event_id: &str) -> Result<(), StoreError> {
         let Some(run_id) = self.run_for_event(event_id).map(str::to_string) else {
             return Ok(());

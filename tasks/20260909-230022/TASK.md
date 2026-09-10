@@ -4,7 +4,6 @@
 - PRIORITY: 70
 - TAGS: review
 
-
 ## Scope
 
 Nightly review of what landed on `master` on 2026-09-09. Read-only: no edit,
@@ -39,14 +38,14 @@ the tests. See F0.
 Chronological and contiguous, one component to a group where the day allows
 it. Reviewed highest risk first, not in date order.
 
-| ID  | Range                  | Commits | Changed | Component                            |
-| --- | ---------------------- | ------- | ------- | ------------------------------------ |
-| G1  | `315b931~1..997e057`   | 10      | 2535    | extension, host service, jobs helper  |
-| G2  | `997e057..19ce35a`     | 3       | 898     | desktop surface, den helper          |
-| G3  | `19ce35a..474a7fa`     | 4       | 894     | refusal codes, release, jobs         |
-| G4  | `474a7fa..353198d`     | 7       | 1787    | briefing pipeline, widgets           |
-| G5  | `353198d..31a877c`     | 2       | 5488    | HUD receipts, offers, job rows       |
-| G6  | `31a877c..bbaabff`     | 6       | 352     | packaging, release, 2.4.0 and 2.4.1  |
+| ID  | Range                | Commits | Changed | Component                            |
+| --- | -------------------- | ------- | ------- | ------------------------------------ |
+| G1  | `315b931~1..997e057` | 10      | 2535    | extension, host service, jobs helper |
+| G2  | `997e057..19ce35a`   | 3       | 898     | desktop surface, den helper          |
+| G3  | `19ce35a..474a7fa`   | 4       | 894     | refusal codes, release, jobs         |
+| G4  | `474a7fa..353198d`   | 7       | 1787    | briefing pipeline, widgets           |
+| G5  | `353198d..31a877c`   | 2       | 5488    | HUD receipts, offers, job rows       |
+| G6  | `31a877c..bbaabff`   | 6       | 352     | packaging, release, 2.4.0 and 2.4.1  |
 
 Review order: G5, G1, G4, G2, G3, G6.
 
@@ -312,8 +311,8 @@ is the wrong half to keep."
 whole answer is lost.**
 `agent/extensions/scufris/response.ts:333` against
 `agent/extensions/scufris/service/protocol.ts:306`.
-The tool schema bounds `label` to 48 *characters*; the wire bounds it to
-`MAX_BADGE_BYTES` = 64 *bytes*. Any multi-byte script crosses that inside the
+The tool schema bounds `label` to 48 _characters_; the wire bounds it to
+`MAX_BADGE_BYTES` = 64 _bytes_. Any multi-byte script crosses that inside the
 schema; the correctness lane confirmed it with a probe against the real module
 ("offer_label is invalid"). `encodeAgentRequest` throws for the whole
 `agent.response`, `tell()` logs one line, and the tool has already returned
@@ -339,7 +338,7 @@ nobody.**
 `session_start` resets `archived`, `drainFailedAt`, `wakeMode`,
 `acknowledgmentGate` and `deliveredEventIds`, but not `eventError`,
 `eventStranded` or `drainWakes`. `reportDrainFailure` short-circuits on
-`if (message === eventError) return;` *above* the line that sets
+`if (message === eventError) return;` _above_ the line that sets
 `drainFailedAt` and above `publishRows()` and the wake. So on a second
 `session_start` in the same process, a drain failing with the same message
 publishes no `event-drain` row and sends no wake. `ctx.hasUI` is false under
@@ -469,7 +468,7 @@ There is no refusal that preserves the association.
 `a_refused_answer_leaves_the_turn_open_for_a_corrected_one` is green because
 `drain` (`:1025`) is a cumulative `try_recv` loop and `one` is never drained
 between the two responses, so the `surface == "one"` assertion matches the
-*first* response's message. The second is in fact recorded `unprompted`. The
+_first_ response's message. The second is in fact recorded `unprompted`. The
 lane ran it: `cargo test -p scufris-service service::tests`, 21 passed, this
 one green.
 
@@ -486,7 +485,7 @@ Found independently by the correctness and red-team lanes and reproduced a
 third time in this session.
 
 The range's headline fix (997e057, "Stop one worker line from wedging every
-job") unified the *bound* at every door and left the *character predicate*
+job") unified the _bound_ at every door and left the _character predicate_
 split. `write_report` (`:2248`) and `parse_event` (`:2106`) both test
 `any(ord(character) < 32 ...)`. `valid_record_text` (`:1437`), which
 `store_job` runs on the summary it copies into the record, tests
@@ -508,7 +507,7 @@ space - which models emit, and which a summary quoted from captured output
 carries - `write_report` admits it, `parse_event` admits it, and
 `read_events:2471` calls `store_job` bare, outside any `try`. `JobError("job
 record is invalid")` propagates out of `read_events`, so the whole `events`
-call fails for *every* job in that poll, `event_offset` never advances past
+call fails for _every_ job in that poll, `event_offset` never advances past
 the line, and every later poll fails identically. `recover_job:3810` takes the
 same path, so a restart recovers nothing either. Only a hand edit of `status`
 clears it. The new drain machinery reports the strand honestly and then retries
@@ -563,13 +562,14 @@ same already-published one.
 
 **G1-7 MAJOR - two documentation pairs are stale where this range changed the
 behaviour.**
+
 - `docs/src/dev/jobs.md:160-162`: "older history is discarded and the new
   complete entry is kept" is no longer true - `trimmed_report` keeps the newest
   whole entries that fit under a `# report trimmed` marker. The Bounds list
   also omits the 500-byte `MAX_SUMMARY` this range added and enforces at three
   doors, so a worker refused for a 600-byte summary finds only the 4 KiB event
   line written down, which it is comfortably under.
-- `docs/src/dev/jobs.md:243`, `:259`: land now runs the dry run *first*, then
+- `docs/src/dev/jobs.md:243`, `:259`: land now runs the dry run _first_, then
   records the intent, then stops the graph (`scufris-jobs:3685-3687`) - that
   reordering is the whole fix, and the page still describes the trap it
   removed. `:259` also says only `abandon` may be re-decided; `stop` now
@@ -730,3 +730,426 @@ qualification.
   widget's" and `docs/src/dev/widgets.md:120` says a reading is the widget's own
   except for it. The reservation is convention only.
 
+## Recovery and disposition - 2026-09-10
+
+This section recovers the interrupted source review. It supersedes severity and
+recommendation labels above where they differ. It does not erase the original
+review record.
+
+### Authority and tree state
+
+- Exact reviewed revision: `bbaabff615a02cf7a38e14d62fc5d53909775e74`.
+- Current `master`, `origin/master`, and tag `v2.4.1` all name that same
+  revision. There are no post-tag commits, tracked edits, or staged edits.
+- The only dirt in the main checkout is this untracked surviving task
+  directory. Recovery copied it into the `recover-nightly-review` Sprout; it
+  did not edit the main checkout.
+- Therefore the reviewed implementation tree and current implementation tree
+  are identical. Every accepted finding below was checked in the current tree;
+  that also verifies it against the exact reviewed tree.
+- Severity is present user harm. Confidence is confidence in the described
+  behavior. Regression risk below means the risk of changing the behavior,
+  not the severity of leaving it. Effort is S, M, or L.
+
+### Interruption and transcript provenance
+
+The diagnosis is in Scufris job `582a68032ce3`, chiefly
+`~/.local/state/scufris/jobs/582a68032ce3/report.md`. The actual outer Claude
+session is
+`~/.claude/projects/-home-alex-personal-scufris2/48a3b8a8-97ac-4019-b8d9-dcdf001385cf.jsonl`.
+Its children are under the adjacent
+`48a3b8a8-97ac-4019-b8d9-dcdf001385cf/subagents/` directory.
+
+| Group | Lane        | Child transcript    | Outcome, UTC                              |
+| ----- | ----------- | ------------------- | ----------------------------------------- |
+| G5    | craft       | `a26ba3484a019de63` | complete, 20:15:43                        |
+| G5    | correctness | `a3bbe9ad8e2591345` | complete, 20:18:27                        |
+| G5    | desktop     | `aea5a76407cbcb690` | complete, 20:14:24                        |
+| G5    | contracts   | `a36e415b431fd6b6b` | complete, 20:15:59                        |
+| G5    | red team    | `aef8dd43e420b60a4` | complete, 20:18:07                        |
+| G1    | craft       | `adf9978462e4743f0` | complete, 20:34:50                        |
+| G1    | correctness | `a46df4c543785f975` | complete, 20:34:23                        |
+| G1    | desktop     | `a1a8686918ce8b0e0` | complete, 20:30:42                        |
+| G1    | contracts   | `af55e7a4d2d602845` | complete, 20:35:38                        |
+| G1    | red team    | `a775dfac3667e4033` | complete, 20:36:02                        |
+| G4    | craft       | `ac08ee56aab971271` | complete, 20:48:31; recovered here        |
+| G4    | correctness | `a49b83931b7b0231a` | complete, 20:50:30; recovered here        |
+| G4    | desktop     | `aaeaf621fdcd19ba1` | complete, 20:43:51; already written above |
+| G4    | contracts   | `a2c6c27fd8d323b7b` | complete, 20:48:19; recovered here        |
+| G4    | red team    | `a1d5c76f009952b9e` | partial; exit 137 at 20:51:03             |
+
+This is 14 completed lanes out of 15 dispatched. G2 and G3 were never
+dispatched. The task stopped changing at 23:45:40 EEST, after only the G4
+desktop report had been written. The outer source said, at 20:50:52 UTC,
+"Four G4 lanes in ... while the red-team lane finishes." Its final source-read
+command at 20:51:02 has no result. Neither the red-team child nor the outer
+source has an `end_turn`, and the outer source wrote no final briefing envelope.
+
+The G4 red-team child made a temporary profile file a symlink to `/dev/zero`
+and called `apply_profile_bounds`. `tools/briefing/briefing.py` used unbounded
+`Path.read_bytes()`. The Python process grew to about 29.2 GB RSS and 28.3 GiB
+of swap before the kernel killed it. The nightly unit has `OOMPolicy=stop` and
+`KillMode=control-group`, so systemd then stopped the collector and both source
+process trees. The configured eight-hour deadlines had more than seven hours
+left. This was an unsafe probe and cgroup-wide OOM stop, not a deadline. It must
+not be repeated.
+
+### Exact coverage status
+
+`COMPLETE` means the intended five unattended lanes were adjudicated, or that
+the small packaging group was reviewed directly as documented. `RECOVERED`
+means a completed report absent from the surviving task was found, deduplicated,
+and checked here. `PARTIAL` means at least one required lane did not complete.
+`NOT RUN` means no lane was dispatched.
+
+| Group | Status             | Exact coverage                                                                                             |
+| ----- | ------------------ | ---------------------------------------------------------------------------------------------------------- |
+| G1    | COMPLETE           | 5/5 lanes completed, written before interruption, rechecked here.                                          |
+| G2    | NOT RUN            | 0/5 lanes dispatched.                                                                                      |
+| G3    | NOT RUN            | 0/5 lanes dispatched.                                                                                      |
+| G4    | PARTIAL, RECOVERED | 4/5 completed; desktop was written; craft, correctness, and contracts were recovered; red team is partial. |
+| G5    | COMPLETE           | 5/5 lanes completed, adjudicated, written, and rechecked here.                                             |
+| G6    | COMPLETE           | Direct review was written and rechecked here.                                                              |
+
+No whole group is `INVALID` or `SUPERSEDED`. Those labels apply to individual
+claims below. The overall review remains OPEN because G2 and G3 were not run
+and G4 is partial.
+
+### Recovered G4 findings
+
+The three complete reports were not accepted verbatim. Their load-bearing
+claims were read against `bbaabff` and the identical current tree. The safe,
+useful part of the partial red-team transcript was also checked. Duplicates are
+folded into existing IDs rather than counted again.
+
+#### G4-R1 BLOCKER: profile bounds can make the host read an infinite special file
+
+`tools/briefing/briefing.py:1195` calls `Path.read_bytes()` before any type or
+size check. There is no no-follow open, `fstat` regular-file check, or byte
+ceiling. A replaced generated file can therefore be a device, FIFO, symlink,
+or oversized regular file. This is the path that read `/dev/zero` until the
+nightly cgroup was OOM-stopped. The current tree still has the same call.
+
+Recommendation: FIX NOW. Open without following symlinks, require a regular
+file, and read no more than a small explicit maximum before JSON decoding. User
+impact is loss of the nightly plus unrelated siblings in its cgroup and severe
+host memory pressure. Confidence HIGH. Regression risk M; effort S-M. Add only
+safe metadata and bounded regular-file tests. Do not execute a device or FIFO
+probe. This comes before any other briefing reliability work.
+
+#### G4-R2 MAJOR: timeout recovery accepts the prompt's example as a real answer
+
+`tools/briefing/briefing.py:580-606` chooses the last decodable fenced object.
+The prompt contains a syntactically valid example with `status: ok`.
+`attempt()` at `:767-783` now parses partial stdout after a timeout. A source
+that echoes the required template before doing work and is then cut off is
+recorded as an OK source with placeholder title, headline, facts, body, and
+offer. The focused safe probe reproduced this from the real prompt and parser.
+
+Recommendation: FIX NOW. Make the example impossible to accept as an answer,
+or bind a final envelope to a per-invocation sentinel. User impact is a
+fabricated green briefing. Confidence HIGH. Parser changes have M regression
+risk and M effort because corrections and fenced Markdown must still work.
+This is independent of G4-R1 but belongs in the same parser-boundary tests.
+
+#### G4-R3 MAJOR: two collectors for one date and profile overwrite one run
+
+`collect()` at `tools/briefing/briefing.py:955-1095` uses one date/profile
+directory with `mkdir(..., exist_ok=True)` and writes a new manifest without an
+exclusive owner, generation, or lock. A timer, shell, or tool can start the
+same key concurrently. The archived red-team regular-file repro had the faster
+run report its own result and the slower run then replace the manifest and all
+same-slug contribution files. The current code still has no owner fence.
+
+Recommendation: FIX NOW. Give a run generation and exclusive owner, or refuse
+a second live collector for the same key. User impact is silent loss and a run
+whose caller observed a result that no longer exists. Confidence HIGH.
+Regression risk H; effort L because stale-owner recovery and atomic publication
+must agree. Do this before allowing concurrent in-process profiles (G4-R4) and
+before re-collection fixes (G1-6).
+
+#### G4-R4 MAJOR: one hand-run nightly blocks every briefing tool run for eight hours
+
+`agent/extensions/scufris/briefing/briefing.ts:148,263-298` has one `running`
+boolean. A hand-run nightly takes the profile's eight-hour timeout. Until its
+`finally`, a morning or other profile returns only `a run is already going`.
+There is no run identity or cancel operation in that response.
+
+Recommendation: SCHEDULE LATER, after G4-R3. User impact is loss of all
+hand-requested briefings for the long run. Confidence HIGH. A better refusal is
+S; safe per-profile concurrency or cancellation is M-L with H regression risk.
+Do not key the boolean by profile until same-key and stale-owner behavior is
+safe.
+
+#### G4-R5 MAJOR: a live second orchestrator is called abandoned and the user is told to kill it
+
+`tools/jobs/scufris-jobs:3930-3956` calls every live pane with another
+`owner_session` an orphan. `orchestration.ts:1660-1684` says it belongs to a
+previous session and tells the user to run `tmux kill-session`. It does not say
+that another live service or development session can still own and steer it.
+
+Recommendation: FIX NOW. First change the message to say `another session` and
+include owner/state evidence. Add owner-liveness classification before making a
+kill recommendation. User impact is destruction of valid running work by
+following a false verdict. Confidence HIGH. Wording is S/low risk; liveness is
+M/medium risk. Never automate the kill.
+
+#### G4-R6 MAJOR: an answer noted during collection has no durable body until every source ends
+
+`note()` at `tools/briefing/briefing.py:1039-1057` writes only
+`index_entry(contribution)` into the live manifest. Full contribution files are
+not written until `finish()` at `:1098-1120`, after the pool returns. If a later
+source or the collector dies, `read_run()` at `:1306-1321` synthesizes an empty
+body for the source whose manifest entry says it answered.
+
+Recommendation: FIX NOW as part of G4-R3's generation design. Atomically write
+the contribution before publishing its completed index entry. User impact is a
+headline that claims recovery while the evidence body is gone. Confidence
+HIGH. Regression risk M; effort M. A generation fence must prevent a late
+writer from entering a replacement run.
+
+#### G4-R7 MINOR: the briefing document contradicts itself about manual bounds
+
+`docs/src/dev/briefings.md:249` says every entry point reads generated profile
+bounds. Lines 278-285 then say manual tool and shell runs get code defaults.
+The first statement matches the current code.
+
+Recommendation: SCHEDULE LATER with the bounds hardening. User impact is wrong
+operator diagnosis and avoidable workarounds. Confidence HIGH. Regression risk
+low; effort S. Update docs after G4-R1 and G4-R11 define the final contract.
+
+#### G4-R8 MINOR: the TypeScript profile-bounds reader has no contract test
+
+`agent/extensions/scufris/briefing/briefing.ts:49-82` independently spells the
+file path, `deadline` key, and fallback. Python and Nix have tests; no TypeScript
+test mentions `briefing-profiles` or `collectTimeout`. Drift restores the old
+30-minute extension cutoff while the other checks remain green.
+
+Recommendation: FIX NOW with G4-R1. User impact is a silently shortened manual
+night after future drift. Confidence HIGH. Regression risk low; effort S. Test
+the generated-file value and environment precedence without special files.
+
+#### G4-R9 MINOR: the file called the whole widget contract omits `_hold`
+
+`surfaces/desktop/widgets/widget.d.ts` claims to be the whole shared contract
+but does not name the runtime-reserved `_hold` field documented in
+`docs/src/dev/widgets.md:118-126` and read in `runtime.rs:715-726`.
+
+Recommendation: SCHEDULE LATER with G4-1 through G4-3. User impact is an author
+accidentally taking control of panel lifetime. Confidence HIGH. Regression risk
+low; effort S. Decide first whether the runtime will strip the field before the
+page sees it (G4-M4).
+
+#### G4-R10 MINOR: the hold-grace test does not create a spent grace
+
+The assertion near `surfaces/desktop/src/widgets/runtime.rs:1736` says the
+grace restarted, but its surface had zero `aging` when hold began. Both current
+and intended behavior pass. This confirms, rather than replaces, G4-2.
+
+Recommendation: FIX NOW with G4-2. User impact is future false confidence in a
+broken timer notice. Confidence HIGH. Regression risk low; effort S. Spend part
+of the grace before setting `_hold: true`.
+
+#### G4-R11 MINOR: a profile deadline above the Node timer range expires immediately
+
+`collectTimeout()` returns unbounded seconds times 1000, and `runHelper()`
+passes it to Node `setTimeout`. The partial red-team lane safely observed Node
+clamp `2147483648` ms to about 1 ms. Home Manager requires positive integers
+but gives no upper bound.
+
+Recommendation: SCHEDULE LATER with profile validation. User impact is an
+immediate timeout for an extreme but accepted configuration. Confidence HIGH.
+Regression risk low; effort S. Bound or chunk the timer; do not merely increase
+it.
+
+### Existing finding dispositions
+
+The anonymous bullets above get stable IDs here in their listed order. These
+tables are the decision record for every existing product finding.
+
+#### Baseline and G6
+
+| ID                                 | Current severity / confidence | Recommendation and shape                                                                                                                                 |
+| ---------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F0                                 | MINOR / HIGH                  | FIX NOW. Ambient variables create false local failures but do not affect sandboxed CI or product runtime. Low risk, S, independent test-fixture cleanup. |
+| F1                                 | MINOR / HIGH                  | FIX NOW. The next Python dependency can make the helper gate test a different interpreter; CI fails loudly. Low risk, S, import `nix/python.nix`.        |
+| Original F2 disabled-button theory | NONE / HIGH                   | CLOSE INVALID. The host broadcasts `OfferTaken` before the agent lookup, so the button is spent and re-enabled. The corrected two-bound defect is G5-1.  |
+
+#### G5 adjudicated findings
+
+| ID    | Current severity / confidence | Recommendation and shape                                                                                                                                                                              |
+| ----- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G5-1  | MAJOR / HIGH                  | FIX NOW. A press can be durably accepted while no turn starts. M risk/M effort. Design with G5-2 and G5-4; align retained offers or add agent rejection and rollback.                                 |
+| G5-2  | MAJOR / HIGH                  | FIX NOW. Job and offer refusals are invisible on desktop. M/M. Preserve operation and route non-submission refusals before changing offer transactions.                                               |
+| G5-3  | MAJOR / MEDIUM                | FIX NOW after one focused WebKitGTK keyboard repro. The wrong Enter can submit draft prose. H/M because focus fixes regress easily; preserve or restore the row control during `tail()` and `list()`. |
+| G5-4  | MAJOR / HIGH                  | FIX NOW. Agent downtime spends an offer permanently. M/M. Implement after G5-2 so any failed relay is visible; then settle only after relay or support rollback.                                      |
+| G5-5  | MAJOR / HIGH                  | FIX NOW. One long project path freezes every job row and the tray. Low/S. Clamp the display field before protocol validation; independent of row-cap policy.                                          |
+| G5-6  | MAJOR / HIGH                  | FIX NOW. A valid schema-level Unicode label can discard the whole answer. M/S-M. Use byte-safe normalization with G1-8 and G1-M4 before encoding.                                                     |
+| G5-7  | MAJOR / HIGH                  | FIX NOW. A review row exposes a stop control guaranteed to fail. Low/S. Send `job.root_job` and test descendant-row control.                                                                          |
+| G5-8  | MAJOR / HIGH                  | FIX NOW. The same drain failure after a second session start has no row or wake. Low/S. Reset all drain state together; verify with G1-3's poison case.                                               |
+| G5-9  | MAJOR / HIGH                  | SCHEDULE LATER, after G5-2 and offer transaction semantics. A normal refusal paints iPhone failed while hiding its detail. M/M iOS state and notice change.                                           |
+| G5-10 | MINOR / HIGH                  | SCHEDULE LATER. A row age freezes and can mislead the morning reader. Low/S, add one display timer without republishing job state.                                                                    |
+| G5-11 | MAJOR / HIGH                  | FIX NOW. A ninth live job is invisible and cannot turn the tray red. M/M. Decide overflow presentation with G5-M2 before changing the documented cap.                                                 |
+| G5-12 | MINOR / HIGH                  | SCHEDULE LATER after offer and drain mechanics settle. Stale ingress and notice docs mislead maintainers. Low/S doc sweep.                                                                            |
+
+The eight G5 minor bullets above are G5-M1 through G5-M8.
+
+| ID and summary                                   | Current severity / confidence | Recommendation and shape                                                                                                                      |
+| ------------------------------------------------ | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| G5-M1, republish silently disarms stop           | MINOR / HIGH                  | SCHEDULE LATER with G5-3. Fails safe but wastes a press. M/S due focus/arming interaction.                                                    |
+| G5-M2, drain row is culled at the cap            | MAJOR / HIGH                  | FIX NOW with G5-11. The final drain warning can disappear after wakes stop. M/M overflow policy.                                              |
+| G5-M3, citations after the fourth are cleared    | MINOR / HIGH                  | SCHEDULE LATER. Measured badges are lost, but job completion still arrives. Low/S-M; retain overflow for the next answer.                     |
+| G5-M4, protocol v6 check comment                 | MINOR / HIGH                  | SCHEDULE LATER in the docs/check sweep. No runtime impact. Low/S.                                                                             |
+| G5-M5, unused `JobRow` re-export                 | NONE / HIGH                   | ACCEPT RISK. It has no user effect and removal can wait for nearby cleanup. Low/S.                                                            |
+| G5-M6, old DOM offer is outside desktop's ring   | MINOR / MEDIUM                | SCHEDULE LATER after G5-2. The host usually drops the same old offer, but the stale DOM button then needs an honest refusal or trimming. M/M. |
+| G5-M7, jobs-only HUD anchors at top              | MINOR / HIGH                  | ACCEPT RISK. Cosmetic empty-conversation layout only. Low/S.                                                                                  |
+| G5-M8, widget page can invoke unarmed job cancel | MAJOR / MEDIUM                | SCHEDULE LATER as capability hardening. Packaged widgets are trusted today, but the capability defeats the stated two-press boundary. M/M-H.  |
+
+#### G1 adjudicated findings
+
+| ID   | Current severity / confidence | Recommendation and shape                                                                                                                                                                                                                    |
+| ---- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G1-1 | MAJOR / HIGH                  | FIX NOW with the offer/job transaction work. Follow-up answers are unowned, unspoken, and stripped of widgets. M/M. Open association from the pressing surface only after the press is accepted.                                            |
+| G1-2 | MAJOR / HIGH                  | FIX NOW with G1-1. Code, test, and docs disagree about whether a refused answer closes the turn; a correction becomes an unprompted duplicate. M/M. Choose one transaction rule, then make the cumulative-channel test drain each response. |
+| G1-3 | BLOCKER / HIGH                | FIX NOW. One admitted non-printable summary permanently wedges every job event. Low/S-M. Use one predicate at report, parse, and record doors, including `scufris-report`; then test the seven demonstrated code points.                    |
+| G1-4 | MAJOR / HIGH                  | SCHEDULE LATER after response transaction rules. One bad optional attachment or widget drops every good peer. M/M-L. Resolve and validate per item while preserving prose and an honest rejection.                                          |
+| G1-5 | MAJOR / HIGH                  | SCHEDULE LATER. The executable-word blacklist cannot enforce no foreground waiting. H/M-L policy change. Replace blacklist reliance with a bounded command capability or remove the claim that it is a complete guard.                      |
+| G1-6 | MAJOR / HIGH                  | SCHEDULE LATER after G4-R3. Re-collecting a delivered key yields no wake and renders new cards over old prose. H/M. Define replace/refuse/new-generation semantics first.                                                                   |
+| G1-7 | MINOR / HIGH                  | SCHEDULE LATER. Report trimming, summary bounds, and cleanup order docs are stale. Low/S after behavior choices are stable.                                                                                                                 |
+| G1-8 | MAJOR / HIGH                  | FIX NOW with G5-6. A carriage return or byte-long `details` discards the whole answer. M/S-M. Normalize or omit only the invalid optional field before encoding.                                                                            |
+
+The thirteen G1 minor bullets above are G1-M1 through G1-M13.
+
+| ID and summary                                      | Current severity / confidence | Recommendation and shape                                                                                                               |
+| --------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| G1-M1, Markdown headings split report entries       | MINOR / HIGH                  | SCHEDULE LATER. Trimming can detach evidence from its event header. Low/S; split only on status-entry headings.                        |
+| G1-M2, missing attachment object maps to 500        | MINOR / HIGH                  | SCHEDULE LATER. Clients may retry a permanent miss. Low/S; map missing to not-found and pin the error variant.                         |
+| G1-M3, quota-declined records stay unindexed        | MINOR / HIGH                  | SCHEDULE LATER. Disk and quota accounting disagree until restart. M/M; track or deterministically evict unindexed records.             |
+| G1-M4, NEL whitespace differs across JS and Rust    | MINOR / HIGH                  | FIX NOW with G1-8. An edge string closes the agent connection and loses an answer. Low/S once one shared normalization rule is chosen. |
+| G1-M5, OpenAPI omits two incomplete-upload 400s     | MINOR / HIGH                  | SCHEDULE LATER with G1-M6. Generated clients lack cases for real responses. Low/S.                                                     |
+| G1-M6, upload refusal literals bypass lockstep list | MINOR / HIGH                  | SCHEDULE LATER with G1-M5. Drift can evade the cross-language test. Low/S.                                                             |
+| G1-M7, empty media type reaches upstream            | MINOR / HIGH                  | ACCEPT RISK. Upstream still refuses it; only refusal locality and diagnosis degrade. Low/S.                                            |
+| G1-M8, any surface abort clears the owner           | MAJOR / HIGH                  | FIX NOW with G1-1. An unrelated surface can make the real answer unspoken. M/S-M; require owner identity.                              |
+| G1-M9, startup reads only today and yesterday       | MINOR / HIGH                  | SCHEDULE LATER. A briefing pending over two dates is never delivered. Low/S-M; use bounded pending discovery rather than a timer.      |
+| G1-M10, duplicate briefing failure prose            | MINOR / HIGH                  | SCHEDULE LATER with G1-6. Drift can give tool and helper different verdicts. Low/S.                                                    |
+| G1-M11, one-use `decide` closure                    | NONE / HIGH                   | ACCEPT RISK. Maintainability only; no wrong behavior. Low/S.                                                                           |
+| G1-M12, unused `MAX_DETAIL_BYTES`                   | NONE / HIGH                   | ACCEPT RISK. Dead export only. Low/S.                                                                                                  |
+| G1-M13, acknowledgment event has no listener        | NONE / HIGH                   | ACCEPT RISK. It is documented and harmless until an integration needs it. Low/S.                                                       |
+
+#### G4 findings already written
+
+The four anonymous G4 desktop bullets above are G4-M1 through G4-M4.
+
+| ID and summary                                   | Current severity / confidence | Recommendation and shape                                                                                                                              |
+| ------------------------------------------------ | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G4-1, dead backend retains hold                  | MAJOR / HIGH                  | FIX NOW. A frozen panel owns a scarce slot for four hours. Low/S; clear hold on `Health::Dead` and test it.                                           |
+| G4-2, grace does not restart after hold          | MAJOR / HIGH                  | FIX NOW. A finished timer can vanish before it is noticed. Low/S with G4-R10. Reset grace at the hold transition.                                     |
+| G4-3, crowd-out always selects oldest held timer | MAJOR / HIGH                  | FIX NOW. Opening a fourth exhibit can silently kill an active timer. M/M; prefer unheld exhibits and define all-held behavior.                        |
+| G4-M1, timer accepts longer than hold ceiling    | MINOR / HIGH                  | FIX NOW with G4-3. A long timer is killed early. Low/S after the four-hour product limit is chosen; align model text and backend.                     |
+| G4-M2, hover/citation does not renew hold budget | MINOR / HIGH                  | SCHEDULE LATER with hold policy. An actively reread timer can still hit the ceiling. M/S.                                                             |
+| G4-M3, malformed `_hold` is silent false         | MINOR / HIGH                  | ACCEPT RISK. This is a packaged backend author error, bounded by normal grace. Low/S logging improvement.                                             |
+| G4-M4, `_hold` is forwarded to widget data       | MINOR / HIGH                  | SCHEDULE LATER with G4-R9. Contract privacy is false though the shipped widget ignores it. Low/S-M; strip before update if that remains the contract. |
+
+### Recovered candidates closed, accepted, or deduplicated
+
+| Candidate                                        | Status        | Reason                                                                                                                   |
+| ------------------------------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| G4 contracts/correctness backend-death claim     | SUPERSEDED    | Duplicate of G4-1; stronger desktop evidence is already written.                                                         |
+| G4 craft hold-grace claim                        | SUPERSEDED    | Duplicate of G4-2; the weak-test part is retained as G4-R10.                                                             |
+| G4 correctness long-timer claim                  | SUPERSEDED    | Duplicate of G4-M1.                                                                                                      |
+| G4 interpreter copies                            | SUPERSEDED    | `6c76c61` unified the runtime paths before the reviewed head; the one residual gate mismatch is F1.                      |
+| G4 red-team re-collection stale prose            | SUPERSEDED    | Same root defect as G1-6; the archived repro strengthens that finding.                                                   |
+| Nightly `model = "Opus"` casing                  | INVALID       | Claude accepted it and this exact run used it; lowercase consistency has no demonstrated product failure. CLOSE INVALID. |
+| `orphans` returns unused `job_ids` beside `jobs` | ACCEPTED RISK | Redundant output has no user effect. Do not schedule it without an API cleanup.                                          |
+| Unused Python `STATUSES` constant                | ACCEPTED RISK | Dead internal name, not an authority used by a product path.                                                             |
+| Original G5 in-memory `archived` claim           | SUPERSEDED    | Fixed by `ae316e8` before the reviewed head.                                                                             |
+| Original G5 unclipped project grid claim         | SUPERSEDED    | Fixed by `6c76c61` before the reviewed head.                                                                             |
+| G5 pending badges on a later answer              | INVALID       | The code documents this as deliberate and labels badges with job IDs.                                                    |
+| G1 duplicate stale attention-notice claim        | SUPERSEDED    | Deduplicated into G5-12.                                                                                                 |
+
+All `INVALID` and independently `SUPERSEDED` candidates are NONE / HIGH as
+separate findings. The two accepted-risk maintenance candidates are also NONE /
+HIGH: both still exist, but neither has demonstrated product impact.
+
+### Prioritized fix slate
+
+1. Make profile-bound reads regular-file-only and byte-bounded, and add safe
+   Python and TypeScript contract tests: G4-R1, G4-R8, and G4-R11's bound.
+2. Make the job event doors use one text predicate and reset all drain state as
+   one unit: G1-3 and G5-8.
+3. Normalize every model- or helper-origin display field before wire encoding:
+   G5-6, G1-8, G1-M4, and G5-5.
+4. Repair the press transaction in dependency order: show typed job/offer
+   refusals (G5-2), establish surface ownership (G1-1, G1-2, G1-M8), then make
+   offer settlement atomic and recoverable (G5-1, G5-4), and pass the root for
+   review-row stop (G5-7).
+5. Add exclusive briefing run identity first, then persist each source answer
+   before its index entry: G4-R3 then G4-R6. Only after that address re-collect
+   and per-profile cancellation: G1-6 then G4-R4.
+6. Correct widget hold lifecycle in one tested change: G4-1, G4-2, G4-R10,
+   G4-3, and G4-M1. Decide the contract before G4-R9 and G4-M4.
+7. Preserve job visibility under pressure: G5-11 and G5-M2. Separately
+   reproduce G5-3 on WebKitGTK before changing focus-preserving HUD updates.
+
+### Smallest remaining review coverage
+
+The documented scope is not complete. The smallest coverage that completes it
+without repeating accepted work is:
+
+- G2 `997e057..19ce35a`: one unattended five-lane panel: craft, correctness,
+  desktop, contracts, and red team.
+- G3 `19ce35a..474a7fa`: one unattended five-lane panel with the same lanes.
+- G4 `474a7fa..353198d`: one replacement red-team lane only, followed by outer
+  adjudication. It should use static reasoning and bounded regular-file
+  fixtures. It must not open or read `/dev/zero`, a device, FIFO, socket, or
+  symlink target, and must not create an unbounded stream. The four completed
+  G4 lanes must not be repeated.
+
+No Feel lane is needed because this was an unattended review without `--live`.
+The optional WebKitGTK reproduction for G5-3 increases confidence before its
+fix; it is not missing group coverage.
+
+### Landing readiness
+
+`sprout land recover-nightly-review --dry-run` passed every Sprout guard and
+left the main checkout unchanged. It does not probe untracked-file collisions.
+The main checkout has the surviving untracked `TASK.md` at the same path as the
+new tracked file, and the two files differ because this branch contains the
+recovery. A real squash is therefore expected to refuse rather than overwrite
+the untracked file.
+
+The evidence commit is complete and the branch is clean, but it is not ready
+for immediate landing. Before an explicit landing, the owner must preserve and
+then remove or replace the main checkout's untracked copy. This recovery did not
+do that because the request required inspecting the dirty main checkout without
+changing it. Run the dry-run again after resolving that collision.
+
+### Verification and skips
+
+Recovery ran only checks needed to validate review claims:
+
+- `git` proved current implementation `HEAD` is the exact reviewed revision and
+  has no implementation diff from it.
+- A structural parse found 15 child transcripts, 14 child `end_turn` records,
+  and exactly one incomplete child, G4 red team.
+- A safe parser probe against the real prompt and module confirmed that partial
+  timeout output containing the prompt example is accepted as `status: ok`.
+- A safe helper-module probe confirmed all seven recorded non-printable
+  characters pass `parse_event` and fail `valid_record_text`.
+- Static inspection confirmed the profile reader still has unbounded
+  `read_bytes()` and no no-follow, file-type, or size guard. No special file was
+  opened.
+- Static inspection plus the retained regular-file transcript repro confirmed
+  same-key collection has no exclusive owner or generation.
+- The source pass rechecked every accepted path named in the disposition tables.
+- `git diff --check` and the focused Prettier check for this task passed after
+  normalizing its Markdown layout; no finding text was removed.
+
+The earlier exact-revision evidence remains: 121 Node tests and typecheck
+passed; 376 Python tests passed with ambient briefing variables removed; 414
+Rust workspace tests passed. Those suites were not repeated because the
+implementation tree has not changed. `nix flake check`, Ruff, an X display, and
+G2/G3 review were not run. A skip is not a pass.
+
+No implementation file, live briefing state, service, process, notification
+path, release, remote, or tag was changed. This task stays OPEN.

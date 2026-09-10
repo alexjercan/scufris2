@@ -1,6 +1,6 @@
 # Nightly review
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 70
 - TAGS: review
 

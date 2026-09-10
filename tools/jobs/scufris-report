@@ -25,8 +25,16 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    if "\r" in summary or "\n" in summary:
-        print("scufris-report: a summary is one line", file=sys.stderr)
+    if not summary.isprintable():
+        # The same predicate the helper's `displayable` uses, for the same
+        # reason: a summary admitted here and refused at the record door wedged
+        # every job's event drain. A newline is one of the characters this
+        # catches, so it still answers "a summary is one line" for the case the
+        # caller is most likely to hit.
+        print(
+            "scufris-report: a summary is one printable line",
+            file=sys.stderr,
+        )
         return 2
     if sys.argv[1] not in WORKER_EVENTS:
         print(

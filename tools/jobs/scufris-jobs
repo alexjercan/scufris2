@@ -54,6 +54,23 @@ MAX_EVENT_LINE = 4096
 # for every job in the poll, permanently, because the cursor never advanced
 # past it. One bound, measured in bytes, at every door.
 MAX_SUMMARY = 500
+
+
+def displayable(text: str) -> bool:
+    """Whether one line of worker text can be written, parsed and stored.
+
+    One predicate for all four doors. `report` and `parse_event` used to test
+    `ord(character) < 32` while `valid_record_text` - which `store_job` runs on
+    the summary it copies into the record - tested `str.isprintable()`. Seven
+    code points passed the first two and failed the third, so a worker line
+    holding one was admitted, written to the event log, and then refused at the
+    record. The cursor never advanced past it and every job's event drain
+    wedged, permanently, for every reader.
+
+    `isprintable` is the strict end of the pair, so the refusal now happens at
+    the door the caller can see rather than two processes later.
+    """
+    return text.isprintable()
 MAX_EVENT_BATCH = 1024 * 1024
 MAX_REPORT_ENTRY = MAX_REPORT_DETAIL + MAX_EVENT_LINE + 5
 MAX_REPORT_FILE = 2 * 1024 * 1024
@@ -1434,9 +1451,7 @@ def valid_record_text(value: Any, maximum: int) -> bool:
         encoded = value.encode("utf-8")
     except UnicodeEncodeError:
         return False
-    return 0 < len(encoded) <= maximum and all(
-        character.isprintable() for character in value
-    )
+    return 0 < len(encoded) <= maximum and displayable(value)
 
 
 def validate_job_record(value: Any, job_id: str) -> dict[str, Any]:
@@ -1866,12 +1881,19 @@ def prepare_harness(
 def report_launch_failure(job_id: str, reason: str) -> None:
     """Say that a worker never started, from inside the pane where it did not.
 
-    `launch` runs in the tmux pane. Everything it can refuse before the harness
-    is running - a missing executable, a working directory that moved, a
-    capability that no longer authorizes this generation - printed to a pane
-    nobody is watching and exited. The job stayed `running` with no event after
-    `worker starting`, so the foreground read it as a worker still thinking and
-    the only way out was noticing by hand.
+    `launch` runs in the tmux pane. Everything it can refuse once the harness is
+    being prepared - a missing executable, a working directory that moved -
+    printed to a pane nobody is watching and exited. The job stayed `running`
+    with no event after `worker starting`, so the foreground read it as a worker
+    still thinking and the only way out was noticing by hand.
+
+    A capability that no longer authorizes this generation is deliberately not
+    one of them. That check raises before the guarded region, so an unauthorized
+    caller cannot use this to publish a terminal event against a job that is
+    still running. Widening the region upward to cover it would trade a stuck
+    reading for a forged one. The stuck pane it leaves behind is a real gap and
+    belongs to whatever watches for a pane that exited with no terminal event,
+    not here.
     """
     try:
         with workflow_lock():
@@ -2103,7 +2125,7 @@ def parse_event(line: str) -> dict[str, Any] | None:
         or not isinstance(value.get("summary"), str)
         or not value["summary"].strip()
         or len(value["summary"].encode("utf-8")) > MAX_SUMMARY
-        or any(ord(character) < 32 for character in value["summary"])
+        or not displayable(value["summary"])
     ):
         return None
     return value
@@ -2245,7 +2267,7 @@ def write_report(
         or not summary.strip()
         or len(summary.encode("utf-8")) > MAX_SUMMARY
         or len(encoded_display) > MAX_EVENT_LINE
-        or any(ord(character) < 32 for character in summary)
+        or not displayable(summary)
     ):
         raise JobError("invalid worker event")
     if len(encoded_detail) > MAX_REPORT_DETAIL:

@@ -147,6 +147,55 @@ class HelperBoundsTest(unittest.TestCase):
             )
         )
 
+    def test_every_door_refuses_the_same_worker_text(self) -> None:
+        """The parse, record and report doors must agree on one predicate.
+
+        They did not. `report` and `parse_event` tested
+        `ord(character) < 32`; `valid_record_text`, which the record copy runs
+        through, tested `str.isprintable()`. Every code point between them was
+        admitted into the event log and then refused at the record, and because
+        the cursor never advanced past the offending line, one worker summary
+        wedged the event drain for every job, permanently.
+
+        These are code points that pass an `ord < 32` test and fail
+        `isprintable`: a C1 control, a no-break space, a soft hyphen, a
+        zero-width joiner, a bidi override, a line separator and an unassigned
+        code point.
+        """
+        wedging = [
+            "\u009b",  # C1 control introducer
+            "\u00a0",  # no-break space
+            "\u00ad",  # soft hyphen
+            "\u200d",  # zero-width joiner
+            "\u202e",  # right-to-left override
+            "\u2028",  # line separator
+            "\u0378",  # unassigned
+        ]
+        for character in wedging:
+            name = f"U+{ord(character):04X}"
+            self.assertGreaterEqual(ord(character), 32, name)
+            self.assertFalse(character.isprintable(), name)
+
+            summary = f"work{character}ing"
+            # The parse door refuses it.
+            line = json.dumps({"generation": 1, "event": "done", "summary": summary})
+            self.assertIsNone(self.jobs.parse_event(line), name)
+            # The record door refuses it, as it always did.
+            self.assertFalse(
+                self.jobs.valid_record_text(summary, self.jobs.MAX_SUMMARY), name
+            )
+            # And they agree, which is the whole point.
+            self.assertFalse(self.jobs.displayable(summary), name)
+
+        # An ordinary summary still passes all of them, including one with a
+        # space and non-ASCII prose.
+        for good in ("work ing", "ran the checks", "wrote the caf\u00e9 page"):
+            line = json.dumps({"generation": 1, "event": "done", "summary": good})
+            self.assertIsNotNone(self.jobs.parse_event(line), good)
+            self.assertTrue(
+                self.jobs.valid_record_text(good, self.jobs.MAX_SUMMARY), good
+            )
+
     def test_a_trimmed_report_keeps_the_history_that_fits(self) -> None:
         # The worker prompt tells a restarted execution to read `report.md` for
         # what the last one left it. Replacing the whole file with the newest
@@ -534,14 +583,20 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         self.assertEqual(detail["report"], escape_text)
         self.assertEqual(detail["project_context"], escape_text)
         self.assertEqual(detail["prompt"], escape_text)
-        self.assertEqual(detail["summary"], status_summary)
+        # The poisoned line is refused at the parse door rather than shown.
+        # `\u009b` passed `ord(character) < 32` at `report` and `parse_event`
+        # and failed `isprintable()` at the record, so copying it into the
+        # record raised and every job's event drain wedged behind it. One
+        # predicate at all four doors means a status file that already holds
+        # such a line drains past it to the last good reading.
+        self.assertEqual(detail["summary"], "update 19999")
         self.assertLessEqual(len(detail["events"]), 100)
         human = self.cli("400000000001").stdout
         self.assertNotIn("\x1b", human)
         self.assertNotIn("\x07", human)
         self.assertNotIn("\r", human)
         self.assertIn(r"\x1b[31m red\x07\x0dnext", human)
-        self.assertIn(r"status\x9b31m text", human)
+        self.assertNotIn("\u009b", human)
 
         detail_maximum = 512 * 1024
         report_maximum = 2 * 1024 * 1024

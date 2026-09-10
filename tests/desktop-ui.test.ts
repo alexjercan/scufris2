@@ -1383,7 +1383,21 @@ test("the briefing drawer keeps active and latest attention rows compact", async
     since: 40,
     failed: 0,
   };
-  const page = hud(true, [], [], [writing, partial, active, olderFailure]);
+  const stopped = {
+    ...base,
+    id: "generation-stopped",
+    collection: "collected",
+    delivery: "failed",
+    since: 50,
+    failed: 0,
+    summary: "delivery stopped; restart the Scufris service",
+  };
+  const page = hud(
+    true,
+    [],
+    [],
+    [stopped, writing, partial, active, olderFailure],
+  );
   await settle();
 
   const rows = page.element("briefing-rows");
@@ -1393,19 +1407,24 @@ test("the briefing drawer keeps active and latest attention rows compact", async
   );
   assert.deepEqual(
     rows.children.map((row) => row.children[1]?.content),
-    ["gather", "partial", "write"],
-    "collapsed keeps both active rows and only the latest attention row in stable order",
+    ["gather", "write", "halt"],
+    "collapsed keeps every active row and only the latest attention row in stable order",
   );
   assert.equal(
     page.element("briefing-toggle").getAttribute("aria-expanded"),
     "false",
   );
-  assert.match(page.element("briefing-meta").content, /2 active/);
-  assert.match(page.element("briefing-meta").content, /2 need attention/);
-  assert.match(page.element("briefing-meta").content, /1 hidden/);
+  assert.match(page.element("briefing-meta").content, /3 active/);
+  assert.match(page.element("briefing-meta").content, /3 need attention/);
+  assert.match(page.element("briefing-meta").content, /2 hidden/);
   assert.match(
-    rows.children[1]?.getAttribute("aria-label") ?? "",
-    /partial.*1 failed.*requires attention/,
+    rows.children[2]?.getAttribute("aria-label") ?? "",
+    /halt.*requires attention.*restart the Scufris service/,
+  );
+  assert.equal(
+    rows.children[2]?.children.length,
+    4,
+    "a stopped delivery needs a restart and cannot be dismissed",
   );
 
   const scroller = page.element("lines");
@@ -1419,7 +1438,7 @@ test("the briefing drawer keeps active and latest attention rows compact", async
   );
   assert.deepEqual(
     rows.children.map((row) => row.children[1]?.content),
-    ["fail", "gather", "partial", "write"],
+    ["fail", "gather", "partial", "write", "halt"],
   );
   assert.equal(
     scroller.scrollTop,
@@ -1436,7 +1455,7 @@ test("the briefing drawer keeps active and latest attention rows compact", async
   );
   assert.equal(
     rows.children.length,
-    4,
+    5,
     "dismissal waits for the service whole-list update",
   );
 });

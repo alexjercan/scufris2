@@ -1104,7 +1104,7 @@ private struct BriefingRowView: View {
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(ScufrisPalette.quartz)
                     .fixedSize()
-                if row.requiresAttention {
+                if row.canDismiss {
                     Button("DISMISS", action: dismiss)
                         .buttonStyle(.plain)
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
@@ -1126,6 +1126,7 @@ private struct BriefingRowView: View {
 
     private var word: String {
         if row.delivery == .inProgress { return "write" }
+        if row.delivery == .failed { return "halt" }
         if row.collection == .collecting { return "gather" }
         if row.delivery == .pending { return "ready" }
         if row.collection == .failed { return "fail" }
@@ -1140,6 +1141,7 @@ private struct BriefingRowView: View {
     }
 
     private var colour: Color {
+        if row.delivery == .failed { return ScufrisPalette.red }
         if row.collection == .failed { return ScufrisPalette.red }
         if row.requiresAttention { return ScufrisPalette.yellow }
         if row.delivery == .delivered { return ScufrisPalette.quartz }

@@ -64,8 +64,6 @@ export class AgentClient {
   private backoff = MIN_BACKOFF_MS;
   private stopped = false;
   private ready = false;
-  /** Durable proactive item whose next atomic response must acknowledge it. */
-  private activeProactive?: string;
   private readonly log: NonNullable<AgentClientOptions["log"]>;
 
   constructor(options: AgentClientOptions) {
@@ -85,19 +83,40 @@ export class AgentClient {
     this.socket?.destroy();
     this.socket = undefined;
     this.ready = false;
-    this.activeProactive = undefined;
     this.buffer = "";
   }
 
-  response(response: AtomicResponse): void {
-    const proactiveId = this.activeProactive;
+  /** Send one response with the proactive event that its Pi turn carried.
+   *
+   * Correlation is an argument, not client state. Other extensions can queue
+   * follow-ups between a wake and an answer, so "the next response" is not an
+   * identity boundary.
+   */
+  response(response: AtomicResponse, proactiveId?: string): void {
     this.tell({
       v: SERVICE_VERSION,
       type: "agent.response",
       ...response,
       ...(proactiveId === undefined ? {} : { proactive_id: proactiveId }),
     });
-    this.activeProactive = undefined;
+  }
+
+  /** Tell the host when Pi delivers the exact queued proactive message. */
+  proactiveStarted(proactiveId: string): void {
+    this.tell({
+      v: SERVICE_VERSION,
+      type: "agent.proactive_started",
+      proactive_id: proactiveId,
+    });
+  }
+
+  /** Tell the host when that same Pi turn settles, with or without an answer. */
+  proactiveSettled(proactiveId: string): void {
+    this.tell({
+      v: SERVICE_VERSION,
+      type: "agent.proactive_settled",
+      proactive_id: proactiveId,
+    });
   }
 
   /** Publishes every delegated job, whole.
@@ -176,11 +195,6 @@ export class AgentClient {
             this.options.busy(),
           );
         } else if (message.type === "agent.wake") {
-          // A volatile wake may arrive while the durable response is being
-          // generated. It has no correlation of its own and must not erase
-          // the terminal item whose next atomic response acknowledges it.
-          if (message.proactive_id !== undefined)
-            this.activeProactive = message.proactive_id;
           this.options.wake({
             ...(message.proactive_id === undefined
               ? {}
@@ -213,7 +227,6 @@ export class AgentClient {
     const handshakeFailed = !this.ready;
     this.socket = undefined;
     this.ready = false;
-    this.activeProactive = undefined;
     this.buffer = "";
     socket.destroy();
     if (handshakeFailed) this.log(UPDATE_TOGETHER, "error");

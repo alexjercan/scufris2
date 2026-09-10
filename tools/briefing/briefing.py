@@ -1762,32 +1762,91 @@ def read_run(date: str, profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
 
 
 def publish(date: str, profile: str, prose: str) -> dict[str, Any]:
-    """Keep the prose Scufris wrote and render the page over again with it.
+    """Serialize retries before fixing one generation's prose."""
+    date = validated_date(date)
+    profile = validated_profile(profile)
+    directory = run_dir(date, profile)
+    lock_path = directory / ".publish.lock"
+    try:
+        descriptor = os.open(
+            lock_path,
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600,
+        )
+    except OSError as trouble:
+        raise Refused(
+            f"the {profile} briefing publication lock is unavailable: {trouble}"
+        ) from None
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        return _publish_owned(date, profile, prose)
+    finally:
+        os.close(descriptor)
 
-    Collection already wrote a page from the contributions alone. This adds the
-    prose to the same run and renders it once more, so the page the owner opens
-    is never behind what Scufris said.
+
+def _publish_owned(date: str, profile: str, prose: str) -> dict[str, Any]:
+    """Prepare one generation once, and finish an interrupted preparation.
+
+    Collection already wrote a page from the contributions alone. The first
+    publish fixes the generation's prose. Repeating the same prose is a no-op,
+    except that it repairs a crash between the prose, manifest, and page
+    writes. Different prose needs a new generation and is refused here.
     """
     manifest = read_manifest(date, profile)
     if not isinstance(prose, str) or not prose.strip():
         raise Refused("a briefing needs its prose")
-    if len(prose) > MAX_PROSE:
-        raise Refused(f"the prose is longer than {MAX_PROSE} characters")
+    normalized = prose.strip() + "\n"
+    wanted = normalized.encode("utf-8")
+    if len(wanted) > MAX_PROSE:
+        raise Refused(f"the prose is longer than {MAX_PROSE} bytes")
     directory = run_dir(date, profile)
-    atomic_write(directory / "briefing.md", prose.strip() + "\n")
+    prose_path = directory / "briefing.md"
+    existing = read_regular(prose_path, MAX_PROSE + 1, optional=True)
+    if existing is not None and existing != wanted:
+        raise Refused("this briefing generation already has different prose")
+    if manifest.get("delivery") == "prepared" and existing is None:
+        raise Refused("this prepared briefing generation has no prose")
+
+    wrote_prose = existing is None
+    if wrote_prose:
+        atomic_write(prose_path, normalized)
+
     # This says the artifact is ready. Only the service may mark terminal
     # delivery done, after the correlated answer is in canonical replay.
-    manifest = {**manifest, "delivery": "prepared"}
-    write_manifest(manifest)
+    wrote_manifest = manifest.get("delivery") != "prepared"
+    if wrote_manifest:
+        manifest = {**manifest, "delivery": "prepared"}
+        write_manifest(manifest)
+
     run = read_run(date, profile)
-    atomic_write(directory / "briefing.html", page.render_page(run))
+    page_path = directory / "briefing.html"
+    rendered = page.render_page(run)
+    rendered_bytes = rendered.encode("utf-8")
+    try:
+        current_page = read_regular(
+            page_path, max(1, len(rendered_bytes)), optional=True
+        )
+    except Refused:
+        current_page = None
+    wrote_page = current_page != rendered_bytes
+    if wrote_page:
+        atomic_write(page_path, rendered)
+
+    changed = wrote_prose or wrote_manifest or wrote_page
+    if wrote_prose:
+        outcome = "published"
+    elif changed:
+        outcome = "recovered"
+    else:
+        outcome = "unchanged"
     return {
         "date": date,
         "profile": profile,
         "state": manifest["state"],
         "delivery": manifest["delivery"],
-        "markdown": str(directory / "briefing.md"),
-        "page": str(directory / "briefing.html"),
+        "outcome": outcome,
+        "markdown": str(prose_path),
+        "page": str(page_path),
     }
 
 

@@ -48,7 +48,7 @@ interface Tick {
   level: number;
 }
 
-// Canonical protocol v9 conversation entry, relayed without reshaping.
+// Canonical protocol v10 conversation entry, relayed without reshaping.
 interface AttachmentDescriptor {
   id: string;
   name: string;
@@ -108,7 +108,7 @@ interface BriefingRow {
   date: string;
   profile: string;
   collection: "collecting" | "collected" | "failed";
-  delivery: "pending" | "in_progress" | "delivered";
+  delivery: "pending" | "in_progress" | "failed" | "delivered";
   since: number;
   completed: number;
   total: number;

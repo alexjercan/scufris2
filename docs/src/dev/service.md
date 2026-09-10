@@ -13,7 +13,7 @@ local HTTP -> content.sock ----+
 `scufris-service` owns the Pi RPC process, canonical user-facing state, the
 latest 200 conversation messages, a durable scheduled-briefing inbox, and
 managed attachment content. It exposes
-three protocol-v9 sockets and one private HTTP socket:
+three protocol-v10 sockets and one private HTTP socket:
 
 - `$XDG_RUNTIME_DIR/scufris/surface.sock`: registered desktop and synthetic
   surfaces;
@@ -30,7 +30,7 @@ coordinated staging stack.
 ## Typed channels
 
 Each socket has its own inbound and outbound message enum. Every line is one
-bounded LF-terminated JSON object with `"v":9`. A wrong version is logged and
+bounded LF-terminated JSON object with `"v":10`. A wrong version is logged and
 the connection closes without a response. Clients show a local message that
 asks the user to update the host and surface together.
 
@@ -115,18 +115,36 @@ While this one proactive slot is reserved, surface submissions receive
 `no_free_slot` and remain in their composer. They are never steered into the
 briefing.
 
-The agent copies `proactive_id` to its next atomic response. The service accepts
-only the active correlation. It first atomically records the assistant message
-and delivery ID in canonical conversation replay, then marks the briefing
-`delivered` and removes its queued wake. A restart resets an unrecorded
+The agent extension stores `proactive_id` on the exact custom message that Pi
+queues. It captures the ID only when Pi delivers that message, sends an
+`agent.proactive_started` marker, and adds the ID only to that turn's atomic
+response. It then sends `agent.proactive_settled` for the same turn. These
+markers and the response use one ordered agent socket. A different queued
+follow-up cannot consume or overwrite the correlation, and its generic
+lifecycle event cannot retry a proactive message that is still queued in Pi.
+The service accepts only the active event ID.
+
+The service atomically records the assistant message and delivery ID in
+canonical conversation replay, then marks the briefing `delivered` and removes
+its queued wake. It broadcasts only after both writes succeed. A failed write
+keeps the correlated response retryable. A restart resets an unrecorded
 `in_progress` item to pending. If replay was written but the second snapshot was
 not, startup finds the delivery ID in replay and closes the inbox before an
-agent can connect. Duplicate terminal upserts therefore do not produce a
-second visible answer.
+agent can connect. Duplicate terminal upserts and response retries therefore do
+not produce a second visible answer.
+
+Consecutive proactive turns use exponential backoff from 2 seconds, bounded at
+30 seconds, between dispatches. The count resets when the queue stays empty
+through that backoff or a surface opens a user turn. Three consecutive
+proactive turn starts open a service-owned circuit before a fourth can start.
+Every retained queued row becomes `failed`, remains
+visible with restart instructions, and cannot be dismissed. Restarting the
+service is the explicit recovery: startup returns those durable wakes to
+`pending`.
 
 Collection and delivery never overwrite each other. The filesystem helper owns
 `collecting`, `collected`, and `failed`; the service owns `pending`,
-`in_progress`, and `delivered`.
+`in_progress`, `failed`, and `delivered`.
 
 After delivery, a successful row leaves surface presentation. A failed row, or
 a measured partial row with `collection == collected && failed > 0`, remains
@@ -226,10 +244,11 @@ state with this precedence:
 failed > blocked > working > starting > idle
 ```
 
-`failed` and `blocked` are folded from the job rows rather than sent as their
-own field, and a row holds until it is filed. So the tray stays red after a job
-fails overnight and goes quiet when Alex archives it, not when the process
-happens to exit: acknowledgement, not timing.
+`failed` and `blocked` are folded from durable rows rather than sent as their
+own field. A failed job holds until it is filed. A circuit-stopped briefing
+holds `failed` until the service restart that returns it to `pending`. Thus the
+tray stays red while explicit recovery is still required, not only while a
+process happens to run.
 
 Surfaces layer local listening, transcription, and speaking presentation over
 that state.

@@ -23,7 +23,7 @@ loopback listener and bearer-token boundary:
 
 | Method       | Path                    | Purpose                                          |
 | ------------ | ----------------------- | ------------------------------------------------ |
-| `GET`        | `/` or `/surface`       | Upgrade to a protocol-v9 surface WebSocket       |
+| `GET`        | `/` or `/surface`       | Upgrade to a protocol-v10 surface WebSocket      |
 | `GET`        | `/health`               | Read the authenticated gateway identity          |
 | `POST`       | `/audio/transcription`  | Forward a bounded mono PCM WAV to host inference |
 | `POST`       | `/attachments?name=...` | Upload one bounded object                        |
@@ -39,7 +39,7 @@ The transcription route accepts at most 2 MiB and 60 seconds of audio. It sends
 multipart `file`, `model=whisper-1`, and `response_format=json` to the loopback
 `ai-tools-api`. Its bounded `{ "text": "..." }` response is presentation data,
 not a surface message. The iOS app places it in the editable composer and sends
-it only through an ordinary protocol-v9 `surface.message` after confirmation.
+it only through an ordinary protocol-v10 `surface.message` after confirmation.
 
 ## Surface lifecycle
 
@@ -94,12 +94,12 @@ attachment IDs. The service resolves them into canonical descriptors before a
 message reaches the agent, another surface, or replay.
 
 ```json
-{"v":9,"type":"surface.hello","surface":{"id":"laptop-a","name":"Laptop A","widgets":[]}}
-{"v":9,"type":"surface.message","id":"message-1","text":"What changed?","attachments":["att_opaque"]}
-{"v":9,"type":"surface.abort","id":"abort-1"}
-{"v":9,"type":"job.command","id":"3f81c204b1e9","action":"cancel"}
-{"v":9,"type":"briefing.dismiss","id":"generation-a"}
-{"v":9,"type":"offer.take","id":"offer-a1"}
+{"v":10,"type":"surface.hello","surface":{"id":"laptop-a","name":"Laptop A","widgets":[]}}
+{"v":10,"type":"surface.message","id":"message-1","text":"What changed?","attachments":["att_opaque"]}
+{"v":10,"type":"surface.abort","id":"abort-1"}
+{"v":10,"type":"job.command","id":"3f81c204b1e9","action":"cancel"}
+{"v":10,"type":"briefing.dismiss","id":"generation-a"}
+{"v":10,"type":"offer.take","id":"offer-a1"}
 ```
 
 `job.command` is the one control a job row has. `cancel` stops the job and

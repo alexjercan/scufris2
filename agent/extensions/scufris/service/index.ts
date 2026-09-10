@@ -21,6 +21,50 @@ import {
   type JobRow,
 } from "./protocol.ts";
 
+export const PROACTIVE_DETAILS_VERSION = 1;
+export const PROACTIVE_DETAILS_KEY = "__scufrisServiceProactive";
+
+interface ProactiveMessageDetails {
+  version: typeof PROACTIVE_DETAILS_VERSION;
+  proactiveId: string;
+}
+
+/** Keep host correlation on the exact custom message Pi queues. */
+export function proactiveMessageDetails(
+  proactiveId: string,
+  wakeDetails?: unknown,
+): Record<string, unknown> {
+  const details =
+    typeof wakeDetails === "object" &&
+    wakeDetails !== null &&
+    !Array.isArray(wakeDetails)
+      ? (wakeDetails as Record<string, unknown>)
+      : {};
+  return {
+    ...details,
+    [PROACTIVE_DETAILS_KEY]: {
+      version: PROACTIVE_DETAILS_VERSION,
+      proactiveId,
+    } satisfies ProactiveMessageDetails,
+  };
+}
+
+/** Read only correlation envelopes created by this extension. */
+export function proactiveIdFromMessage(message: unknown): string | undefined {
+  if (typeof message !== "object" || message === null) return undefined;
+  const custom = message as Record<string, unknown>;
+  if (custom.role !== "custom") return undefined;
+  const details = custom.details;
+  if (typeof details !== "object" || details === null) return undefined;
+  const envelope = (details as Record<string, unknown>)[PROACTIVE_DETAILS_KEY];
+  if (typeof envelope !== "object" || envelope === null) return undefined;
+  const correlation = envelope as Partial<ProactiveMessageDetails>;
+  return correlation.version === PROACTIVE_DETAILS_VERSION &&
+    typeof correlation.proactiveId === "string"
+    ? correlation.proactiveId
+    : undefined;
+}
+
 export function resolveSocketPath(
   environment: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
@@ -46,6 +90,10 @@ export default function service(pi: ExtensionAPI): void {
   let rows: JobRow[] = [];
   let context: ExtensionContext | undefined;
   let client: AgentClient | undefined;
+  // Set only when Pi delivers the correlated custom message. Queue receipt is
+  // not turn receipt: workflow and offer follow-ups may be ahead of it.
+  let turnProactiveId: string | undefined;
+  let turnResponseSent = false;
 
   const notify = (message: string, level: "info" | "error") => {
     if (context?.hasUI) context.ui.notify(`Scufris service: ${message}`, level);
@@ -62,10 +110,35 @@ export default function service(pi: ExtensionAPI): void {
 
   pi.events.on(AGENT_RESPONSE_EVENT, (value: unknown) => {
     const response = value as AtomicResponse | undefined;
-    if (typeof response?.text === "string") client?.response(response);
+    if (typeof response?.text !== "string") return;
+    const proactiveId = turnResponseSent ? undefined : turnProactiveId;
+    if (proactiveId !== undefined) turnResponseSent = true;
+    client?.response(response, proactiveId);
+  });
+
+  pi.on("message_end", (event) => {
+    const proactiveId = proactiveIdFromMessage(event.message);
+    if (proactiveId === undefined) return;
+    turnProactiveId = proactiveId;
+    turnResponseSent = false;
+    client?.proactiveStarted(proactiveId);
+  });
+
+  pi.on("agent_settled", () => {
+    if (turnProactiveId === undefined) return;
+    if (!turnResponseSent)
+      notify(
+        `proactive event ${turnProactiveId} settled without an atomic response`,
+        "error",
+      );
+    client?.proactiveSettled(turnProactiveId);
+    turnProactiveId = undefined;
+    turnResponseSent = false;
   });
 
   pi.on("session_start", (_event, ctx) => {
+    turnProactiveId = undefined;
+    turnResponseSent = false;
     context = ctx;
     if (!socketPath) {
       notify("XDG_RUNTIME_DIR is required to reach the agent channel", "error");
@@ -93,9 +166,17 @@ export default function service(pi: ExtensionAPI): void {
       // The same wake a briefing already performs, under the caller's custom
       // type. It is a follow-up that triggers a turn, never a user message, so
       // nothing here looks like the owner typed it.
-      wake: ({ customType, content, details }) => {
+      wake: ({ proactiveId, customType, content, details }) => {
         void pi.sendMessage(
-          { customType, content, details, display: true },
+          {
+            customType,
+            content,
+            details:
+              proactiveId === undefined
+                ? details
+                : proactiveMessageDetails(proactiveId, details),
+            display: true,
+          },
           { deliverAs: "followUp", triggerTurn: true },
         );
       },
@@ -108,6 +189,8 @@ export default function service(pi: ExtensionAPI): void {
     client?.stop();
     client = undefined;
     context = undefined;
+    turnProactiveId = undefined;
+    turnResponseSent = false;
     rows = [];
   });
 }

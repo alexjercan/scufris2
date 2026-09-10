@@ -4,7 +4,7 @@ This directory contains the native SwiftUI companion. XcodeGen creates the
 Xcode project from `project.yml`; the generated project and Info.plist are not
 committed.
 
-The application connects to the authenticated protocol-v9 surface gateway over
+The application connects to the authenticated protocol-v10 surface gateway over
 `wss://`, stores its URL, bearer token, and stable surface identity in the iOS
 Keychain, replays the canonical conversation, and submits text with optional
 managed attachment IDs. Response `text` stays literal plain prose with safe web

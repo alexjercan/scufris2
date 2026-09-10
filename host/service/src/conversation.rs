@@ -119,9 +119,14 @@ impl ConversationHistory {
     }
 
     pub fn contains_delivery(&self, delivery_id: &str) -> bool {
+        self.delivery_message(delivery_id).is_some()
+    }
+
+    pub fn delivery_message(&self, delivery_id: &str) -> Option<&ConversationMessage> {
         self.entries
             .iter()
-            .any(|entry| entry.delivery_id.as_deref() == Some(delivery_id))
+            .find(|entry| entry.delivery_id.as_deref() == Some(delivery_id))
+            .map(|entry| &entry.message)
     }
 
     fn push(&mut self, message: ConversationMessage, delivery_id: Option<String>) {

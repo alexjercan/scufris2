@@ -19,6 +19,8 @@ use tracing::warn;
 const FORMAT_VERSION: u32 = 2;
 const LEGACY_FORMAT_VERSION: u32 = 1;
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+const DELIVERY_FAILED_SUMMARY: &str =
+    "delivery stopped after repeated proactive turns; restart the Scufris service";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -46,6 +48,27 @@ pub struct BriefingStore {
     pending: Vec<Queued>,
     /// Presentation state only. Delivery acknowledgment stays on each row.
     dismissed: HashSet<String>,
+    #[cfg(test)]
+    fail_persistence: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpsertOutcome {
+    Inserted,
+    Updated,
+    Deduplicated,
+    AlreadyDelivered,
+}
+
+impl UpsertOutcome {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Inserted => "inserted",
+            Self::Updated => "updated",
+            Self::Deduplicated => "deduplicated",
+            Self::AlreadyDelivered => "already_delivered",
+        }
+    }
 }
 
 impl BriefingStore {
@@ -55,6 +78,8 @@ impl BriefingStore {
             rows: Vec::new(),
             pending: Vec::new(),
             dismissed: HashSet::new(),
+            #[cfg(test)]
+            fail_persistence: false,
         };
         if let Err(error) = store.load() {
             warn!(%error, path = %store.path.display(), "briefing state was rejected; starting empty");
@@ -64,7 +89,10 @@ impl BriefingStore {
         // still attached to this process, so it is pending again.
         let mut changed = false;
         for row in &mut store.rows {
-            if row.delivery == BriefingDeliveryState::InProgress {
+            if matches!(
+                row.delivery,
+                BriefingDeliveryState::InProgress | BriefingDeliveryState::Failed
+            ) {
                 row.delivery = BriefingDeliveryState::Pending;
                 changed = true;
             }
@@ -90,6 +118,14 @@ impl BriefingStore {
             .collect()
     }
 
+    /// One circuit-stopped delivery that the service state must surface.
+    pub fn failed_delivery_summary(&self) -> Option<&str> {
+        self.rows
+            .iter()
+            .find(|row| row.delivery == BriefingDeliveryState::Failed)
+            .map(|row| row.summary.as_str())
+    }
+
     /// The complete service audit, including the delivered successes and the
     /// dismissed rows `rows` hides. Retention is asserted against it.
     #[cfg(test)]
@@ -99,8 +135,31 @@ impl BriefingStore {
 
     pub fn next(&self) -> Option<(&str, &BriefingWake)> {
         self.pending
-            .first()
+            .iter()
+            .find(|queued| {
+                self.rows.iter().any(|row| {
+                    row.id == queued.run_id && row.delivery == BriefingDeliveryState::Pending
+                })
+            })
             .map(|queued| (queued.run_id.as_str(), &queued.wake))
+    }
+
+    pub fn pending_len(&self) -> usize {
+        self.pending
+            .iter()
+            .filter(|queued| {
+                self.rows.iter().any(|row| {
+                    row.id == queued.run_id && row.delivery == BriefingDeliveryState::Pending
+                })
+            })
+            .count()
+    }
+
+    pub fn run_for_event(&self, event_id: &str) -> Option<&str> {
+        self.pending
+            .iter()
+            .find(|queued| queued.wake.event_id == event_id)
+            .map(|queued| queued.run_id.as_str())
     }
 
     /// Merges a generation update without allowing a stale writer to move it
@@ -110,10 +169,16 @@ impl BriefingStore {
         mut incoming: BriefingRow,
         wake: Option<BriefingWake>,
         already_delivered: bool,
-    ) -> Result<(), StoreError> {
+    ) -> Result<UpsertOutcome, StoreError> {
         let previous_rows = self.rows.clone();
         let previous_pending = self.pending.clone();
         let previous_dismissed = self.dismissed.clone();
+        let existed = self.rows.iter().any(|row| row.id == incoming.id);
+        let was_delivered = self
+            .rows
+            .iter()
+            .find(|row| row.id == incoming.id)
+            .is_some_and(|row| row.delivery == BriefingDeliveryState::Delivered);
         // Collection cannot acknowledge delivery. The service computed this
         // from canonical replay, or explicitly accepted a wake-free legacy
         // row, before calling the store.
@@ -133,7 +198,11 @@ impl BriefingStore {
                     .min(current.total.max(incoming.total));
                 current.total = current.total.max(incoming.total);
                 current.failed = current.failed.max(incoming.failed).min(current.completed);
-                current.summary = incoming.summary;
+                if current.delivery != BriefingDeliveryState::Failed
+                    || incoming.delivery == BriefingDeliveryState::Delivered
+                {
+                    current.summary = incoming.summary;
+                }
             }
             if current.delivery != BriefingDeliveryState::Delivered
                 && incoming.delivery == BriefingDeliveryState::Delivered
@@ -197,19 +266,36 @@ impl BriefingStore {
             let removed = self.rows.remove(index);
             self.dismissed.remove(&removed.id);
         }
+        if self.rows == previous_rows
+            && self.pending == previous_pending
+            && self.dismissed == previous_dismissed
+        {
+            return Ok(if was_delivered {
+                UpsertOutcome::AlreadyDelivered
+            } else {
+                UpsertOutcome::Deduplicated
+            });
+        }
         if let Err(error) = self.persist() {
             self.rows = previous_rows;
             self.pending = previous_pending;
             self.dismissed = previous_dismissed;
             return Err(error);
         }
-        Ok(())
+        Ok(if existed {
+            UpsertOutcome::Updated
+        } else {
+            UpsertOutcome::Inserted
+        })
     }
 
     /// Closes the crash window after canonical replay was stored but the
     /// inbox acknowledgement was not. This runs before an agent can connect,
     /// so an answer already in replay cannot trigger a second model turn.
-    pub fn recover_delivered(&mut self, contains: impl Fn(&str) -> bool) -> Result<(), StoreError> {
+    pub fn recover_delivered(
+        &mut self,
+        contains: impl Fn(&str) -> bool,
+    ) -> Result<usize, StoreError> {
         let previous_rows = self.rows.clone();
         let previous_pending = self.pending.clone();
         let delivered: Vec<(String, String)> = self
@@ -219,7 +305,7 @@ impl BriefingStore {
             .map(|queued| (queued.run_id.clone(), queued.wake.event_id.clone()))
             .collect();
         if delivered.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
         for (run_id, _) in &delivered {
             if let Some(row) = self.rows.iter_mut().find(|row| row.id == *run_id) {
@@ -236,7 +322,7 @@ impl BriefingStore {
             self.pending = previous_pending;
             return Err(error);
         }
-        Ok(())
+        Ok(delivered.len())
     }
 
     pub fn in_progress(&mut self, event_id: &str) -> Result<(), StoreError> {
@@ -257,6 +343,45 @@ impl BriefingStore {
             return Err(error);
         }
         Ok(())
+    }
+
+    pub fn delivery_failed(&mut self, event_id: &str) -> Result<(), StoreError> {
+        let Some(run_id) = self.run_for_event(event_id).map(str::to_string) else {
+            return Ok(());
+        };
+        self.fail_runs(&HashSet::from([run_id])).map(|_| ())
+    }
+
+    /// Stops every retained terminal item while the circuit is open. The
+    /// queue remains durable so opening the store on an explicit service
+    /// restart can return these rows to pending without reconstructing wakes.
+    pub fn queued_delivery_failed(&mut self) -> Result<usize, StoreError> {
+        let run_ids = self
+            .pending
+            .iter()
+            .map(|queued| queued.run_id.clone())
+            .collect();
+        self.fail_runs(&run_ids)
+    }
+
+    fn fail_runs(&mut self, run_ids: &HashSet<String>) -> Result<usize, StoreError> {
+        let previous_rows = self.rows.clone();
+        let mut changed = 0;
+        for row in &mut self.rows {
+            if run_ids.contains(&row.id) && row.delivery != BriefingDeliveryState::Delivered {
+                row.delivery = BriefingDeliveryState::Failed;
+                row.summary = DELIVERY_FAILED_SUMMARY.into();
+                changed += 1;
+            }
+        }
+        if changed == 0 {
+            return Ok(0);
+        }
+        if let Err(error) = self.persist() {
+            self.rows = previous_rows;
+            return Err(error);
+        }
+        Ok(changed)
     }
 
     pub fn retry(&mut self, event_id: &str) -> Result<(), StoreError> {
@@ -401,7 +526,16 @@ impl BriefingStore {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub fn fail_persistence(&mut self, fail: bool) {
+        self.fail_persistence = fail;
+    }
+
     fn persist(&self) -> Result<(), StoreError> {
+        #[cfg(test)]
+        if self.fail_persistence {
+            return Err(io::Error::other("injected briefing persistence failure").into());
+        }
         let parent = self
             .path
             .parent()
@@ -525,6 +659,120 @@ mod tests {
         let done = BriefingStore::open(path);
         assert_eq!(done.rows()[0].delivery, BriefingDeliveryState::Delivered);
         assert!(done.next().is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn duplicate_ingress_reports_what_happened_without_rewriting_state() {
+        let root =
+            std::env::temp_dir().join(format!("scufris-briefing-dedupe-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let path = root.join("briefings.json");
+        let mut store = BriefingStore::open(path);
+        assert_eq!(
+            store
+                .upsert(
+                    row("generation-a", BriefingCollectionState::Collected),
+                    Some(wake("generation-a")),
+                    false,
+                )
+                .unwrap(),
+            UpsertOutcome::Inserted
+        );
+        assert_eq!(
+            store
+                .upsert(
+                    row("generation-a", BriefingCollectionState::Collected),
+                    Some(wake("generation-a")),
+                    false,
+                )
+                .unwrap(),
+            UpsertOutcome::Deduplicated
+        );
+        store.acknowledge("briefing-generation-a-terminal").unwrap();
+        assert_eq!(
+            store
+                .upsert(
+                    row("generation-a", BriefingCollectionState::Collected),
+                    Some(wake("generation-a")),
+                    false,
+                )
+                .unwrap(),
+            UpsertOutcome::AlreadyDelivered
+        );
+        assert!(store.next().is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_delivery_needs_a_restart_before_it_is_pending_again() {
+        let root =
+            std::env::temp_dir().join(format!("scufris-briefing-failed-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let path = root.join("briefings.json");
+        let mut store = BriefingStore::open(path.clone());
+        store
+            .upsert(
+                row("generation-a", BriefingCollectionState::Collected),
+                Some(wake("generation-a")),
+                false,
+            )
+            .unwrap();
+        store
+            .delivery_failed("briefing-generation-a-terminal")
+            .unwrap();
+        assert!(store.next().is_none());
+        assert_eq!(
+            store.audit_rows()[0].delivery,
+            BriefingDeliveryState::Failed
+        );
+        assert!(store.audit_rows()[0].summary.contains("restart"));
+        assert_eq!(
+            store
+                .upsert(
+                    row("generation-a", BriefingCollectionState::Collected),
+                    Some(wake("generation-a")),
+                    false,
+                )
+                .unwrap(),
+            UpsertOutcome::Deduplicated
+        );
+        assert!(store.audit_rows()[0].summary.contains("restart"));
+        drop(store);
+
+        let restored = BriefingStore::open(path);
+        assert!(restored.next().is_some());
+        assert_eq!(
+            restored.audit_rows()[0].delivery,
+            BriefingDeliveryState::Pending
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_failed_persistence_rolls_back_the_delivery_transition() {
+        let root = std::env::temp_dir().join(format!(
+            "scufris-briefing-persist-failure-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let path = root.join("briefings.json");
+        let mut store = BriefingStore::open(path);
+        store
+            .upsert(
+                row("generation-a", BriefingCollectionState::Collected),
+                Some(wake("generation-a")),
+                false,
+            )
+            .unwrap();
+        store.fail_persistence(true);
+        assert!(store.in_progress("briefing-generation-a-terminal").is_err());
+        assert_eq!(
+            store.audit_rows()[0].delivery,
+            BriefingDeliveryState::Pending
+        );
+        assert!(store.next().is_some());
+        store.fail_persistence(false);
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -1,4 +1,4 @@
-//! Canonical protocol v9 service state.
+//! Canonical protocol v10 service state.
 
 use std::{
     collections::HashMap,
@@ -44,6 +44,22 @@ const MAX_FAILURES: u32 = 3;
 const RECOVERY: &str =
     " Restart it from the tray, or with `systemctl --user restart scufris-service`.";
 const HELLO_GRACE: Duration = Duration::from_secs(10);
+const MAX_CONSECUTIVE_PROACTIVE_TURNS: u32 = 3;
+#[cfg(not(test))]
+const PROACTIVE_BACKOFF_MIN: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const PROACTIVE_BACKOFF_MIN: Duration = Duration::from_millis(20);
+#[cfg(not(test))]
+const PROACTIVE_BACKOFF_MAX: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const PROACTIVE_BACKOFF_MAX: Duration = Duration::from_millis(80);
+
+fn proactive_backoff(completed: u32) -> Duration {
+    let exponent = completed.saturating_sub(1).min(4);
+    PROACTIVE_BACKOFF_MIN
+        .saturating_mul(1_u32 << exponent)
+        .min(PROACTIVE_BACKOFF_MAX)
+}
 
 #[derive(Clone)]
 pub struct SurfaceSender {
@@ -88,6 +104,15 @@ struct Inner {
     briefings: BriefingStore,
     /// Terminal event currently holding the one proactive model slot.
     active_proactive: Option<String>,
+    /// Pi has delivered the exact queued custom message for that event.
+    active_proactive_started: bool,
+    /// Fast consecutive proactive turns are bounded independently of Pi's
+    /// follow-up queue. A user turn or an inbox that stays empty through the
+    /// backoff ends the sequence.
+    consecutive_proactive: u32,
+    proactive_not_before: Option<Instant>,
+    proactive_timer_pending: bool,
+    proactive_circuit_open: bool,
     surfaces: HashMap<String, RegisteredSurface>,
     surface_by_connection: HashMap<u64, (String, u64)>,
     next_surface_generation: u64,
@@ -105,6 +130,9 @@ impl Inner {
     /// it rather than until the process happens to exit. Filing is the
     /// acknowledgement, and it is what puts the tray back to quiet.
     fn attention(&self) -> Option<(ScufrisState, &str)> {
+        if let Some(summary) = self.briefings.failed_delivery_summary() {
+            return Some((ScufrisState::Failed, summary));
+        }
         let worst = |wanted: JobRowState| {
             self.jobs
                 .iter()
@@ -121,6 +149,12 @@ impl Inner {
         let attention = self.attention();
         if let Some((ScufrisState::Failed, detail)) = attention {
             return (ScufrisState::Failed, detail.to_string());
+        }
+        if self.proactive_circuit_open {
+            return (
+                ScufrisState::Failed,
+                format!("Briefing delivery stopped for safety.{RECOVERY}"),
+            );
         }
         if self.lifecycle == Lifecycle::Failed {
             return (ScufrisState::Failed, self.lifecycle_detail.clone());
@@ -223,31 +257,107 @@ impl Inner {
     /// Gives one durable terminal item the model slot only while no user turn
     /// owns it. The row is stored as in progress before the wake crosses the
     /// volatile agent connection.
-    fn dispatch_briefing(&mut self) {
+    fn dispatch_briefing_now(&mut self) {
         if self.lifecycle != Lifecycle::Idle
             || self.associated_surface.is_some()
             || self.active_proactive.is_some()
             || self.agent.is_none()
+            || self.proactive_circuit_open
         {
             return;
         }
-        let Some((_run_id, wake)) = self.briefings.next() else {
+        let Some((run_id, wake)) = self.briefings.next() else {
+            self.consecutive_proactive = 0;
+            self.proactive_not_before = None;
             return;
         };
+        let run_id = run_id.to_string();
         let wake = wake.clone();
-        if let Err(error) = self.briefings.in_progress(&wake.event_id) {
-            warn!(%error, event = wake.event_id, "briefing delivery could not be reserved");
+        if self.consecutive_proactive >= MAX_CONSECUTIVE_PROACTIVE_TURNS {
+            self.proactive_circuit_open = true;
+            let failed = match self.briefings.queued_delivery_failed() {
+                Ok(failed) => failed,
+                Err(error) => {
+                    self.lifecycle = Lifecycle::Failed;
+                    self.lifecycle_detail = format!(
+                        "Briefing delivery stopped, but its safety state could not be stored.{RECOVERY}"
+                    );
+                    warn!(
+                        %error,
+                        run = run_id,
+                        event = wake.event_id,
+                        outcome = "persist_failed",
+                        pending = self.briefings.pending_len(),
+                        "proactive circuit state could not be stored"
+                    );
+                    0
+                }
+            };
+            error!(
+                run = run_id,
+                event = wake.event_id,
+                outcome = "circuit_open",
+                consecutive = self.consecutive_proactive,
+                limit = MAX_CONSECUTIVE_PROACTIVE_TURNS,
+                failed,
+                pending = self.briefings.pending_len(),
+                "proactive briefing circuit opened; restart the service to retry"
+            );
+            self.publish_state();
+            self.publish_briefings();
             return;
         }
+        if let Err(error) = self.briefings.in_progress(&wake.event_id) {
+            self.proactive_circuit_open = true;
+            self.lifecycle = Lifecycle::Failed;
+            self.lifecycle_detail = format!(
+                "Briefing delivery stopped because its reservation could not be stored.{RECOVERY}"
+            );
+            warn!(
+                %error,
+                run = run_id,
+                event = wake.event_id,
+                outcome = "circuit_open",
+                pending = self.briefings.pending_len(),
+                "briefing delivery could not be reserved"
+            );
+            self.publish_state();
+            self.publish_briefings();
+            return;
+        }
+        let event_id = wake.event_id.clone();
         if self.send_agent(AgentResponseBody::Wake {
-            proactive_id: Some(wake.event_id.clone()),
+            proactive_id: Some(event_id.clone()),
             custom_type: wake.custom_type,
             text: wake.text,
             details: wake.details,
         }) {
-            self.active_proactive = Some(wake.event_id);
-        } else if let Err(error) = self.briefings.retry(&wake.event_id) {
-            warn!(%error, event = wake.event_id, "briefing delivery could not be returned to pending");
+            self.proactive_not_before = None;
+            self.active_proactive = Some(event_id.clone());
+            self.active_proactive_started = false;
+            info!(
+                run = run_id,
+                event = event_id,
+                outcome = "queued_in_pi",
+                consecutive = self.consecutive_proactive,
+                pending = self.briefings.pending_len(),
+                "proactive briefing dispatched"
+            );
+        } else if let Err(error) = self.briefings.retry(&event_id) {
+            self.proactive_circuit_open = true;
+            self.lifecycle = Lifecycle::Failed;
+            self.lifecycle_detail = format!(
+                "Briefing delivery stopped because its retry could not be stored.{RECOVERY}"
+            );
+            warn!(
+                %error,
+                run = run_id,
+                event = event_id,
+                outcome = "circuit_open",
+                pending = self.briefings.pending_len(),
+                "briefing delivery could not be returned to pending"
+            );
+            self.publish_state();
         }
         self.publish_briefings();
     }
@@ -263,10 +373,20 @@ impl Service {
     pub fn new(config: Config, attachments: Arc<AttachmentStore>) -> Arc<Self> {
         let conversation = ConversationHistory::open(config.conversation_file.clone());
         let mut briefings = BriefingStore::open(config.briefing_file.clone());
-        if let Err(error) =
-            briefings.recover_delivered(|event_id| conversation.contains_delivery(event_id))
-        {
-            warn!(%error, "canonical briefing delivery recovery could not be stored");
+        match briefings.recover_delivered(|event_id| conversation.contains_delivery(event_id)) {
+            Ok(recovered) if recovered > 0 => info!(
+                outcome = "recovered_delivery",
+                recovered,
+                pending = briefings.pending_len(),
+                "canonical briefing deliveries recovered at startup"
+            ),
+            Ok(_) => {}
+            Err(error) => warn!(
+                %error,
+                outcome = "persist_failed",
+                pending = briefings.pending_len(),
+                "canonical briefing delivery recovery could not be stored"
+            ),
         }
         Arc::new(Self {
             config,
@@ -282,6 +402,11 @@ impl Service {
                 jobs: Vec::new(),
                 briefings,
                 active_proactive: None,
+                active_proactive_started: false,
+                consecutive_proactive: 0,
+                proactive_not_before: None,
+                proactive_timer_pending: false,
+                proactive_circuit_open: false,
                 surfaces: HashMap::new(),
                 surface_by_connection: HashMap::new(),
                 next_surface_generation: 0,
@@ -296,6 +421,150 @@ impl Service {
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|held| held.into_inner())
+    }
+
+    /// Dispatch now or arm one bounded backoff timer. Repeated reconciliation
+    /// while the timer is armed does not create more timers or bypass it.
+    fn dispatch_briefing(self: &Arc<Self>) {
+        let wait = {
+            let mut inner = self.lock();
+            if inner.lifecycle != Lifecycle::Idle
+                || inner.associated_surface.is_some()
+                || inner.active_proactive.is_some()
+                || inner.agent.is_none()
+                || inner.proactive_circuit_open
+            {
+                return;
+            }
+            match inner.proactive_not_before {
+                Some(deadline) if deadline > Instant::now() => {
+                    if inner.proactive_timer_pending {
+                        return;
+                    }
+                    inner.proactive_timer_pending = true;
+                    Some(deadline.saturating_duration_since(Instant::now()))
+                }
+                _ => {
+                    inner.dispatch_briefing_now();
+                    None
+                }
+            }
+        };
+        let Some(wait) = wait else {
+            return;
+        };
+        let service = Arc::downgrade(self);
+        thread::spawn(move || {
+            thread::sleep(wait);
+            let Some(service) = service.upgrade() else {
+                return;
+            };
+            let mut inner = service.lock();
+            inner.proactive_timer_pending = false;
+            if inner
+                .proactive_not_before
+                .is_some_and(|deadline| deadline > Instant::now())
+            {
+                drop(inner);
+                service.dispatch_briefing();
+                return;
+            }
+            inner.dispatch_briefing_now();
+        });
+    }
+
+    /// Reconcile the exact Pi turn after its extension reports settlement.
+    /// Agent-socket ordering puts any atomic response before this marker.
+    fn proactive_settled(self: &Arc<Self>, event_id: String) {
+        let mut inner = self.lock();
+        if inner.active_proactive.as_deref() != Some(&event_id) || !inner.active_proactive_started {
+            return;
+        }
+        let run_id = inner
+            .briefings
+            .run_for_event(&event_id)
+            .unwrap_or("unknown")
+            .to_string();
+        if let Some(message) = inner.conversation.delivery_message(&event_id).cloned() {
+            match inner
+                .briefings
+                .recover_delivered(|candidate| candidate == event_id)
+            {
+                Ok(recovered) if recovered > 0 => {
+                    inner.active_proactive = None;
+                    inner.active_proactive_started = false;
+                    inner.broadcast(message.into());
+                    let wait = proactive_backoff(inner.consecutive_proactive);
+                    inner.proactive_not_before = Some(Instant::now() + wait);
+                    info!(
+                        run = run_id,
+                        event = event_id,
+                        outcome = "recovered_delivery",
+                        backoff_ms = wait.as_millis(),
+                        pending = inner.briefings.pending_len(),
+                        "proactive briefing recovered after its acknowledgement failed"
+                    );
+                    inner.publish_briefings();
+                    drop(inner);
+                    self.dispatch_briefing();
+                    return;
+                }
+                Ok(_) => {}
+                Err(error) => warn!(
+                    %error,
+                    run = run_id,
+                    event = event_id,
+                    outcome = "persist_failed",
+                    pending = inner.briefings.pending_len(),
+                    "canonical proactive delivery could not close its inbox"
+                ),
+            }
+        }
+        inner.active_proactive = None;
+        inner.active_proactive_started = false;
+        match inner.briefings.retry(&event_id) {
+            Ok(()) => {
+                let wait = proactive_backoff(inner.consecutive_proactive);
+                inner.proactive_not_before = Some(Instant::now() + wait);
+                warn!(
+                    run = run_id,
+                    event = event_id,
+                    outcome = "retry",
+                    consecutive = inner.consecutive_proactive,
+                    backoff_ms = wait.as_millis(),
+                    pending = inner.briefings.pending_len(),
+                    "proactive briefing settled without a correlated response"
+                );
+            }
+            Err(error) => {
+                inner.proactive_circuit_open = true;
+                inner.lifecycle = Lifecycle::Failed;
+                inner.lifecycle_detail = format!(
+                    "Briefing delivery stopped because its retry could not be stored.{RECOVERY}"
+                );
+                if let Err(mark_error) = inner.briefings.queued_delivery_failed() {
+                    warn!(
+                        %mark_error,
+                        run = run_id,
+                        event = event_id,
+                        outcome = "persist_failed",
+                        "failed proactive deliveries could not be marked"
+                    );
+                }
+                error!(
+                    %error,
+                    run = run_id,
+                    event = event_id,
+                    outcome = "circuit_open",
+                    pending = inner.briefings.pending_len(),
+                    "proactive briefing retry could not be stored; circuit opened"
+                );
+                inner.publish_state();
+            }
+        }
+        inner.publish_briefings();
+        drop(inner);
+        self.dispatch_briefing();
     }
 
     pub fn register_surface(
@@ -475,7 +744,13 @@ impl Service {
             );
             return;
         }
-        // This surface opens a turn and owns the answer that closes it.
+        // This surface opens a turn and owns the answer that closes it. It
+        // also ends a normal consecutive proactive sequence. An opened
+        // circuit still requires the restart named by the failed row.
+        if !inner.proactive_circuit_open {
+            inner.consecutive_proactive = 0;
+            inner.proactive_not_before = None;
+        }
         inner.associated_surface = Some(surface.clone());
         inner.record(ConversationMessage {
             role: ConversationRole::User,
@@ -525,7 +800,11 @@ impl Service {
         }
     }
 
-    pub fn register_agent(&self, connection: u64, outbox: SyncSender<AgentResponse>) -> bool {
+    pub fn register_agent(
+        self: &Arc<Self>,
+        connection: u64,
+        outbox: SyncSender<AgentResponse>,
+    ) -> bool {
         let mut inner = self.lock();
         if inner.agent.is_some() {
             info!(connection, "second agent connection rejected");
@@ -540,11 +819,12 @@ impl Service {
         inner.agent_joined = true;
         info!("agent connected");
         debug!(connection, "agent registration accepted");
-        inner.dispatch_briefing();
+        drop(inner);
+        self.dispatch_briefing();
         true
     }
 
-    pub fn unregister_agent(&self, connection: u64) {
+    pub fn unregister_agent(self: &Arc<Self>, connection: u64) {
         let mut inner = self.lock();
         if inner
             .agent
@@ -552,10 +832,26 @@ impl Service {
             .is_some_and(|agent| agent.connection == connection)
         {
             inner.agent = None;
-            if let Some(event_id) = inner.active_proactive.take()
-                && let Err(error) = inner.briefings.retry(&event_id)
-            {
-                warn!(%error, event = event_id, "interrupted briefing delivery could not be returned to pending");
+            inner.active_proactive_started = false;
+            if let Some(event_id) = inner.active_proactive.take() {
+                match inner.briefings.retry(&event_id) {
+                    Ok(()) => {
+                        inner.proactive_not_before =
+                            Some(Instant::now() + proactive_backoff(inner.consecutive_proactive));
+                    }
+                    Err(error) => {
+                        inner.proactive_circuit_open = true;
+                        inner.lifecycle = Lifecycle::Failed;
+                        inner.lifecycle_detail = format!(
+                            "Briefing delivery stopped because its retry could not be stored.{RECOVERY}"
+                        );
+                        if let Err(mark_error) = inner.briefings.queued_delivery_failed() {
+                            warn!(%mark_error, event = event_id, outcome = "persist_failed", "failed proactive deliveries could not be marked");
+                        }
+                        warn!(%error, event = event_id, outcome = "circuit_open", "interrupted briefing delivery could not be returned to pending");
+                        inner.publish_state();
+                    }
+                }
             }
             inner.publish_briefings();
             info!("agent disconnected");
@@ -563,7 +859,7 @@ impl Service {
         }
     }
 
-    pub fn agent_request(&self, connection: u64, body: AgentRequestBody) {
+    pub fn agent_request(self: &Arc<Self>, connection: u64, body: AgentRequestBody) {
         let mut inner = self.lock();
         if !inner
             .agent
@@ -575,6 +871,48 @@ impl Service {
         debug!(connection, payload = ?body, "agent message received");
         match body {
             AgentRequestBody::Hello => {}
+            AgentRequestBody::ProactiveStarted { proactive_id } => {
+                let run_id = inner
+                    .briefings
+                    .run_for_event(&proactive_id)
+                    .unwrap_or("unknown")
+                    .to_string();
+                if inner.active_proactive.as_deref() != Some(&proactive_id) {
+                    warn!(
+                        run = run_id,
+                        event = proactive_id,
+                        expected = inner.active_proactive.as_deref().unwrap_or("none"),
+                        outcome = "ignored",
+                        pending = inner.briefings.pending_len(),
+                        "stale proactive turn start was ignored"
+                    );
+                } else if inner.active_proactive_started {
+                    info!(
+                        run = run_id,
+                        event = proactive_id,
+                        outcome = "deduplicated",
+                        consecutive = inner.consecutive_proactive,
+                        pending = inner.briefings.pending_len(),
+                        "proactive turn start was already recorded"
+                    );
+                } else {
+                    inner.active_proactive_started = true;
+                    inner.consecutive_proactive += 1;
+                    info!(
+                        run = run_id,
+                        event = proactive_id,
+                        outcome = "started",
+                        consecutive = inner.consecutive_proactive,
+                        pending = inner.briefings.pending_len(),
+                        "proactive turn started"
+                    );
+                }
+            }
+            AgentRequestBody::ProactiveSettled { proactive_id } => {
+                drop(inner);
+                self.proactive_settled(proactive_id);
+                return;
+            }
             AgentRequestBody::Jobs { jobs } => {
                 inner.jobs = jobs.clone();
                 inner.broadcast(SurfaceResponseBody::Jobs { jobs });
@@ -589,9 +927,33 @@ impl Service {
                 receipts,
             } => {
                 if let Some(event_id) = proactive_id {
+                    let run_id = inner
+                        .briefings
+                        .run_for_event(&event_id)
+                        .unwrap_or("unknown")
+                        .to_string();
                     if inner.active_proactive.as_deref() != Some(&event_id) {
-                        warn!(event = event_id, "stale proactive response was ignored");
+                        warn!(
+                            run = run_id,
+                            event = event_id,
+                            expected = inner.active_proactive.as_deref().unwrap_or("none"),
+                            outcome = "ignored",
+                            pending = inner.briefings.pending_len(),
+                            "stale proactive response was ignored"
+                        );
                         return;
+                    }
+                    if !inner.active_proactive_started {
+                        inner.active_proactive_started = true;
+                        inner.consecutive_proactive += 1;
+                        warn!(
+                            run = run_id,
+                            event = event_id,
+                            outcome = "inferred_start",
+                            consecutive = inner.consecutive_proactive,
+                            pending = inner.briefings.pending_len(),
+                            "proactive response arrived before its turn-start marker"
+                        );
                     }
                     let descriptors = match self.attachments.resolve(&attachments, true) {
                         Ok(descriptors) => descriptors,
@@ -619,22 +981,71 @@ impl Service {
                     {
                         Ok(recorded) => recorded,
                         Err(error) => {
-                            warn!(%error, event = event_id, "briefing response was not durably recorded");
+                            warn!(
+                                %error,
+                                run = run_id,
+                                event = event_id,
+                                outcome = "persist_failed",
+                                pending = inner.briefings.pending_len(),
+                                "briefing response was not durably recorded"
+                            );
                             return;
                         }
                     };
-                    if recorded {
-                        inner.broadcast(message.into());
-                    }
-                    match inner.briefings.acknowledge(&event_id) {
-                        Ok(_) => {
-                            inner.active_proactive = None;
-                            inner.publish_briefings();
-                        }
+                    let durable_message = if recorded {
+                        message
+                    } else {
+                        inner
+                            .conversation
+                            .delivery_message(&event_id)
+                            .cloned()
+                            .expect("a deduplicated delivery has a canonical message")
+                    };
+                    let acknowledged = match inner.briefings.acknowledge(&event_id) {
+                        Ok(found) => found,
                         Err(error) => {
-                            warn!(%error, event = event_id, "briefing delivery acknowledgement was not stored")
+                            warn!(
+                                %error,
+                                run = run_id,
+                                event = event_id,
+                                outcome = "persist_failed",
+                                pending = inner.briefings.pending_len(),
+                                "briefing delivery acknowledgement was not stored; the correlated response remains retryable"
+                            );
+                            return;
                         }
+                    };
+                    if acknowledged {
+                        inner.active_proactive = None;
+                        inner.active_proactive_started = false;
+                        inner.broadcast(durable_message.into());
+                        let wait = proactive_backoff(inner.consecutive_proactive);
+                        inner.proactive_not_before = Some(Instant::now() + wait);
+                        info!(
+                            run = run_id,
+                            event = event_id,
+                            replay = if recorded { "inserted" } else { "deduplicated" },
+                            outcome = "delivered",
+                            backoff_ms = wait.as_millis(),
+                            pending = inner.briefings.pending_len(),
+                            "proactive briefing acknowledged"
+                        );
+                    } else {
+                        inner.active_proactive = None;
+                        inner.active_proactive_started = false;
+                        inner.proactive_circuit_open = true;
+                        error!(
+                            run = run_id,
+                            event = event_id,
+                            outcome = "missing",
+                            pending = inner.briefings.pending_len(),
+                            "proactive event was absent from its briefing inbox; circuit opened"
+                        );
+                        inner.publish_state();
                     }
+                    inner.publish_briefings();
+                    drop(inner);
+                    self.dispatch_briefing();
                     return;
                 }
                 if inner.active_proactive.is_some() {
@@ -853,25 +1264,76 @@ impl Service {
     /// stores the quiet row and any terminal wake before acknowledging the
     /// control request. No connected agent is required.
     pub fn control_briefing(
-        &self,
+        self: &Arc<Self>,
         id: String,
         briefing: BriefingRow,
         wake: Option<BriefingWake>,
     ) -> ControlResponseBody {
         let mut inner = self.lock();
+        let run_id = briefing.id.clone();
+        let event_id = wake.as_ref().map(|wake| wake.event_id.clone());
         let delivered = wake
             .as_ref()
             .is_some_and(|wake| inner.conversation.contains_delivery(&wake.event_id))
             || (wake.is_none() && briefing.delivery == BriefingDeliveryState::Delivered);
-        if let Err(error) = inner.briefings.upsert(briefing, wake, delivered) {
-            return ControlResponseBody::Rejected {
-                id,
-                code: refusal::NO_FREE_SLOT.into(),
-                detail: error.to_string(),
-            };
-        }
+        let outcome = match inner.briefings.upsert(briefing, wake, delivered) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                warn!(
+                    %error,
+                    request = id,
+                    run = run_id,
+                    event = event_id.as_deref().unwrap_or("none"),
+                    outcome = "rejected",
+                    pending = inner.briefings.pending_len(),
+                    "briefing ingress was rejected"
+                );
+                return ControlResponseBody::Rejected {
+                    id,
+                    code: refusal::NO_FREE_SLOT.into(),
+                    detail: error.to_string(),
+                };
+            }
+        };
+        let circuit_failed = if inner.proactive_circuit_open {
+            match inner.briefings.queued_delivery_failed() {
+                Ok(failed) => failed,
+                Err(error) => {
+                    warn!(
+                        %error,
+                        request = id,
+                        run = run_id,
+                        event = event_id.as_deref().unwrap_or("none"),
+                        outcome = "rejected",
+                        pending = inner.briefings.pending_len(),
+                        "briefing ingress arrived after the circuit opened but could not be marked failed"
+                    );
+                    return ControlResponseBody::Rejected {
+                        id,
+                        code: refusal::NO_FREE_SLOT.into(),
+                        detail: format!(
+                            "Briefing delivery is stopped, but its safety state could not be stored: {error}"
+                        ),
+                    };
+                }
+            }
+        } else {
+            0
+        };
+        info!(
+            request = id,
+            run = run_id,
+            event = event_id.as_deref().unwrap_or("none"),
+            outcome = outcome.name(),
+            delivered,
+            circuit_open = inner.proactive_circuit_open,
+            circuit_failed,
+            pending = inner.briefings.pending_len(),
+            "briefing ingress stored"
+        );
         inner.publish_briefings();
-        inner.dispatch_briefing();
+        drop(inner);
+        self.dispatch_briefing();
         ControlResponseBody::BriefingAck { id }
     }
 
@@ -1003,7 +1465,8 @@ impl Service {
                     inner.lifecycle_detail.clear();
                 }
                 inner.publish_state();
-                inner.dispatch_briefing();
+                drop(inner);
+                self.dispatch_briefing();
             }
             Event::AgentStart => {
                 let mut inner = self.lock();
@@ -1016,7 +1479,8 @@ impl Service {
                 inner.lifecycle = Lifecycle::Idle;
                 inner.lifecycle_detail.clear();
                 inner.publish_state();
-                inner.dispatch_briefing();
+                drop(inner);
+                self.dispatch_briefing();
             }
             Event::ExtensionUiRequest {
                 id,
@@ -1201,9 +1665,12 @@ fn drain_stderr(stderr: impl std::io::Read) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{
-        atomic::{AtomicU64, Ordering},
-        mpsc::{Receiver, sync_channel},
+    use std::{
+        fs,
+        sync::{
+            atomic::{AtomicU64, Ordering},
+            mpsc::{Receiver, sync_channel},
+        },
     };
 
     use scufris_control::service::{
@@ -1277,6 +1744,56 @@ mod tests {
         }
     }
 
+    fn submit_briefing(service: &Arc<Service>, id: &str) {
+        assert!(matches!(
+            service.control_briefing(
+                format!("update-{id}"),
+                briefing_row(id),
+                Some(briefing_wake(id)),
+            ),
+            ControlResponseBody::BriefingAck { .. }
+        ));
+    }
+
+    fn proactive_started(id: &str) -> AgentRequestBody {
+        AgentRequestBody::ProactiveStarted {
+            proactive_id: format!("briefing-{id}-terminal"),
+        }
+    }
+
+    fn proactive_settled(id: &str) -> AgentRequestBody {
+        AgentRequestBody::ProactiveSettled {
+            proactive_id: format!("briefing-{id}-terminal"),
+        }
+    }
+
+    fn proactive_answer(id: &str, text: &str) -> AgentRequestBody {
+        AgentRequestBody::Response {
+            proactive_id: Some(format!("briefing-{id}-terminal")),
+            text: text.into(),
+            details: None,
+            widgets: None,
+            attachments: Vec::new(),
+            receipts: Vec::new(),
+        }
+    }
+
+    fn receive_assistant_text(inbox: &Receiver<SurfaceResponse>) -> String {
+        loop {
+            let message = inbox
+                .recv_timeout(Duration::from_secs(1))
+                .expect("an assistant message");
+            if let SurfaceResponseBody::Message {
+                role: ConversationRole::Assistant,
+                text,
+                ..
+            } = message.body
+            {
+                return text;
+            }
+        }
+    }
+
     #[test]
     fn one_terminal_generation_waits_for_the_user_and_is_recorded_once() {
         let runtime = test_runtime();
@@ -1334,6 +1851,7 @@ mod tests {
                 ..
             } if id == event_id
         ));
+        service.agent_request(10, proactive_started("generation-a"));
 
         service.surface_message(1, "held".into(), "Do not capture this.".into(), vec![]);
         assert!(
@@ -1356,6 +1874,7 @@ mod tests {
                 receipts: vec![],
             },
         );
+        service.agent_request(10, proactive_settled("generation-a"));
         assert_eq!(
             drain(&surface_in)
                 .iter()
@@ -1387,6 +1906,337 @@ mod tests {
             "duplicate terminal ingress stayed done"
         );
         std::fs::remove_dir_all(runtime).unwrap();
+    }
+
+    #[test]
+    fn only_the_matching_proactive_turn_can_acknowledge_a_delivery() {
+        let service = service();
+        let (_, surface_in) = surface(&service, 1, "one");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        service.apply(Event::AgentSettled);
+        submit_briefing(&service, "generation-a");
+        assert!(matches!(
+            agent_in.recv().unwrap().body,
+            AgentResponseBody::Wake {
+                proactive_id: Some(ref id),
+                ..
+            } if id == "briefing-generation-a-terminal"
+        ));
+        service.agent_request(10, proactive_started("generation-a"));
+
+        service.agent_request(10, proactive_answer("generation-b", "wrong turn"));
+        assert_eq!(
+            service.lock().briefings.audit_rows()[0].delivery,
+            BriefingDeliveryState::InProgress
+        );
+        assert!(drain(&surface_in).iter().all(|body| !matches!(
+            body,
+            SurfaceResponseBody::Message {
+                role: ConversationRole::Assistant,
+                ..
+            }
+        )));
+
+        service.agent_request(10, proactive_answer("generation-a", "matching turn"));
+        service.agent_request(10, proactive_settled("generation-a"));
+        assert_eq!(receive_assistant_text(&surface_in), "matching turn");
+        assert_eq!(
+            service.lock().briefings.audit_rows()[0].delivery,
+            BriefingDeliveryState::Delivered
+        );
+    }
+
+    #[test]
+    fn an_unrelated_settled_event_cannot_retry_a_proactive_message_still_queued_in_pi() {
+        let service = service();
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        service.apply(Event::AgentSettled);
+        submit_briefing(&service, "generation-a");
+        assert!(matches!(
+            agent_in.recv().unwrap().body,
+            AgentResponseBody::Wake { .. }
+        ));
+
+        service.apply(Event::AgentSettled);
+        thread::sleep(PROACTIVE_BACKOFF_MIN.saturating_mul(2));
+        assert!(agent_in.try_recv().is_err());
+        let inner = service.lock();
+        assert_eq!(
+            inner.briefings.audit_rows()[0].delivery,
+            BriefingDeliveryState::InProgress
+        );
+        assert_eq!(
+            inner.active_proactive.as_deref(),
+            Some("briefing-generation-a-terminal")
+        );
+        assert!(!inner.active_proactive_started);
+        assert_eq!(inner.consecutive_proactive, 0);
+        drop(inner);
+
+        service.agent_request(10, proactive_started("generation-a"));
+        service.agent_request(10, proactive_answer("generation-a", "right turn"));
+        service.agent_request(10, proactive_settled("generation-a"));
+        assert_eq!(
+            service.lock().briefings.audit_rows()[0].delivery,
+            BriefingDeliveryState::Delivered
+        );
+    }
+
+    #[test]
+    fn an_exact_proactive_settlement_without_a_response_retries_with_backoff() {
+        let service = service();
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        service.apply(Event::AgentSettled);
+        submit_briefing(&service, "generation-a");
+        assert!(matches!(
+            agent_in.recv().unwrap().body,
+            AgentResponseBody::Wake { .. }
+        ));
+        service.agent_request(10, proactive_started("generation-a"));
+        service.apply(Event::AgentStart);
+        service.apply(Event::AgentSettled);
+
+        let settled_at = Instant::now();
+        service.agent_request(10, proactive_settled("generation-a"));
+        assert!(matches!(
+            agent_in
+                .recv_timeout(Duration::from_secs(1))
+                .expect("the backed-off retry")
+                .body,
+            AgentResponseBody::Wake { .. }
+        ));
+        assert!(settled_at.elapsed() >= PROACTIVE_BACKOFF_MIN);
+        let inner = service.lock();
+        assert_eq!(inner.consecutive_proactive, 1);
+        assert!(!inner.active_proactive_started);
+        assert_eq!(
+            inner.briefings.audit_rows()[0].delivery,
+            BriefingDeliveryState::InProgress
+        );
+    }
+
+    #[test]
+    fn proactive_response_is_safe_for_both_settled_event_orderings() {
+        for settle_first in [true, false] {
+            let service = service();
+            let (_, surface_in) = surface(&service, 1, "one");
+            let (agent, agent_in) = sync_channel(8);
+            service.register_agent(10, agent);
+            agent_in.recv().unwrap();
+            service.apply(Event::AgentSettled);
+            submit_briefing(&service, "generation-a");
+            assert!(matches!(
+                agent_in.recv().unwrap().body,
+                AgentResponseBody::Wake { .. }
+            ));
+            service.agent_request(10, proactive_started("generation-a"));
+            if settle_first {
+                service.apply(Event::AgentSettled);
+            }
+            service.agent_request(10, proactive_answer("generation-a", "canonical"));
+            if !settle_first {
+                service.apply(Event::AgentSettled);
+            }
+            service.agent_request(10, proactive_settled("generation-a"));
+            assert_eq!(receive_assistant_text(&surface_in), "canonical");
+            thread::sleep(Duration::from_millis(20));
+            assert!(agent_in.try_recv().is_err());
+            assert_eq!(
+                service.lock().briefings.audit_rows()[0].delivery,
+                BriefingDeliveryState::Delivered
+            );
+        }
+    }
+
+    #[test]
+    fn consecutive_proactive_turns_back_off_and_open_the_circuit() {
+        let service = service();
+        let (agent, agent_in) = sync_channel(16);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        service.apply(Event::AgentSettled);
+        for suffix in ['a', 'b', 'c', 'd', 'e'] {
+            submit_briefing(&service, &format!("generation-{suffix}"));
+        }
+
+        let mut received_at = Vec::new();
+        for suffix in ['a', 'b', 'c'] {
+            let message = agent_in
+                .recv_timeout(Duration::from_secs(2))
+                .expect("the next backoff dispatch");
+            assert!(matches!(message.body, AgentResponseBody::Wake { .. }));
+            received_at.push(Instant::now());
+            service.agent_request(10, proactive_started(&format!("generation-{suffix}")));
+            service.apply(Event::AgentSettled);
+            service.agent_request(
+                10,
+                proactive_answer(&format!("generation-{suffix}"), &format!("answer {suffix}")),
+            );
+            service.agent_request(10, proactive_settled(&format!("generation-{suffix}")));
+        }
+        assert!(received_at[1].duration_since(received_at[0]) >= PROACTIVE_BACKOFF_MIN);
+        assert!(
+            received_at[2].duration_since(received_at[1])
+                >= PROACTIVE_BACKOFF_MIN.saturating_mul(2)
+        );
+        assert!(agent_in.recv_timeout(Duration::from_millis(150)).is_err());
+        let inner = service.lock();
+        let rows = inner.briefings.audit_rows();
+        for id in ["generation-d", "generation-e"] {
+            let failed = rows.iter().find(|row| row.id == id).unwrap();
+            assert_eq!(failed.delivery, BriefingDeliveryState::Failed);
+            assert!(failed.summary.contains("restart"));
+        }
+        assert_eq!(inner.briefings.pending_len(), 0);
+        assert!(inner.proactive_circuit_open);
+        let (state, detail) = inner.state();
+        assert_eq!(state, ScufrisState::Failed);
+        assert!(detail.contains("restart"));
+        drop(inner);
+
+        // A continuous producer may add more unique generations after the
+        // circuit opens. They receive the same durable stop state and cannot
+        // wait as ordinary pending work for a restart to run another burst.
+        submit_briefing(&service, "generation-f");
+        assert!(agent_in.recv_timeout(Duration::from_millis(50)).is_err());
+        let inner = service.lock();
+        let failed = inner
+            .briefings
+            .audit_rows()
+            .into_iter()
+            .find(|row| row.id == "generation-f")
+            .unwrap();
+        assert_eq!(failed.delivery, BriefingDeliveryState::Failed);
+        assert!(failed.summary.contains("restart"));
+        assert_eq!(inner.briefings.pending_len(), 0);
+    }
+
+    #[test]
+    fn external_input_resets_the_proactive_turn_counter() {
+        let service = service();
+        let (_, surface_in) = surface(&service, 1, "one");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        service.apply(Event::AgentSettled);
+        service.lock().consecutive_proactive = 2;
+        service.surface_message(
+            1,
+            "external-turn".into(),
+            "new external input".into(),
+            Vec::new(),
+        );
+        assert!(matches!(
+            agent_in.recv().unwrap().body,
+            AgentResponseBody::Message { .. }
+        ));
+        assert_eq!(service.lock().consecutive_proactive, 0);
+        drop(surface_in);
+    }
+
+    #[test]
+    fn a_failed_delivery_reservation_opens_the_circuit_before_a_wake() {
+        let service = service();
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        submit_briefing(&service, "generation-a");
+        service.lock().briefings.fail_persistence(true);
+        service.apply(Event::AgentSettled);
+        assert!(agent_in.try_recv().is_err());
+        let inner = service.lock();
+        assert!(inner.proactive_circuit_open);
+        assert!(inner.active_proactive.is_none());
+        assert_eq!(inner.consecutive_proactive, 0);
+        assert_eq!(
+            inner.briefings.audit_rows()[0].delivery,
+            BriefingDeliveryState::Pending
+        );
+        assert_eq!(inner.state().0, ScufrisState::Failed);
+    }
+
+    #[test]
+    fn proactive_delivery_waits_for_both_durable_writes() {
+        for fail_conversation in [true, false] {
+            let runtime = test_runtime();
+            let mut config = Config::test(runtime.clone());
+            let blocked = runtime.join("blocked");
+            if fail_conversation {
+                fs::create_dir_all(&runtime).unwrap();
+                fs::write(&blocked, "not a directory").unwrap();
+                config.conversation_file = blocked.join("conversation.json");
+            }
+            let service = service_at(config);
+            let (_, surface_in) = surface(&service, 1, "one");
+            let (agent, agent_in) = sync_channel(8);
+            service.register_agent(10, agent);
+            agent_in.recv().unwrap();
+            service.apply(Event::AgentSettled);
+            submit_briefing(&service, "generation-a");
+            assert!(matches!(
+                agent_in.recv().unwrap().body,
+                AgentResponseBody::Wake { .. }
+            ));
+            service.agent_request(10, proactive_started("generation-a"));
+            if !fail_conversation {
+                service.lock().briefings.fail_persistence(true);
+                service.apply(Event::AgentSettled);
+            }
+            service.agent_request(10, proactive_answer("generation-a", "one durable answer"));
+            assert!(drain(&surface_in).iter().all(|body| !matches!(
+                body,
+                SurfaceResponseBody::Message {
+                    role: ConversationRole::Assistant,
+                    ..
+                }
+            )));
+            assert_eq!(
+                service.lock().briefings.audit_rows()[0].delivery,
+                BriefingDeliveryState::InProgress
+            );
+
+            if fail_conversation {
+                fs::remove_file(&blocked).unwrap();
+                fs::create_dir(&blocked).unwrap();
+            } else {
+                service.lock().briefings.fail_persistence(false);
+            }
+            service.agent_request(10, proactive_settled("generation-a"));
+            if fail_conversation {
+                assert!(matches!(
+                    agent_in
+                        .recv_timeout(Duration::from_secs(1))
+                        .expect("the durable retry")
+                        .body,
+                    AgentResponseBody::Wake { .. }
+                ));
+                service.agent_request(10, proactive_started("generation-a"));
+                service.agent_request(10, proactive_answer("generation-a", "one durable answer"));
+                service.agent_request(10, proactive_settled("generation-a"));
+            }
+            assert_eq!(receive_assistant_text(&surface_in), "one durable answer");
+            assert_eq!(
+                service.lock().briefings.audit_rows()[0].delivery,
+                BriefingDeliveryState::Delivered
+            );
+            service.agent_request(10, proactive_answer("generation-a", "duplicate"));
+            assert!(drain(&surface_in).iter().all(|body| !matches!(
+                body,
+                SurfaceResponseBody::Message {
+                    role: ConversationRole::Assistant,
+                    ..
+                }
+            )));
+            assert_eq!(service.lock().conversation.len(), 1);
+            drop(service);
+            fs::remove_dir_all(runtime).unwrap();
+        }
     }
 
     #[test]

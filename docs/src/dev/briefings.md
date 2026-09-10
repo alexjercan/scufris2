@@ -268,6 +268,7 @@ refused without consuming its contents.
 $XDG_STATE_HOME/scufris/briefings/2026-08-31/
 ├── morning/
 │   ├── .collect.lock          excludes a second collector for this run slot
+│   ├── .publish.lock          serializes publication retries for the generation
 │   ├── manifest.json          generation, owner, collection/delivery state,
 │   │                          bounds, sources, offers, events, diagnostics
 │   ├── contributions/*.json   one durable envelope for each source
@@ -316,11 +317,12 @@ and delivery are two state machines:
 | `collected`  | at least one source answered, or none existed |
 | `failed`     | every declared source failed                  |
 
-| service delivery | meaning                                         |
-| ---------------- | ----------------------------------------------- |
-| `pending`        | the terminal wake is durably queued             |
-| `in_progress`    | one correlated proactive model slot is reserved |
-| `delivered`      | the correlated answer is in canonical replay    |
+| service delivery | meaning                                                |
+| ---------------- | ------------------------------------------------------ |
+| `pending`        | the terminal wake is durably queued                    |
+| `in_progress`    | one correlated proactive model slot is reserved        |
+| `failed`         | the proactive circuit stopped it until service restart |
+| `delivered`      | the correlated answer is in canonical replay           |
 
 A failed run is delivered because the absence of a briefing is itself the
 news: one source failing out of five was reported and five out of five used to
@@ -435,8 +437,13 @@ When the terminal item is pending, the service waits until Pi is idle and no
 user turn owns the response association. It marks the item `in_progress` before
 sending `agent.wake` with its stable `proactive_id`. While that slot is held, a
 new surface message is refused and retained in the surface's composer rather
-than being captured by the briefing. The extension copies `proactive_id` onto
-exactly the next atomic `agent.response`.
+than being captured by the briefing. The extension stores `proactive_id` on the
+exact custom message Pi queued, captures it when Pi delivers that message,
+sends `agent.proactive_started`, and adds the ID only to that turn's atomic
+`agent.response`. It then sends `agent.proactive_settled` on the same ordered
+socket. An unrelated follow-up cannot acknowledge the item, and its generic
+lifecycle event cannot retry a proactive message that is still waiting in Pi's
+queue.
 
 Scufris reads the run, writes one briefing in its own voice from measured
 contributions, publishes the same prose into the artifact, and returns the
@@ -445,7 +452,18 @@ conversation replay with its delivery ID. Only then does it mark the inbox item
 `delivered`. This is the acknowledgment boundary. A crash before the replay
 write retries the pending item; a crash after the replay write recovers it as
 delivered before an agent can connect, so no second visible answer is made.
-Duplicate or stale correlated responses are ignored.
+Duplicate or stale correlated responses are ignored. Publication is also
+idempotent. The first publish fixes `briefing.md`; the same prose is a no-op or
+repairs an interruption between the prose, manifest, and page writes. Different
+prose for the same generation is refused. `.publish.lock` serializes concurrent
+retries.
+
+Consecutive proactive turns use bounded exponential backoff. The count resets
+when the queue stays empty through that backoff or a surface opens a user turn.
+Three consecutive proactive turn starts open a circuit before a fourth
+starts. All queued rows become
+`failed` and show restart instructions. They cannot be dismissed. An explicit
+service restart returns their durable wakes to `pending`.
 
 A delivered success then disappears from the drawer. A delivered run needs
 attention only if collection is `failed`, or if collection is `collected` with

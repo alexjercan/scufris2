@@ -9,6 +9,23 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Changed
+
+- Surface and agent protocol 10 adds a failed briefing-delivery state. Host,
+  agent, desktop, gateway, control client, and iPhone must update together.
+
+### Fixed
+
+- Proactive event IDs now stay on the exact Pi turn that received them. The
+  service backs off consecutive proactive turns and stops before a fourth turn
+  until an explicit service restart. New ingress receives the same failed state
+  while that circuit remains open.
+- Briefing test fixtures pin progress announcements to a fixture control client
+  instead of resolving and mutating a developer's live service from `PATH`.
+- Briefing publication and delivery retries are idempotent across interrupted
+  artifact, conversation, and inbox writes. Queue ingress, dispatch, and
+  delivery now emit structured run, event, outcome, and pending counts.
+
 ## [2.6.0] - 2026-09-10
 
 ### Added

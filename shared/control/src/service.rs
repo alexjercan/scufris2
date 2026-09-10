@@ -1,4 +1,4 @@
-//! Scufris protocol v9 typed channels.
+//! Scufris protocol v10 typed channels.
 //!
 //! Surface, agent, and control traffic use separate Unix sockets and separate
 //! enums. Each decoder accepts only its channel and direction.
@@ -13,7 +13,7 @@ use crate::{
     is_identifier, read_line,
 };
 
-pub const SERVICE_VERSION: u32 = 9;
+pub const SERVICE_VERSION: u32 = 10;
 pub const SURFACE_FILE_NAME: &str = "surface.sock";
 pub const AGENT_FILE_NAME: &str = "agent.sock";
 pub const CONTROL_FILE_NAME: &str = "control.sock";
@@ -227,6 +227,8 @@ pub enum BriefingCollectionState {
 pub enum BriefingDeliveryState {
     Pending,
     InProgress,
+    /// The service circuit breaker stopped automatic model turns.
+    Failed,
     Delivered,
 }
 
@@ -265,8 +267,9 @@ impl BriefingRow {
 
     /// A delivered result that stays visible until presentation dismissal.
     pub fn requires_attention(&self) -> bool {
-        self.delivery == BriefingDeliveryState::Delivered
-            && (self.collection == BriefingCollectionState::Failed || self.partial())
+        self.delivery == BriefingDeliveryState::Failed
+            || (self.delivery == BriefingDeliveryState::Delivered
+                && (self.collection == BriefingCollectionState::Failed || self.partial()))
     }
 
     /// Whether a surface may dismiss this generation from presentation.
@@ -486,6 +489,12 @@ impl AgentRequest {
 pub enum AgentRequestBody {
     #[serde(rename = "agent.hello")]
     Hello,
+    /// Pi delivered one exact queued custom message and started its turn.
+    #[serde(rename = "agent.proactive_started")]
+    ProactiveStarted { proactive_id: String },
+    /// That exact Pi turn settled, with or without an atomic response.
+    #[serde(rename = "agent.proactive_settled")]
+    ProactiveSettled { proactive_id: String },
     #[serde(rename = "agent.response")]
     Response {
         text: String,
@@ -1016,6 +1025,8 @@ fn validate_surface_response(message: &SurfaceResponse) -> Result<(), MessageErr
 fn validate_agent_request(message: &AgentRequest) -> Result<(), MessageError> {
     match &message.body {
         AgentRequestBody::Hello => Ok(()),
+        AgentRequestBody::ProactiveStarted { proactive_id }
+        | AgentRequestBody::ProactiveSettled { proactive_id } => id(proactive_id, "proactive id"),
         AgentRequestBody::Response {
             text: body,
             proactive_id,
@@ -1129,13 +1140,13 @@ mod tests {
 
     #[test]
     fn channels_and_directions_are_distinct() {
-        let line = b"{\"v\":9,\"type\":\"agent.hello\"}\n";
+        let line = b"{\"v\":10,\"type\":\"agent.hello\"}\n";
         assert!(read_agent_request(&mut Cursor::new(line)).is_ok());
         assert!(matches!(
             read_surface_request(&mut Cursor::new(line)),
             Err(MessageError::InvalidJson(_))
         ));
-        let outbound = b"{\"v\":9,\"type\":\"surface.ready\",\"surface\":\"desk\"}\n";
+        let outbound = b"{\"v\":10,\"type\":\"surface.ready\",\"surface\":\"desk\"}\n";
         assert!(read_surface_response(&mut Cursor::new(outbound)).is_ok());
         assert!(read_surface_request(&mut Cursor::new(outbound)).is_err());
     }
@@ -1147,7 +1158,7 @@ mod tests {
         // would speak every briefing the owner never asked for.
         let hello = |id: &str| {
             format!(
-                "{{\"v\":9,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{id}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
+                "{{\"v\":10,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{id}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
             )
         };
         assert!(read_surface_request(&mut Cursor::new(hello("desk"))).is_ok());
@@ -1323,10 +1334,34 @@ mod tests {
     fn only_the_control_channel_carries_a_wake() {
         // A wake is not a second way to drive the conversation, so the channel
         // the remote gateway speaks cannot express one.
-        let line = b"{\"v\":9,\"type\":\"control.wake\",\"id\":\"wake-1\",\"custom_type\":\"scufris-wake\",\"text\":\"Wake up.\"}\n";
+        let line = b"{\"v\":10,\"type\":\"control.wake\",\"id\":\"wake-1\",\"custom_type\":\"scufris-wake\",\"text\":\"Wake up.\"}\n";
         assert!(read_control_request(&mut Cursor::new(line)).is_ok());
         assert!(read_surface_request(&mut Cursor::new(line)).is_err());
         assert!(read_agent_request(&mut Cursor::new(line)).is_err());
+    }
+
+    #[test]
+    fn proactive_turn_boundaries_are_bounded_to_the_agent_channel() {
+        for body in [
+            AgentRequestBody::ProactiveStarted {
+                proactive_id: "briefing-generation-a-terminal".into(),
+            },
+            AgentRequestBody::ProactiveSettled {
+                proactive_id: "briefing-generation-a-terminal".into(),
+            },
+        ] {
+            let marker = AgentRequest::new(body);
+            let mut bytes = Vec::new();
+            crate::write_message(&mut bytes, &marker).unwrap();
+            assert_eq!(read_agent_request(&mut Cursor::new(bytes)).unwrap(), marker);
+        }
+
+        let invalid = AgentRequest::new(AgentRequestBody::ProactiveStarted {
+            proactive_id: "not an identifier".into(),
+        });
+        let mut bytes = Vec::new();
+        crate::write_message(&mut bytes, &invalid).unwrap();
+        assert!(read_agent_request(&mut Cursor::new(bytes)).is_err());
     }
 
     #[test]
@@ -1548,6 +1583,15 @@ mod tests {
         assert!(!collecting.partial());
         assert!(!collecting.requires_attention());
         assert!(!collecting.dismissible());
+
+        let stopped = BriefingRow {
+            collection: BriefingCollectionState::Collected,
+            delivery: BriefingDeliveryState::Failed,
+            ..collecting
+        };
+        assert!(stopped.active());
+        assert!(stopped.requires_attention());
+        assert!(!stopped.dismissible());
     }
 
     #[test]
@@ -1556,21 +1600,21 @@ mod tests {
         // Neither is a way to drive the conversation, so the request channel
         // that carries them is the one a registered surface already speaks.
         let line =
-            b"{\"v\":9,\"type\":\"job.command\",\"id\":\"3f81c204b1e9\",\"action\":\"cancel\"}\n";
+            b"{\"v\":10,\"type\":\"job.command\",\"id\":\"3f81c204b1e9\",\"action\":\"cancel\"}\n";
         assert!(read_surface_request(&mut Cursor::new(line)).is_ok());
         assert!(read_agent_request(&mut Cursor::new(line)).is_err());
         assert!(read_control_request(&mut Cursor::new(line)).is_err());
 
-        let take = b"{\"v\":9,\"type\":\"offer.take\",\"id\":\"offer-1\"}\n";
+        let take = b"{\"v\":10,\"type\":\"offer.take\",\"id\":\"offer-1\"}\n";
         assert!(read_surface_request(&mut Cursor::new(take)).is_ok());
         assert!(read_agent_request(&mut Cursor::new(take)).is_err());
 
-        let dismiss = b"{\"v\":9,\"type\":\"briefing.dismiss\",\"id\":\"generation-a\"}\n";
+        let dismiss = b"{\"v\":10,\"type\":\"briefing.dismiss\",\"id\":\"generation-a\"}\n";
         assert!(read_surface_request(&mut Cursor::new(dismiss)).is_ok());
         assert!(read_agent_request(&mut Cursor::new(dismiss)).is_err());
         assert!(read_control_request(&mut Cursor::new(dismiss)).is_err());
 
-        let invalid = b"{\"v\":9,\"type\":\"briefing.dismiss\",\"id\":\"../generation\"}\n";
+        let invalid = b"{\"v\":10,\"type\":\"briefing.dismiss\",\"id\":\"../generation\"}\n";
         assert!(matches!(
             read_surface_request(&mut Cursor::new(invalid)),
             Err(MessageError::InvalidSubmission("briefing id"))

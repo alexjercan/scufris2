@@ -1,6 +1,6 @@
 import Foundation
 
-let scufrisProtocolVersion = 9
+let scufrisProtocolVersion = 10
 let scufrisMaximumMessageBytes = 64 * 1024
 let scufrisMaximumTextBytes = 8 * 1024
 let scufrisMaximumDetailsBytes = 32 * 1024
@@ -177,8 +177,13 @@ struct BriefingRow: Codable, Equatable, Identifiable {
     }
 
     var requiresAttention: Bool {
-        delivery == .delivered
-            && (collection == .failed || (collection == .collected && failed > 0))
+        delivery == .failed
+            || (delivery == .delivered
+                && (collection == .failed || (collection == .collected && failed > 0)))
+    }
+
+    var canDismiss: Bool {
+        delivery == .delivered && requiresAttention
     }
 
     var isProtocolValid: Bool {
@@ -201,6 +206,7 @@ enum BriefingCollectionState: String, Codable, Equatable {
 enum BriefingDeliveryState: String, Codable, Equatable {
     case pending
     case inProgress = "in_progress"
+    case failed
     case delivered
 }
 

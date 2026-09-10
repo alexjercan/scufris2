@@ -842,7 +842,7 @@ impl Widgets {
     }
 
     fn report(&self, report: WidgetReport) {
-        // Widget execution is best-effort presentation in protocol v9. Runtime
+        // Widget execution is best-effort presentation in protocol v10. Runtime
         // outcomes remain local and never produce protocol acknowledgements.
         debug!(?report, "widget presentation outcome");
     }

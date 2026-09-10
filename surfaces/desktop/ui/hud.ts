@@ -80,6 +80,7 @@
     failed: "fail",
     pending: "ready",
     in_progress: "write",
+    delivery_failed: "halt",
     delivered: "done",
     partial: "partial",
   };
@@ -498,11 +499,12 @@
   const briefingActive = (row: BriefingRow): boolean =>
     row.collection === "collecting" || row.delivery !== "delivered";
 
-  /** A delivered failure or measured partial result still needs attention. */
+  /** A delivery stop, delivered failure, or measured partial needs attention. */
   const briefingAttention = (row: BriefingRow): boolean =>
-    row.delivery === "delivered" &&
-    (row.collection === "failed" ||
-      (row.collection === "collected" && row.failed > 0));
+    row.delivery === "failed" ||
+    (row.delivery === "delivered" &&
+      (row.collection === "failed" ||
+        (row.collection === "collected" && row.failed > 0)));
 
   /** Dismissal asks the service. Only its next whole-list update hides a row. */
   const dismissBriefing = (id: string): void => {
@@ -517,13 +519,15 @@
     drawn.className = "briefing-row";
     const attention = briefingAttention(row);
     drawn.dataset["state"] =
-      row.collection === "failed"
+      row.delivery === "failed"
         ? "failed"
-        : attention
-          ? "partial"
-          : row.delivery === "delivered"
-            ? "delivered"
-            : row.collection;
+        : row.collection === "failed"
+          ? "failed"
+          : attention
+            ? "partial"
+            : row.delivery === "delivered"
+              ? "delivered"
+              : row.collection;
     const profile = document.createElement("span");
     profile.className = "briefing-profile";
     profile.textContent = row.profile;
@@ -533,15 +537,17 @@
     const key =
       row.delivery === "in_progress"
         ? "in_progress"
-        : row.collection === "collecting"
-          ? "collecting"
-          : row.delivery === "pending"
-            ? "pending"
-            : row.collection === "failed"
-              ? "failed"
-              : row.failed > 0
-                ? "partial"
-                : "delivered";
+        : row.delivery === "failed"
+          ? "delivery_failed"
+          : row.collection === "collecting"
+            ? "collecting"
+            : row.delivery === "pending"
+              ? "pending"
+              : row.collection === "failed"
+                ? "failed"
+                : row.failed > 0
+                  ? "partial"
+                  : "delivered";
     state.textContent = BRIEFING_WORDS[key] ?? key;
     const count = document.createElement("span");
     count.className = "briefing-count";
@@ -558,7 +564,7 @@
       `${row.profile} briefing for ${row.date}, ${state.textContent}, ${row.completed} of ${row.total} sources${failed}${needs}: ${row.summary}`,
     );
     drawn.append(profile, state, count, summary);
-    if (attention) {
+    if (attention && row.delivery === "delivered") {
       const dismiss = document.createElement("button");
       dismiss.type = "button";
       dismiss.className = "briefing-dismiss";

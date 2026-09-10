@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -176,6 +177,14 @@ import sys
 print("nothing to report")
 print("the token expired", file=sys.stderr)
 raise SystemExit(3)
+"""
+
+FIXTURE_CONTROL = """#!/usr/bin/env python3
+import os
+import pathlib
+import sys
+with pathlib.Path(os.environ["BRIEFING_CONTROL_CALLS"]).open("a") as stream:
+    stream.write(sys.argv[-1] + "\\n")
 """
 
 ENVELOPE = {
@@ -519,6 +528,7 @@ class Run(unittest.TestCase):
         self.answer = self.root / "answer.txt"
         self.prompt = self.root / "prompt.txt"
         self.where = self.root / "where.txt"
+        self.control_calls = self.root / "control-calls.jsonl"
         # The machine's own sources and the home a source with no root runs in
         # are both under the fixture, so no test reads the developer's own.
         self.config = self.root / "config"
@@ -538,12 +548,17 @@ class Run(unittest.TestCase):
                 "BRIEFING_ANSWER": str(self.answer),
                 "BRIEFING_PROMPT": str(self.prompt),
                 "BRIEFING_WHERE": str(self.where),
+                "BRIEFING_CONTROL_CALLS": str(self.control_calls),
+                # Collection announces progress. Pin that side effect to the
+                # fixture even when a developer has a live service in PATH.
+                "SCUFRIS_CTL": str(self.bin / "scufris-ctl"),
             },
         )
         self.environment.start()
         self.addCleanup(self.environment.stop)
         os.environ.pop("SCUFRIS_CONFIG", None)
         self.harness(ANSWERING)
+        self.control(FIXTURE_CONTROL)
 
     def harness(self, program: str) -> None:
         for name in ("pi", "claude"):
@@ -624,6 +639,18 @@ class Run(unittest.TestCase):
         executable.write_text(program, encoding="utf-8")
         executable.chmod(0o755)
         return executable
+
+    def test_collection_announcements_stay_in_the_fixture(self) -> None:
+        self.declare("the-den")
+        manifest = briefing.collect("2026-08-31", "morning")
+        updates = [
+            json.loads(line)
+            for line in self.control_calls.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertTrue(updates)
+        terminal = [update for update in updates if "wake" in update]
+        self.assertEqual(len(terminal), 1)
+        self.assertEqual(terminal[0]["briefing"]["id"], briefing.service_run_id(manifest))
 
     def test_two_sources_offers_become_one_numbered_list_on_the_run(self) -> None:
         # The numbers belong to the run, not to any source. They are assigned
@@ -1208,6 +1235,86 @@ class Run(unittest.TestCase):
         self.assertIn("call the dentist", rendered)
         # The page collection wrote is replaced, not left beside the prose.
         self.assertNotIn("no prose yet", rendered)
+        self.assertEqual(result["outcome"], "published")
+
+    def test_repeated_publish_is_a_no_op_and_changed_prose_is_refused(self) -> None:
+        self.declare("the-den")
+        briefing.collect("2026-08-31", "morning")
+        prose = "Good morning. Two tasks are left over."
+        briefing.publish("2026-08-31", "morning", prose)
+        directory = briefing.run_dir("2026-08-31", "morning")
+        before = {
+            name: (directory / name).read_bytes()
+            for name in ("manifest.json", "briefing.md", "briefing.html")
+        }
+        with mock.patch.object(
+            briefing, "atomic_write", wraps=briefing.atomic_write
+        ) as write:
+            repeated = briefing.publish("2026-08-31", "morning", prose)
+        self.assertEqual(repeated["outcome"], "unchanged")
+        write.assert_not_called()
+        self.assertEqual(
+            before,
+            {
+                name: (directory / name).read_bytes()
+                for name in ("manifest.json", "briefing.md", "briefing.html")
+            },
+        )
+        with self.assertRaises(briefing.Refused) as refused:
+            briefing.publish("2026-08-31", "morning", "A changed morning.")
+        self.assertIn("different prose", str(refused.exception))
+        self.assertEqual((directory / "briefing.md").read_text(), prose + "\n")
+
+    def test_concurrent_publication_fixes_exactly_one_prose(self) -> None:
+        self.declare("the-den")
+        briefing.collect("2026-08-31", "morning")
+
+        def attempt(prose: str) -> tuple[str, str]:
+            try:
+                result = briefing.publish("2026-08-31", "morning", prose)
+                return ("published", result["outcome"])
+            except briefing.Refused as error:
+                return ("refused", str(error))
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(attempt, ["First prose.", "Second prose."]))
+        self.assertEqual([kind for kind, _ in results].count("published"), 1)
+        self.assertEqual([kind for kind, _ in results].count("refused"), 1)
+        self.assertIn(
+            (briefing.run_dir("2026-08-31", "morning") / "briefing.md")
+            .read_text()
+            .strip(),
+            {"First prose.", "Second prose."},
+        )
+
+    def test_publish_recovers_each_write_boundary_without_changing_prose(
+        self,
+    ) -> None:
+        self.declare("the-den")
+        for failed_name in ("manifest.json", "briefing.html"):
+            with self.subTest(failed_name=failed_name):
+                date = "2026-08-31" if failed_name == "manifest.json" else "2026-09-01"
+                briefing.collect(date, "morning")
+                prose = f"The briefing interrupted before {failed_name}."
+                real_write = briefing.atomic_write
+                failed = False
+
+                def interrupted(path: Path, data: str) -> None:
+                    nonlocal failed
+                    if path.name == failed_name and not failed:
+                        failed = True
+                        raise OSError("simulated process loss")
+                    real_write(path, data)
+
+                with mock.patch.object(briefing, "atomic_write", interrupted):
+                    with self.assertRaises(OSError):
+                        briefing.publish(date, "morning", prose)
+                recovered = briefing.publish(date, "morning", prose)
+                self.assertEqual(recovered["outcome"], "recovered")
+                run = briefing.read_run(date, "morning")
+                self.assertEqual(run["manifest"]["delivery"], "prepared")
+                self.assertEqual(run["prose"], prose + "\n")
+                self.assertIn(prose, Path(recovered["page"]).read_text())
 
     def test_publishing_a_run_that_is_not_there_is_refused(self) -> None:
         with self.assertRaises(briefing.Refused):

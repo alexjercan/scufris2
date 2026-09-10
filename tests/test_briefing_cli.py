@@ -30,6 +30,14 @@ import sys
 pathlib.Path(os.environ["BRIEFING_OPENED"]).write_text(sys.argv[1])
 """
 
+FIXTURE_CONTROL = """#!/usr/bin/env python3
+import os
+import pathlib
+import sys
+with pathlib.Path(os.environ["BRIEFING_CONTROL_CALLS"]).open("a") as stream:
+    stream.write(sys.argv[-1] + "\\n")
+"""
+
 ENVELOPE = {
     "title": "The Den",
     "status": "ok",
@@ -46,10 +54,12 @@ class Command(unittest.TestCase):
         self.root = Path(self.room.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
+        self.control_calls = self.root / "control-calls.jsonl"
         for name, program in (
             ("pi", ANSWERING),
             ("claude", ANSWERING),
             ("xdg-open", OPENER),
+            ("scufris-ctl", FIXTURE_CONTROL),
         ):
             executable = self.bin / name
             executable.write_text(program, encoding="utf-8")
@@ -92,6 +102,10 @@ class Command(unittest.TestCase):
             "SCUFRIS_PROJECT_ROOTS": json.dumps([str(self.projects)]),
             "BRIEFING_ANSWER": str(self.answer),
             "BRIEFING_OPENED": str(self.opened),
+            "BRIEFING_CONTROL_CALLS": str(self.control_calls),
+            # Never let a command-line fixture announce to a developer's live
+            # service, even when SCUFRIS_CTL was inherited by the test process.
+            "SCUFRIS_CTL": str(self.bin / "scufris-ctl"),
         }
         self.env.pop("SCUFRIS_CONFIG", None)
 
@@ -176,6 +190,11 @@ class Command(unittest.TestCase):
         assert isinstance(collected, dict)
         self.assertEqual(collected["state"], "collected")
         self.assertEqual(collected["sources"][0]["headline"], ENVELOPE["headline"])
+        updates = [
+            json.loads(line)
+            for line in self.control_calls.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertTrue(any("wake" in update for update in updates))
 
         shown = self.answered("show")
         assert isinstance(shown, dict)

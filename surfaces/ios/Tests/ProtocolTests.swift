@@ -38,7 +38,7 @@ struct ProtocolTests {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(hello))
                 as? [String: Any]
         )
-        #expect(object["v"] as? Int == 9)
+        #expect(object["v"] as? Int == 10)
         #expect(object["type"] as? String == "surface.hello")
         let surface = try #require(object["surface"] as? [String: Any])
         #expect(surface["id"] as? String == "ios-test")
@@ -102,7 +102,7 @@ struct ProtocolTests {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
                 as? [String: Any]
         )
-        #expect(object["v"] as? Int == 9)
+        #expect(object["v"] as? Int == 10)
         #expect(object["type"] as? String == "surface.message")
         #expect(object["attachments"] as? [String] == ["att_one", "att_two"])
     }
@@ -178,20 +178,20 @@ struct ProtocolTests {
     @Test
     func conversationResponsesDecodeWithoutWidgetPresentation() throws {
         let data = Data(
-            #"{"v":9,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","details":"Passed.","attachments":[]}"#.utf8
+            #"{"v":10,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","details":"Passed.","attachments":[]}"#.utf8
         )
         let message = try JSONDecoder().decode(
             IncomingConversationMessage.self,
             from: data
         )
-        #expect(message.v == 9)
+        #expect(message.v == 10)
         #expect(message.role == .assistant)
         #expect(message.text == "Done.")
         #expect(message.details == "Passed.")
         #expect(message.attachments?.isEmpty == true)
 
         let omitted = Data(
-            #"{"v":9,"type":"surface.message","role":"user","surface":"ios","text":"Hello."}"#.utf8
+            #"{"v":10,"type":"surface.message","role":"user","surface":"ios","text":"Hello."}"#.utf8
         )
         let textOnly = try JSONDecoder().decode(IncomingConversationMessage.self, from: omitted)
         #expect(textOnly.details == nil)
@@ -202,7 +202,7 @@ struct ProtocolTests {
     @Test
     func badgesAreGroupedByTheJobTheyAreAbout() throws {
         let data = Data(
-            #"{"v":9,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","receipts":[{"job_id":"750a4de8a80d","badges":[{"label":"landed","value":"yes","state":"measured"},{"label":"pushed","value":"no","state":"refuted"}],"offers":[{"id":"offer-a1","label":"push master"}]}]}"#.utf8
+            #"{"v":10,"type":"surface.message","role":"assistant","surface":"desk","text":"Done.","receipts":[{"job_id":"750a4de8a80d","badges":[{"label":"landed","value":"yes","state":"measured"},{"label":"pushed","value":"no","state":"refuted"}],"offers":[{"id":"offer-a1","label":"push master"}]}]}"#.utf8
         )
         let message = try JSONDecoder().decode(
             IncomingConversationMessage.self,
@@ -220,7 +220,7 @@ struct ProtocolTests {
     @Test
     func jobRowsCarryEverythingOneRowDraws() throws {
         let data = Data(
-            #"{"v":9,"type":"surface.jobs","jobs":[{"id":"01ccbac98b97","project":"personal/scufris2","state":"done","since":1788901200,"summary":"reviewed 9 commits"},{"id":"3f81c204b1e9","project":null,"state":"working","since":1788904800,"summary":""}]}"#.utf8
+            #"{"v":10,"type":"surface.jobs","jobs":[{"id":"01ccbac98b97","project":"personal/scufris2","state":"done","since":1788901200,"summary":"reviewed 9 commits"},{"id":"3f81c204b1e9","project":null,"state":"working","since":1788904800,"summary":""}]}"#.utf8
         )
         let listed = try JSONDecoder().decode(IncomingJobs.self, from: data)
         #expect(listed.jobs.count == 2)
@@ -237,7 +237,7 @@ struct ProtocolTests {
     @Test
     func briefingRowsKeepCollectionAndDeliveryIndependent() throws {
         let data = Data(
-            #"{"v":9,"type":"surface.briefings","briefings":[{"id":"generation-a","date":"2026-09-10","profile":"nightly","collection":"collected","delivery":"in_progress","since":1788901200,"completed":3,"total":3,"failed":1,"summary":"2 of 3 sources answered; 1 failed"}]}"#.utf8
+            #"{"v":10,"type":"surface.briefings","briefings":[{"id":"generation-a","date":"2026-09-10","profile":"nightly","collection":"collected","delivery":"in_progress","since":1788901200,"completed":3,"total":3,"failed":1,"summary":"2 of 3 sources answered; 1 failed"}]}"#.utf8
         )
         let listed = try JSONDecoder().decode(IncomingBriefings.self, from: data)
         let row = try #require(listed.briefings.first)
@@ -262,6 +262,7 @@ struct ProtocolTests {
         )
         #expect(!deliveredPartial.isActive)
         #expect(deliveredPartial.requiresAttention)
+        #expect(deliveredPartial.canDismiss)
         let deliveredSuccess = BriefingRow(
             id: row.id,
             date: row.date,
@@ -275,6 +276,21 @@ struct ProtocolTests {
             summary: row.summary
         )
         #expect(!deliveredSuccess.requiresAttention)
+        let stopped = BriefingRow(
+            id: row.id,
+            date: row.date,
+            profile: row.profile,
+            collection: .collected,
+            delivery: .failed,
+            since: row.since,
+            completed: row.completed,
+            total: row.total,
+            failed: 0,
+            summary: "delivery stopped; restart the Scufris service"
+        )
+        #expect(stopped.isActive)
+        #expect(stopped.requiresAttention)
+        #expect(!stopped.canDismiss)
     }
 
     @Test
@@ -300,6 +316,7 @@ struct ProtocolTests {
             )
         }
         let listed = [
+            row("stopped", since: 50, collection: .collected, delivery: .failed, failed: 0),
             row("writing", since: 40, collection: .collected, delivery: .inProgress, failed: 0),
             row("success", since: 5, collection: .collected, delivery: .delivered, failed: 0),
             row("partial", since: 30, collection: .collected, delivery: .delivered, failed: 1),
@@ -308,13 +325,13 @@ struct ProtocolTests {
         ]
 
         let collapsed = BriefingDrawerPresentation(rows: listed, expanded: false)
-        #expect(collapsed.rows.map(\.id) == ["active", "partial", "writing"])
-        #expect(collapsed.activeCount == 2)
-        #expect(collapsed.attentionCount == 2)
-        #expect(collapsed.hiddenAttentionCount == 1)
+        #expect(collapsed.rows.map(\.id) == ["active", "writing", "stopped"])
+        #expect(collapsed.activeCount == 3)
+        #expect(collapsed.attentionCount == 3)
+        #expect(collapsed.hiddenAttentionCount == 2)
 
         let expanded = BriefingDrawerPresentation(rows: listed, expanded: true)
-        #expect(expanded.rows.map(\.id) == ["failed", "active", "partial", "writing"])
+        #expect(expanded.rows.map(\.id) == ["failed", "active", "partial", "writing", "stopped"])
         #expect(expanded.hiddenAttentionCount == 0)
     }
 
@@ -327,7 +344,7 @@ struct ProtocolTests {
                 )
             ) as? [String: Any]
         )
-        #expect(command["v"] as? Int == 9)
+        #expect(command["v"] as? Int == 10)
         #expect(command["type"] as? String == "job.command")
         #expect(command["action"] as? String == "cancel")
 

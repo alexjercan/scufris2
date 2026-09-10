@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -218,12 +219,17 @@ def ambiguous(date: str, names: list[str]) -> Refused:
 def resolve(date: str, profile: str | None = None, *, undelivered: bool = False) -> str:
     """Which run the caller means when it named a date and no profile.
 
-    Naming no profile means the one obvious run: the briefing that was
-    gathered and is still waiting for its prose. Two of those are two
-    briefings, and this refuses rather than guesses between them. A wake that
-    published into another profile's run would put one briefing's prose on
-    another's page, and picking the newer of two would do exactly that on the
-    day both were collected in the same minute.
+    Naming no profile means the one obvious run: the briefing that still owes
+    the conversation its prose. Two of those are two briefings, and this
+    refuses rather than guesses between them. A wake that published into
+    another profile's run would put one briefing's prose on another's page, and
+    picking the newer of two would do exactly that on the day both were
+    collected in the same minute.
+
+    A failed run owes prose too - the sentence saying there is none - so it is
+    one of the candidates. That is why this reads `collected_runs` rather than
+    a gathered-only list: a date holding one failed run and one collected run
+    has two answers, and naming neither is not one of them.
     """
     if profile is not None:
         return validated_profile(profile)
@@ -1163,6 +1169,15 @@ def finish(
 #: checkout.
 PROFILE_BOUNDS_FILE = "briefing-profiles.json"
 
+#: The most this reader will take from the generated bounds file.
+#:
+#: The file holds six numbers for a handful of profiles, so a few kilobytes is
+#: already far past any honest one. The bound exists because the reader is not
+#: the thing that generated the file: a nightly review lane once replaced it
+#: with a symlink to `/dev/zero`, and an unbounded read grew to 29 GB before the
+#: kernel stopped it, taking the collector and every source with it.
+MAX_PROFILE_BOUNDS = 65536
+
 #: What a profile may set, and the variable each one is read through.
 PROFILE_BOUNDS = {
     "deadline": "SCUFRIS_BRIEFING_DEADLINE",
@@ -1179,6 +1194,47 @@ def config_home() -> Path:
     return base / "scufris"
 
 
+def read_profile_bounds(path: Path) -> bytes | None:
+    """Reads the generated bounds file, or answers `None` if it is not one.
+
+    `O_NOFOLLOW` because the path is a fixed name in a directory the run does
+    not own exclusively, and a symlink there is not the deployment's file. The
+    regular-file check because a character device never reaches EOF. The size
+    check because a regular file can still be larger than any honest set of
+    numbers.
+
+    `O_NONBLOCK` because the type check cannot run until the open returns, and
+    opening a FIFO for reading blocks until someone writes to it. Without it the
+    guard against a FIFO would itself be the hang it exists to prevent. It has
+    no effect on the regular file this expects.
+
+    The order matters: the file type is settled from the open descriptor with
+    `fstat` rather than from the path, so nothing can be swapped between the
+    check and the read.
+    """
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    try:
+        handle = os.open(path, flags | getattr(os, "O_CLOEXEC", 0))
+    except OSError:
+        return None
+    try:
+        status = os.fstat(handle)
+        if not stat.S_ISREG(status.st_mode):
+            return None
+        if status.st_size > MAX_PROFILE_BOUNDS:
+            return None
+        # One byte past the bound, so a file that grew between `fstat` and here
+        # is refused rather than truncated into something that still parses.
+        raw = os.read(handle, MAX_PROFILE_BOUNDS + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(handle)
+    if len(raw) > MAX_PROFILE_BOUNDS:
+        return None
+    return raw
+
+
 def apply_profile_bounds(profile: str) -> None:
     """Puts the deployment's numbers for one profile into this process.
 
@@ -1190,10 +1246,15 @@ def apply_profile_bounds(profile: str) -> None:
     Everything that can go wrong here reads as if the file said nothing. A
     briefing that refuses to run over a generated file is worse than one held to
     its defaults, and the manifest records the numbers it actually used.
+
+    The file is opened without following a symlink and is read only when it is
+    a regular file no larger than `MAX_PROFILE_BOUNDS`. Nothing generates a
+    device, a FIFO, or a megabyte here, so anything else is a replaced file
+    rather than a deployment, and reading it is how one bad path takes the whole
+    run down with it.
     """
-    try:
-        raw = (config_home() / PROFILE_BOUNDS_FILE).read_bytes()
-    except OSError:
+    raw = read_profile_bounds(config_home() / PROFILE_BOUNDS_FILE)
+    if raw is None:
         return
     try:
         declared = json.loads(raw)

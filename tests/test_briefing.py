@@ -27,6 +27,34 @@ import page
 MORNING_FIXTURE = REPOSITORY / "tests" / "fixtures" / "briefing-morning-run.json"
 
 
+_AMBIENT: dict[str, str] = {}
+
+
+def setUpModule() -> None:
+    """Takes the deployment's briefing bounds out of the tests' environment.
+
+    `briefing` reads `SCUFRIS_BRIEFING_*` in `environment_seconds` and
+    `environment_int`, and the environment deliberately wins over everything
+    else so a run asked for by hand keeps the number it asked for. The timer
+    unit exports all six into every source process, so a source told to run this
+    project's checks reads its own suite as red: a test that passes its own
+    `source_deadline`, `max_body` or `max_offers` is silently overridden by
+    whatever the shell already holds.
+
+    Measured before this: six failures with the variables set, none without.
+    Clearing them here rather than in one `setUp` because five classes read
+    them, and a suite whose result depends on who started it is not a result.
+    """
+    for variable in briefing.PROFILE_BOUNDS.values():
+        if variable in os.environ:
+            _AMBIENT[variable] = os.environ.pop(variable)
+
+
+def tearDownModule() -> None:
+    os.environ.update(_AMBIENT)
+    _AMBIENT.clear()
+
+
 class RenderedDocument(HTMLParser):
     """The semantic elements and attributes in one rendered briefing."""
 
@@ -1559,6 +1587,81 @@ class Run(unittest.TestCase):
                 [],
                 f"a briefing refused to run over {written!r}",
             )
+
+    def test_a_date_owing_two_kinds_of_prose_asks_which_one(self) -> None:
+        """A failed run and a collected run on one date are two answers.
+
+        `collected_runs` widened to admit `failed`, and `resolve` is its second
+        consumer. This pins the behaviour rather than the old answer: before the
+        widening this date resolved to the collected run silently, which would
+        now hide the failed one from the reader who asked about the day.
+        """
+        self.declare("aaa", "pi", "morning")
+        gathered = briefing.collect(profile="morning")
+        day = str(gathered["date"])
+        self.declare("bbb", "pi", "nightly")
+        self.harness(FAILING)
+        briefing.collect(profile="nightly")
+        states = {
+            manifest["profile"]: manifest["state"]
+            for manifest in briefing.collected_runs(day)
+        }
+        self.assertEqual(states, {"morning": "collected", "nightly": "failed"})
+        with self.assertRaises(briefing.Refused) as refusal:
+            briefing.resolve(day)
+        self.assertIn("morning", str(refusal.exception))
+        self.assertIn("nightly", str(refusal.exception))
+        # Naming one still answers.
+        self.assertEqual(briefing.resolve(day, "nightly"), "nightly")
+
+    def test_a_profile_file_that_is_not_a_regular_file_reads_as_nothing(self) -> None:
+        """A replaced bounds file must not be read, however it was replaced.
+
+        The generated file is a fixed name in a directory the run does not own
+        exclusively. A nightly review lane once made it a symlink to
+        `/dev/zero`; the unbounded read grew to 29 GB and the kernel stopped the
+        collector and every source with it. None of these fixtures opens a
+        device: the symlink points at an ordinary file, and the FIFO is only
+        ever opened by the reader under test, which must not block on it.
+        """
+        directory = self.config / "scufris"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / briefing.PROFILE_BOUNDS_FILE
+        elsewhere = directory / "elsewhere.json"
+        elsewhere.write_text(
+            json.dumps({"nightly": {"deadline": 77}}), encoding="utf-8"
+        )
+
+        cases = {}
+        path.symlink_to(elsewhere)
+        cases["a symlink to a regular file"] = path
+        fifo = directory / "fifo.json"
+        os.mkfifo(fifo)
+        cases["a FIFO"] = fifo
+        directory_named_like_the_file = directory / "adirectory.json"
+        directory_named_like_the_file.mkdir()
+        cases["a directory"] = directory_named_like_the_file
+
+        for what, candidate in cases.items():
+            self.assertIsNone(
+                briefing.read_profile_bounds(candidate),
+                f"the reader took {what}",
+            )
+
+    def test_a_profile_file_larger_than_the_bound_reads_as_nothing(self) -> None:
+        directory = self.config / "scufris"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / briefing.PROFILE_BOUNDS_FILE
+        padding = "x" * (briefing.MAX_PROFILE_BOUNDS + 1)
+        path.write_text(
+            json.dumps({"nightly": {"deadline": 900}, "pad": padding}),
+            encoding="utf-8",
+        )
+        self.assertIsNone(briefing.read_profile_bounds(path))
+
+        # One byte under the bound is still the deployment's file.
+        path.write_text(json.dumps({"nightly": {"deadline": 900}}), encoding="utf-8")
+        self.assertIsNotNone(briefing.read_profile_bounds(path))
 
     def test_every_source_runs_at_once_when_nothing_caps_them(self) -> None:
         self.declare("aaa", "pi", "morning")

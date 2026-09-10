@@ -646,6 +646,15 @@ in {
             # still asking its sources is never killed halfway. What it has
             # gathered by then is published either way.
             TimeoutStartSec = profile.deadline + 300;
+            # A deadline bounds time, not memory, and the two fail differently.
+            # A review lane once made the generated bounds file a symlink to
+            # `/dev/zero`; the reader grew to 29 GB and the kernel stopped the
+            # whole control group seven hours before the deadline, taking the
+            # collector and every source with it. The reader is bounded now, so
+            # this is the second wall rather than the first: whatever runs away
+            # next is stopped while the machine is still usable.
+            MemoryMax = "4G";
+            MemoryHigh = "3G";
             WorkingDirectory = "%h";
           };
         })

@@ -8,7 +8,11 @@
   pkgs,
   ...
 }: let
-  python = pkgs.python3.withPackages (pythonPackages: [pythonPackages.markdown-it-py]);
+  # The one interpreter every helper path names. Spelling it again here made
+  # this gate test a different Python from the one the deployment runs, so the
+  # next dependency added to `nix/python.nix` would pass the gate and fail at
+  # the first import of a real briefing.
+  python = import ../python.nix {inherit pkgs;};
 in {
   helper-tests =
     pkgs.runCommand "scufris-helper-tests" {

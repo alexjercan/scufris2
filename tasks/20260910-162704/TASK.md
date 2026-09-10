@@ -1,6 +1,6 @@
 # Cut the v2.6.0 release
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 0
 - TAGS: release
 
@@ -67,10 +67,55 @@ carries all user-facing work and already wrote its `CHANGELOG.md`
   workflow.
 - `git diff --check`: clean.
 
-### Remaining
+### Remaining after preparation
 
 - Tag, push `master`, push the tag, verify the started workflows.
 - `gh workflow run testflight.yml --ref v2.6.0`. `SERVICE_VERSION` moved 8 ->
   9, and the gateway compares it with exact equality, so the phone is refused
   at its hello the moment the machine switches.
 - Deploy only after that build is installed on the phone.
+
+### Released
+
+- `1a0dbe7` tagged `v2.6.0` and pushed. All four workflows green: `release`
+  on the tag, and `check`, `Documentation`, and `iOS` on master. The GitHub
+  Release is source-only with no assets, as the process requires.
+- `gh workflow run testflight.yml --ref v2.6.0` succeeded. The build is
+  uploaded.
+- Deployed against the process note, by explicit decision, as at v2.5.0. The
+  TestFlight build was uploaded but not yet installed on the phone.
+- `nix.dotfiles` `7fd5cbe` bumps the `scufris` input to `v2.6.0`.
+  `nix flake check` passed there. `home-manager switch --flake .#alex` moved
+  `scufris-service`, `scufris-desktop`, and `scufris-surface-gateway` to
+  `scufris-service-2.6.0`.
+
+### The gateway was already down when the deploy ran
+
+`scufris-surface-gateway` was crash-looping before the switch, and the phone
+had read OFFLINE since 16:49. The unit exited 1 on every restart with
+`I/O failed: No such file or directory (os error 2)`, because its
+`--token-file`, `~/.local/share/scufris/credentials/ios/surface-token`, did
+not exist.
+
+The whole Scufris data tree was recreated at 16:49. `credentials/` was gone,
+`briefings.json` was absent, `conversation.json` was 2 KB, and `sessions/`
+held one file starting 16:49:25. `~/.local/state/scufris` and
+`~/.local/state/scufris-desktop` carried the same timestamps. The journal
+shows the units stopped at 16:42:48 and an `sd-switch` reload from a tmux
+pane at 16:49:24, so a separate `home-manager switch` ran there. This release
+switched at 17:45, about an hour later, and did not cause it. What deleted
+the tree is not identified.
+
+No copy of the token survived under `$HOME`, in Trash, or under any name
+matching `surface-token`. A new 32-byte hex token was minted at 0600 by
+explicit decision, so the phone's stored token no longer matches and has to
+be re-entered. All three units are active on `scufris-service-2.6.0` and the
+gateway listens on `127.0.0.1:10440`.
+
+### Remaining
+
+- Install the `v2.6.0` TestFlight build on the phone and enter the new token.
+  Until both are done the phone stays OFFLINE: protocol 9 is compared with
+  exact equality, and the old token no longer authenticates.
+- The briefing audit, conversation history, and attachments from before 16:49
+  are gone. Nothing here recovers them.

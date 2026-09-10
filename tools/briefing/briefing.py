@@ -392,7 +392,9 @@ def read_manifest(date: str, profile: str = DEFAULT_PROFILE) -> dict[str, Any]:
             "generation": hashlib.sha256(material).hexdigest()[:24],
             "delivery": "prepared" if found.get("state") == "delivered" else "pending",
             "legacy_delivered": found.get("state") == "delivered",
-            "state": "collected" if found.get("state") == "delivered" else found.get("state"),
+            "state": "collected"
+            if found.get("state") == "delivered"
+            else found.get("state"),
             "events": [],
         }
     generation = found.get("generation")
@@ -436,7 +438,10 @@ def write_manifest(manifest: dict[str, Any], *, replace: bool = False) -> None:
         if current is not None:
             if current.get("generation") != manifest.get("generation"):
                 raise Refused("a newer generation owns this briefing run")
-            if current.get("state") != "collecting" and manifest.get("state") == "collecting":
+            if (
+                current.get("state") != "collecting"
+                and manifest.get("state") == "collecting"
+            ):
                 raise Refused("a terminal briefing generation cannot be reopened")
             if len(manifest.get("events", [])) < len(current.get("events", [])):
                 raise Refused("a briefing event cannot move backward")
@@ -1256,7 +1261,9 @@ def collect(
             0o600,
         )
     except OSError as trouble:
-        raise Refused(f"the {profile} briefing lock is unavailable: {trouble}") from None
+        raise Refused(
+            f"the {profile} briefing lock is unavailable: {trouble}"
+        ) from None
     try:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1352,7 +1359,10 @@ def _collect_owned(
         "delivery": "pending",
         "started": started.isoformat(timespec="seconds"),
         "finished": None,
-        "owner": {"pid": os.getpid(), "start": process_identity(os.getpid()) or "unknown"},
+        "owner": {
+            "pid": os.getpid(),
+            "start": process_identity(os.getpid()) or "unknown",
+        },
         # Named before the first question rather than after the last answer, so
         # a run in flight says which projects it is waiting on.
         "sources": [asking_entry(source) for source in sources],
@@ -1580,10 +1590,7 @@ def read_profile_bounds(path: Path) -> bytes | None:
                 return None
         handle = os.open(
             opened,
-            os.O_RDONLY
-            | os.O_NOFOLLOW
-            | os.O_NONBLOCK
-            | getattr(os, "O_CLOEXEC", 0),
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0),
         )
     except OSError:
         return None
@@ -1938,9 +1945,7 @@ def lifecycle_update(manifest: dict[str, Any]) -> dict[str, Any]:
     return update
 
 
-def announce(
-    manifest: dict[str, Any], *, ctl: str | None = None
-) -> tuple[bool, str]:
+def announce(manifest: dict[str, Any], *, ctl: str | None = None) -> tuple[bool, str]:
     """Best-effort latency hint backed by later full reconciliation."""
     command = [
         ctl or os.environ.get("SCUFRIS_CTL") or CTL,
@@ -2014,8 +2019,12 @@ def reconcile(*, ctl: str | None = None) -> dict[str, int]:
             if manifest.get("state") == "collecting" and not owner_is_live(manifest):
                 try:
                     started = datetime.fromisoformat(str(manifest.get("started", "")))
-                    deadline = float(manifest.get("bounds", {}).get("run_deadline", RUN_DEADLINE))
-                    stale = (datetime.now().astimezone() - started).total_seconds() > deadline + 300
+                    deadline = float(
+                        manifest.get("bounds", {}).get("run_deadline", RUN_DEADLINE)
+                    )
+                    stale = (
+                        datetime.now().astimezone() - started
+                    ).total_seconds() > deadline + 300
                 except (TypeError, ValueError):
                     stale = True
                 if stale:

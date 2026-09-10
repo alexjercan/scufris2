@@ -812,7 +812,9 @@ keywords = { harness = "pi", model = "openai-codex/gpt-5.6-sol", thinking = "med
         self.assertEqual(len(broken["diagnostics"]), 1)
         self.assertEqual(broken["diagnostics"][0]["project"], str(config))
 
-    def test_non_store_user_config_symlinks_are_refused_before_toml_is_read(self) -> None:
+    def test_non_store_user_config_symlinks_are_refused_before_toml_is_read(
+        self,
+    ) -> None:
         config = self.root / "config" / "scufris" / "config.toml"
         config.parent.mkdir(parents=True)
         generated = self.root / "generated-config.toml"

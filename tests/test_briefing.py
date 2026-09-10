@@ -1489,7 +1489,9 @@ class Run(unittest.TestCase):
         self.assertIn("could not be run", answer["reason"])
         self.assertEqual(briefing.run_state("2026-08-31", "morning"), "collected")
 
-    def test_a_prepared_run_can_be_reconciled_until_the_service_acknowledges(self) -> None:
+    def test_a_prepared_run_can_be_reconciled_until_the_service_acknowledges(
+        self,
+    ) -> None:
         self.declare("the-den")
         briefing.collect("2026-08-31", "morning")
         briefing.publish("2026-08-31", "morning", "Good morning.")
@@ -1677,13 +1679,15 @@ class Run(unittest.TestCase):
             "state": "collecting",
             "finished": None,
             "owner": {"pid": 999_999_999, "start": "missing"},
-            "sources": [briefing.asking_entry({"project": "projects/the-den", "slug": "projects-the-den"})],
+            "sources": [
+                briefing.asking_entry(
+                    {"project": "projects/the-den", "slug": "projects-the-den"}
+                )
+            ],
         }
         briefing.write_manifest(collecting, replace=True)
         with self.assertRaises(briefing.Refused):
-            briefing.finalize(
-                "2026-08-31", "morning", "generation-stale", "oom-kill"
-            )
+            briefing.finalize("2026-08-31", "morning", "generation-stale", "oom-kill")
         closed = briefing.finalize(
             "2026-08-31", "morning", "generation-current", "oom-kill"
         )
@@ -1709,9 +1713,7 @@ class Run(unittest.TestCase):
             "while True: time.sleep(1)\n"
         )
         began = time.monotonic()
-        manifest = briefing.collect(
-            "2026-08-31", "morning", source_deadline=30
-        )
+        manifest = briefing.collect("2026-08-31", "morning", source_deadline=30)
         self.assertLess(time.monotonic() - began, 4)
         source = manifest["sources"][0]
         self.assertEqual(source["status"], "failed")

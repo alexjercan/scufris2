@@ -86,18 +86,19 @@ in
 
     # A deployed Home Manager file is one final link into the immutable store.
     # This is the only configuration link the reader follows.
-    briefing-generated-symlink = pkgs.runCommand "scufris-briefing-generated-symlink-check" {
-      nativeBuildInputs = [pkgs.jq];
-    } ''
-      mkdir -p home config/scufris
-      target="$(readlink -f ${configured})"
-      case "$target" in /nix/store/*) ;; *) exit 1 ;; esac
-      ln -s "$target" config/scufris/config.toml
-      HOME="$PWD/home" XDG_CONFIG_HOME="$PWD/config" SCUFRIS_PROJECT_ROOTS='[]' \
-        ${lib.getExe scufris.briefing} sources --profile morning --json > answer.json
-      jq -e '.sources | any(.project == "@jobs")' answer.json > /dev/null
-      touch "$out"
-    '';
+    briefing-generated-symlink =
+      pkgs.runCommand "scufris-briefing-generated-symlink-check" {
+        nativeBuildInputs = [pkgs.jq];
+      } ''
+        mkdir -p home config/scufris
+        target="$(readlink -f ${configured})"
+        case "$target" in /nix/store/*) ;; *) exit 1 ;; esac
+        ln -s "$target" config/scufris/config.toml
+        HOME="$PWD/home" XDG_CONFIG_HOME="$PWD/config" SCUFRIS_PROJECT_ROOTS='[]' \
+          ${lib.getExe scufris.briefing} sources --profile morning --json > answer.json
+        jq -e '.sources | any(.project == "@jobs")' answer.json > /dev/null
+        touch "$out"
+      '';
 
     briefing-sources-are-typed = assert renders {
       morning.jobs = {

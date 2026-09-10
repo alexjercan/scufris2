@@ -339,13 +339,72 @@ body {
 
 /* `.jobs` sets its own display, which beats what the browser does for a
  * hidden element. The first frame is drawn before the host has answered. */
-.jobs[hidden] {
+.jobs[hidden],
+.briefings[hidden] {
   display: none;
 }
 
 .jobs > .who {
   align-self: start;
   padding-top: 3px;
+}
+
+/* Briefings use the conversation grid but put an explicit disclosure control
+ * in the header. Collapsed still means useful: active rows and the newest
+ * delivered row that needs attention remain below it. */
+.briefings {
+  display: grid;
+  grid-template-columns: var(--gutter) minmax(0, 1fr);
+  column-gap: var(--step);
+  padding-top: 13px;
+}
+
+.briefing-toggle {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: var(--gutter) minmax(0, 1fr);
+  column-gap: var(--step);
+  align-items: baseline;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.briefing-toggle .who {
+  align-self: start;
+  padding-top: 3px;
+}
+
+.briefing-toggle-body {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+  padding-bottom: 3px;
+}
+
+.briefing-meta {
+  overflow: hidden;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+
+.briefing-toggle-mark {
+  flex: 0 0 auto;
+  color: var(--quartz);
+}
+
+.briefing-toggle:hover .briefing-toggle-mark,
+.briefing-toggle:focus-visible .briefing-toggle-mark {
+  color: var(--yellow);
 }
 
 .rows {
@@ -415,11 +474,11 @@ body {
   color: var(--muted);
 }
 
-/* A briefing row is status, not a job. It has no action and keeps the measured
- * count visible when the summary has to yield at a narrow width. */
+/* A briefing row is status, not a job. Delivered failures and measured
+ * partials alone have one explicit dismissal control. */
 .briefing-row {
   display: grid;
-  grid-template-columns: minmax(0, 9em) 4.5em 3.5em minmax(0, 1fr);
+  grid-template-columns: minmax(0, 9em) 4.5em 3.5em minmax(0, 1fr) auto;
   gap: 10px;
   align-items: baseline;
   padding: 4px 0;
@@ -462,17 +521,36 @@ body {
   color: var(--red);
 }
 
+.briefing-row[data-state="partial"] .briefing-state {
+  color: var(--yellow);
+}
+
 .briefing-row[data-state="delivered"] .briefing-state {
   color: var(--quartz);
 }
 
+.briefing-dismiss {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  color: var(--niagara);
+  cursor: pointer;
+}
+
+.briefing-dismiss:hover,
+.briefing-dismiss:focus-visible {
+  color: var(--yellow);
+}
+
 @media (max-width: 520px) {
   .briefing-row {
-    grid-template-columns: minmax(0, 1fr) 4.5em 3.5em;
+    grid-template-columns: minmax(0, 1fr) 4.5em 3.5em auto;
   }
 
   .briefing-summary {
     grid-column: 1 / -1;
+    grid-row: 2;
   }
 }
 

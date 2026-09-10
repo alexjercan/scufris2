@@ -48,7 +48,7 @@ interface Tick {
   level: number;
 }
 
-// Canonical protocol v8 conversation entry, relayed without reshaping.
+// Canonical protocol v9 conversation entry, relayed without reshaping.
 interface AttachmentDescriptor {
   id: string;
   name: string;

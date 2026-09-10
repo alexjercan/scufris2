@@ -153,6 +153,9 @@ fn surface(service: Arc<Service>, stream: UnixStream, connection: u64) {
                 SurfaceRequestBody::JobCommand { id, action } => {
                     service.surface_job_command(connection, id, action)
                 }
+                SurfaceRequestBody::BriefingDismiss { id } => {
+                    service.surface_briefing_dismiss(connection, id)
+                }
                 SurfaceRequestBody::OfferTake { id } => service.surface_offer_take(connection, id),
             },
             Err(MessageError::Empty) => break,

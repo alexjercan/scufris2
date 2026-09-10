@@ -519,6 +519,9 @@ function hud(
   page.answers["hud_submit"] = taken;
   page.add("lines", "OL");
   page.add("briefings", "LI");
+  page.add("briefing-toggle", "BUTTON");
+  page.add("briefing-meta", "SPAN");
+  page.add("briefing-toggle-mark", "SPAN");
   page.add("briefing-rows", "DIV");
   page.add("jobs", "LI");
   page.add("rows", "DIV");
@@ -1330,13 +1333,111 @@ test("briefing progress is a quiet accessible row in the conversation flow", asy
       summary: "3 of 3 sources answered",
     },
   ]);
-  const done = page.element("briefing-rows").children[0]!;
-  assert.equal(done.dataset["state"], "delivered");
-  assert.equal(done.children[1]?.content, "done");
+  assert.equal(page.element("briefing-rows").children.length, 0);
+  assert.equal(page.element("briefings").hidden, true);
   assert.equal(
     lines.children.filter((child) => child.className === "line").length,
     1,
-    "a lifecycle update did not create a conversation line",
+    "a successful lifecycle update became transient without a conversation line",
+  );
+});
+
+test("the briefing drawer keeps active and latest attention rows compact", async () => {
+  const base = {
+    date: "2026-09-10",
+    profile: "nightly",
+    total: 3,
+    completed: 3,
+    summary: "measured result",
+  };
+  const olderFailure = {
+    ...base,
+    id: "generation-failed",
+    collection: "failed",
+    delivery: "delivered",
+    since: 10,
+    failed: 3,
+  };
+  const active = {
+    ...base,
+    id: "generation-active",
+    collection: "collecting",
+    delivery: "pending",
+    since: 20,
+    completed: 1,
+    failed: 0,
+  };
+  const partial = {
+    ...base,
+    id: "generation-partial",
+    collection: "collected",
+    delivery: "delivered",
+    since: 30,
+    failed: 1,
+  };
+  const writing = {
+    ...base,
+    id: "generation-writing",
+    collection: "collected",
+    delivery: "in_progress",
+    since: 40,
+    failed: 0,
+  };
+  const page = hud(true, [], [], [writing, partial, active, olderFailure]);
+  await settle();
+
+  const rows = page.element("briefing-rows");
+  assert.deepEqual(
+    rows.children.map((row) => row.children[0]?.content),
+    ["nightly", "nightly", "nightly"],
+  );
+  assert.deepEqual(
+    rows.children.map((row) => row.children[1]?.content),
+    ["gather", "partial", "write"],
+    "collapsed keeps both active rows and only the latest attention row in stable order",
+  );
+  assert.equal(
+    page.element("briefing-toggle").getAttribute("aria-expanded"),
+    "false",
+  );
+  assert.match(page.element("briefing-meta").content, /2 active/);
+  assert.match(page.element("briefing-meta").content, /2 need attention/);
+  assert.match(page.element("briefing-meta").content, /1 hidden/);
+  assert.match(
+    rows.children[1]?.getAttribute("aria-label") ?? "",
+    /partial.*1 failed.*requires attention/,
+  );
+
+  const scroller = page.element("lines");
+  scroller.scrollTop = 31;
+  scroller.scrollHeight = 300;
+  scroller.clientHeight = 100;
+  page.element("briefing-toggle").dispatch("click", {});
+  assert.equal(
+    page.element("briefing-toggle").getAttribute("aria-expanded"),
+    "true",
+  );
+  assert.deepEqual(
+    rows.children.map((row) => row.children[1]?.content),
+    ["fail", "gather", "partial", "write"],
+  );
+  assert.equal(
+    scroller.scrollTop,
+    31,
+    "opening the drawer does not move a reader who scrolled up",
+  );
+
+  const failedDismiss = rows.children[0]?.children[4];
+  assert.equal(failedDismiss?.content, "dismiss");
+  failedDismiss?.dispatch("click", {});
+  assert.equal(
+    page.lastCall("hud_briefing_dismiss")["id"],
+    "generation-failed",
+  );
+  assert.equal(
+    rows.children.length,
+    4,
+    "dismissal waits for the service whole-list update",
   );
 });
 

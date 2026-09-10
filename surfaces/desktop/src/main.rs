@@ -324,6 +324,10 @@ impl Backend for ServiceLink {
         ServiceLink::job_command(self, id, action)
     }
 
+    fn briefing_dismiss(&self, id: String) -> Result<(), String> {
+        ServiceLink::briefing_dismiss(self, id)
+    }
+
     fn offer_take(&self, id: String) -> Result<(), String> {
         ServiceLink::offer_take(self, id)
     }
@@ -484,6 +488,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             hud_open_attachment,
             hud_open_link,
             hud_job_command,
+            hud_briefing_dismiss,
             hud_offer_take,
             hud_save_attachment,
             hud_close,
@@ -668,9 +673,23 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                         said.accepted(&id);
                         observer.observe(LinkEvent::Accepted(id));
                     }
-                    LinkEvent::Refused(id, detail) => {
-                        said.refused(&id, detail.clone());
-                        observer.observe(LinkEvent::Refused(id, detail));
+                    LinkEvent::Refused {
+                        id,
+                        operation,
+                        code,
+                        detail,
+                    } => {
+                        if operation == "message" {
+                            said.refused(&id, detail.clone());
+                        } else {
+                            said.request_failed(format!("{code}: {detail}"));
+                        }
+                        observer.observe(LinkEvent::Refused {
+                            id,
+                            operation,
+                            code,
+                            detail,
+                        });
                     }
                     LinkEvent::Disconnected => {
                         said.dropped(link::UNAVAILABLE);
@@ -1064,6 +1083,15 @@ fn hud_job_command(
     action: JobAction,
 ) -> Result<(), String> {
     conversation.job_command(id, action)
+}
+
+/// Dismisses one terminal delivered briefing from presentation.
+#[tauri::command]
+fn hud_briefing_dismiss(
+    conversation: tauri::State<'_, Arc<Hud>>,
+    id: String,
+) -> Result<(), String> {
+    conversation.briefing_dismiss(id)
 }
 
 /// Takes one offer the agent made.

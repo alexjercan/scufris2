@@ -425,9 +425,11 @@ idempotent.
 
 Start and source-completion updates only replace `surface.briefings`; they never
 enter Pi and never create speech or a conversation line. The desktop HUD and
-iPhone draw the complete durable row list with profile, collection/delivery
-state, count, and summary. The rows have screen-reader labels and narrow-width
-layouts, and no surface action owns them.
+iPhone draw one compact `BRIEF` drawer with profile, collection/delivery state,
+count, and summary. The collapsed drawer shows all active runs and at most the
+newest delivered row that needs attention. Expanding it shows every relevant
+row in stable `since`, then generation-ID order. The rows have screen-reader
+labels and narrow-width layouts.
 
 When the terminal item is pending, the service waits until Pi is idle and no
 user turn owns the response association. It marks the item `in_progress` before
@@ -445,9 +447,26 @@ write retries the pending item; a crash after the replay write recovers it as
 delivered before an agent can connect, so no second visible answer is made.
 Duplicate or stale correlated responses are ignored.
 
+A delivered success then disappears from the drawer. A delivered run needs
+attention only if collection is `failed`, or if collection is `collected` with
+the measured source count `failed > 0`. The latter is the complete definition
+of partial; no summary or prose is classified. Failed and partial rows stay
+visible until a person sends `briefing.dismiss` with the opaque generation ID.
+The service allows dismissal only after terminal collection and delivered
+response, stores it atomically, and publishes the resulting whole list to every
+surface. Repeating it is harmless.
+
+Dismissal is presentation state, not delivery acknowledgment or deletion. The
+service keeps the canonical response, collection artifacts, and row in its
+bounded audit. State format 2 stores up to 128 audit rows and a bounded set of
+dismissed IDs; format 1 loads with no dismissals. Active and undismissed
+attention rows never yield to eviction. The oldest delivered success or
+dismissed attention row yields first when audit space is needed.
+
 Filesystem state remains the collection authority and service state remains
 the delivery authority. Preparing `briefing.md` does not acknowledge delivery,
-and a service acknowledgment does not rewrite collection state.
+a service acknowledgment does not rewrite collection state, and dismissal
+does neither.
 
 Everything before the prose is code. The schedule, the sources, the runs and
 the record are decided by systemd and `briefing.py`, and no model is asked

@@ -4,12 +4,15 @@ This directory contains the native SwiftUI companion. XcodeGen creates the
 Xcode project from `project.yml`; the generated project and Info.plist are not
 committed.
 
-The application connects to the authenticated protocol-v8 surface gateway over
+The application connects to the authenticated protocol-v9 surface gateway over
 `wss://`, stores its URL, bearer token, and stable surface identity in the iOS
 Keychain, replays the canonical conversation, and submits text with optional
 managed attachment IDs. Response `text` stays literal plain prose with safe web
 URL autolinks. Optional `details` uses native selectable Markdown blocks and
-safe native links. No response HTML or remote web view is rendered.
+safe native links. No response HTML or remote web view is rendered. Scheduled runs
+use the compact `BRIEF` drawer: active rows and the newest delivered attention
+row stay visible while collapsed, successful deliveries disappear, and failed
+or measured-partial deliveries can be durably dismissed across all surfaces.
 
 The document and photo controls upload one selected object through the
 authenticated HTTPS gateway. The composer holds up to eight canonical

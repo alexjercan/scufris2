@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BRIEF drawer - narrow expanded</title>
+    <link rel="stylesheet" href="../../../surfaces/desktop/ui/hud.css" />
+  </head>
+  <body>
+    <main class="hud">
+      <header class="crown">
+        <span class="mark">Scufris</span>
+        <span class="notice">idle</span>
+      </header>
+      <section class="stream">
+        <ol class="lines">
+          <li class="briefings" data-transient="briefings">
+            <button class="briefing-toggle" type="button" aria-expanded="true">
+              <span class="who">brief</span>
+              <span class="briefing-toggle-body">
+                <span class="briefing-meta">2 active - 2 need attention</span>
+                <span class="briefing-toggle-mark">-</span>
+              </span>
+            </button>
+            <div class="rows">
+              <div class="briefing-row" data-state="failed">
+                <span class="briefing-profile">nightly</span>
+                <span class="briefing-state">fail</span>
+                <span class="briefing-count">3/3</span>
+                <span class="briefing-summary">Every source failed</span>
+                <button class="briefing-dismiss" type="button">dismiss</button>
+              </div>
+              <div class="briefing-row" data-state="collecting">
+                <span class="briefing-profile">morning</span>
+                <span class="briefing-state">gather</span>
+                <span class="briefing-count">1/3</span>
+                <span class="briefing-summary">One source finished</span>
+              </div>
+              <div class="briefing-row" data-state="partial">
+                <span class="briefing-profile">weekly</span>
+                <span class="briefing-state">partial</span>
+                <span class="briefing-count">4/4</span>
+                <span class="briefing-summary"
+                  >Three sources answered; one failed</span
+                >
+                <button class="briefing-dismiss" type="button">dismiss</button>
+              </div>
+              <div class="briefing-row" data-state="collected">
+                <span class="briefing-profile">release</span>
+                <span class="briefing-state">write</span>
+                <span class="briefing-count">5/5</span>
+                <span class="briefing-summary">All sources answered</span>
+              </div>
+            </div>
+          </li>
+        </ol>
+      </section>
+      <form class="ask">
+        <div class="selected"></div>
+        <div class="composer">
+          <button class="attach" type="button">+</button>
+          <span class="caret">&gt;</span>
+          <textarea class="words" aria-label="Message"></textarea>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>

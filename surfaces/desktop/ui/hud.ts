@@ -45,6 +45,9 @@
 
   const lines = element<HTMLOListElement>("lines");
   const briefings = element<HTMLLIElement>("briefings");
+  const briefingToggle = element<HTMLButtonElement>("briefing-toggle");
+  const briefingMeta = element<HTMLElement>("briefing-meta");
+  const briefingToggleMark = element<HTMLElement>("briefing-toggle-mark");
   const briefingRows = element<HTMLElement>("briefing-rows");
   const jobs = element<HTMLLIElement>("jobs");
   const rows = element<HTMLElement>("rows");
@@ -78,6 +81,7 @@
     pending: "ready",
     in_progress: "write",
     delivered: "done",
+    partial: "partial",
   };
 
   /** What one line does to the notice line, when nothing is in flight. */
@@ -108,6 +112,10 @@
   let following = true;
   /** Lines that have arrived since the reader stopped following. */
   let unseen = 0;
+  /** The briefing drawer opens only by an explicit press. */
+  let briefingExpanded = false;
+  /** Presentation-relevant rows from the latest whole-list update. */
+  let listedBriefings: BriefingRow[] = [];
 
   const size = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -486,58 +494,137 @@
     tail();
   };
 
-  /** Draws durable scheduled briefing state. It has no controls: collection
-   * and delivery ownership stay outside every foreground surface. */
-  const listBriefings = (listed: BriefingRow[]): void => {
-    briefingRows.replaceChildren(
-      ...listed.map((row) => {
-        const drawn = document.createElement("div");
-        drawn.className = "briefing-row";
-        drawn.dataset["state"] =
-          row.delivery === "delivered" ? "delivered" : row.collection;
-        const profile = document.createElement("span");
-        profile.className = "briefing-profile";
-        profile.textContent = row.profile;
-        profile.title = `${row.profile} for ${row.date}`;
-        const state = document.createElement("span");
-        state.className = "briefing-state";
-        const key =
-          row.delivery === "in_progress" || row.delivery === "delivered"
-            ? row.delivery
-            : row.delivery === "pending" && row.collection !== "collecting"
-              ? "pending"
-              : row.collection;
-        state.textContent = BRIEFING_WORDS[key] ?? key;
-        const count = document.createElement("span");
-        count.className = "briefing-count";
-        count.textContent = `${row.completed}/${row.total}`;
-        const summary = document.createElement("span");
-        summary.className = "briefing-summary";
-        summary.textContent = row.summary;
-        summary.title = row.summary;
-        drawn.setAttribute(
-          "aria-label",
-          `${row.profile} briefing for ${row.date}, ${state.textContent}, ${row.completed} of ${row.total} sources: ${row.summary}`,
-        );
-        drawn.append(profile, state, count, summary);
-        return drawn;
-      }),
+  /** Collection or terminal delivery still has work to do. */
+  const briefingActive = (row: BriefingRow): boolean =>
+    row.collection === "collecting" || row.delivery !== "delivered";
+
+  /** A delivered failure or measured partial result still needs attention. */
+  const briefingAttention = (row: BriefingRow): boolean =>
+    row.delivery === "delivered" &&
+    (row.collection === "failed" ||
+      (row.collection === "collected" && row.failed > 0));
+
+  /** Dismissal asks the service. Only its next whole-list update hides a row. */
+  const dismissBriefing = (id: string): void => {
+    void invoke("hud_briefing_dismiss", { id }).catch((error: unknown) => {
+      notice.dataset["tone"] = "trouble";
+      notice.textContent = String(error);
+    });
+  };
+
+  const drawBriefingRow = (row: BriefingRow): HTMLElement => {
+    const drawn = document.createElement("div");
+    drawn.className = "briefing-row";
+    const attention = briefingAttention(row);
+    drawn.dataset["state"] =
+      row.collection === "failed"
+        ? "failed"
+        : attention
+          ? "partial"
+          : row.delivery === "delivered"
+            ? "delivered"
+            : row.collection;
+    const profile = document.createElement("span");
+    profile.className = "briefing-profile";
+    profile.textContent = row.profile;
+    profile.title = `${row.profile} for ${row.date}`;
+    const state = document.createElement("span");
+    state.className = "briefing-state";
+    const key =
+      row.delivery === "in_progress"
+        ? "in_progress"
+        : row.collection === "collecting"
+          ? "collecting"
+          : row.delivery === "pending"
+            ? "pending"
+            : row.collection === "failed"
+              ? "failed"
+              : row.failed > 0
+                ? "partial"
+                : "delivered";
+    state.textContent = BRIEFING_WORDS[key] ?? key;
+    const count = document.createElement("span");
+    count.className = "briefing-count";
+    count.textContent = `${row.completed}/${row.total}`;
+    const summary = document.createElement("span");
+    summary.className = "briefing-summary";
+    summary.textContent = row.summary;
+    summary.title = row.summary;
+    const failed = row.failed === 0 ? "" : `, ${row.failed} failed`;
+    const needs = attention ? ", requires attention" : "";
+    drawn.setAttribute("role", "group");
+    drawn.setAttribute(
+      "aria-label",
+      `${row.profile} briefing for ${row.date}, ${state.textContent}, ${row.completed} of ${row.total} sources${failed}${needs}: ${row.summary}`,
     );
+    drawn.append(profile, state, count, summary);
+    if (attention) {
+      const dismiss = document.createElement("button");
+      dismiss.type = "button";
+      dismiss.className = "briefing-dismiss";
+      dismiss.textContent = "dismiss";
+      dismiss.setAttribute(
+        "aria-label",
+        `Dismiss ${state.textContent} ${row.profile} briefing for ${row.date}`,
+      );
+      dismiss.addEventListener("click", () => dismissBriefing(row.id));
+      drawn.append(dismiss);
+    }
+    return drawn;
+  };
+
+  /** Draws the compact briefing drawer from the latest whole-list update. */
+  const drawBriefings = (): void => {
+    const ordered = [...listedBriefings].sort(
+      (left, right) =>
+        left.since - right.since ||
+        (left.id === right.id ? 0 : left.id < right.id ? -1 : 1),
+    );
+    const active = ordered.filter(briefingActive);
+    const attention = ordered.filter(briefingAttention);
+    const latestAttention = attention[attention.length - 1];
+    const shown = briefingExpanded
+      ? ordered
+      : ordered.filter(
+          (row) => briefingActive(row) || row.id === latestAttention?.id,
+        );
+    const hidden = briefingExpanded
+      ? 0
+      : Math.max(0, attention.length - (latestAttention ? 1 : 0));
+    const facts = [
+      active.length === 0 ? "" : `${active.length} active`,
+      attention.length === 0
+        ? ""
+        : `${attention.length} need${attention.length === 1 ? "s" : ""} attention`,
+      hidden === 0 ? "" : `${hidden} hidden`,
+    ].filter(Boolean);
+    briefingMeta.textContent = facts.join(" - ");
+    briefingToggle.setAttribute("aria-expanded", String(briefingExpanded));
+    briefingToggle.setAttribute(
+      "aria-label",
+      `${briefingExpanded ? "Collapse" : "Expand"} briefings${facts.length === 0 ? "" : `. ${facts.join(". ")}.`}`,
+    );
+    briefingToggleMark.textContent = briefingExpanded ? "-" : "+";
+    briefingRows.replaceChildren(...shown.map(drawBriefingRow));
     tail();
+  };
+
+  const listBriefings = (listed: BriefingRow[]): void => {
+    listedBriefings = listed.filter(
+      (row) => briefingActive(row) || briefingAttention(row),
+    );
+    if (listedBriefings.length === 0) briefingExpanded = false;
+    drawBriefings();
   };
 
   /** Keeps quiet lifecycle lists at the end of the conversation flow. */
   const tail = (): void => {
     briefings.remove();
     jobs.remove();
-    if (briefingRows.children.length > 0) {
-      briefings.hidden = false;
-      lines.append(briefings);
-    }
-    if (rows.children.length > 0) {
-      jobs.hidden = false;
-      lines.append(jobs);
-    }
+    briefings.hidden = briefingRows.children.length === 0;
+    jobs.hidden = rows.children.length === 0;
+    if (!briefings.hidden) lines.append(briefings);
+    if (!jobs.hidden) lines.append(jobs);
   };
 
   const append = (entry: ConversationEntry): void => {
@@ -642,6 +729,11 @@
     notice.dataset["tone"] = "keys";
     notice.textContent = KEYS;
   };
+
+  briefingToggle.addEventListener("click", () => {
+    briefingExpanded = !briefingExpanded;
+    drawBriefings();
+  });
 
   // ---------- the field ----------
 
@@ -792,8 +884,10 @@
 
   void listen("scufris://briefings", (event) => {
     const follow = atBottom();
+    const top = lines.scrollTop;
     listBriefings(event.payload as BriefingRow[]);
     if (follow) pin();
+    else lines.scrollTop = top;
     settle();
   });
 

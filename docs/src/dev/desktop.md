@@ -8,7 +8,7 @@ surface.message -> HUD
 assistant message -> text + optional speech + optional widgets
 ```
 
-`scufris-desktop` is a registered protocol v8 surface. It owns local windows,
+`scufris-desktop` is a registered protocol v9 surface. It owns local windows,
 keyboard controls, recording, transcription, speech playback, and widget
 presentation. It does not own Pi or the canonical conversation.
 
@@ -81,6 +81,15 @@ unmerged branch; it arms on the first press, says `sure?`, and forgets after
 three seconds, because stopping the wrong job costs an hour of an agent's work.
 Two or more finished rows also offer one control that files all of them.
 
+The `BRIEF` section is one compact drawer in the conversation flow. Its
+collapsed state shows every active briefing plus at most the newest delivered
+failure or measured partial result. The header reports active, attention, and
+hidden counts. Expanding it shows all relevant rows in stable order without
+moving a reader who has scrolled up. A delivered success disappears. A failed
+or partial row has one accessible `dismiss` control; the desktop sends only its
+opaque generation ID and waits for the service's whole-list update before the
+row disappears.
+
 Each message occupies two columns: the speaker marker in a fixed gutter and
 everything the message is made of - words, attachment cards, details - in one
 body column. A message longer than the window wraps inside that column and never
@@ -117,7 +126,9 @@ presentation only when the message's `surface` equals its persisted ID:
 
 A widget call opens the named installed widget as an exhibit and passes its
 arguments as initial data. Runtime outcomes stay local. No widget result,
-acknowledgement, asynchronous update, or close message crosses protocol v8.
+acknowledgement, asynchronous update, or close message crosses protocol v9.
+Briefing dismissal is separate surface presentation state and does cross as
+`briefing.dismiss`; it is not a widget outcome or delivery acknowledgment.
 
 ## Pill and voice interaction
 
@@ -190,6 +201,7 @@ process matching.
 - attachments: 8 unique references per message and 16 MiB per object;
 - receipts: 4 job groups per message, 6 badges and 2 offers per group;
 - job rows: 8;
+- briefing audit rows: 128;
 - local speech paragraph: 1000 UTF-8 bytes; and
 - reconnect backoff: 250 ms to 5 seconds.
 

@@ -1,4 +1,4 @@
-//! Scufris protocol v8 typed channels.
+//! Scufris protocol v9 typed channels.
 //!
 //! Surface, agent, and control traffic use separate Unix sockets and separate
 //! enums. Each decoder accepts only its channel and direction.
@@ -13,7 +13,7 @@ use crate::{
     is_identifier, read_line,
 };
 
-pub const SERVICE_VERSION: u32 = 8;
+pub const SERVICE_VERSION: u32 = 9;
 pub const SURFACE_FILE_NAME: &str = "surface.sock";
 pub const AGENT_FILE_NAME: &str = "agent.sock";
 pub const CONTROL_FILE_NAME: &str = "control.sock";
@@ -248,6 +248,34 @@ pub struct BriefingRow {
     pub summary: String,
 }
 
+impl BriefingRow {
+    /// Collection or terminal delivery still has work to do.
+    pub fn active(&self) -> bool {
+        self.collection == BriefingCollectionState::Collecting
+            || self.delivery != BriefingDeliveryState::Delivered
+    }
+
+    /// A terminal collection used at least one source failure.
+    ///
+    /// This is the complete definition of partial. It uses only the measured
+    /// collection state and failed-source count, never prose or a summary.
+    pub fn partial(&self) -> bool {
+        self.collection == BriefingCollectionState::Collected && self.failed > 0
+    }
+
+    /// A delivered result that stays visible until presentation dismissal.
+    pub fn requires_attention(&self) -> bool {
+        self.delivery == BriefingDeliveryState::Delivered
+            && (self.collection == BriefingCollectionState::Failed || self.partial())
+    }
+
+    /// Whether a surface may dismiss this generation from presentation.
+    pub fn dismissible(&self) -> bool {
+        self.collection != BriefingCollectionState::Collecting
+            && self.delivery == BriefingDeliveryState::Delivered
+    }
+}
+
 /// The terminal model turn attached to a briefing update.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -341,6 +369,12 @@ pub enum SurfaceRequestBody {
     /// costs and what filing means both belong to the agent that owns the job.
     #[serde(rename = "job.command")]
     JobCommand { id: String, action: JobAction },
+    /// Dismiss one terminal, delivered briefing from surface presentation.
+    ///
+    /// The opaque generation ID is the whole request. The service keeps the
+    /// run and audit row and changes only its durable presentation state.
+    #[serde(rename = "briefing.dismiss")]
+    BriefingDismiss { id: String },
     /// Take one offer the agent made.
     ///
     /// The identifier is the whole request. The prompt behind an offer was
@@ -931,6 +965,7 @@ fn validate_surface_request(message: &SurfaceRequest) -> Result<(), MessageError
         }
         SurfaceRequestBody::Abort { id: one } => id(one, "abort id"),
         SurfaceRequestBody::JobCommand { id: one, .. } => id(one, "job id"),
+        SurfaceRequestBody::BriefingDismiss { id: one } => id(one, "briefing id"),
         SurfaceRequestBody::OfferTake { id: one } => id(one, "offer id"),
     }
 }
@@ -1094,13 +1129,13 @@ mod tests {
 
     #[test]
     fn channels_and_directions_are_distinct() {
-        let line = b"{\"v\":8,\"type\":\"agent.hello\"}\n";
+        let line = b"{\"v\":9,\"type\":\"agent.hello\"}\n";
         assert!(read_agent_request(&mut Cursor::new(line)).is_ok());
         assert!(matches!(
             read_surface_request(&mut Cursor::new(line)),
             Err(MessageError::InvalidJson(_))
         ));
-        let outbound = b"{\"v\":8,\"type\":\"surface.ready\",\"surface\":\"desk\"}\n";
+        let outbound = b"{\"v\":9,\"type\":\"surface.ready\",\"surface\":\"desk\"}\n";
         assert!(read_surface_response(&mut Cursor::new(outbound)).is_ok());
         assert!(read_surface_request(&mut Cursor::new(outbound)).is_err());
     }
@@ -1112,7 +1147,7 @@ mod tests {
         // would speak every briefing the owner never asked for.
         let hello = |id: &str| {
             format!(
-                "{{\"v\":8,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{id}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
+                "{{\"v\":9,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{id}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
             )
         };
         assert!(read_surface_request(&mut Cursor::new(hello("desk"))).is_ok());
@@ -1288,7 +1323,7 @@ mod tests {
     fn only_the_control_channel_carries_a_wake() {
         // A wake is not a second way to drive the conversation, so the channel
         // the remote gateway speaks cannot express one.
-        let line = b"{\"v\":8,\"type\":\"control.wake\",\"id\":\"wake-1\",\"custom_type\":\"scufris-wake\",\"text\":\"Wake up.\"}\n";
+        let line = b"{\"v\":9,\"type\":\"control.wake\",\"id\":\"wake-1\",\"custom_type\":\"scufris-wake\",\"text\":\"Wake up.\"}\n";
         assert!(read_control_request(&mut Cursor::new(line)).is_ok());
         assert!(read_surface_request(&mut Cursor::new(line)).is_err());
         assert!(read_agent_request(&mut Cursor::new(line)).is_err());
@@ -1478,18 +1513,67 @@ mod tests {
     }
 
     #[test]
+    fn briefing_attention_uses_only_measured_terminal_fields() {
+        let row = BriefingRow {
+            id: "generation-a".into(),
+            date: "2026-09-10".into(),
+            profile: "morning".into(),
+            collection: BriefingCollectionState::Collected,
+            delivery: BriefingDeliveryState::Delivered,
+            since: 1_757_000_000,
+            completed: 3,
+            total: 3,
+            failed: 1,
+            summary: "Summary prose does not classify this row.".into(),
+        };
+        assert!(row.partial());
+        assert!(row.requires_attention());
+        assert!(row.dismissible());
+        assert!(!row.active());
+
+        let successful = BriefingRow {
+            failed: 0,
+            ..row.clone()
+        };
+        assert!(!successful.partial());
+        assert!(!successful.requires_attention());
+        assert!(successful.dismissible());
+
+        let collecting = BriefingRow {
+            collection: BriefingCollectionState::Collecting,
+            delivery: BriefingDeliveryState::Pending,
+            ..row
+        };
+        assert!(collecting.active());
+        assert!(!collecting.partial());
+        assert!(!collecting.requires_attention());
+        assert!(!collecting.dismissible());
+    }
+
+    #[test]
     fn only_a_surface_asks_for_a_job_to_stop_or_be_filed() {
         // The two verbs are the surface's, and the agent hears them relayed.
         // Neither is a way to drive the conversation, so the request channel
         // that carries them is the one a registered surface already speaks.
         let line =
-            b"{\"v\":8,\"type\":\"job.command\",\"id\":\"3f81c204b1e9\",\"action\":\"cancel\"}\n";
+            b"{\"v\":9,\"type\":\"job.command\",\"id\":\"3f81c204b1e9\",\"action\":\"cancel\"}\n";
         assert!(read_surface_request(&mut Cursor::new(line)).is_ok());
         assert!(read_agent_request(&mut Cursor::new(line)).is_err());
         assert!(read_control_request(&mut Cursor::new(line)).is_err());
 
-        let take = b"{\"v\":8,\"type\":\"offer.take\",\"id\":\"offer-1\"}\n";
+        let take = b"{\"v\":9,\"type\":\"offer.take\",\"id\":\"offer-1\"}\n";
         assert!(read_surface_request(&mut Cursor::new(take)).is_ok());
         assert!(read_agent_request(&mut Cursor::new(take)).is_err());
+
+        let dismiss = b"{\"v\":9,\"type\":\"briefing.dismiss\",\"id\":\"generation-a\"}\n";
+        assert!(read_surface_request(&mut Cursor::new(dismiss)).is_ok());
+        assert!(read_agent_request(&mut Cursor::new(dismiss)).is_err());
+        assert!(read_control_request(&mut Cursor::new(dismiss)).is_err());
+
+        let invalid = b"{\"v\":9,\"type\":\"briefing.dismiss\",\"id\":\"../generation\"}\n";
+        assert!(matches!(
+            read_surface_request(&mut Cursor::new(invalid)),
+            Err(MessageError::InvalidSubmission("briefing id"))
+        ));
     }
 }

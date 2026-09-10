@@ -1,4 +1,4 @@
-//! Canonical protocol v8 service state.
+//! Canonical protocol v9 service state.
 
 use std::{
     collections::HashMap,
@@ -25,7 +25,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     agent::{Agent, described},
     attachment::AttachmentStore,
-    briefings::BriefingStore,
+    briefings::{BriefingStore, DismissError},
     config::Config,
     conversation::ConversationHistory,
     rpc::{self, Command, DialogAnswer, Event, SessionState},
@@ -740,6 +740,59 @@ impl Service {
         }
     }
 
+    /// Dismisses one terminal delivered briefing from every surface.
+    ///
+    /// Registration is the authorization boundary, as it is for job controls.
+    /// The store changes only presentation state; collection artifacts,
+    /// canonical replay, and the bounded audit remain intact.
+    pub fn surface_briefing_dismiss(&self, connection: u64, id: String) {
+        let mut inner = self.lock();
+        let Some(surface) = inner.speaking_surface(connection) else {
+            return;
+        };
+        debug!(
+            connection,
+            surface,
+            briefing = id,
+            "briefing dismissal received"
+        );
+        match inner.briefings.dismiss(&id) {
+            Ok(_) => inner.publish_briefings(),
+            Err(DismissError::Unavailable) => inner.send_surface(
+                &surface,
+                SurfaceResponseBody::Rejected {
+                    id: Some(id),
+                    operation: "briefing".into(),
+                    code: refusal::BRIEFING_UNAVAILABLE.into(),
+                    detail: "That briefing generation is not retained.".into(),
+                },
+            ),
+            Err(DismissError::NotDismissible) => inner.send_surface(
+                &surface,
+                SurfaceResponseBody::Rejected {
+                    id: Some(id),
+                    operation: "briefing".into(),
+                    code: refusal::BRIEFING_NOT_DISMISSIBLE.into(),
+                    detail:
+                        "A briefing can be dismissed only after its terminal response is delivered."
+                            .into(),
+                },
+            ),
+            Err(DismissError::Store(error)) => {
+                warn!(%error, briefing = id, "briefing dismissal could not be stored");
+                inner.send_surface(
+                    &surface,
+                    SurfaceResponseBody::Rejected {
+                        id: Some(id),
+                        operation: "briefing".into(),
+                        code: refusal::BRIEFING_DISMISSAL_FAILED.into(),
+                        detail: "The briefing dismissal could not be stored.".into(),
+                    },
+                );
+            }
+        }
+    }
+
     /// Takes one offer, once.
     ///
     /// The words behind an offer are the agent's and never crossed, so the
@@ -1334,6 +1387,93 @@ mod tests {
             "duplicate terminal ingress stayed done"
         );
         std::fs::remove_dir_all(runtime).unwrap();
+    }
+
+    #[test]
+    fn a_dismissed_partial_briefing_disappears_everywhere_but_stays_in_audit() {
+        let runtime = test_runtime();
+        let config = Config::test(runtime.clone());
+        let service = service_at(config.clone());
+        let (_, one) = surface(&service, 1, "one");
+        let (_, two) = surface(&service, 2, "two");
+        let mut partial = briefing_row("generation-partial");
+        partial.failed = 1;
+        partial.delivery = BriefingDeliveryState::Delivered;
+        service.control_briefing("update-partial".into(), partial, None);
+        for inbox in [&one, &two] {
+            assert!(drain(inbox).iter().any(|body| matches!(
+                body,
+                SurfaceResponseBody::Briefings { briefings }
+                    if briefings.len() == 1 && briefings[0].id == "generation-partial"
+            )));
+        }
+
+        service.surface_briefing_dismiss(1, "generation-partial".into());
+        for inbox in [&one, &two] {
+            assert!(drain(inbox).iter().any(|body| matches!(
+                body,
+                SurfaceResponseBody::Briefings { briefings } if briefings.is_empty()
+            )));
+        }
+        service.surface_briefing_dismiss(1, "generation-partial".into());
+        assert!(drain(&one).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Briefings { briefings } if briefings.is_empty()
+        )));
+        drop(service);
+
+        let stored: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&config.briefing_file).unwrap()).unwrap();
+        assert_eq!(stored["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            stored["dismissed"],
+            serde_json::json!(["generation-partial"])
+        );
+
+        let restored = service_at(config);
+        let (outbox, inbox) = sync_channel(32);
+        restored.register_surface(
+            3,
+            SurfaceRegistration {
+                id: "three".into(),
+                name: "three".into(),
+                widgets: vec![],
+            },
+            outbox,
+        );
+        assert!(
+            std::iter::from_fn(|| inbox.try_recv().ok()).any(|message| matches!(
+                message.body,
+                SurfaceResponseBody::Briefings { briefings } if briefings.is_empty()
+            ))
+        );
+        std::fs::remove_dir_all(runtime).unwrap();
+    }
+
+    #[test]
+    fn briefing_dismissal_refuses_unknown_or_undelivered_ids() {
+        let service = service();
+        let (_, inbox) = surface(&service, 1, "one");
+        service.surface_briefing_dismiss(1, "generation-missing".into());
+        assert!(drain(&inbox).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Rejected { operation, code, .. }
+                if operation == "briefing" && code == refusal::BRIEFING_UNAVAILABLE
+        )));
+
+        let active = BriefingRow {
+            collection: BriefingCollectionState::Collecting,
+            completed: 0,
+            ..briefing_row("generation-active")
+        };
+        service.control_briefing("update-active".into(), active, None);
+        drain(&inbox);
+        service.surface_briefing_dismiss(1, "generation-active".into());
+        assert!(drain(&inbox).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Rejected { operation, code, .. }
+                if operation == "briefing" && code == refusal::BRIEFING_NOT_DISMISSIBLE
+        )));
     }
 
     #[test]

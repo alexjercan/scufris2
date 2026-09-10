@@ -246,8 +246,8 @@ impl Conversation {
         before != self.attachments.len()
     }
 
-    /// Presents a local attachment operation failure.
-    pub fn attachment_failed(&mut self, trouble: impl Into<String>) {
+    /// Presents a local request failure that does not settle a submission.
+    pub fn request_failed(&mut self, trouble: impl Into<String>) {
         self.trouble = trouble.into();
     }
 
@@ -456,6 +456,19 @@ mod tests {
                 trouble: "Scufris is not reachable.".into(),
             }
         );
+    }
+
+    #[test]
+    fn a_row_control_refusal_is_visible_without_settling_a_message() {
+        let mut conversation = Conversation::new("p");
+        let submission = conversation.typed("hello").expect("the line is sent");
+        conversation.request_failed("briefing_not_dismissible: wait for delivery");
+        assert!(conversation.notice().sending);
+        assert_eq!(
+            conversation.notice().trouble,
+            "briefing_not_dismissible: wait for delivery"
+        );
+        assert!(conversation.accepted(&submission.id));
     }
 
     #[test]

@@ -1,6 +1,6 @@
-/** Protocol v8 agent channel. */
+/** Protocol v9 agent channel. */
 
-export const SERVICE_VERSION = 8;
+export const SERVICE_VERSION = 9;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
 export const SOCKET_DIRECTORY_NAME = "scufris";
 export const AGENT_FILE_NAME = "agent.sock";
@@ -106,9 +106,9 @@ export interface BriefingRow {
 }
 
 export type AgentRequest =
-  | { v: 8; type: "agent.hello" }
+  | { v: 9; type: "agent.hello" }
   | {
-      v: 8;
+      v: 9;
       type: "agent.response";
       text: string;
       proactive_id?: string;
@@ -117,12 +117,12 @@ export type AgentRequest =
       attachments?: string[];
       receipts?: Citation[];
     }
-  | { v: 8; type: "agent.jobs"; jobs: JobRow[] };
+  | { v: 9; type: "agent.jobs"; jobs: JobRow[] };
 
 export type AgentResponse =
-  | { v: 8; type: "agent.ready" }
+  | { v: 9; type: "agent.ready" }
   | {
-      v: 8;
+      v: 9;
       type: "agent.message";
       id: string;
       text: string;
@@ -130,17 +130,17 @@ export type AgentResponse =
       attachments: AttachmentDescriptor[];
     }
   | {
-      v: 8;
+      v: 9;
       type: "agent.wake";
       proactive_id?: string;
       custom_type: string;
       text: string;
       details?: unknown;
     }
-  | { v: 8; type: "agent.abort"; id: string }
-  | { v: 8; type: "agent.job_command"; id: string; action: JobAction }
-  | { v: 8; type: "agent.offer_take"; id: string }
-  | { v: 8; type: "agent.rejected"; code: string; detail: string };
+  | { v: 9; type: "agent.abort"; id: string }
+  | { v: 9; type: "agent.job_command"; id: string; action: JobAction }
+  | { v: 9; type: "agent.offer_take"; id: string }
+  | { v: 9; type: "agent.rejected"; code: string; detail: string };
 
 /**
  * Every stable refusal code, mirroring `shared/control/src/refusal.rs`.
@@ -171,6 +171,9 @@ export const REFUSAL = {
   ATTACHMENT_UNAVAILABLE: "attachment_unavailable",
   INVALID_RANGE: "invalid_range",
   OFFER_UNAVAILABLE: "offer_unavailable",
+  BRIEFING_UNAVAILABLE: "briefing_unavailable",
+  BRIEFING_NOT_DISMISSIBLE: "briefing_not_dismissible",
+  BRIEFING_DISMISSAL_FAILED: "briefing_dismissal_failed",
   INVALID_WIDGETS: "invalid_widgets",
   WIDGET_NOT_FOUND: "widget_not_found",
   SURFACE_NOT_FOUND: "surface_not_found",
@@ -403,12 +406,12 @@ export function decodeAgentResponse(line: string): AgentResponse {
       "unsupported protocol version",
       "unsupported_version",
     );
-  if (message.type === "agent.ready") return { v: 8, type: "agent.ready" };
+  if (message.type === "agent.ready") return { v: 9, type: "agent.ready" };
   if (message.type === "agent.abort")
-    return { v: 8, type: "agent.abort", id: id(message.id, "id") };
+    return { v: 9, type: "agent.abort", id: id(message.id, "id") };
   if (message.type === "agent.rejected")
     return {
-      v: 8,
+      v: 9,
       type: "agent.rejected",
       code: id(message.code, "code"),
       detail: typeof message.detail === "string" ? message.detail : "",
@@ -419,14 +422,14 @@ export function decodeAgentResponse(line: string): AgentResponse {
     if (message.action !== "cancel" && message.action !== "archive")
       throw new ProtocolError("invalid job action", "invalid_action");
     return {
-      v: 8,
+      v: 9,
       type: "agent.job_command",
       id: id(message.id, "id"),
       action: message.action,
     };
   }
   if (message.type === "agent.offer_take")
-    return { v: 8, type: "agent.offer_take", id: id(message.id, "id") };
+    return { v: 9, type: "agent.offer_take", id: id(message.id, "id") };
   if (message.type === "agent.wake") {
     // A wake is words from outside the agent process, carried under the
     // caller's own custom type so an existing wake handler still matches.
@@ -441,7 +444,7 @@ export function decodeAgentResponse(line: string): AgentResponse {
         throw new ProtocolError("invalid wake details", "invalid_details");
     }
     return {
-      v: 8,
+      v: 9,
       type: "agent.wake",
       ...(message.proactive_id === undefined
         ? {}
@@ -478,7 +481,7 @@ export function decodeAgentResponse(line: string): AgentResponse {
     )
       throw new ProtocolError("duplicate attachment", "invalid_attachments");
     return {
-      v: 8,
+      v: 9,
       type: "agent.message",
       id: id(message.id, "id"),
       text: bounded(message.text, MAX_TEXT_BYTES, "text"),

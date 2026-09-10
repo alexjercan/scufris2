@@ -9,6 +9,19 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Added
+
+- Desktop and iPhone now show scheduled runs in one compact `BRIEF` drawer.
+  Active runs stay visible; successful deliveries disappear; failed and
+  measured-partial deliveries remain until one durable dismissal hides them on
+  every surface without deleting their audit, answer, or artifacts.
+
+### Changed
+
+- Surface and agent protocol 9 adds strict `briefing.dismiss`. Briefing persistence format
+  2 keeps a bounded dismissed-ID set beside the 128-row audit and migrates
+  format 1 with no dismissals.
+
 ## [2.5.0] - 2026-09-10
 
 ### Added

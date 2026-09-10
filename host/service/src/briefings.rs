@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::warn;
 
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
+const LEGACY_FORMAT_VERSION: u32 = 1;
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -32,13 +33,19 @@ struct Stored {
     version: u32,
     rows: Vec<BriefingRow>,
     pending: Vec<Queued>,
+    /// Generation IDs dismissed from presentation. Audit rows stay above.
+    #[serde(default)]
+    dismissed: Vec<String>,
 }
 
 /// The service-owned account of briefing presentation and terminal ingress.
 pub struct BriefingStore {
     path: PathBuf,
+    /// The complete bounded audit, including presentation-dismissed rows.
     rows: Vec<BriefingRow>,
     pending: Vec<Queued>,
+    /// Presentation state only. Delivery acknowledgment stays on each row.
+    dismissed: HashSet<String>,
 }
 
 impl BriefingStore {
@@ -47,6 +54,7 @@ impl BriefingStore {
             path,
             rows: Vec::new(),
             pending: Vec::new(),
+            dismissed: HashSet::new(),
         };
         if let Err(error) = store.load() {
             warn!(%error, path = %store.path.display(), "briefing state was rejected; starting empty");
@@ -67,7 +75,23 @@ impl BriefingStore {
         store
     }
 
+    /// Rows relevant to current presentation, oldest first.
+    ///
+    /// Every active run is present. A delivered failed or partial run remains
+    /// until dismissed. Fully successful delivered runs disappear at the
+    /// canonical delivery boundary but remain in the bounded audit.
     pub fn rows(&self) -> Vec<BriefingRow> {
+        self.rows
+            .iter()
+            .filter(|row| {
+                row.active() || (row.requires_attention() && !self.dismissed.contains(&row.id))
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// The complete service audit, used for retention checks and diagnostics.
+    pub fn audit_rows(&self) -> Vec<BriefingRow> {
         self.rows.clone()
     }
 
@@ -87,6 +111,7 @@ impl BriefingStore {
     ) -> Result<(), StoreError> {
         let previous_rows = self.rows.clone();
         let previous_pending = self.pending.clone();
+        let previous_dismissed = self.dismissed.clone();
         // Collection cannot acknowledge delivery. The service computed this
         // from canonical replay, or explicitly accepted a wake-free legacy
         // row, before calling the store.
@@ -125,6 +150,7 @@ impl BriefingStore {
             {
                 self.rows = previous_rows;
                 self.pending = previous_pending;
+                self.dismissed = previous_dismissed;
                 return Err(StoreError::Malformed(
                     "briefing wake event belongs to another run".into(),
                 ));
@@ -153,20 +179,26 @@ impl BriefingStore {
         });
         self.rows.sort_by_key(|row| (row.since, row.id.clone()));
         while self.rows.len() > MAX_BRIEFING_ROWS {
-            let Some(index) = self
-                .rows
-                .iter()
-                .position(|row| row.delivery == BriefingDeliveryState::Delivered)
-            else {
+            // Never evict active or undismissed attention. Successful and
+            // dismissed delivered rows remain audit only and yield oldest
+            // first when the bounded audit is full.
+            let Some(index) = self.rows.iter().position(|row| {
+                row.delivery == BriefingDeliveryState::Delivered
+                    && !row.active()
+                    && (!row.requires_attention() || self.dismissed.contains(&row.id))
+            }) else {
                 self.rows = previous_rows;
                 self.pending = previous_pending;
+                self.dismissed = previous_dismissed;
                 return Err(StoreError::Full);
             };
-            self.rows.remove(index);
+            let removed = self.rows.remove(index);
+            self.dismissed.remove(&removed.id);
         }
         if let Err(error) = self.persist() {
             self.rows = previous_rows;
             self.pending = previous_pending;
+            self.dismissed = previous_dismissed;
             return Err(error);
         }
         Ok(())
@@ -268,6 +300,28 @@ impl BriefingStore {
         Ok(true)
     }
 
+    /// Dismisses one terminal delivered generation from presentation only.
+    ///
+    /// The row, terminal wake history, canonical response, and run artifacts
+    /// are not changed. Repeating the same dismissal is a successful no-op.
+    pub fn dismiss(&mut self, run_id: &str) -> Result<bool, DismissError> {
+        let Some(row) = self.rows.iter().find(|row| row.id == run_id) else {
+            return Err(DismissError::Unavailable);
+        };
+        if !row.dismissible() {
+            return Err(DismissError::NotDismissible);
+        }
+        if self.dismissed.contains(run_id) {
+            return Ok(false);
+        }
+        self.dismissed.insert(run_id.to_string());
+        if let Err(error) = self.persist() {
+            self.dismissed.remove(run_id);
+            return Err(error.into());
+        }
+        Ok(true)
+    }
+
     fn load(&mut self) -> Result<(), StoreError> {
         let file = match OpenOptions::new()
             .read(true)
@@ -292,9 +346,10 @@ impl BriefingStore {
         }
         let stored: Stored = serde_json::from_slice(&bytes)
             .map_err(|error| StoreError::Malformed(error.to_string()))?;
-        if stored.version != FORMAT_VERSION
+        if !matches!(stored.version, LEGACY_FORMAT_VERSION | FORMAT_VERSION)
             || stored.rows.len() > MAX_BRIEFING_ROWS
             || stored.pending.len() > MAX_BRIEFING_ROWS
+            || stored.dismissed.len() > MAX_BRIEFING_ROWS
         {
             return Err(StoreError::Malformed("unsupported briefing state".into()));
         }
@@ -324,8 +379,23 @@ impl BriefingStore {
                 ));
             }
         }
+        let mut dismissed = HashSet::new();
+        for run_id in stored.dismissed {
+            let row = stored
+                .rows
+                .iter()
+                .find(|row| row.id == run_id)
+                .ok_or_else(|| StoreError::Malformed("dismissed briefing has no row".into()))?;
+            if !row.dismissible() || !dismissed.insert(run_id) {
+                return Err(StoreError::Malformed(
+                    "duplicate or nonterminal briefing dismissal".into(),
+                ));
+            }
+        }
         self.rows = stored.rows;
+        self.rows.sort_by_key(|row| (row.since, row.id.clone()));
         self.pending = stored.pending;
+        self.dismissed = dismissed;
         Ok(())
     }
 
@@ -336,10 +406,13 @@ impl BriefingStore {
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no parent"))?;
         fs::create_dir_all(parent)?;
         fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        let mut dismissed: Vec<_> = self.dismissed.iter().cloned().collect();
+        dismissed.sort();
         let mut bytes = serde_json::to_vec(&Stored {
             version: FORMAT_VERSION,
             rows: self.rows.clone(),
             pending: self.pending.clone(),
+            dismissed,
         })?;
         bytes.push(b'\n');
         if bytes.len() as u64 > MAX_FILE_BYTES {
@@ -372,6 +445,16 @@ impl BriefingStore {
 }
 
 #[derive(Debug, Error)]
+pub enum DismissError {
+    #[error("that briefing generation is not retained")]
+    Unavailable,
+    #[error("that briefing is still active or is not delivered")]
+    NotDismissible,
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
+#[derive(Debug, Error)]
 pub enum StoreError {
     #[error("briefing state I/O failed: {0}")]
     Io(#[from] io::Error),
@@ -381,7 +464,7 @@ pub enum StoreError {
     Malformed(String),
     #[error("briefing state exceeds its bound")]
     TooLarge,
-    #[error("all briefing row slots still require delivery")]
+    #[error("all briefing row slots are active or need undismissed attention")]
     Full,
 }
 
@@ -465,8 +548,9 @@ mod tests {
             .recover_delivered(|event_id| event_id == "briefing-generation-a-terminal")
             .unwrap();
         assert!(restored.next().is_none());
+        assert!(restored.rows().is_empty());
         assert_eq!(
-            restored.rows()[0].delivery,
+            restored.audit_rows()[0].delivery,
             BriefingDeliveryState::Delivered
         );
         fs::remove_dir_all(root).unwrap();
@@ -519,11 +603,174 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            store.rows()[0].collection,
+            store.audit_rows()[0].collection,
             BriefingCollectionState::Collected
         );
-        assert_eq!(store.rows()[0].delivery, BriefingDeliveryState::Delivered);
+        assert_eq!(
+            store.audit_rows()[0].delivery,
+            BriefingDeliveryState::Delivered
+        );
         assert!(store.next().is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dismissal_is_durable_idempotent_presentation_state() {
+        let root =
+            std::env::temp_dir().join(format!("scufris-briefing-dismiss-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let path = root.join("briefings.json");
+        let mut partial = row("generation-partial", BriefingCollectionState::Collected);
+        partial.total = 2;
+        partial.completed = 2;
+        partial.failed = 1;
+        let mut store = BriefingStore::open(path.clone());
+        store
+            .upsert(partial, Some(wake("generation-partial")), false)
+            .unwrap();
+        store
+            .acknowledge("briefing-generation-partial-terminal")
+            .unwrap();
+        assert_eq!(store.rows().len(), 1);
+        assert!(store.dismiss("generation-partial").unwrap());
+        assert!(!store.dismiss("generation-partial").unwrap());
+        assert!(store.rows().is_empty());
+        assert_eq!(store.audit_rows().len(), 1);
+        drop(store);
+
+        let mut restored = BriefingStore::open(path);
+        assert!(restored.rows().is_empty());
+        assert_eq!(restored.audit_rows().len(), 1);
+        assert!(!restored.dismiss("generation-partial").unwrap());
+        assert!(matches!(
+            restored.dismiss("generation-missing"),
+            Err(DismissError::Unavailable)
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn active_and_undelivered_briefings_cannot_be_dismissed() {
+        let root =
+            std::env::temp_dir().join(format!("scufris-briefing-active-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let path = root.join("briefings.json");
+        let mut store = BriefingStore::open(path);
+        store
+            .upsert(
+                row("generation-active", BriefingCollectionState::Collecting),
+                None,
+                false,
+            )
+            .unwrap();
+        store
+            .upsert(
+                row("generation-ready", BriefingCollectionState::Failed),
+                Some(wake("generation-ready")),
+                false,
+            )
+            .unwrap();
+        for id in ["generation-active", "generation-ready"] {
+            assert!(matches!(
+                store.dismiss(id),
+                Err(DismissError::NotDismissible)
+            ));
+        }
+        assert_eq!(store.rows().len(), 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bounded_audit_never_evicts_undismissed_attention() {
+        let root =
+            std::env::temp_dir().join(format!("scufris-briefing-bound-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let path = root.join("briefings.json");
+        fs::create_dir_all(&root).unwrap();
+        let rows: Vec<_> = (0..MAX_BRIEFING_ROWS)
+            .map(|index| {
+                let collection = if index == 0 {
+                    BriefingCollectionState::Collecting
+                } else {
+                    BriefingCollectionState::Failed
+                };
+                let mut one = row(&format!("generation-{index:03}"), collection);
+                one.delivery = BriefingDeliveryState::Delivered;
+                one.since += index as u64;
+                one
+            })
+            .collect();
+        let mut bytes = serde_json::to_vec(&Stored {
+            version: FORMAT_VERSION,
+            rows,
+            pending: vec![],
+            dismissed: vec![],
+        })
+        .unwrap();
+        bytes.push(b'\n');
+        fs::write(&path, bytes).unwrap();
+
+        let mut store = BriefingStore::open(path);
+        assert_eq!(store.rows().len(), MAX_BRIEFING_ROWS);
+        assert!(matches!(
+            store.upsert(
+                row("generation-next", BriefingCollectionState::Collecting),
+                None,
+                false,
+            ),
+            Err(StoreError::Full)
+        ));
+        assert_eq!(store.audit_rows().len(), MAX_BRIEFING_ROWS);
+        assert!(
+            store
+                .audit_rows()
+                .iter()
+                .any(|row| row.id == "generation-000" && row.active())
+        );
+        store.dismiss("generation-001").unwrap();
+        store
+            .upsert(
+                row("generation-next", BriefingCollectionState::Collecting),
+                None,
+                false,
+            )
+            .unwrap();
+        assert_eq!(store.audit_rows().len(), MAX_BRIEFING_ROWS);
+        assert!(
+            store
+                .audit_rows()
+                .iter()
+                .all(|row| row.id != "generation-001")
+        );
+        assert!(
+            store
+                .audit_rows()
+                .iter()
+                .any(|row| row.id == "generation-000")
+        );
+        assert!(store.rows().iter().any(|row| row.id == "generation-next"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn version_one_state_migrates_with_no_dismissals() {
+        let root = std::env::temp_dir().join(format!("scufris-briefing-v1-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let path = root.join("briefings.json");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({
+                "version": 1,
+                "rows": [row("generation-a", BriefingCollectionState::Collecting)],
+                "pending": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let store = BriefingStore::open(path);
+        assert_eq!(store.rows().len(), 1);
+        assert_eq!(store.audit_rows().len(), 1);
         fs::remove_dir_all(root).unwrap();
     }
 }

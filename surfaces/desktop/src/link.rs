@@ -1,4 +1,4 @@
-//! Registered protocol v8 surface link.
+//! Registered protocol v9 surface link.
 
 use std::{
     io::BufReader,
@@ -31,7 +31,12 @@ pub enum LinkEvent {
     Disconnected,
     HandshakeFailed,
     Accepted(String),
-    Refused(String, String),
+    Refused {
+        id: String,
+        operation: String,
+        code: String,
+        detail: String,
+    },
     State(ScufrisState, String),
     /// Every job row at once, replacing what the surface holds.
     Jobs(Vec<JobRow>),
@@ -152,6 +157,13 @@ impl ServiceLink {
             return Err("The Scufris surface is still loading.".into());
         }
         send(&self.writer, SurfaceRequestBody::JobCommand { id, action })
+    }
+
+    pub fn briefing_dismiss(&self, id: String) -> Result<(), String> {
+        if !self.ready.load(Ordering::Acquire) {
+            return Err("The Scufris surface is still loading.".into());
+        }
+        send(&self.writer, SurfaceRequestBody::BriefingDismiss { id })
     }
 
     pub fn offer_take(&self, id: String) -> Result<(), String> {
@@ -287,9 +299,15 @@ fn serve(
             SurfaceResponseBody::Ready { .. } => return Outcome::HandshakeFailed,
             SurfaceResponseBody::Rejected {
                 id: Some(id),
+                operation,
+                code,
                 detail,
-                ..
-            } => observe(LinkEvent::Refused(id, detail)),
+            } => observe(LinkEvent::Refused {
+                id,
+                operation,
+                code,
+                detail,
+            }),
             SurfaceResponseBody::Rejected { detail, .. } => {
                 tracing::warn!(%detail, "surface request rejected")
             }

@@ -13,7 +13,7 @@ local HTTP -> content.sock ----+
 `scufris-service` owns the Pi RPC process, canonical user-facing state, the
 latest 200 conversation messages, a durable scheduled-briefing inbox, and
 managed attachment content. It exposes
-three protocol-v8 sockets and one private HTTP socket:
+three protocol-v9 sockets and one private HTTP socket:
 
 - `$XDG_RUNTIME_DIR/scufris/surface.sock`: registered desktop and synthetic
   surfaces;
@@ -30,7 +30,7 @@ coordinated staging stack.
 ## Typed channels
 
 Each socket has its own inbound and outbound message enum. Every line is one
-bounded LF-terminated JSON object with `"v":8`. A wrong version is logged and
+bounded LF-terminated JSON object with `"v":9`. A wrong version is logged and
 the connection closes without a response. Clients show a local message that
 asks the user to update the host and surface together.
 
@@ -104,8 +104,9 @@ for want of a surface to attribute it to.
 one terminal `BriefingWake`. The service writes the complete row and wake queue
 to `$XDG_DATA_HOME/scufris/briefings.json` before returning
 `control.briefing_ack`. The update is accepted with no agent or surface
-connected. The service broadcasts the complete `surface.briefings` list, so
-collection progress is quiet state and never a model turn.
+connected. The service broadcasts the complete presentation-relevant
+`surface.briefings` list, so collection progress is quiet state and never a
+model turn.
 
 A terminal wake has a stable event ID. The service queues it once, waits for Pi
 to be idle and for no user turn to own the response association, writes
@@ -126,6 +127,21 @@ second visible answer.
 Collection and delivery never overwrite each other. The filesystem helper owns
 `collecting`, `collected`, and `failed`; the service owns `pending`,
 `in_progress`, and `delivered`.
+
+After delivery, a successful row leaves surface presentation. A failed row, or
+a measured partial row with `collection == collected && failed > 0`, remains
+until `briefing.dismiss`. Only a registered surface can send that request. The
+opaque ID must name a retained terminal, delivered generation. The service
+stores dismissal atomically and then broadcasts the new whole list. A repeated
+dismissal succeeds as a no-op; unknown and nondismissible IDs receive bounded
+rejections.
+
+Dismissal does not acknowledge delivery and does not remove the canonical
+answer, run artifacts, or audit row. Briefing state format 2 retains up to 128
+audit rows plus their bounded dismissed-ID set and reads format 1 as no
+dismissals. Active and undismissed attention rows are protected from audit
+eviction. The oldest delivered success or dismissed attention row yields
+first.
 
 ## Unprompted wake ingress
 

@@ -65,3 +65,12 @@ pub const NOT_SHOWN: &str = "not_shown";
 
 /// The offer pressed has been taken already, or is no longer in the replay.
 pub const OFFER_UNAVAILABLE: &str = "offer_unavailable";
+
+/// No retained briefing row has the generation the surface named.
+pub const BRIEFING_UNAVAILABLE: &str = "briefing_unavailable";
+
+/// The briefing is still collecting or its terminal response is not delivered.
+pub const BRIEFING_NOT_DISMISSIBLE: &str = "briefing_not_dismissible";
+
+/// The durable presentation-state write did not complete.
+pub const BRIEFING_DISMISSAL_FAILED: &str = "briefing_dismissal_failed";

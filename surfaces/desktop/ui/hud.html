@@ -25,12 +25,29 @@
         <ol id="lines" class="lines" aria-label="Conversation">
           <li
             id="briefings"
-            class="jobs"
+            class="briefings"
             data-transient="briefings"
-            aria-label="Scheduled briefings"
             hidden
           >
-            <span class="who">brief</span>
+            <button
+              id="briefing-toggle"
+              class="briefing-toggle"
+              type="button"
+              aria-controls="briefing-rows"
+              aria-expanded="false"
+              aria-label="Expand briefings"
+            >
+              <span class="who">brief</span>
+              <span class="briefing-toggle-body">
+                <span id="briefing-meta" class="briefing-meta"></span>
+                <span
+                  id="briefing-toggle-mark"
+                  class="briefing-toggle-mark"
+                  aria-hidden="true"
+                  >+</span
+                >
+              </span>
+            </button>
             <div id="briefing-rows" class="rows"></div>
           </li>
           <li id="jobs" class="jobs" data-transient="jobs" hidden>

@@ -269,6 +269,22 @@ final class ConversationStore: NSObject, ObservableObject {
         }
     }
 
+    /// Dismisses presentation for one delivered terminal briefing.
+    ///
+    /// This app does not hide the row optimistically. The service persists the
+    /// dismissal and its next whole-list update settles every surface.
+    func dismissBriefing(_ id: String) {
+        guard case .connected = connectionState, let socket else { return }
+        let request = SurfaceBriefingDismissRequest(id: id)
+        Task {
+            do {
+                try await send(request, through: socket)
+            } catch {
+                failCurrentConnection(error)
+            }
+        }
+    }
+
     /// Takes one offer, and lets the service settle whether it was open.
     ///
     /// The words behind it never reached this app: it sends the identifier
@@ -699,6 +715,10 @@ final class ConversationStore: NSObject, ObservableObject {
                 throw ProtocolFailure.invalidMessage("the briefing list is outside its bounds")
             }
             briefings = listed.briefings
+                .filter { $0.isActive || $0.requiresAttention }
+                .sorted {
+                    $0.since == $1.since ? $0.id < $1.id : $0.since < $1.since
+                }
         case "surface.offer_taken":
             let taken = try decoder.decode(IncomingOfferTaken.self, from: data)
             markTaken(taken.id)

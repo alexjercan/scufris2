@@ -23,7 +23,7 @@ loopback listener and bearer-token boundary:
 
 | Method       | Path                    | Purpose                                          |
 | ------------ | ----------------------- | ------------------------------------------------ |
-| `GET`        | `/` or `/surface`       | Upgrade to a protocol-v8 surface WebSocket       |
+| `GET`        | `/` or `/surface`       | Upgrade to a protocol-v9 surface WebSocket       |
 | `GET`        | `/health`               | Read the authenticated gateway identity          |
 | `POST`       | `/audio/transcription`  | Forward a bounded mono PCM WAV to host inference |
 | `POST`       | `/attachments?name=...` | Upload one bounded object                        |
@@ -39,7 +39,7 @@ The transcription route accepts at most 2 MiB and 60 seconds of audio. It sends
 multipart `file`, `model=whisper-1`, and `response_format=json` to the loopback
 `ai-tools-api`. Its bounded `{ "text": "..." }` response is presentation data,
 not a surface message. The iOS app places it in the editable composer and sends
-it only through an ordinary protocol-v8 `surface.message` after confirmation.
+it only through an ordinary protocol-v9 `surface.message` after confirmation.
 
 ## Surface lifecycle
 
@@ -49,7 +49,7 @@ flowchart TB
     Hello --> Replay["replayed surface.message entries<br/>0 to 200"]
     Replay --> State[surface.state]
     State --> Jobs["surface.jobs<br/>0 to 8 rows"]
-    Jobs --> Briefings["surface.briefings<br/>0 to 16 rows"]
+    Jobs --> Briefings["surface.briefings<br/>0 to 128 relevant rows"]
     Briefings --> Ready["surface.ready<br/>matching stable ID"]
     Ready --> Live[enable live speech + widget effects]
 ```
@@ -89,21 +89,26 @@ surface.abort {id} -> surface.aborted {id}
 
 ## Messages a client sends
 
-All messages include `"v": 8`. Surface submissions carry only managed
+All messages include `"v": 9`. Surface submissions carry only managed
 attachment IDs. The service resolves them into canonical descriptors before a
 message reaches the agent, another surface, or replay.
 
 ```json
-{"v":8,"type":"surface.hello","surface":{"id":"laptop-a","name":"Laptop A","widgets":[]}}
-{"v":8,"type":"surface.message","id":"message-1","text":"What changed?","attachments":["att_opaque"]}
-{"v":8,"type":"surface.abort","id":"abort-1"}
-{"v":8,"type":"job.command","id":"3f81c204b1e9","action":"cancel"}
-{"v":8,"type":"offer.take","id":"offer-a1"}
+{"v":9,"type":"surface.hello","surface":{"id":"laptop-a","name":"Laptop A","widgets":[]}}
+{"v":9,"type":"surface.message","id":"message-1","text":"What changed?","attachments":["att_opaque"]}
+{"v":9,"type":"surface.abort","id":"abort-1"}
+{"v":9,"type":"job.command","id":"3f81c204b1e9","action":"cancel"}
+{"v":9,"type":"briefing.dismiss","id":"generation-a"}
+{"v":9,"type":"offer.take","id":"offer-a1"}
 ```
 
 `job.command` is the one control a job row has. `cancel` stops the job and
 keeps an unmerged branch; `archive` only files the row and touches nothing
-else. `offer.take` carries an offer identifier and nothing else: the words
+else. `briefing.dismiss` carries only one opaque generation ID. The service
+accepts it only after terminal collection and delivered response, stores the
+presentation dismissal, and publishes a whole `surface.briefings` replacement
+to every surface. It does not remove the briefing audit, canonical response, or
+artifacts. `offer.take` carries an offer identifier and nothing else: the words
 behind an offer stay with the agent, so no surface can compose a prompt.
 
 ## Messages a client receives
@@ -115,7 +120,7 @@ behind an offer stay with the agent, so no surface can compose a prompt.
 | `surface.aborted`     | Settle the matching abort                                                                                                 |
 | `surface.state`       | Show `failed`, `blocked`, `working`, `starting`, or `idle`; conversation views present working as transient `thinking...` |
 | `surface.jobs`        | Replace the whole job list with these 0 to 8 rows                                                                         |
-| `surface.briefings`   | Replace 0 to 16 quiet briefing rows; never speak them or create a conversation line                                       |
+| `surface.briefings`   | Replace up to 128 relevant briefing rows; never speak them or create a conversation line                                  |
 | `surface.offer_taken` | Mark that offer spent wherever it is drawn                                                                                |
 | `surface.ready`       | End replay; enable live effects                                                                                           |
 | `surface.rejected`    | Show the bounded code/detail; keep user data when relevant                                                                |
@@ -146,8 +151,10 @@ A briefing row carries an opaque generation ID, date and profile labels,
 independent collection and delivery states, start time, completed/total/failed
 counts, and a bounded measured summary. Draw it as quiet state outside the
 conversation messages. Desktop and iPhone retain the count at narrow widths and
-expose the complete row as one accessibility label. There is no surface action
-for a briefing row.
+expose the complete row plus its disclosure and dismissal controls to
+accessibility. Show every active row. After delivery, hide success and retain
+only failed or measured-partial rows until `briefing.dismiss` is durably
+reflected in the next whole-list update.
 
 `text` is literal plain prose on every surface. Markdown delimiters in it stay
 literal, while safe bare HTTP and HTTPS URLs can become native links. Only

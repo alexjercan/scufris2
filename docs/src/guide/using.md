@@ -69,6 +69,13 @@ conversation have explicit open and save controls; executable and unknown
 binary types are save-only. A desktop crash does not stop the conversation
 because the service owns it.
 
+Scheduled work appears in the compact `BRIEF` drawer on desktop and iPhone.
+Active runs stay visible. A successful briefing leaves the drawer after its
+answer is delivered. A failed briefing, or one completed with measured source
+failures, stays until you dismiss it. Expand the drawer to inspect older items
+that need attention. Dismissal hides presentation on every surface but keeps
+the briefing answer, audit, and run artifacts.
+
 Useful local commands:
 
 ```bash

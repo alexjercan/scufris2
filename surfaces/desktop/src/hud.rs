@@ -227,6 +227,17 @@ impl Hud {
         }
     }
 
+    /// Dismisses one delivered terminal briefing from presentation.
+    ///
+    /// The service publishes the resulting whole list to every surface. This
+    /// process does not hide the row optimistically or infer acknowledgment.
+    pub fn briefing_dismiss(&self, id: String) -> Result<(), String> {
+        match self.backend.get() {
+            Some(backend) => backend.briefing_dismiss(id),
+            None => Err("Scufris is not reachable.".into()),
+        }
+    }
+
     /// Takes one offer, and lets the service settle whether it was open.
     pub fn offer_take(&self, id: String) -> Result<(), String> {
         match self.backend.get() {
@@ -425,7 +436,12 @@ impl Hud {
 
     /// Shows a safe local attachment operation failure.
     pub fn attachment_failed(&self, trouble: impl Into<String>) {
-        self.lock().attachment_failed(trouble);
+        self.request_failed(trouble);
+    }
+
+    /// Shows a rejected row control without treating its ID as a submission.
+    pub fn request_failed(&self, trouble: impl Into<String>) {
+        self.lock().request_failed(trouble);
         self.tell();
     }
 

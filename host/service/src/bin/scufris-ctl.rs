@@ -1,4 +1,4 @@
-//! Minimal protocol v8 control client.
+//! Minimal protocol v9 control client.
 
 use std::{io::BufReader, os::unix::net::UnixStream, process::ExitCode};
 

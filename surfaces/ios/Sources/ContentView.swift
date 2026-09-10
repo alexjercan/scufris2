@@ -30,6 +30,7 @@ struct ContentView: View {
     @State private var isHoldingMicrophone = false
     @State private var isShowingDocumentPicker = false
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var briefingsExpanded = false
     @State private var isLoadingPhoto = false
     @State private var previewAttachment: LocalAttachment?
     @State private var sharedAttachment: LocalAttachment?
@@ -375,29 +376,83 @@ struct ContentView: View {
         .containerRelativeFrame(.vertical) { height, _ in max(0, height - 44) }
     }
 
-    /// Quiet scheduled work. These rows have no swipe action because a
-    /// surface neither owns nor cancels a schedule generation.
+    /// Quiet scheduled work in one compact drawer. Collapsed presentation
+    /// keeps all active rows and only the newest delivered attention row.
     @ViewBuilder
     private var briefingList: some View {
         if !store.briefings.isEmpty {
+            let drawer = BriefingDrawerPresentation(
+                rows: store.briefings,
+                expanded: briefingsExpanded
+            )
+
             VStack(spacing: 0) {
                 Divider().overlay(ScufrisPalette.line)
+                Button {
+                    briefingsExpanded.toggle()
+                } label: {
+                    HStack(spacing: 9) {
+                        Text("BRIEF")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .tracking(0.8)
+                            .foregroundStyle(ScufrisPalette.quartz)
+                        Text(
+                            briefingDrawerSummary(
+                                active: drawer.activeCount,
+                                attention: drawer.attentionCount,
+                                hidden: drawer.hiddenAttentionCount
+                            ).uppercased()
+                        )
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(ScufrisPalette.muted)
+                        .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(briefingsExpanded ? "-" : "+")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(ScufrisPalette.quartz)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(.horizontal, 17)
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(briefingsExpanded ? "Collapse briefings" : "Expand briefings")
+                .accessibilityValue(
+                    briefingDrawerSummary(
+                        active: drawer.activeCount,
+                        attention: drawer.attentionCount,
+                        hidden: drawer.hiddenAttentionCount
+                    )
+                )
+
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(store.briefings) { row in
-                            BriefingRowView(row: row)
-                                .padding(.horizontal, 17)
-                                .padding(.vertical, 6)
-                            if row.id != store.briefings.last?.id {
+                        ForEach(drawer.rows) { row in
+                            BriefingRowView(row: row) {
+                                store.dismissBriefing(row.id)
+                            }
+                            .padding(.horizontal, 17)
+                            .padding(.vertical, 6)
+                            if row.id != drawer.rows.last?.id {
                                 Divider().overlay(ScufrisPalette.line)
                             }
                         }
                     }
                 }
-                .scrollDisabled(store.briefings.count <= 3)
-                .frame(height: min(CGFloat(store.briefings.count), 3.5) * 42)
+                .scrollDisabled(drawer.rows.count <= 3)
+                .frame(height: min(CGFloat(drawer.rows.count), 3.5) * 48)
             }
         }
+    }
+
+    private func briefingDrawerSummary(active: Int, attention: Int, hidden: Int) -> String {
+        var facts: [String] = []
+        if active > 0 { facts.append("\(active) active") }
+        if attention > 0 {
+            facts.append("\(attention) need\(attention == 1 ? "s" : "") attention")
+        }
+        if hidden > 0 { facts.append("\(hidden) hidden") }
+        return facts.joined(separator: " - ")
     }
 
     /// Every delegated job, as a section above the composer.
@@ -1029,6 +1084,7 @@ private struct WrappingRun: Layout {
 /// One scheduled briefing generation, with measured progress kept visible.
 private struct BriefingRowView: View {
     let row: BriefingRow
+    let dismiss: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -1048,6 +1104,15 @@ private struct BriefingRowView: View {
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(ScufrisPalette.quartz)
                     .fixedSize()
+                if row.requiresAttention {
+                    Button("DISMISS", action: dismiss)
+                        .buttonStyle(.plain)
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(ScufrisPalette.niagara)
+                        .accessibilityLabel(
+                            "Dismiss \(word) \(row.profile) briefing for \(row.date)"
+                        )
+                }
             }
             Text(row.summary)
                 .font(.system(size: 10, design: .monospaced))
@@ -1055,24 +1120,28 @@ private struct BriefingRowView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(row.profile) briefing for \(row.date), \(word), \(row.completed) of \(row.total) sources: \(row.summary)"
-        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
     }
 
     private var word: String {
-        if row.delivery == .delivered { return "done" }
         if row.delivery == .inProgress { return "write" }
-        switch row.collection {
-        case .collecting: return "gather"
-        case .collected: return "ready"
-        case .failed: return "fail"
-        }
+        if row.collection == .collecting { return "gather" }
+        if row.delivery == .pending { return "ready" }
+        if row.collection == .failed { return "fail" }
+        if row.failed > 0 { return "partial" }
+        return "done"
+    }
+
+    private var accessibilitySummary: String {
+        let failed = row.failed == 0 ? "" : ", \(row.failed) failed"
+        let attention = row.requiresAttention ? ", requires attention" : ""
+        return "\(row.profile) briefing for \(row.date), \(word), \(row.completed) of \(row.total) sources\(failed)\(attention): \(row.summary)"
     }
 
     private var colour: Color {
         if row.collection == .failed { return ScufrisPalette.red }
+        if row.requiresAttention { return ScufrisPalette.yellow }
         if row.delivery == .delivered { return ScufrisPalette.quartz }
         return ScufrisPalette.wisteria
     }

@@ -1,6 +1,6 @@
 import Foundation
 
-let scufrisProtocolVersion = 8
+let scufrisProtocolVersion = 9
 let scufrisMaximumMessageBytes = 64 * 1024
 let scufrisMaximumTextBytes = 8 * 1024
 let scufrisMaximumDetailsBytes = 32 * 1024
@@ -77,6 +77,14 @@ struct SurfaceJobCommandRequest: Encodable {
     let type = "job.command"
     let id: String
     let action: JobAction
+}
+
+/// Presentation dismissal for one terminal delivered briefing. The service
+/// retains the audit row, canonical response, and collection artifacts.
+struct SurfaceBriefingDismissRequest: Encodable {
+    let v = scufrisProtocolVersion
+    let type = "briefing.dismiss"
+    let id: String
 }
 
 /// Taking one offer. The words behind it never leave the extension: this
@@ -164,6 +172,15 @@ struct BriefingRow: Codable, Equatable, Identifiable {
     let failed: UInt32
     let summary: String
 
+    var isActive: Bool {
+        collection == .collecting || delivery != .delivered
+    }
+
+    var requiresAttention: Bool {
+        delivery == .delivered
+            && (collection == .failed || (collection == .collected && failed > 0))
+    }
+
     var isProtocolValid: Bool {
         let identifier = #"^[A-Za-z0-9._-]{1,64}$"#
         return id.range(of: identifier, options: .regularExpression) != nil
@@ -185,6 +202,32 @@ enum BriefingDeliveryState: String, Codable, Equatable {
     case pending
     case inProgress = "in_progress"
     case delivered
+}
+
+/// The deterministic visible slice of the whole briefing list.
+struct BriefingDrawerPresentation: Equatable {
+    let rows: [BriefingRow]
+    let activeCount: Int
+    let attentionCount: Int
+    let hiddenAttentionCount: Int
+
+    init(rows: [BriefingRow], expanded: Bool) {
+        let relevant = rows
+            .filter { $0.isActive || $0.requiresAttention }
+            .sorted {
+                $0.since == $1.since ? $0.id < $1.id : $0.since < $1.since
+            }
+        let attention = relevant.filter(\.requiresAttention)
+        let latestAttention = attention.last
+        self.rows = expanded
+            ? relevant
+            : relevant.filter { $0.isActive || $0.id == latestAttention?.id }
+        activeCount = relevant.filter(\.isActive).count
+        attentionCount = attention.count
+        hiddenAttentionCount = expanded
+            ? 0
+            : max(0, attention.count - (latestAttention == nil ? 0 : 1))
+    }
 }
 
 struct IncomingConversationMessage: Decodable {

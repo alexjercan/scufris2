@@ -253,6 +253,10 @@ pub trait Backend: Send + Sync {
     fn job_command(&self, _id: String, _action: JobAction) -> Result<(), String> {
         Err("This surface cannot act on jobs.".into())
     }
+    /// Dismisses one terminal delivered briefing from presentation.
+    fn briefing_dismiss(&self, _id: String) -> Result<(), String> {
+        Err("This surface cannot dismiss briefings.".into())
+    }
     /// Takes one offer the agent made.
     fn offer_take(&self, _id: String) -> Result<(), String> {
         Err("This surface cannot take offers.".into())
@@ -690,14 +694,22 @@ impl App {
                 debug!(id = %id, "submission accepted");
                 self.handle(Event::Acknowledged(id))
             }
-            LinkEvent::Refused(id, detail) => {
+            LinkEvent::Refused {
+                id,
+                operation,
+                detail,
+                ..
+            } if operation == "message" => {
                 debug!(id = %id, detail = %detail, "submission refused");
                 self.handle(Event::SubmissionFailed { id, reason: detail })
             }
             // Both are the conversation window's, and the companion has
             // nothing to show for either: a job row is not a state the pill
             // wears, and a spent offer is a badge in a message.
-            LinkEvent::Jobs(_) | LinkEvent::Briefings(_) | LinkEvent::OfferTaken(_) => {}
+            LinkEvent::Refused { .. }
+            | LinkEvent::Jobs(_)
+            | LinkEvent::Briefings(_)
+            | LinkEvent::OfferTaken(_) => {}
             LinkEvent::Message { .. } => {}
         }
     }
@@ -2850,10 +2862,12 @@ mod tests {
 
         // What the service answers when it refused the send before any of the
         // words could leave: it says which submission that was.
-        harness.app.observe(LinkEvent::Refused(
-            "pill-1".into(),
-            "submission pill-1 was not sent: the Scufris session is not ready".into(),
-        ));
+        harness.app.observe(LinkEvent::Refused {
+            id: "pill-1".into(),
+            operation: "message".into(),
+            code: "no_free_slot".into(),
+            detail: "submission pill-1 was not sent: the Scufris session is not ready".into(),
+        });
         harness.executor.drain();
 
         let presentation = harness.surface.last();
@@ -2910,6 +2924,21 @@ mod tests {
     /// the service's word, on the link's thread; an uncertainty is the
     /// companion's own timeout, and nothing on the wire ever says it.
     #[test]
+    fn a_row_control_refusal_does_not_settle_a_message_submission() {
+        let harness = harness(FakeRecorder::default(), Ok("open the tasks widget".into()));
+        say(&harness);
+        harness.app.observe(LinkEvent::Refused {
+            id: "generation-a".into(),
+            operation: "briefing".into(),
+            code: "briefing_not_dismissible".into(),
+            detail: "wait for delivery".into(),
+        });
+        harness.executor.drain();
+        assert_eq!(harness.surface.last().state, "sent");
+        assert!(store_still_holds(&harness));
+    }
+
+    #[test]
     fn an_answer_that_arrives_during_the_handoff_leaves_the_pill_on_screen() {
         #[derive(Clone, Copy)]
         enum Answer {
@@ -2933,11 +2962,14 @@ mod tests {
                 thread::spawn(move || {
                     for answer in answers {
                         match answer {
-                            Answer::Refused => runtime.observe(LinkEvent::Refused(
-                                "pill-1".into(),
-                                "submission pill-1 was not sent: the Scufris session is not ready"
-                                    .into(),
-                            )),
+                            Answer::Refused => runtime.observe(LinkEvent::Refused {
+                                id: "pill-1".into(),
+                                operation: "message".into(),
+                                code: "no_free_slot".into(),
+                                detail:
+                                    "submission pill-1 was not sent: the Scufris session is not ready"
+                                        .into(),
+                            }),
                             Answer::Uncertain => runtime.handle(Event::SubmissionUncertain {
                                 id: "pill-1".into(),
                                 reason: "The service did not confirm delivery.".into(),
@@ -3554,10 +3586,12 @@ mod tests {
         say(&harness);
         assert_eq!(harness.surface.last().state, "sent");
 
-        harness.app.observe(LinkEvent::Refused(
-            "pill-1".into(),
-            "the Scufris session is not ready".into(),
-        ));
+        harness.app.observe(LinkEvent::Refused {
+            id: "pill-1".into(),
+            operation: "message".into(),
+            code: "no_free_slot".into(),
+            detail: "the Scufris session is not ready".into(),
+        });
         harness.executor.drain();
         assert_eq!(
             harness.surface.last().state,

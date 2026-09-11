@@ -7,6 +7,7 @@ workflow -> decide and delegate
 response -> emit one atomic answer
 calm     -> reduce Pi transcript noise
 service  -> connect Pi to the conversation owner
+terminal -> hold the agent from a terminal instead
 ```
 
 Scufris loads four foreground extensions from `agent/extensions/scufris/`:
@@ -14,7 +15,10 @@ Scufris loads four foreground extensions from `agent/extensions/scufris/`:
 - `workflow/` owns distributed worker orchestration;
 - `response.ts` owns one atomic final response;
 - `calm.ts` owns the reduced foreground Pi presentation; and
-- `service/` owns the protocol v10 agent connection.
+- `service/` owns the protocol v11 agent connection.
+
+`terminal/` is the fifth, and it is loaded only by a terminal that means to
+become the agent. See [The terminal extension](#the-terminal-extension).
 
 Only an orchestrator process loads foreground behavior. Worker Pi processes do
 not connect as another agent or offer desktop presentation.
@@ -96,6 +100,48 @@ states and not a fifth:
 Badges reach the next final response grouped by job, at most four groups to a
 message. The job identifier is what binds a badge to what it is about, so
 nothing parses the model's prose and nothing breaks it.
+
+## The terminal extension
+
+`terminal/index.ts` is how an interactive Pi becomes the agent for a while.
+`.pi/extensions/scufris-terminal` loads it, and that file is the gate: with no
+`SCUFRIS_TERMINAL=1` in the environment an ordinary `pi` in this checkout gets
+nothing from it. The lifecycle itself lives under `agent/extensions/scufris/`,
+so it is packaged like everything else.
+
+Three states, and nothing between them:
+
+```text
+Independent --acquire ok--------> Leased
+Independent --acquire refused---> Independent (a notice, and no channel)
+Leased      --release, exit-----> Independent
+Leased      --lease ended-------> Lost --reacquire--> Leased | Independent
+Lost        --/scufris hold-----> Independent
+```
+
+`Independent` is an ordinary Pi: no `agent.sock`, no HUD, its own session id
+owning its own jobs. `Leased` is the sole agent. `Lost` is `Independent` plus a
+retry loop, one second doubling to thirty, which `/scufris hold` stops.
+
+`/scufris` carries all of it: `status` (state, channel, generation, owner,
+lineage, and what the host says), `attach`, `release`, `hold`.
+
+While the lease is held, `/new`, `/resume`, and `/fork` are cancelled with a
+notice naming `/scufris release`. The lineage has to stay one chain, because
+the fork-back on release copies this session and a `/resume` into an unrelated
+one would hand that context to the managed child. `/tree` is allowed: it is the
+same file, and the move is reported with `agent.session`.
+
+`attach` forks the lineage into this directory and switches to the copy, so
+model context follows the conversation. It asks only when this session is not
+already the lineage or a fork of it. That guard is not cosmetic: a switch
+starts a session, which would ask for another switch, and Phase 0 gate G3
+measured 3560 switches in 25 seconds without it.
+
+In a terminal the response extension renders natively. Streamed Markdown and
+thinking are no longer hidden, and the shared answer is the last assistant
+message of the turn unless `scufris_final_response` was called, in which case
+the tool's text, receipts, offers, and attachments win.
 
 ## Lifecycle rules
 

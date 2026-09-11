@@ -23,7 +23,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use scufris_control::service::JobAction;
+use scufris_control::service::{AgentHolder, JobAction};
 use serde::Serialize;
 use tracing::{debug, error, info, warn};
 
@@ -689,7 +689,9 @@ impl App {
             LinkEvent::Ready => self.set_connected(true),
             LinkEvent::Disconnected => self.set_connected(false),
             LinkEvent::HandshakeFailed => self.set_connection_failure(crate::link::UPDATE_TOGETHER),
-            LinkEvent::State(state, detail) => self.set_assistant(state.into(), detail),
+            LinkEvent::State(state, detail, holder) => {
+                self.set_assistant(state.into(), detail, holder)
+            }
             LinkEvent::Accepted(id) => {
                 debug!(id = %id, "submission accepted");
                 self.handle(Event::Acknowledged(id))
@@ -738,7 +740,7 @@ impl App {
     }
 
     /// Records what the companion shows the assistant is doing.
-    pub fn set_assistant(self: &Arc<Self>, state: Assistant, detail: String) {
+    pub fn set_assistant(self: &Arc<Self>, state: Assistant, detail: String, holder: AgentHolder) {
         {
             let mut companion = self
                 .companion
@@ -751,7 +753,7 @@ impl App {
                     "assistant state"
                 );
             }
-            companion.set_assistant(state, detail);
+            companion.set_assistant(state, detail, holder);
         }
         self.publish();
     }
@@ -2408,7 +2410,7 @@ mod tests {
         harness.executor.drain();
         harness
             .app
-            .set_assistant(Assistant::Working, "packing".into());
+            .set_assistant(Assistant::Working, "packing".into(), AgentHolder::Managed);
         harness.executor.drain();
 
         harness.app.handle(Event::Stop);
@@ -3412,7 +3414,7 @@ mod tests {
         harness.surface.blind_show.store(u64::MAX, Ordering::SeqCst);
         harness
             .app
-            .set_assistant(Assistant::Working, "packing".into());
+            .set_assistant(Assistant::Working, "packing".into(), AgentHolder::Managed);
         harness.executor.drain();
 
         assert!(
@@ -3452,7 +3454,7 @@ mod tests {
 
         harness
             .app
-            .set_assistant(Assistant::Working, "packing".into());
+            .set_assistant(Assistant::Working, "packing".into(), AgentHolder::Managed);
 
         assert_eq!(
             on_return.load(Ordering::SeqCst),
@@ -3525,7 +3527,7 @@ mod tests {
             // with the pill while the tray is still refusing the state before.
             let runtime = Arc::clone(&runtime);
             thread::spawn(move || {
-                runtime.set_assistant(Assistant::Working, "packing".into());
+                runtime.set_assistant(Assistant::Working, "packing".into(), AgentHolder::Managed);
                 runtime.handle(Event::Escape);
             })
             .join()
@@ -3734,7 +3736,9 @@ mod tests {
         assert_eq!(harness.surface.last().state, "sent");
         harness.app.observe(LinkEvent::Accepted("pill-1".into()));
         harness.executor.drain();
-        harness.app.set_assistant(Assistant::Working, String::new());
+        harness
+            .app
+            .set_assistant(Assistant::Working, String::new(), AgentHolder::Managed);
         harness.executor.drain();
         assert_eq!(harness.surface.last().state, "working");
         // Speech is the companion's own, and it shows over whatever the
@@ -3742,7 +3746,9 @@ mod tests {
         harness.app.set_speaking(true);
         harness.executor.drain();
         assert_eq!(harness.surface.last().state, "speaking");
-        harness.app.set_assistant(Assistant::Idle, String::new());
+        harness
+            .app
+            .set_assistant(Assistant::Idle, String::new(), AgentHolder::Managed);
         harness.executor.drain();
         assert_eq!(
             harness.surface.last().state,

@@ -44,6 +44,10 @@ in
         export SCUFRIS_PROJECT_ROOTS=${pkgs.lib.escapeShellArg (builtins.toJSON projectRoots)}
       fi
       export SCUFRIS_ROLE=orchestrator
+      # Jobs this conversation delegates belong to the conversation, not to
+      # the session that happened to start them. The session id changes on
+      # every handoff; this token does not.
+      export SCUFRIS_JOB_OWNER=foreground
 
       pi=${pkgs.lib.escapeShellArg "${piPackage}/bin/pi"}
       if system_pi="$(type -P pi)"; then

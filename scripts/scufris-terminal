@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Normal interactive Pi, holding the Scufris conversation.
+#
+# The service says where its sessions live and which file the next holder
+# would continue from. This starts Pi on a fork of that file, in the current
+# directory, so a terminal keeps the model context the phone built up. The
+# terminal extension does the rest: it takes the lease, records what is typed,
+# and gives the agent back.
+#
+# Packaged by `nix/terminal.nix`. The extension comes from the checkout this
+# runs in, so the composition is the project's own.
+
+set -euo pipefail
+
+if ! ctl="$(type -P scufris-ctl)"; then
+  printf 'scufris-terminal: scufris-ctl is not on PATH\n' >&2
+  exit 2
+fi
+if ! pi="$(type -P pi)"; then
+  printf 'scufris-terminal: pi is not on PATH\n' >&2
+  exit 2
+fi
+
+# A session the caller chose is the caller's. Adding this one on top would be
+# refused by Pi or would quietly win, and neither is what the caller asked
+# for.
+chose_session=false
+for argument in "$@"; do
+  case "$argument" in
+    --session | --session=* | --session-dir | --session-dir=* | --fork | --fork=* | --continue | -c)
+      chose_session=true
+      ;;
+  esac
+done
+
+session_args=()
+if [[ "$chose_session" == false ]]; then
+  state=""
+  if ! state="$("$ctl" state 2>&1)"; then
+    printf 'scufris-terminal: the service did not answer, so this terminal starts on a session of its own\n' >&2
+    printf '%s\n' "$state" >&2
+    state=""
+  fi
+
+  session_dir=""
+  lineage=""
+  while IFS= read -r line; do
+    case "$line" in
+      'sessions: '*) session_dir="${line#sessions: }" ;;
+      'lineage: '*) lineage="${line#lineage: }" ;;
+    esac
+  done <<<"$state"
+
+  if [[ -n "$session_dir" ]]; then
+    session_args+=(--session-dir "$session_dir")
+    # No lineage file means nothing has been said yet, so there is nothing to
+    # fork and this terminal writes the first session of the conversation.
+    if [[ -n "$lineage" ]]; then
+      if [[ -r "$lineage" ]]; then
+        session_args+=(--fork "$lineage")
+      else
+        printf 'scufris-terminal: cannot read %s, so this terminal joins by catch-up instead\n' "$lineage" >&2
+      fi
+    fi
+  fi
+fi
+
+export SCUFRIS_TERMINAL=1
+exec "$pi" ${session_args+"${session_args[@]}"} "$@"

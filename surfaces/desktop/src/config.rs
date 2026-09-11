@@ -71,6 +71,12 @@ pub struct Config {
     /// one is configured. Without it the companion stays silent, which is a
     /// deployment without a synthesiser rather than a fault.
     pub speak_command: Option<PathBuf>,
+    /// Whether an answer owned by a terminal is spoken here.
+    ///
+    /// Off by default. The person typing in a terminal is usually sitting at
+    /// this machine and reading the answer as it arrives, so speaking it would
+    /// be the same words twice.
+    pub speak_terminal: bool,
     /// File holding an accepted transcript that has not been acknowledged.
     pub state_file: PathBuf,
 }
@@ -115,6 +121,7 @@ impl Config {
                 chat: env::var_os("SCUFRIS_DESKTOP_CHAT_COMMAND"),
                 restart: env::var_os("SCUFRIS_DESKTOP_RESTART_COMMAND"),
                 speak: env::var_os("SCUFRIS_DESKTOP_SPEAK_COMMAND"),
+                speak_terminal: env::var_os("SCUFRIS_DESKTOP_SPEAK_TERMINAL"),
             },
             State {
                 configured: env::var_os("SCUFRIS_DESKTOP_STATE_FILE"),
@@ -173,6 +180,7 @@ impl Config {
             chat_command: absolute(hooks.chat, "SCUFRIS_DESKTOP_CHAT_COMMAND")?,
             restart_command: absolute(hooks.restart, "SCUFRIS_DESKTOP_RESTART_COMMAND")?,
             speak_command: absolute(hooks.speak, "SCUFRIS_DESKTOP_SPEAK_COMMAND")?,
+            speak_terminal: enabled(hooks.speak_terminal),
             state_file: state.resolve()?,
         })
     }
@@ -191,7 +199,7 @@ impl Config {
             value.as_deref().unwrap_or(DERIVED)
         }
         format!(
-            "socket={}\ncommand_socket={}\nstate_file={}\nstt_endpoint={}\nstt_model={}\nstt_language={}\npopup_key={}\nbackground_key={}\nabort_key={}\nterminal_command={}\nrestart_command={}\nspeak_command={}\n",
+            "socket={}\ncommand_socket={}\nstate_file={}\nstt_endpoint={}\nstt_model={}\nstt_language={}\npopup_key={}\nbackground_key={}\nabort_key={}\nterminal_command={}\nrestart_command={}\nspeak_command={}\nspeak_terminal={}\n",
             self.socket.display(),
             optional(&self.command_socket),
             self.state_file.display(),
@@ -204,6 +212,7 @@ impl Config {
             optional(&self.chat_command),
             optional(&self.restart_command),
             optional(&self.speak_command),
+            self.speak_terminal,
         )
     }
 }
@@ -234,6 +243,7 @@ struct Hooks {
     chat: Option<OsString>,
     restart: Option<OsString>,
     speak: Option<OsString>,
+    speak_terminal: Option<OsString>,
 }
 
 /// The three inputs that can name the durable state file, in priority order.
@@ -286,6 +296,15 @@ fn request_setting(
 
 fn word(value: Option<OsString>) -> Option<String> {
     non_empty(value).map(|value| value.to_string_lossy().into_owned())
+}
+
+/// One boolean the deployment turned on.
+///
+/// Only `1` is on. A unit file that exports a variable it has no value for
+/// leaves the default alone, which is how every other optional setting here
+/// reads its environment.
+fn enabled(value: Option<OsString>) -> bool {
+    non_empty(value).is_some_and(|value| value == "1")
 }
 
 fn absolute(value: Option<OsString>, name: &'static str) -> Result<Option<PathBuf>, ConfigError> {
@@ -354,6 +373,7 @@ mod tests {
                 chat: chat.map(OsString::from),
                 restart: None,
                 speak: None,
+                speak_terminal: None,
             },
             state(),
         )
@@ -395,6 +415,7 @@ mod tests {
                 chat: None,
                 restart: None,
                 speak: None,
+                speak_terminal: None,
             },
             state(),
         )
@@ -480,8 +501,38 @@ mod tests {
                 "terminal_command=/nix/store/x/bin/scufris-chat\n",
                 "restart_command=none\n",
                 "speak_command=none\n",
+                "speak_terminal=false\n",
             )
         );
+    }
+
+    /// Speaking a terminal's answer is one deployment's choice, and only the
+    /// value the option documents turns it on. Anything else, an empty
+    /// variable included, leaves the companion silent about a conversation
+    /// somebody is already reading.
+    #[test]
+    fn a_terminals_answer_is_spoken_only_where_the_deployment_asked_for_it() {
+        let with = |value: Option<&str>| {
+            Config::resolve(
+                Some(OsString::from("/run/user/1000/scufris/surface.sock")),
+                None,
+                transcription(None),
+                unset(),
+                Hooks {
+                    chat: None,
+                    restart: None,
+                    speak: None,
+                    speak_terminal: value.map(OsString::from),
+                },
+                state(),
+            )
+            .expect("the companion resolves")
+        };
+        assert!(with(Some("1")).speak_terminal);
+        assert!(with(Some("1")).describe().contains("speak_terminal=true\n"));
+        for off in [None, Some(""), Some("0"), Some("true"), Some("yes")] {
+            assert!(!with(off).speak_terminal, "{off:?} is not on");
+        }
     }
 
     /// The two keys beside the hotkey are the deployment's to name, and
@@ -504,6 +555,7 @@ mod tests {
                 chat: None,
                 restart: None,
                 speak: None,
+                speak_terminal: None,
             },
             state(),
         )
@@ -533,6 +585,7 @@ mod tests {
                 chat: None,
                 restart: None,
                 speak: None,
+                speak_terminal: None,
             },
             state(),
         )

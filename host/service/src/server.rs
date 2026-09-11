@@ -176,25 +176,27 @@ fn agent(service: Arc<Service>, stream: UnixStream, connection: u64) {
         return;
     };
     let mut reader = BufReader::new(&stream);
-    match read_agent_request(&mut reader) {
-        Ok(request) if request.body == AgentRequestBody::Hello => {}
-        Ok(_) => {
-            warn!(connection, "agent did not say hello first");
-            return;
-        }
+    let (lease, session) = match read_agent_request(&mut reader) {
+        Ok(request) => match request.body {
+            AgentRequestBody::Hello { lease, session } => (lease, session),
+            _ => {
+                warn!(connection, "agent did not say hello first");
+                return;
+            }
+        },
         Err(error) => {
             protocol_error(Channel::Agent, connection, &error);
             return;
         }
-    }
-    if !service.register_agent(connection, outbox) {
+    };
+    if !service.admit_agent(connection, lease, session, outbox) {
         let _ = writing.join();
         return;
     }
     loop {
         match read_agent_request(&mut reader) {
             Ok(request) => {
-                if request.body == AgentRequestBody::Hello {
+                if matches!(request.body, AgentRequestBody::Hello { .. }) {
                     warn!(connection, "agent said hello twice");
                     break;
                 }
@@ -246,12 +248,8 @@ fn control(service: Arc<Service>, stream: UnixStream, connection: u64) {
                             }));
                     }
                     ControlRequestBody::State { id } => {
-                        let (state, detail) = service.control_state();
-                        let _ = outbox.try_send(ControlResponse::new(ControlResponseBody::State {
-                            id,
-                            state,
-                            detail,
-                        }));
+                        let answer = service.control_state_full(id);
+                        let _ = outbox.try_send(ControlResponse::new(answer));
                     }
                     ControlRequestBody::Wake {
                         id,
@@ -266,6 +264,27 @@ fn control(service: Arc<Service>, stream: UnixStream, connection: u64) {
                         let answer = service.control_briefing(id, briefing, wake);
                         let _ = outbox.try_send(ControlResponse::new(answer));
                     }
+                    ControlRequestBody::LeaseAcquire {
+                        id,
+                        holder,
+                        abort_working,
+                    } => {
+                        let answer =
+                            service.control_lease_acquire(connection, id, holder, abort_working);
+                        let _ = outbox.try_send(ControlResponse::new(answer));
+                    }
+                    ControlRequestBody::LeasePing { id } => {
+                        let answer = service.control_lease_ping(connection, id);
+                        let _ = outbox.try_send(ControlResponse::new(answer));
+                    }
+                    ControlRequestBody::LeaseRelease { id } => {
+                        let answer = service.control_lease_release(connection, id);
+                        let _ = outbox.try_send(ControlResponse::new(answer));
+                    }
+                    ControlRequestBody::Conversation { id, since } => {
+                        let answer = service.control_conversation(id, since);
+                        let _ = outbox.try_send(ControlResponse::new(answer));
+                    }
                 }
             }
             Err(MessageError::Empty) => break,
@@ -275,6 +294,8 @@ fn control(service: Arc<Service>, stream: UnixStream, connection: u64) {
             }
         }
     }
+    // The lease is the connection, so this is where a held one ends.
+    service.control_disconnected(connection);
     debug!(connection, "control disconnected");
     drop(outbox);
     let _ = stream.shutdown(std::net::Shutdown::Both);

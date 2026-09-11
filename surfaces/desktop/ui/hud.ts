@@ -52,6 +52,7 @@
   const jobs = element<HTMLLIElement>("jobs");
   const rows = element<HTMLElement>("rows");
   const notice = element<HTMLElement>("notice");
+  const holder = element<HTMLElement>("holder");
   const words = element<HTMLTextAreaElement>("words");
   const selected = element<HTMLElement>("selected");
   const attach = element<HTMLButtonElement>("attach");
@@ -751,8 +752,19 @@
     );
   };
 
+  /** What the strip says about where the conversation is being answered. */
+  const HOLDER_WORDS: Record<string, string> = {
+    managed: "",
+    terminal: "in a terminal",
+  };
+
   const say = (state: Notice): void => {
     setThinking(state.thinking === true);
+    // An unknown value is drawn rather than dropped: a service that says
+    // something this build has no word for is still saying the agent is not
+    // where it usually is.
+    holder.textContent =
+      HOLDER_WORDS[state.holder] ?? String(state.holder ?? "");
     drawSelected(state.attachments ?? []);
     if (state.trouble !== "") {
       notice.dataset["tone"] = "trouble";

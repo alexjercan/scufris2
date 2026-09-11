@@ -34,6 +34,7 @@ programs.scufris
 │   ├── package
 │   ├── sessionDirectory
 │   ├── conversationFile
+│   ├── terminalLease
 │   ├── serviceName                  (read-only)
 │   └── remoteSurface
 │       ├── enable
@@ -45,7 +46,7 @@ programs.scufris
     ├── enable
     ├── package
     ├── aiToolsApi.baseUrl
-    ├── speech.{enable,model,voice}
+    ├── speech.{enable,model,voice,speakTerminal}
     ├── transcription.{model,language}
     ├── popupKey
     ├── backgroundKey
@@ -69,6 +70,7 @@ programs.scufris
 | Run the conversation owner                        | `service.enable`                           | `false`                                    |
 | Store its Pi session                              | `service.sessionDirectory`                 | `$XDG_DATA_HOME/scufris/sessions`          |
 | Store canonical surface replay                    | `service.conversationFile`                 | `$XDG_DATA_HOME/scufris/conversation.json` |
+| Let a terminal hold the conversation              | `service.terminalLease`                    | `false`                                    |
 | Run the gateway and private Tailscale Serve route | `service.remoteSurface.enable`             | `false`                                    |
 | Select gateway port                               | `service.remoteSurface.port`               | `10440`                                    |
 | Read gateway secret                               | `service.remoteSurface.tokenFile`          | `null`; required when enabled              |
@@ -78,6 +80,7 @@ programs.scufris
 | Let Scufris manage the API                        | `aiToolsApi.enable`                        | `false`                                    |
 | Enable local speech                               | `desktop.speech.enable`                    | `false`                                    |
 | Select speech request                             | `desktop.speech.model`, `.voice`           | `piper-1`, `en_US-lessac-medium`           |
+| Read out a terminal's answer                      | `desktop.speech.speakTerminal`             | `false`                                    |
 | Select STT request                                | `desktop.transcription.model`, `.language` | `whisper-1`, `auto`                        |
 | Open/talk key                                     | `desktop.popupKey`                         | `Super+D`                                  |
 | Hide/cancel key                                   | `desktop.backgroundKey`                    | derived `Super+Escape`                     |

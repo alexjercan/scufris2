@@ -5,10 +5,14 @@ import {
   decodeAgentResponse,
   encodeAgentRequest,
   jobSummary,
+  recordedText,
   surfacePrompt,
   takeLines,
+  type AgentHolder,
   type AgentRequest,
+  type AgentSession,
   type Citation,
+  type ConversationEntry,
   type JobAction,
   type JobRow,
   type WidgetCall,
@@ -53,6 +57,21 @@ export interface AgentClientOptions {
   offerTake: (id: string) => void;
   /** Called on every completed handshake, including a reconnect. */
   connected?: () => void;
+  /** The lease generation and the session to declare in the handshake. */
+  hello?: () => { lease?: number; session?: AgentSession };
+  /** One typed turn was recorded at that sequence. */
+  turnAck?: (id: string, sequence: number) => void;
+  /**
+   * The conversation is moving to another process.
+   *
+   * Sent before the host stops or drops this agent, so a shutdown that
+   * follows knows it is a handoff and not the end of the conversation.
+   */
+  handoff?: (generation: number, next: AgentHolder) => void;
+  /** What was said while this agent was not the one holding the channel. */
+  catchUp?: (since: number, entries: ConversationEntry[]) => void;
+  /** A submission was refused, by identifier when it had one. */
+  refused?: (id: string | undefined, code: string, detail: string) => void;
   log?: (message: string, level: "info" | "error") => void;
 }
 
@@ -92,13 +111,48 @@ export class AgentClient {
    * follow-ups between a wake and an answer, so "the next response" is not an
    * identity boundary.
    */
-  response(response: AtomicResponse, proactiveId?: string): void {
+  response(
+    response: AtomicResponse,
+    proactiveId?: string,
+    turnId?: string,
+  ): void {
     this.tell({
       v: SERVICE_VERSION,
       type: "agent.response",
       ...response,
+      ...(turnId === undefined ? {} : { turn_id: turnId }),
       ...(proactiveId === undefined ? {} : { proactive_id: proactiveId }),
     });
+  }
+
+  /** Record one turn typed into the terminal that holds the lease.
+   *
+   * The words are already in Pi when this is sent, so nothing is waited for:
+   * the acknowledgement says where it was recorded, which is what lets the
+   * answer of this turn name the turn it answers.
+   */
+  turn(id: string, text: string, images = 0): void {
+    this.tell({
+      v: SERVICE_VERSION,
+      type: "agent.turn",
+      id,
+      text: recordedText(text),
+      ...(images === 0 ? {} : { images }),
+    });
+  }
+
+  /** Say whether this agent is mid-turn.
+   *
+   * The managed child's own RPC stdout says this and says it first. A terminal
+   * has no such stream, so this is the only way it is counted.
+   */
+  activity(working: boolean): void {
+    this.tell({ v: SERVICE_VERSION, type: "agent.activity", working });
+  }
+
+  /** Say which session file this agent is writing now. */
+  session(session: AgentSession): void {
+    this.tell({ v: SERVICE_VERSION, type: "agent.session", ...session });
   }
 
   /** Tell the host when Pi delivers the exact queued proactive message. */
@@ -159,7 +213,11 @@ export class AgentClient {
     socket.unref();
     socket.on("connect", () => {
       socket.write(
-        encodeAgentRequest({ v: SERVICE_VERSION, type: "agent.hello" }),
+        encodeAgentRequest({
+          v: SERVICE_VERSION,
+          type: "agent.hello",
+          ...(this.options.hello?.() ?? {}),
+        }),
       );
     });
     socket.on("data", (chunk: string) => this.receive(socket, chunk));
@@ -211,7 +269,14 @@ export class AgentClient {
           this.options.jobCommand(message.id, message.action);
         } else if (message.type === "agent.offer_take") {
           this.options.offerTake(message.id);
+        } else if (message.type === "agent.turn_ack") {
+          this.options.turnAck?.(message.id, message.sequence);
+        } else if (message.type === "agent.handoff") {
+          this.options.handoff?.(message.generation, message.next);
+        } else if (message.type === "agent.catch_up") {
+          this.options.catchUp?.(message.since, message.entries);
         } else {
+          this.options.refused?.(message.id, message.code, message.detail);
           this.log(`${message.code}: ${message.detail}`, "error");
         }
       } catch {

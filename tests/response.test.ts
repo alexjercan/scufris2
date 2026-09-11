@@ -7,6 +7,7 @@ import response, {
   offerPolicy,
   plainProse,
   restoredOfferPrompts,
+  terminalResponsePolicy,
 } from "../agent/extensions/scufris/response.ts";
 import { AGENT_RESPONSE_EVENT } from "../agent/extensions/scufris/service/client.ts";
 import {
@@ -259,5 +260,116 @@ test("a restart honours the buttons an earlier session drew", () => {
   assert.deepEqual(
     [...prompts],
     [["offer-a1", "for job 3f81c204b1e9: land it"]],
+  );
+});
+
+/** One response extension in terminal mode, with its lifecycle drivable. */
+function terminalResponse() {
+  const handlers = new Map<string, Array<(event: any, context: any) => any>>();
+  const emitted: Array<{ name: string; value: any }> = [];
+  const entries: Array<{ type: string; value: any }> = [];
+  const transformers: Array<unknown> = [];
+  let tool: any;
+  const api = {
+    on(name: string, handler: (event: any, context: any) => any) {
+      handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+    },
+    events: {
+      on() {},
+      emit(name: string, value: unknown) {
+        emitted.push({ name, value });
+      },
+    },
+    registerTool(value: any) {
+      tool = value;
+    },
+    registerEntryRenderer() {},
+    registerMarkdownTransformer(value: unknown) {
+      transformers.push(value);
+    },
+    appendEntry(type: string, value: unknown) {
+      entries.push({ type, value });
+    },
+  };
+  const previous = process.env.SCUFRIS_ROLE;
+  process.env.SCUFRIS_ROLE = "orchestrator";
+  try {
+    response(api as never, { terminal: true });
+  } finally {
+    if (previous === undefined) delete process.env.SCUFRIS_ROLE;
+    else process.env.SCUFRIS_ROLE = previous;
+  }
+  const fire = async (name: string, event: unknown) => {
+    const results: unknown[] = [];
+    for (const handler of handlers.get(name) ?? [])
+      results.push(await handler(event as any, {}));
+    return results;
+  };
+  return { fire, emitted, entries, transformers, tool: tool! };
+}
+
+test("in a terminal the last message is the answer, drawn once", async () => {
+  const r = terminalResponse();
+  // Native rendering is the whole point, so nothing hides streamed text.
+  assert.equal(r.transformers.length, 0);
+  await r.fire("before_agent_start", { systemPrompt: "base" });
+  const message = {
+    role: "assistant",
+    content: [{ type: "text", text: "## Done\n\nAll 84 tests passed." }],
+    stopReason: "stop",
+  };
+  // The message is left exactly as the person read it.
+  assert.deepEqual(await r.fire("message_end", { message }), [undefined]);
+  assert.equal(r.emitted.length, 0, "the turn is not over yet");
+  await r.fire("agent_settled", {});
+  assert.deepEqual(r.emitted, [
+    {
+      name: AGENT_RESPONSE_EVENT,
+      value: { text: "## Done\n\nAll 84 tests passed." },
+    },
+  ]);
+  // Pi already drew it, so no second rendered copy is appended.
+  assert.deepEqual(r.entries, []);
+});
+
+test("in a terminal the tool wins and answers only once", async () => {
+  const r = terminalResponse();
+  await r.fire("before_agent_start", { systemPrompt: "base" });
+  const call = {
+    id: "call-1",
+    name: FINAL_TOOL,
+    arguments: { text: "Landed.", details: "## Receipt" },
+  };
+  await r.fire("message_end", {
+    message: { role: "assistant", content: [call], stopReason: "toolUse" },
+  });
+  await r.tool.execute("call-1", call.arguments, undefined, undefined, {});
+  await r.fire("agent_settled", {});
+  assert.deepEqual(
+    r.emitted.map((event) => event.value.text),
+    ["Landed."],
+  );
+  // The tool's answer is the one with receipts, and it is rendered as an entry.
+  assert.equal(r.entries[0]?.type, RESPONSE_ENTRY);
+});
+
+test("the terminal policy asks for a native answer, not a tool call", async () => {
+  assert.match(terminalResponsePolicy, /Answer natively/);
+  assert.match(terminalResponsePolicy, /mirror your final message/);
+  assert.match(
+    terminalResponsePolicy,
+    /only when the answer needs measured receipts/,
+  );
+  const r = terminalResponse();
+  const [result] = (await r.fire("before_agent_start", {
+    systemPrompt: "base",
+  })) as Array<{ systemPrompt: string }>;
+  assert.match(
+    result!.systemPrompt,
+    /^base\n\nYou are answering in a terminal/,
+  );
+  assert.match(
+    result!.systemPrompt,
+    /scufris_final_response for every final answer/,
   );
 });

@@ -27,6 +27,19 @@
       };
     };
   };
+  # The same home with the handoff turned on. It is one option, and what it
+  # has to do is put the flag on the unit and the launcher in the profile.
+  terminalHome = mkHome {
+    settings = {
+      agent.package = testAgent;
+      service = {
+        enable = true;
+        package = service;
+        terminalLease = true;
+      };
+    };
+  };
+  terminalUnit = terminalHome.config.systemd.user.services."scufris-service";
   serviceConfig = serviceHome.config.programs.scufris.service;
   serviceUnit = serviceHome.config.systemd.user.services.${serviceConfig.serviceName};
   gatewayConfig = serviceConfig.remoteSurface;
@@ -51,6 +64,10 @@ in
       ${service}/bin/scufris-service --help | grep -F 'SCUFRIS_SERVICE_AGENT'
       ${service}/bin/scufris-service --help | grep -F 'SCUFRIS_SERVICE_SESSION_DIR'
       ${service}/bin/scufris-service --help | grep -F 'SCUFRIS_SERVICE_CONVERSATION_FILE'
+      # The handoff is an option of the service, off unless a deployment asks.
+      # The proof-of-concept name for it never shipped and is not an alias.
+      ${service}/bin/scufris-service --help | grep -F 'SCUFRIS_SERVICE_TERMINAL_LEASE'
+      ! ${service}/bin/scufris-service --debug-lease
       ! ${service}/bin/scufris-service --nonsense
       ${service}/bin/scufris-surface-gateway --help | grep -F 'Usage: scufris-surface-gateway'
       ${service}/bin/scufris-surface-gateway --help | grep -F 'SCUFRIS_GATEWAY_TOKEN_FILE'
@@ -61,12 +78,16 @@ in
 
       # Protocol v6 control is diagnostic, window, and wake only.
       ${ctl}/bin/scufris-ctl --help | grep -F 'Usage: scufris-ctl [COMMAND]'
-      for verb in state open hud show hide wake; do
+      for verb in state open hud show hide wake lineage; do
         ${ctl}/bin/scufris-ctl --help | grep -qE "^  $verb "
       done
       for removed in send watch abort debug; do
         ! ${ctl}/bin/scufris-ctl --help | grep -qE "^  $removed "
       done
+      # Handoff copies pile up in the session directory, and removing them is
+      # a deliberate act with a window and a rehearsal.
+      ${ctl}/bin/scufris-ctl lineage prune --help | grep -F -- '--keep'
+      ${ctl}/bin/scufris-ctl lineage prune --help | grep -F -- '--dry-run'
       # A wake carries words and says whether they landed.
       ${ctl}/bin/scufris-ctl wake --help | grep -F -- '--custom-type'
       ${ctl}/bin/scufris-ctl wake --help | grep -F -- '--details'
@@ -110,6 +131,14 @@ in
     assert lib.elem "SCUFRIS_SERVICE_AGENT=${lib.getExe testAgent}" serviceUnit.Service.Environment;
     assert lib.elem "SCUFRIS_SERVICE_SESSION_DIR=/home/scufris-test/.local/share/scufris/sessions" serviceUnit.Service.Environment;
     assert lib.elem "SCUFRIS_SERVICE_CONVERSATION_FILE=/home/scufris-test/.local/share/scufris/conversation.json" serviceUnit.Service.Environment;
+    # The handoff is off unless a deployment asked for it, and asking for it is
+    # one option. Off, the service refuses every lease and the terminal
+    # launcher is not installed, because it would start a Pi that is refused.
+    assert !serviceConfig.terminalLease;
+    assert !(lib.any (lib.hasPrefix "SCUFRIS_SERVICE_TERMINAL_LEASE=") serviceUnit.Service.Environment);
+    assert !(lib.any (package: (package.name or "") == "scufris-terminal") serviceHome.config.home.packages);
+    assert lib.elem "SCUFRIS_SERVICE_TERMINAL_LEASE=1" terminalUnit.Service.Environment;
+    assert lib.any (package: (package.name or "") == "scufris-terminal") terminalHome.config.home.packages;
     # The client belongs to whoever enabled a half of Scufris, and it is one
     # package so enabling both halves does not collide.
     assert lib.elem ctl serviceHome.config.home.packages;

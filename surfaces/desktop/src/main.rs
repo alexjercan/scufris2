@@ -281,6 +281,7 @@ fn local_presentation(
     message: &ConversationMessage,
     live: bool,
     local_surface: &str,
+    speak_terminal: bool,
 ) -> LocalPresentation {
     if !live {
         return LocalPresentation {
@@ -289,11 +290,18 @@ fn local_presentation(
             widgets: Vec::new(),
         };
     }
-    let associated =
-        message.role == ConversationRole::Assistant && message.surface == local_surface;
+    let answer = message.role == ConversationRole::Assistant;
+    let associated = answer && message.surface == local_surface;
+    // A terminal's answer is somebody else's window. Its widgets are never
+    // run here, because a widget is an action and the surface that asked for
+    // it is the one that gets it; speaking it is a deployment's choice.
+    let spoken = associated
+        || (answer
+            && speak_terminal
+            && message.surface == scufris_control::service::TERMINAL_SURFACE);
     LocalPresentation {
         stop_speech: true,
-        speak: associated.then(|| message.text.clone()),
+        speak: spoken.then(|| message.text.clone()),
         widgets: if associated {
             message.widgets.clone().unwrap_or_default()
         } else {
@@ -642,6 +650,7 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
             let voice = Arc::clone(&speaker);
             let said = Arc::clone(&conversation);
             let local_surface = surface_id.clone();
+            let speak_terminal = config.speak_terminal;
             let registration = SurfaceRegistration {
                 id: surface_id.clone(),
                 name: surface_name.clone(),
@@ -658,7 +667,8 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                     }
                     LinkEvent::Message { message, live } => {
                         said.said(message.clone());
-                        let presentation = local_presentation(&message, live, &local_surface);
+                        let presentation =
+                            local_presentation(&message, live, &local_surface, speak_terminal);
                         if presentation.stop_speech {
                             voice.hush();
                         }
@@ -698,9 +708,9 @@ fn start(config: Config) -> Result<(), Box<dyn Error>> {
                     LinkEvent::HandshakeFailed => {
                         observer.observe(LinkEvent::HandshakeFailed);
                     }
-                    LinkEvent::State(state, detail) => {
-                        said.assistant(state);
-                        observer.observe(LinkEvent::State(state, detail));
+                    LinkEvent::State(state, detail, holder) => {
+                        said.assistant(state, holder);
+                        observer.observe(LinkEvent::State(state, detail, holder));
                         surfaces.assistant(observer.shown_assistant());
                     }
                     LinkEvent::Jobs(jobs) => said.jobs(jobs),
@@ -1311,22 +1321,44 @@ mod tests {
 
     #[test]
     fn replay_has_no_local_presentation_effects() {
-        let presentation = local_presentation(&answer("desk"), false, "desk");
-        assert!(!presentation.stop_speech);
-        assert_eq!(presentation.speak, None);
-        assert!(presentation.widgets.is_empty());
+        for speak_terminal in [false, true] {
+            let presentation = local_presentation(&answer("desk"), false, "desk", speak_terminal);
+            assert!(!presentation.stop_speech);
+            assert_eq!(presentation.speak, None);
+            assert!(presentation.widgets.is_empty());
+            let replayed = local_presentation(&answer("terminal"), false, "desk", speak_terminal);
+            assert_eq!(replayed.speak, None);
+        }
     }
 
     #[test]
     fn only_the_associated_live_surface_speaks_and_executes_widgets() {
-        let associated = local_presentation(&answer("desk"), true, "desk");
+        let associated = local_presentation(&answer("desk"), true, "desk", false);
         assert!(associated.stop_speech);
         assert_eq!(associated.speak.as_deref(), Some("Spoken text."));
         assert_eq!(associated.widgets.len(), 1);
 
-        let other = local_presentation(&answer("phone"), true, "desk");
+        let other = local_presentation(&answer("phone"), true, "desk", false);
         assert!(other.stop_speech);
         assert_eq!(other.speak, None);
         assert!(other.widgets.is_empty());
+    }
+
+    /// The one surface a companion can be asked to read out for somebody else.
+    /// Its widgets stay where they were asked for: a widget is an action, and
+    /// speaking an answer is not running one.
+    #[test]
+    fn a_terminals_answer_is_read_out_only_when_the_deployment_asked() {
+        let silent = local_presentation(&answer("terminal"), true, "desk", false);
+        assert!(silent.stop_speech);
+        assert_eq!(silent.speak, None);
+
+        let spoken = local_presentation(&answer("terminal"), true, "desk", true);
+        assert_eq!(spoken.speak.as_deref(), Some("Spoken text."));
+        assert!(spoken.widgets.is_empty());
+
+        // The option is about the terminal, not about every other surface.
+        let phone = local_presentation(&answer("phone"), true, "desk", true);
+        assert_eq!(phone.speak, None);
     }
 }

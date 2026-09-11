@@ -22,7 +22,8 @@ use std::sync::{
 };
 
 use scufris_control::service::{
-    AttachmentDescriptor, BriefingRow, ConversationMessage, JobAction, JobRow, ScufrisState,
+    AgentHolder, AttachmentDescriptor, BriefingRow, ConversationMessage, JobAction, JobRow,
+    ScufrisState,
 };
 use serde::Serialize;
 use tauri::{
@@ -179,8 +180,8 @@ impl Hud {
     }
 
     /// Presents the service's live state beside, but never inside, history.
-    pub fn assistant(&self, state: ScufrisState) {
-        if self.lock().assistant(state) {
+    pub fn assistant(&self, state: ScufrisState, holder: AgentHolder) {
+        if self.lock().assistant(state, holder) {
             self.tell();
         }
     }

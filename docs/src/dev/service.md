@@ -13,7 +13,7 @@ local HTTP -> content.sock ----+
 `scufris-service` owns the Pi RPC process, canonical user-facing state, the
 latest 200 conversation messages, a durable scheduled-briefing inbox, and
 managed attachment content. It exposes
-three protocol-v10 sockets and one private HTTP socket:
+three protocol-v11 sockets and one private HTTP socket:
 
 - `$XDG_RUNTIME_DIR/scufris/surface.sock`: registered desktop and synthetic
   surfaces;
@@ -30,7 +30,7 @@ coordinated staging stack.
 ## Typed channels
 
 Each socket has its own inbound and outbound message enum. Every line is one
-bounded LF-terminated JSON object with `"v":10`. A wrong version is logged and
+bounded LF-terminated JSON object with `"v":11`. A wrong version is logged and
 the connection closes without a response. Clients show a local message that
 asks the user to update the host and surface together.
 
@@ -41,8 +41,49 @@ surface ID. Registering the same ID replaces only the previous generation.
 
 An agent starts with `agent.hello`. A second agent receives `agent.rejected` and
 is disconnected. Control supports `control.hello`, `control.state`,
-`control.wake`, and durable `control.briefing` upserts. There is no control
-watch, abort, debug, event stream, or prompt command.
+`control.wake`, durable `control.briefing` upserts, one bounded
+`control.conversation` page, and the three lease verbs below. There is no
+control watch, abort, debug, event stream, or prompt command.
+
+## The terminal lease
+
+The service starts and owns a Pi child. An interactive Pi in a terminal is a
+second Pi, and two agents on one channel is the thing the channel refuses. The
+lease is how the terminal becomes the one agent instead of a rival to it.
+
+`control.lease_acquire` stops and reaps the managed child, then answers
+`control.lease` with a generation. It blocks for as long as the stop takes,
+because the terminal must not touch the agent channel while the child still
+holds the session file. The reply is the permission to connect. A busy agent is
+refused with `agent_busy` unless the caller asked to abort the work first, a
+held lease is refused with `lease_held`, and a service started without the
+lease enabled refuses every acquire with `lease_disabled`.
+
+The lease is the control connection. `agent.hello` must carry the live
+generation to be admitted while a lease is held, which fences out the child's
+own connection as it closes and a terminal whose lease already ended. With no
+lease held, a hello that names a generation is refused too, because nothing
+granted it. `control.lease_ping` every five seconds says the holder is still
+there; three missed pings end the lease, because a terminal that is stopped
+rather than killed keeps an open socket that nobody reads. `control.lease_release`,
+or the connection closing, gives the agent back.
+
+`agent.handoff` tells the agent the lease ended and who is next, so a terminal
+leaves the channel before the managed child returns to it.
+
+## Session lineage
+
+Pi fixes a session's working directory when the file is created, so the service
+cannot hand one file to processes in different directories. It hands over the
+lineage instead. An agent declares the file it writes with `agent.session`, and
+the next holder is started with `--fork` on that file. Pi copies the branch into
+a new file and names the old one as its parent.
+
+A joining agent that continues the lineage, by writing that file or by forking
+it, already has the words. Any other session is told what it missed:
+`agent.catch_up` carries one bounded page of canonical entries, which the agent
+injects as a single undisplayed message. One block of text, not a replayed turn
+for every entry.
 
 ## Replay and broadcast
 
@@ -97,6 +138,18 @@ so the agent may correct the response and still reach the owner. With no turn
 open the next answer is `unprompted`, and so is an answer whose owner
 disconnected before it arrived, widgets stripped. An answer is never refused
 for want of a surface to attribute it to.
+
+Each open turn has an identifier, and an answer that names it closes exactly
+that turn. An answer naming a turn that already closed is recorded rather than
+dropped, and leaves the open turn alone. This is what lets a terminal, where the
+person also types into the same session, keep a phone's question and a local
+question apart.
+
+The terminal is a surface as well as the agent. `agent.turn` submits the words
+a person typed there, which are recorded as a user message from the `terminal`
+surface and answered by `agent.turn_ack` with the sequence they were recorded
+at. Widget calls in an answer to a terminal turn are refused with
+`invalid_widgets`: a terminal draws text.
 
 ## Durable briefing ingress
 
@@ -265,12 +318,20 @@ briefing stop when both need attention.
 Surfaces layer local listening, transcription, and speaking presentation over
 that state.
 
+`surface.state` also says which process is the agent. The field is absent for
+the managed child, so a host that never hands the agent over sends what it
+always did, and `terminal` while a lease is held.
+
 ## Process ownership
 
 The service starts Pi in RPC mode, reads lifecycle events, cancels extension
 dialogs that have no interactive RPC client, and restarts quick failures with a
 bound. It does not use Pi RPC to inject prompts or abort work. Those operations
 travel only over the typed agent channel.
+
+While a terminal holds the lease there is no managed child. The service starts
+one again when the lease ends, forking the file the terminal wrote so the
+conversation continues rather than starting over.
 
 ---
 

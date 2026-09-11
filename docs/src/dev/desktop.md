@@ -8,7 +8,7 @@ surface.message -> HUD
 assistant message -> text + optional speech + optional widgets
 ```
 
-`scufris-desktop` is a registered protocol v10 surface. It owns local windows,
+`scufris-desktop` is a registered protocol v11 surface. It owns local windows,
 keyboard controls, recording, transcription, speech playback, and widget
 presentation. It does not own Pi or the canonical conversation.
 
@@ -130,9 +130,23 @@ presentation only when the message's `surface` equals its persisted ID:
 - animate local response presentation; and
 - execute attached widget calls as best-effort presentation.
 
+One answer that is not this surface's can also be spoken. With
+`SCUFRIS_DESKTOP_SPEAK_TERMINAL=1`
+(`programs.scufris.desktop.speech.speakTerminal`), a live assistant message
+whose `surface` is `terminal` is read out here. Only the words: its widgets are
+never run, because a widget is an action and the surface that asked for it is
+the one that gets it. Replayed messages are never spoken, whatever the option
+says, and every other surface stays silent. The default is off: the person
+typing in a terminal is usually at this machine and reading the answer there.
+
+The chrome strip says where the conversation is being answered. It is empty
+while the service holds its own agent and says `in a terminal` while a terminal
+holds it. That is not what the agent is doing: a terminal at its prompt is
+idle, and the notice on the right of the same strip is what reports state.
+
 A widget call opens the named installed widget as an exhibit and passes its
 arguments as initial data. Runtime outcomes stay local. No widget result,
-acknowledgement, asynchronous update, or close message crosses protocol v10.
+acknowledgement, asynchronous update, or close message crosses protocol v11.
 Briefing dismissal is separate surface presentation state and does cross as
 `briefing.dismiss`; it is not a widget outcome or delivery acknowledgment.
 
@@ -194,6 +208,7 @@ process matching.
 | `SCUFRIS_DESKTOP_CANCEL_KEY`      | Local cancel accelerator or `none`                              |
 | `SCUFRIS_DESKTOP_STOP_KEY`        | Local stop accelerator or `none`                                |
 | `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | Local stdin-driven HTTP synthesis and playback helper           |
+| `SCUFRIS_DESKTOP_SPEAK_TERMINAL`  | `1` also speaks a live answer a terminal asked for              |
 | `SCUFRIS_DESKTOP_RESTART_COMMAND` | Owned service restart helper                                    |
 | `SCUFRIS_WIDGET_PATH`             | Additional compiled widget roots                                |
 

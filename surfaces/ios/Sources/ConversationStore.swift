@@ -37,6 +37,8 @@ final class ConversationStore: NSObject, ObservableObject {
     @Published private(set) var briefings: [BriefingRow] = []
     @Published private(set) var serviceDetail = ""
     @Published private(set) var serviceState = "idle"
+    /// Which process is the agent, as the service last said.
+    @Published private(set) var serviceHolder = AgentHolder.managed
     @Published private(set) var settings = ConnectionSettings(backendURL: "", token: "")
     @Published var draft = ""
     @Published private(set) var dictationState: DictationState = .idle
@@ -695,10 +697,15 @@ final class ConversationStore: NSObject, ObservableObject {
             _ = try decoder.decode(IncomingReady.self, from: data)
             connectionState = .connected
             serviceState = "idle"
+            // The first state message says who holds the agent. Until it
+            // arrives, the service holding its own is the honest assumption
+            // and the one that says nothing.
+            serviceHolder = .managed
             serviceDetail = "Ready"
         case "surface.state":
             let state = try decoder.decode(IncomingState.self, from: data)
             serviceState = state.state
+            serviceHolder = state.holder ?? .managed
             serviceDetail = state.detail.isEmpty ? state.state.capitalized : state.detail
         case "surface.jobs":
             let listed = try decoder.decode(IncomingJobs.self, from: data)

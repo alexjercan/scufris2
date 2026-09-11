@@ -20,7 +20,11 @@ worker wrapper -> private per-execution environment
 | `SCUFRIS_CONTENT_SOCKET` | Pi attachment tool                                        | Exact `content.sock` override. Default: resolved from `SCUFRIS_RUNTIME_DIR`, then XDG. Expert/test use.        |
 | `SCUFRIS_ROLE`           | Pi extensions, worker wrapper                             | `orchestrator` for the main agent or `worker` for a delegated Pi. Set by launchers; do not set for normal use. |
 | `SCUFRIS_PROJECT_ROOTS`  | launcher, jobs helper                                     | JSON string array searched for Git projects. Packaged default: `["~/personal","~/work","~/third-party"]`.      |
+| `SCUFRIS_JOB_OWNER`      | Pi workflow extension                                     | Owner token for delegated work. `foreground` on every managed launcher. Unset means this Pi's session id.      |
 | `SCUFRIS_CALM`           | development/worker environment                            | Reserved launcher value. Calm session state defaults on and is controlled by `/calm`.                          |
+| `SCUFRIS_CONTROL_SOCKET` | Pi terminal extension, `scufris-ctl`                      | Exact `control.sock` override. Default: resolved from `SCUFRIS_RUNTIME_DIR`, then XDG. Expert/test use.        |
+| `SCUFRIS_TERMINAL`       | Pi terminal extension                                     | `1` makes this interactive Pi ask for the agent. Unset means an ordinary Pi. Set by `scufris-terminal`.        |
+| `SCUFRIS_TERMINAL_LOG`   | Pi terminal extension                                     | Absolute file given one JSON line per lifecycle event. Unset means no trace. Diagnostic use.                   |
 
 ## Briefings
 
@@ -74,6 +78,7 @@ exact socket variable -> SCUFRIS_RUNTIME_DIR/NAME -> XDG_RUNTIME_DIR/scufris/NAM
 | `SCUFRIS_SERVICE_AGENT`             | `scufris-service` | Absolute agent launcher. Default: first `scufris` on `PATH`.                                                                    |
 | `SCUFRIS_SERVICE_SESSION_DIR`       | `scufris-service` | Absolute Pi session directory. Default: `$XDG_DATA_HOME/scufris/sessions`, then `$HOME/.local/share/scufris/sessions`.          |
 | `SCUFRIS_SERVICE_CONVERSATION_FILE` | `scufris-service` | Absolute canonical replay snapshot. Default: `$XDG_DATA_HOME/scufris/conversation.json`, then `$HOME/.local/share/scufris/...`. |
+| `SCUFRIS_SERVICE_TERMINAL_LEASE`    | `scufris-service` | Boolean. `1` lets a terminal take the agent. Off by default: without it every `control.lease_acquire` is refused.               |
 | `SCUFRIS_GATEWAY_LISTEN`            | surface gateway   | Loopback listen address. Default: `127.0.0.1:10440`. CLI `--listen` is equivalent.                                              |
 | `SCUFRIS_GATEWAY_TOKEN_FILE`        | surface gateway   | Absolute private token file. Required unless `--token-file` is passed.                                                          |
 | `SCUFRIS_GATEWAY_AI_TOOLS_API`      | surface gateway   | Loopback inference API base URL. Default: `http://127.0.0.1:10300`. CLI `--ai-tools-api` is equivalent.                         |
@@ -93,6 +98,7 @@ exact socket variable -> SCUFRIS_RUNTIME_DIR/NAME -> XDG_RUNTIME_DIR/scufris/NAM
 | `SCUFRIS_DESKTOP_CHAT_COMMAND`    | unset                                                                         | Absolute executable for the tray's terminal view. No shell command string.                             |
 | `SCUFRIS_DESKTOP_RESTART_COMMAND` | unset                                                                         | Absolute executable for backend restart. Home Manager generates a safe service-specific command.       |
 | `SCUFRIS_DESKTOP_SPEAK_COMMAND`   | unset                                                                         | Absolute executable that reads one paragraph on stdin and owns synthesis/playback. Unset means silent. |
+| `SCUFRIS_DESKTOP_SPEAK_TERMINAL`  | unset                                                                         | `1` also reads out a live answer a terminal asked for. Its widgets are never run here.                 |
 | `SCUFRIS_WIDGET_PATH`             | unset                                                                         | Colon-separated roots of external compiled desktop widgets.                                            |
 | `DEN_PATH`                        | `~/personal/the-den`                                                          | Journal directory read by the den backend and by `scufris-den`.                                        |
 | `MACROS_DATABASE`                 | `$DEN_PATH/Foods.csv`, else `~/.local/share/nvim/macros.csv`                  | Food database used by the macros widget and by `scufris-den`.                                          |

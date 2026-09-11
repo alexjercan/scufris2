@@ -1,6 +1,6 @@
 import Foundation
 
-let scufrisProtocolVersion = 10
+let scufrisProtocolVersion = 11
 let scufrisMaximumMessageBytes = 64 * 1024
 let scufrisMaximumTextBytes = 8 * 1024
 let scufrisMaximumDetailsBytes = 32 * 1024
@@ -274,11 +274,33 @@ struct IncomingReady: Decodable {
     let surface: String
 }
 
+/// Which process is the agent right now.
+///
+/// Absent means the managed child, so a host that never hands the agent to a
+/// terminal sends nothing extra and this app reads the same state it always
+/// did.
+enum AgentHolder: String, Decodable {
+    case managed
+    case terminal
+
+    /// What the header says about where the conversation is being answered.
+    ///
+    /// The usual place says nothing. This is not what the agent is doing; the
+    /// state word beside it says that, and a terminal at its prompt is idle.
+    var label: String {
+        switch self {
+        case .managed: ""
+        case .terminal: "in a terminal"
+        }
+    }
+}
+
 struct IncomingState: Decodable {
     let v: Int
     let type: String
     let state: String
     let detail: String
+    let holder: AgentHolder?
 }
 
 struct IncomingRejected: Decodable {

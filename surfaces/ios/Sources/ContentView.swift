@@ -126,12 +126,24 @@ struct ContentView: View {
                 .accessibilityLabel("Configure backend")
             }
 
-            Text(store.routeLabel)
-                .font(.system(size: 9, weight: .regular, design: .monospaced))
-                .tracking(0.7)
-                .foregroundStyle(ScufrisPalette.muted)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(store.routeLabel)
+                    .font(.system(size: 9, weight: .regular, design: .monospaced))
+                    .tracking(0.7)
+                    .foregroundStyle(ScufrisPalette.muted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                // Empty while the service holds its own agent, which is
+                // almost always, so the usual header is the header it was.
+                if !store.serviceHolder.label.isEmpty {
+                    Text(store.serviceHolder.label.uppercased())
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .tracking(0.7)
+                        .foregroundStyle(ScufrisPalette.quartz)
+                        .lineLimit(1)
+                }
+            }
         }
         .padding(.leading, 17)
         .padding(.trailing, 10)

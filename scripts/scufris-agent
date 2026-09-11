@@ -86,4 +86,8 @@ for skill in "${skills[@]}"; do
 done
 
 export SCUFRIS_ROLE=orchestrator
+# Jobs this conversation delegates belong to the conversation, not to the
+# session that happened to start them. The session id changes on every
+# handoff; this token does not.
+export SCUFRIS_JOB_OWNER=foreground
 exec "$system_pi" "${args[@]}" "$@"

@@ -96,6 +96,16 @@ test("package loads only capability-owned Scufris extensions", async () => {
   assert.doesNotMatch(briefing, /setInterval/);
   assert.equal(briefing.match(/setTimeout\(/g)?.length, 1);
   assert.doesNotMatch(briefing, /untilTomorrow|parseSchedule|decide\(/);
+  // The terminal is the one project-local extension. It is off unless asked
+  // for by name, so a plain `pi` in this checkout gets nothing from it, and
+  // it holds the gate and the composition only: the lifecycle is packaged.
+  const terminal = await readFile(
+    join(root, ".pi", "extensions", "scufris-terminal", "index.ts"),
+    "utf8",
+  );
+  assert.match(terminal, /SCUFRIS_TERMINAL/);
+  assert.match(terminal, /if \(!terminalEnabled\(\)\) return;/);
+  assert.doesNotMatch(terminal, /pi\.on\("input"/);
   await access(join(root, "tools", "briefing", "cli.py"));
   await access(join(root, "tools", "briefing", "page.py"));
   await access(join(root, "tools", "jobs", "scufris-report"));
@@ -108,5 +118,28 @@ test("package loads only capability-owned Scufris extensions", async () => {
     "scufris-dev",
     "scufris-jobs",
     "scufris-staging",
+    "scufris-terminal",
   ]);
+  // The terminal launcher chooses a session and nothing else. It composes no
+  // extensions, because the composition is the checkout's own and two of them
+  // in one process would be two agents.
+  const launcher = await readFile(
+    join(root, "scripts", "scufris-terminal"),
+    "utf8",
+  );
+  assert.match(launcher, /export SCUFRIS_TERMINAL=1/);
+  assert.match(launcher, /--session-dir/);
+  assert.match(launcher, /--fork/);
+  assert.doesNotMatch(launcher, /--extension|--skill/);
+  // Jobs a conversation delegates outlive the session that started them, so
+  // both launchers of the managed child name the conversation as the owner.
+  for (const managed of [
+    join(root, "scripts", "scufris-agent"),
+    join(root, "nix", "launcher.nix"),
+  ]) {
+    assert.match(
+      await readFile(managed, "utf8"),
+      /SCUFRIS_JOB_OWNER=foreground/,
+    );
+  }
 });

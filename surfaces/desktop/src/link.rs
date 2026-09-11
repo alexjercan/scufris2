@@ -1,4 +1,4 @@
-//! Registered protocol v10 surface link.
+//! Registered protocol v11 surface link.
 
 use std::{
     io::BufReader,
@@ -13,8 +13,9 @@ use std::{
 };
 
 use scufris_control::service::{
-    BriefingRow, ConversationMessage, JobAction, JobRow, ScufrisState, SurfaceRegistration,
-    SurfaceRequest, SurfaceRequestBody, SurfaceResponseBody, read_surface_response,
+    AgentHolder, BriefingRow, ConversationMessage, JobAction, JobRow, ScufrisState,
+    SurfaceRegistration, SurfaceRequest, SurfaceRequestBody, SurfaceResponseBody,
+    read_surface_response,
 };
 use scufris_control::{MessageError, write_message};
 
@@ -37,7 +38,7 @@ pub enum LinkEvent {
         code: String,
         detail: String,
     },
-    State(ScufrisState, String),
+    State(ScufrisState, String, AgentHolder),
     /// Every job row at once, replacing what the surface holds.
     Jobs(Vec<JobRow>),
     /// Every durable scheduled briefing generation.
@@ -276,9 +277,11 @@ fn serve(
             }),
             SurfaceResponseBody::MessageAck { id } => observe(LinkEvent::Accepted(id)),
             SurfaceResponseBody::Aborted { .. } => {}
-            SurfaceResponseBody::State { state, detail } => {
-                observe(LinkEvent::State(state, detail))
-            }
+            SurfaceResponseBody::State {
+                state,
+                detail,
+                holder,
+            } => observe(LinkEvent::State(state, detail, holder)),
             SurfaceResponseBody::Jobs { jobs } => observe(LinkEvent::Jobs(jobs)),
             SurfaceResponseBody::Briefings { briefings } => {
                 observe(LinkEvent::Briefings(briefings))

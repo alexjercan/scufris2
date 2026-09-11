@@ -10,7 +10,7 @@
   fixtures,
   ...
 }: let
-  inherit (scufris) resources launcher piPackage;
+  inherit (scufris) resources launcher piPackage terminal ctl;
   inherit (fixtures) systemPi;
   python = import ../python.nix {inherit pkgs;};
 in {
@@ -54,6 +54,25 @@ in {
     ${python}/bin/python3 ${resources}/share/scufris/tools/briefing/cli.py --help > /dev/null
     touch "$out"
   '';
+
+  # The other launcher. It is normal interactive Pi plus the two programs it
+  # has to find, and it composes nothing: the checkout it runs in owns the
+  # extension, because two compositions would be two agents.
+  terminal-launcher =
+    pkgs.runCommand "scufris-terminal-launcher-check" {
+      nativeBuildInputs = [pkgs.shellcheck];
+    } ''
+      wrapper=${terminal}/bin/scufris-terminal
+      grep -q ${ctl}/bin "$wrapper"
+      grep -q ${piPackage}/bin "$wrapper"
+      # The text is one file in the store rather than a copy of itself here,
+      # so the working tree and the deployment answer the same way.
+      script="$(grep -o '/nix/store/[^ ]*/scripts/scufris-terminal' "$wrapper")"
+      shellcheck "$script"
+      grep -q 'SCUFRIS_TERMINAL=1' "$script"
+      ! grep -q -- '--extension' "$script"
+      touch "$out"
+    '';
 
   launcher-fallback-pi = pkgs.runCommand "scufris-launcher-fallback-pi-check" {} ''
     export HOME="$TMPDIR/home"

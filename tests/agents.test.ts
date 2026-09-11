@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ACKNOWLEDGED_ACTION_TOOLS,
+  adoptedOwners,
   applySteerResult,
   boundedRows,
   deliveredWorkerEventIds,
@@ -21,13 +22,20 @@ import {
   publishedRows,
   QUICK_REVIEW_TOOL,
   resolveWakeCommand,
+  resolveOwner,
   restoreFiledRows,
+  strayWorkerNotice,
+  suspendsOnExit,
   TERMINAL_OWNERSHIP_STATES,
   toolBatchAllowsAction,
   wakeModeFromEntries,
   workerEventWakes,
 } from "../agent/extensions/scufris/workflow/orchestration.ts";
 import { JOB_CITATION_EVENT } from "../agent/extensions/scufris/shared/citations.ts";
+import {
+  FOREGROUND_OWNER,
+  JOB_OWNER_VARIABLE,
+} from "../agent/extensions/scufris/shared/owner.ts";
 import { receiptBadges } from "../agent/extensions/scufris/workflow/citation.ts";
 import { MAX_JOB_ROWS } from "../agent/extensions/scufris/service/protocol.ts";
 import {
@@ -714,4 +722,54 @@ test("orchestration delivers exact worker wakes and quiet progress by mode", () 
           ],
     );
   }
+});
+
+test("the owner of delegated work outlives the session that started it", () => {
+  // No announcement yet: the launcher's token is what says this process speaks
+  // for the conversation, and a plain Pi speaks only for itself.
+  assert.equal(
+    resolveOwner(undefined, { [JOB_OWNER_VARIABLE]: FOREGROUND_OWNER }, "s-1"),
+    FOREGROUND_OWNER,
+  );
+  assert.equal(resolveOwner(undefined, {}, "s-1"), "s-1");
+  assert.equal(resolveOwner(undefined, {}, undefined), "");
+  // A grant moves the token here; a release moves it back to this session.
+  assert.equal(resolveOwner(FOREGROUND_OWNER, {}, "s-1"), FOREGROUND_OWNER);
+  assert.equal(
+    resolveOwner("s-1", { [JOB_OWNER_VARIABLE]: FOREGROUND_OWNER }, "s-1"),
+    "s-1",
+  );
+
+  // Only the conversation adopts, and only its own past records.
+  assert.deepEqual(adoptedOwners(FOREGROUND_OWNER, "s-1"), ["s-1"]);
+  assert.deepEqual(adoptedOwners("s-1", "s-1"), []);
+  assert.deepEqual(adoptedOwners(FOREGROUND_OWNER, undefined), []);
+  assert.deepEqual(adoptedOwners(FOREGROUND_OWNER, FOREGROUND_OWNER), []);
+
+  // Exiting while the conversation owns the work stops nothing: the agent
+  // moves by design and the next holder adopts what is running.
+  assert.equal(suspendsOnExit(FOREGROUND_OWNER), false);
+  assert.equal(suspendsOnExit("s-1"), true);
+});
+
+test("stray worker panes are named by whose they are", () => {
+  assert.equal(strayWorkerNotice([]), undefined);
+  const conversation = strayWorkerNotice([
+    { job_id: "a1", tmux_session: "scufris-a1", owner_kind: "conversation" },
+  ]);
+  assert.match(conversation ?? "", /owned by the Scufris conversation/);
+  assert.match(conversation ?? "", /a1 in tmux session scufris-a1/);
+  assert.match(conversation ?? "", /tmux kill-session -t <session>/);
+  // One pane that belongs to a Pi which is not here makes the whole notice
+  // the older, blunter one: nothing about it is the conversation's to explain.
+  const mixed = strayWorkerNotice([
+    { job_id: "a1", tmux_session: "scufris-a1", owner_kind: "conversation" },
+    { job_id: "b2", tmux_session: "scufris-b2", owner_kind: "session" },
+  ]);
+  assert.match(mixed ?? "", /from a previous foreground session/);
+  // A helper that has not been updated says nothing about the kind of owner.
+  assert.match(
+    strayWorkerNotice([{ job_id: "c3", tmux_session: "scufris-c3" }]) ?? "",
+    /from a previous foreground session/,
+  );
 });

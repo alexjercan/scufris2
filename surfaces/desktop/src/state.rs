@@ -4,7 +4,7 @@
 //! produces the actions the host must run. It holds no window, audio, socket, or
 //! file handle so the whole interaction is testable without a desktop session.
 
-use scufris_control::service::ScufrisState;
+use scufris_control::service::{AgentHolder, ScufrisState};
 
 use crate::pending::Pending;
 
@@ -367,6 +367,10 @@ pub struct Companion {
     /// interactions, and only the person's own Escape puts it away. Nothing
     /// the assistant does ever takes the pill down or brings it back.
     dismissed: bool,
+    /// Which process is the agent: the managed child, or a terminal that
+    /// holds the lease. Shown as a small label, because who is answering
+    /// changes where the person types, and nothing else on the pill says so.
+    holder: AgentHolder,
     /// Why the pill window is unusable, when the host could not put it where a
     /// phase needed it.
     ///
@@ -392,6 +396,7 @@ impl Companion {
             connection_detail: "The Scufris service is unavailable.".into(),
             prefix: prefix.into(),
             commands: 0,
+            holder: AgentHolder::Managed,
             dismissed: true,
             blind: None,
         }
@@ -566,9 +571,21 @@ impl Companion {
     }
 
     /// Records the assistant state the service reported.
-    pub fn set_assistant(&mut self, state: Assistant, detail: String) {
+    pub fn set_assistant(&mut self, state: Assistant, detail: String, holder: AgentHolder) {
         self.assistant = state;
         self.assistant_detail = detail;
+        self.holder = holder;
+    }
+
+    /// Which process is the agent, as the service last said.
+    ///
+    /// The conversation window is where it is drawn, from the same event; the
+    /// pill is one word wide and says what the agent is doing, not where it
+    /// is. Kept here because the runtime is what the tray and the pill read,
+    /// and a later label has one place to read it from.
+    #[cfg(test)]
+    pub fn holder(&self) -> AgentHolder {
+        self.holder
     }
 
     /// Records whether the companion is speaking an answer.
@@ -1056,6 +1073,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_companion_records_which_process_is_the_agent() {
+        let mut companion = Companion::new("test");
+        companion.set_connected(true);
+        assert_eq!(companion.holder(), AgentHolder::Managed);
+        companion.set_assistant(Assistant::Idle, String::new(), AgentHolder::Terminal);
+        assert_eq!(companion.holder(), AgentHolder::Terminal);
+        // The holder is not the state: a terminal at its prompt is idle, and
+        // the word the pill shows says so.
+        assert_eq!(companion.presentation().state, "idle");
+        companion.set_assistant(Assistant::Working, String::new(), AgentHolder::Managed);
+        assert_eq!(companion.holder(), AgentHolder::Managed);
+    }
+
+    #[test]
     fn phase_names_are_stable_and_free_of_transcripts() {
         assert_eq!(Phase::Resting.name(), "resting");
         assert_eq!(Phase::Listening.name(), "listening");
@@ -1140,19 +1171,19 @@ mod tests {
     fn the_pill_rests_on_screen_through_and_after_a_turn() {
         let mut companion = handed_off();
         // The service picks the turn up: the pill reports it, passively.
-        companion.set_assistant(Assistant::Working, String::new());
+        companion.set_assistant(Assistant::Working, String::new(), AgentHolder::Managed);
         assert_eq!(companion.posture(), Posture::Passive);
         assert_eq!(companion.presentation().state, "working");
-        companion.set_assistant(Assistant::Speaking, String::new());
+        companion.set_assistant(Assistant::Speaking, String::new(), AgentHolder::Managed);
         assert_eq!(companion.posture(), Posture::Passive);
         assert_eq!(companion.presentation().state, "speaking");
         // The pill is a resident HUD: an idle assistant is something to show,
         // not a reason to leave.
-        companion.set_assistant(Assistant::Idle, String::new());
+        companion.set_assistant(Assistant::Idle, String::new(), AgentHolder::Managed);
         assert_eq!(companion.posture(), Posture::Passive);
         assert_eq!(companion.presentation().state, "idle");
         // A turn started somewhere else is shown like any other.
-        companion.set_assistant(Assistant::Working, String::new());
+        companion.set_assistant(Assistant::Working, String::new(), AgentHolder::Managed);
         assert_eq!(companion.posture(), Posture::Passive);
         assert_eq!(companion.presentation().state, "working");
     }
@@ -1162,7 +1193,7 @@ mod tests {
     #[test]
     fn stopping_a_run_ends_it_and_leaves_the_words_alone() {
         let mut companion = drafted("open the tasks widget");
-        companion.set_assistant(Assistant::Working, String::new());
+        companion.set_assistant(Assistant::Working, String::new(), AgentHolder::Managed);
         assert_eq!(
             companion.apply(Event::Stop),
             vec![Action::Abort {
@@ -1195,7 +1226,7 @@ mod tests {
             Assistant::Blocked,
             Assistant::Error,
         ] {
-            companion.set_assistant(state, String::new());
+            companion.set_assistant(state, String::new(), AgentHolder::Managed);
             assert_eq!(
                 companion.apply(Event::Stop),
                 Vec::new(),
@@ -1209,16 +1240,20 @@ mod tests {
     fn assistant_activity_never_raises_a_dismissed_pill() {
         let mut companion = Companion::new("pill");
         companion.set_connected(true);
-        companion.set_assistant(Assistant::Working, String::new());
+        companion.set_assistant(Assistant::Working, String::new(), AgentHolder::Managed);
         assert_eq!(companion.posture(), Posture::Off);
-        companion.set_assistant(Assistant::Error, "the agent stopped".into());
+        companion.set_assistant(
+            Assistant::Error,
+            "the agent stopped".into(),
+            AgentHolder::Managed,
+        );
         assert_eq!(companion.posture(), Posture::Off);
     }
 
     #[test]
     fn only_the_persons_escape_dismisses_the_resting_pill() {
         let mut companion = handed_off();
-        companion.set_assistant(Assistant::Working, String::new());
+        companion.set_assistant(Assistant::Working, String::new(), AgentHolder::Managed);
         assert_eq!(companion.posture(), Posture::Passive);
         // The socket closing is something the resident pill reports, not a
         // reason for it to leave.
@@ -1226,7 +1261,7 @@ mod tests {
         assert_eq!(companion.posture(), Posture::Passive);
         assert_eq!(companion.presentation().state, "disconnected");
         companion.set_connected(true);
-        companion.set_assistant(Assistant::Working, String::new());
+        companion.set_assistant(Assistant::Working, String::new(), AgentHolder::Managed);
         assert_eq!(companion.posture(), Posture::Passive);
 
         // Escape is the one road off the screen, and the next activation is
@@ -1235,7 +1270,7 @@ mod tests {
         assert_eq!(companion.posture(), Posture::Watched);
         companion.apply(Event::Escape);
         assert_eq!(companion.posture(), Posture::Off);
-        companion.set_assistant(Assistant::Speaking, String::new());
+        companion.set_assistant(Assistant::Speaking, String::new(), AgentHolder::Managed);
         assert_eq!(
             companion.posture(),
             Posture::Off,
@@ -1879,11 +1914,15 @@ mod tests {
         assert_eq!(companion.tray_state(), "disconnected");
         companion.set_connected(true);
         assert_eq!(companion.tray_state(), "idle");
-        companion.set_assistant(Assistant::Working, String::new());
+        companion.set_assistant(Assistant::Working, String::new(), AgentHolder::Managed);
         assert_eq!(companion.tray_state(), "working");
-        companion.set_assistant(Assistant::Blocked, "the workflow needs review".into());
+        companion.set_assistant(
+            Assistant::Blocked,
+            "the workflow needs review".into(),
+            AgentHolder::Managed,
+        );
         assert_eq!(companion.tray_state(), "blocked");
-        companion.set_assistant(Assistant::Speaking, String::new());
+        companion.set_assistant(Assistant::Speaking, String::new(), AgentHolder::Managed);
         assert_eq!(companion.tray_state(), "speaking");
         companion.apply(Event::Activate);
         assert_eq!(companion.tray_state(), "listening");

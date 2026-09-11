@@ -536,7 +536,13 @@ function hud(
     lines,
     jobs,
     briefings,
-    notice: { sending: false, thinking: false, attachments: [], trouble: "" },
+    notice: {
+      sending: false,
+      thinking: false,
+      attachments: [],
+      trouble: "",
+      holder: "managed",
+    },
   };
   page.answers["hud_submit"] = taken;
   page.add("lines", "OL");
@@ -548,6 +554,7 @@ function hud(
   page.add("jobs", "LI");
   page.add("rows", "DIV");
   page.add("notice", "SPAN");
+  page.add("holder", "SPAN");
   page.add("words", "TEXTAREA");
   page.add("selected", "DIV");
   page.add("attach", "BUTTON");
@@ -1884,6 +1891,41 @@ test("the notice says the worst thing that is true", async () => {
     trouble: "",
   });
   assert.equal(notice.dataset["tone"], "keys");
+});
+
+test("the strip says where the conversation is being answered", async () => {
+  const page = hud();
+  await settle();
+  const holder = page.element("holder");
+  // The service holding its own agent is the usual case and says nothing.
+  assert.equal(holder.textContent, "");
+
+  page.publish("scufris://notice", {
+    sending: false,
+    thinking: false,
+    trouble: "",
+    holder: "terminal",
+  });
+  assert.equal(holder.textContent, "in a terminal");
+  // Where the agent is is not what it is doing: the notice is untouched.
+  assert.equal(page.element("notice").dataset["tone"], "keys");
+
+  page.publish("scufris://notice", {
+    sending: false,
+    thinking: false,
+    trouble: "",
+    holder: "managed",
+  });
+  assert.equal(holder.textContent, "");
+
+  // A word this build has none of its own for is shown rather than dropped.
+  page.publish("scufris://notice", {
+    sending: false,
+    thinking: false,
+    trouble: "",
+    holder: "somewhere-else",
+  });
+  assert.equal(holder.textContent, "somewhere-else");
 });
 
 test("working adds one transient thinking line and terminal state hides it", async () => {

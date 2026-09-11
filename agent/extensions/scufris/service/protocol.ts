@@ -1,10 +1,11 @@
-/** Protocol v10 agent channel. */
+/** Protocol v11 agent channel. */
 
-export const SERVICE_VERSION = 10;
+export const SERVICE_VERSION = 11;
 export const MAX_MESSAGE_BYTES = 64 * 1024;
 export const SOCKET_DIRECTORY_NAME = "scufris";
 export const AGENT_FILE_NAME = "agent.sock";
 export const CONTENT_FILE_NAME = "content.sock";
+export const CONTROL_FILE_NAME = "control.sock";
 export const MAX_IDENTIFIER_LENGTH = 64;
 export const MAX_TEXT_BYTES = 8 * 1024;
 export const MAX_DETAILS_BYTES = 32 * 1024;
@@ -23,6 +24,14 @@ export const MAX_JOB_ROWS = 8;
 export const MAX_JOB_SUMMARY_BYTES = 512;
 export const MAX_BRIEFING_ROWS = 64;
 export const MAX_BRIEFING_SUMMARY_BYTES = 256;
+export const MAX_CONVERSATION_PAGE = 64;
+export const MAX_TURN_IMAGES = 8;
+export const MAX_PATH_BYTES = 4 * 1024;
+
+/** The surface name a terminal's words and answers are recorded under. */
+export const TERMINAL_SURFACE = "terminal";
+/** The job owner token one holder at a time carries. */
+export const FOREGROUND_OWNER = "foreground";
 
 export interface WidgetDefinition {
   name: string;
@@ -109,26 +118,62 @@ export interface BriefingRow {
   summary: string;
 }
 
+/** Which process is the agent right now. */
+export type AgentHolder = "managed" | "terminal";
+
+/**
+ * The Pi session one agent is writing.
+ *
+ * `parent` is what a fork writes in its own header. It is how the service
+ * tells an agent that already has the conversation from one that only has a
+ * new file, and so whether catch-up is worth sending.
+ */
+export interface AgentSession {
+  id: string;
+  file: string;
+  cwd: string;
+  parent?: string;
+}
+
+/** One canonical conversation entry, text only. */
+export interface ConversationEntry {
+  sequence: number;
+  role: "user" | "assistant";
+  surface: string;
+  text: string;
+}
+
 export type AgentRequest =
-  | { v: 10; type: "agent.hello" }
-  | { v: 10; type: "agent.proactive_started"; proactive_id: string }
-  | { v: 10; type: "agent.proactive_settled"; proactive_id: string }
+  | { v: 11; type: "agent.hello"; lease?: number; session?: AgentSession }
   | {
-      v: 10;
+      v: 11;
+      type: "agent.session";
+      id: string;
+      file: string;
+      cwd: string;
+      parent?: string;
+    }
+  | { v: 11; type: "agent.turn"; id: string; text: string; images?: number }
+  | { v: 11; type: "agent.activity"; working: boolean }
+  | { v: 11; type: "agent.proactive_started"; proactive_id: string }
+  | { v: 11; type: "agent.proactive_settled"; proactive_id: string }
+  | {
+      v: 11;
       type: "agent.response";
       text: string;
+      turn_id?: string;
       proactive_id?: string;
       details?: string;
       widgets?: WidgetCall[];
       attachments?: string[];
       receipts?: Citation[];
     }
-  | { v: 10; type: "agent.jobs"; jobs: JobRow[] };
+  | { v: 11; type: "agent.jobs"; jobs: JobRow[] };
 
 export type AgentResponse =
-  | { v: 10; type: "agent.ready" }
+  | { v: 11; type: "agent.ready" }
   | {
-      v: 10;
+      v: 11;
       type: "agent.message";
       id: string;
       text: string;
@@ -136,17 +181,112 @@ export type AgentResponse =
       attachments: AttachmentDescriptor[];
     }
   | {
-      v: 10;
+      v: 11;
       type: "agent.wake";
       proactive_id?: string;
       custom_type: string;
       text: string;
       details?: unknown;
     }
-  | { v: 10; type: "agent.abort"; id: string }
-  | { v: 10; type: "agent.job_command"; id: string; action: JobAction }
-  | { v: 10; type: "agent.offer_take"; id: string }
-  | { v: 10; type: "agent.rejected"; code: string; detail: string };
+  | { v: 11; type: "agent.abort"; id: string }
+  | { v: 11; type: "agent.turn_ack"; id: string; sequence: number }
+  | { v: 11; type: "agent.handoff"; generation: number; next: AgentHolder }
+  | {
+      v: 11;
+      type: "agent.catch_up";
+      since: number;
+      entries: ConversationEntry[];
+    }
+  | { v: 11; type: "agent.job_command"; id: string; action: JobAction }
+  | { v: 11; type: "agent.offer_take"; id: string }
+  | {
+      v: 11;
+      type: "agent.rejected";
+      id?: string;
+      code: string;
+      detail: string;
+    };
+
+/** The state the service computes, in the order it prefers. */
+export type ScufrisState =
+  | "failed"
+  | "blocked"
+  | "working"
+  | "starting"
+  | "idle";
+
+/**
+ * What a terminal says about itself when it asks for the lease.
+ *
+ * None of it is trusted with anything. The pid names who took the agent in the
+ * log, and the paths are recorded and forked from, never run.
+ */
+export interface LeaseHolderInfo {
+  pid: number;
+  session_file?: string;
+  cwd: string;
+}
+
+/**
+ * The control channel, which is local only.
+ *
+ * It never crosses the surface gateway, so nothing here is reachable from the
+ * phone. A terminal uses it to take the agent, to say it is still there, and to
+ * read what it missed.
+ */
+export type ControlRequest =
+  | { v: 11; type: "control.hello" }
+  | { v: 11; type: "control.state"; id: string }
+  | {
+      v: 11;
+      type: "control.lease_acquire";
+      id: string;
+      holder: LeaseHolderInfo;
+      abort_working?: boolean;
+    }
+  | { v: 11; type: "control.lease_ping"; id: string }
+  | { v: 11; type: "control.lease_release"; id: string }
+  | { v: 11; type: "control.conversation"; id: string; since: number };
+
+export type ControlResponse =
+  | { v: 11; type: "control.ready" }
+  | {
+      v: 11;
+      type: "control.state";
+      id: string;
+      state: ScufrisState;
+      detail: string;
+      holder?: AgentHolder;
+      generation?: number;
+      session_dir: string;
+      lineage_file?: string;
+    }
+  | {
+      v: 11;
+      type: "control.lease";
+      id: string;
+      generation: number;
+      session_dir: string;
+      lineage_file?: string;
+      sequence: number;
+      owner: string;
+    }
+  | { v: 11; type: "control.lease_pong"; id: string; generation: number }
+  | { v: 11; type: "control.lease_released"; id: string }
+  | {
+      v: 11;
+      type: "control.conversation_entries";
+      id: string;
+      entries: ConversationEntry[];
+      more?: boolean;
+    }
+  | {
+      v: 11;
+      type: "control.rejected";
+      id: string;
+      code: string;
+      detail: string;
+    };
 
 /**
  * Every stable refusal code, mirroring `shared/control/src/refusal.rs`.
@@ -185,6 +325,12 @@ export const REFUSAL = {
   SURFACE_NOT_FOUND: "surface_not_found",
   NO_FREE_SLOT: "no_free_slot",
   NOT_SHOWN: "not_shown",
+  LEASE_DISABLED: "lease_disabled",
+  LEASE_HELD: "lease_held",
+  LEASE_REQUIRED: "lease_required",
+  NOT_LEASE_HOLDER: "not_lease_holder",
+  AGENT_BUSY: "agent_busy",
+  LEASE_PING_STALE: "lease_ping_stale",
 } as const;
 
 export class ProtocolError extends Error {
@@ -223,6 +369,54 @@ function id(value: unknown, field: string): string {
   if (typeof value !== "string" || !identifier.test(value))
     throw new ProtocolError(`${field} is invalid`, `invalid_${field}`);
   return value;
+}
+/** A protocol counter: a non-negative integer the runtime can hold exactly. */
+function sequence(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+    throw new ProtocolError(`${field} is invalid`, `invalid_${field}`);
+  return value;
+}
+const STATES: readonly ScufrisState[] = [
+  "failed",
+  "blocked",
+  "working",
+  "starting",
+  "idle",
+];
+
+/** A lease generation, which only ever counts up from one. */
+function generation(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1)
+    throw new ProtocolError("generation is invalid", "invalid_generation");
+  return value;
+}
+
+export function decodeHolder(value: unknown): AgentHolder {
+  if (value !== "managed" && value !== "terminal")
+    throw new ProtocolError("holder is invalid", "invalid_holder");
+  return value;
+}
+
+/** An absolute path, recorded and forked from and never run. */
+export function decodePath(value: unknown, field: string): string {
+  const path = bounded(value, MAX_PATH_BYTES, field);
+  if (!path.startsWith("/") || path.includes("\n"))
+    throw new ProtocolError(`${field} is invalid`, `invalid_${field}`);
+  return path;
+}
+
+export function decodeConversationEntry(value: unknown): ConversationEntry {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new ProtocolError("invalid conversation entry", "invalid_entries");
+  const entry = value as Record<string, unknown>;
+  if (entry.role !== "user" && entry.role !== "assistant")
+    throw new ProtocolError("invalid conversation role", "invalid_entries");
+  return {
+    sequence: sequence(entry.sequence, "sequence"),
+    role: entry.role,
+    surface: id(entry.surface, "surface"),
+    text: bounded(entry.text, MAX_TEXT_BYTES, "text", true),
+  };
 }
 
 export function decodeAttachmentDescriptor(
@@ -356,6 +550,38 @@ function checkJobRows(rows: JobRow[]): void {
   }
 }
 
+/** The session bounds the host holds, applied before the line is written. */
+function checkSession(session: {
+  id: string;
+  file: string;
+  cwd: string;
+  parent?: string;
+}): void {
+  bounded(session.id, MAX_IDENTIFIER_LENGTH, "session_id");
+  decodePath(session.file, "session_file");
+  decodePath(session.cwd, "session_cwd");
+  if (session.parent !== undefined)
+    decodePath(session.parent, "session_parent");
+}
+
+/**
+ * Clamps words a terminal has already shown to what the host will record.
+ *
+ * The turn or the answer is already in Pi and already on the screen; this copy
+ * exists so the HUD shows it too. Something past the bound is cut rather than
+ * refused, because refusing would leave the conversation with no record of
+ * what everyone in the room already read.
+ */
+export function recordedText(value: string): string {
+  const clean = value.replace(/[\0\r]/g, " ");
+  const bytes = Buffer.from(clean, "utf8");
+  if (bytes.length <= MAX_TEXT_BYTES) return clean;
+  return bytes
+    .subarray(0, MAX_TEXT_BYTES)
+    .toString("utf8")
+    .replace(/\uFFFD+$/, "");
+}
+
 export function encodeAgentRequest(message: AgentRequest): string {
   if (message.type === "agent.jobs") checkJobRows(message.jobs);
   if (
@@ -363,8 +589,28 @@ export function encodeAgentRequest(message: AgentRequest): string {
     message.type === "agent.proactive_settled"
   )
     id(message.proactive_id, "proactive_id");
+  if (message.type === "agent.hello") {
+    // A generation is a fence, and a fence that is not a real generation is
+    // the one thing this must never send: the host would refuse the hello and
+    // the terminal would look like a broken agent instead of an unfenced one.
+    if (message.lease !== undefined) generation(message.lease);
+    if (message.session) checkSession(message.session);
+  }
+  if (message.type === "agent.session") checkSession(message);
+  if (message.type === "agent.turn") {
+    id(message.id, "turn_id");
+    bounded(message.text, MAX_TEXT_BYTES, "text");
+    if (
+      message.images !== undefined &&
+      (!Number.isSafeInteger(message.images) ||
+        message.images < 0 ||
+        message.images > MAX_TURN_IMAGES)
+    )
+      throw new ProtocolError("too many images", "invalid_images");
+  }
   if (message.type === "agent.response") {
     if (message.receipts) checkCitations(message.receipts);
+    if (message.turn_id !== undefined) id(message.turn_id, "turn_id");
     if (message.proactive_id !== undefined)
       id(message.proactive_id, "proactive_id");
     bounded(message.text, MAX_TEXT_BYTES, "text");
@@ -417,30 +663,58 @@ export function decodeAgentResponse(line: string): AgentResponse {
       "unsupported protocol version",
       "unsupported_version",
     );
-  if (message.type === "agent.ready") return { v: 10, type: "agent.ready" };
+  if (message.type === "agent.ready") return { v: 11, type: "agent.ready" };
   if (message.type === "agent.abort")
-    return { v: 10, type: "agent.abort", id: id(message.id, "id") };
+    return { v: 11, type: "agent.abort", id: id(message.id, "id") };
   if (message.type === "agent.rejected")
     return {
-      v: 10,
+      v: 11,
       type: "agent.rejected",
+      ...(message.id === undefined ? {} : { id: id(message.id, "id") }),
       code: id(message.code, "code"),
       detail: typeof message.detail === "string" ? message.detail : "",
     };
+  if (message.type === "agent.turn_ack")
+    return {
+      v: 11,
+      type: "agent.turn_ack",
+      id: id(message.id, "id"),
+      sequence: sequence(message.sequence, "sequence"),
+    };
+  if (message.type === "agent.handoff")
+    return {
+      v: 11,
+      type: "agent.handoff",
+      generation: generation(message.generation),
+      next: decodeHolder(message.next),
+    };
+  if (message.type === "agent.catch_up") {
+    if (
+      !Array.isArray(message.entries) ||
+      message.entries.length > MAX_CONVERSATION_PAGE
+    )
+      throw new ProtocolError("invalid catch-up", "invalid_entries");
+    return {
+      v: 11,
+      type: "agent.catch_up",
+      since: sequence(message.since, "since"),
+      entries: message.entries.map(decodeConversationEntry),
+    };
+  }
   if (message.type === "agent.job_command") {
     // A surface named a row and a verb. What stopping costs and what filing
     // means are both decided here, because this is what owns the job.
     if (message.action !== "cancel" && message.action !== "archive")
       throw new ProtocolError("invalid job action", "invalid_action");
     return {
-      v: 10,
+      v: 11,
       type: "agent.job_command",
       id: id(message.id, "id"),
       action: message.action,
     };
   }
   if (message.type === "agent.offer_take")
-    return { v: 10, type: "agent.offer_take", id: id(message.id, "id") };
+    return { v: 11, type: "agent.offer_take", id: id(message.id, "id") };
   if (message.type === "agent.wake") {
     // A wake is words from outside the agent process, carried under the
     // caller's own custom type so an existing wake handler still matches.
@@ -455,7 +729,7 @@ export function decodeAgentResponse(line: string): AgentResponse {
         throw new ProtocolError("invalid wake details", "invalid_details");
     }
     return {
-      v: 10,
+      v: 11,
       type: "agent.wake",
       ...(message.proactive_id === undefined
         ? {}
@@ -492,7 +766,7 @@ export function decodeAgentResponse(line: string): AgentResponse {
     )
       throw new ProtocolError("duplicate attachment", "invalid_attachments");
     return {
-      v: 10,
+      v: 11,
       type: "agent.message",
       id: id(message.id, "id"),
       text: bounded(message.text, MAX_TEXT_BYTES, "text"),
@@ -501,6 +775,108 @@ export function decodeAgentResponse(line: string): AgentResponse {
     };
   }
   throw new ProtocolError("unknown agent message", "unknown_type");
+}
+
+export function encodeControlRequest(message: ControlRequest): string {
+  if (message.type !== "control.hello") id(message.id, "id");
+  if (message.type === "control.lease_acquire") {
+    const holder = message.holder;
+    if (!Number.isSafeInteger(holder.pid) || holder.pid < 1)
+      throw new ProtocolError("pid is invalid", "invalid_pid");
+    decodePath(holder.cwd, "cwd");
+    if (holder.session_file !== undefined)
+      decodePath(holder.session_file, "session_file");
+  }
+  if (message.type === "control.conversation") sequence(message.since, "since");
+  const line = `${safeStringify(message)}\n`;
+  if (Buffer.byteLength(line, "utf8") > MAX_MESSAGE_BYTES)
+    throw new ProtocolError("message is too large", "message_too_large");
+  return line;
+}
+
+export function decodeControlResponse(line: string): ControlResponse {
+  if (line.endsWith("\r"))
+    throw new ProtocolError("invalid framing", "invalid_framing");
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    throw new ProtocolError("invalid JSON", "invalid_json");
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new ProtocolError("message is not an object", "invalid_json");
+  const message = value as Record<string, unknown>;
+  if (message.v !== SERVICE_VERSION)
+    throw new ProtocolError(
+      "unsupported protocol version",
+      "unsupported_version",
+    );
+  if (message.type === "control.ready") return { v: 11, type: "control.ready" };
+  if (message.type === "control.lease_released")
+    return { v: 11, type: "control.lease_released", id: id(message.id, "id") };
+  if (message.type === "control.lease_pong")
+    return {
+      v: 11,
+      type: "control.lease_pong",
+      id: id(message.id, "id"),
+      generation: generation(message.generation),
+    };
+  if (message.type === "control.rejected")
+    return {
+      v: 11,
+      type: "control.rejected",
+      id: id(message.id, "id"),
+      code: id(message.code, "code"),
+      detail: typeof message.detail === "string" ? message.detail : "",
+    };
+  if (message.type === "control.state") {
+    if (!STATES.includes(message.state as ScufrisState))
+      throw new ProtocolError("invalid state", "invalid_state");
+    return {
+      v: 11,
+      type: "control.state",
+      id: id(message.id, "id"),
+      state: message.state as ScufrisState,
+      detail: typeof message.detail === "string" ? message.detail : "",
+      ...(message.holder === undefined
+        ? {}
+        : { holder: decodeHolder(message.holder) }),
+      ...(message.generation === undefined
+        ? {}
+        : { generation: generation(message.generation) }),
+      session_dir: decodePath(message.session_dir, "session_dir"),
+      ...(message.lineage_file === undefined
+        ? {}
+        : { lineage_file: decodePath(message.lineage_file, "lineage_file") }),
+    };
+  }
+  if (message.type === "control.lease")
+    return {
+      v: 11,
+      type: "control.lease",
+      id: id(message.id, "id"),
+      generation: generation(message.generation),
+      session_dir: decodePath(message.session_dir, "session_dir"),
+      ...(message.lineage_file === undefined
+        ? {}
+        : { lineage_file: decodePath(message.lineage_file, "lineage_file") }),
+      sequence: sequence(message.sequence, "sequence"),
+      owner: id(message.owner, "owner"),
+    };
+  if (message.type === "control.conversation_entries") {
+    if (!Array.isArray(message.entries))
+      throw new ProtocolError("entries is invalid", "invalid_entries");
+    if (message.entries.length > MAX_CONVERSATION_PAGE)
+      throw new ProtocolError("too many entries", "invalid_entries");
+    return {
+      v: 11,
+      type: "control.conversation_entries",
+      id: id(message.id, "id"),
+      entries: message.entries.map(decodeConversationEntry),
+      ...(message.more === undefined ? {} : { more: message.more === true }),
+    };
+  }
+  throw new ProtocolError("unknown control message", "unknown_type");
 }
 
 export function takeLines(buffer: string): { lines: string[]; rest: string } {

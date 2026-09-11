@@ -56,6 +56,9 @@
   };
   service = headless.service;
   ctl = headless.ctl;
+  # The other end of the handoff: a terminal that holds the conversation the
+  # service was holding. It is a launcher, not a second agent.
+  terminal = import ./terminal.nix {inherit pkgs piPackage ctl;};
   staging = import ./staging.nix {
     inherit pkgs self service desktop speak aiToolsApi;
   };
@@ -75,6 +78,7 @@ in {
     desktop
     service
     ctl
+    terminal
     staging
     devShell
     docs

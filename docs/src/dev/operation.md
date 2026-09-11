@@ -63,6 +63,88 @@ resolves archived jobs too; missing and ambiguous prefixes fail without
 selecting a job. Full detail includes events, the report, the pinned project
 context, and the prompt.
 
+## Holding the conversation in a terminal
+
+The background service holds the agent by default. A terminal can take it,
+keep it for as long as it runs, and give it back on exit. Nothing is offered
+until the service is started with `SCUFRIS_SERVICE_TERMINAL_LEASE=1`
+(`terminalLease = true` in Home Manager); without it every request is refused
+and the terminal runs as an ordinary Pi.
+
+```bash
+scufris-ctl state          # holder, generation, sessions, lineage file
+scufris-terminal           # take the agent in this directory
+```
+
+`scufris-terminal` asks the service where the sessions are and which file the
+next holder continues from, then starts Pi on a fork of that file. Inside a
+checkout that carries `.pi/extensions/scufris-terminal`, plain `pi` with
+`SCUFRIS_TERMINAL=1` also joins, on a session of its own and with catch-up
+rather than the model context.
+
+From inside the terminal, everything is on `/scufris`:
+
+| Command            | Does                                                   |
+| ------------------ | ------------------------------------------------------ |
+| `/scufris status`  | holder, generation, lineage file, owner, channel       |
+| `/scufris release` | give the agent back and keep running independently     |
+| `/scufris attach`  | take the agent, forking the lineage file when possible |
+| `/scufris hold`    | stop retrying after a loss                             |
+
+On exit the service starts its own agent again from the terminal's session, so
+the conversation continues where the terminal left it. A terminal that dies
+without releasing is noticed after three missed heartbeats, about fifteen
+seconds, and the service recovers the same way.
+
+Each handoff copies the session branch into a new file. Remove the copies
+nothing continues from:
+
+```bash
+scufris-ctl lineage prune --keep 30 --dry-run
+scufris-ctl lineage prune --keep 30
+```
+
+Only forked files older than the window are removed, never the file the next
+holder would start from.
+
+### Turning it on and off
+
+```nix
+programs.scufris.service.terminalLease = true;
+```
+
+The option puts `SCUFRIS_SERVICE_TERMINAL_LEASE=1` on the service unit and
+installs `scufris-terminal`. Activate the generation and restart the service:
+
+```bash
+systemctl --user restart scufris-service.service
+scufris-ctl state          # holder: managed
+```
+
+Setting it back to `false` is the rollback, and it needs nothing else. A
+terminal holding the agent at that moment loses it when the service restarts:
+the lease ends with the process that granted it, the service starts its own
+agent from the terminal's own session file, and the terminal keeps running as
+an ordinary Pi with a notice. No session is lost, because every handoff writes
+into the session directory the service reads.
+
+Rolling the whole deployment back to the previous Home Manager generation is
+also safe. An older service does not know the lease verbs and refuses them,
+which is what a terminal treats as "the lease is not offered". Sessions that
+a fork created stay readable: a fork is an ordinary session file with one
+extra header field.
+
+The first foreground `session_start` after the change adopts the jobs the
+previous owner held, so no migration step is needed. Check that nothing was
+left behind:
+
+```bash
+echo '{}' | tools/jobs/scufris-jobs orphans
+```
+
+An empty list is the expected answer. A row means a worker pane is owned by a
+Pi that is not here; [Jobs](jobs.md) says what to do with it.
+
 ## Housekeeping
 
 - Finished workflows are archived, not deleted. Remove

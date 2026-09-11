@@ -15,6 +15,7 @@ use std::{
     ffi::OsString,
     io::{self, Write},
     os::unix::process::CommandExt,
+    path::Path,
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio},
     sync::{Arc, Mutex},
     thread,
@@ -55,11 +56,15 @@ pub struct Streams {
 
 impl Agent {
     /// Starts one agent in RPC mode on the configured session directory.
-    pub fn start(config: &Config) -> io::Result<(Self, Streams)> {
+    ///
+    /// `fork` names the session the last holder wrote, so the child starts
+    /// from that branch with its own cwd. With none the child continues the
+    /// newest session it can read, which is the plain restart.
+    pub fn start(config: &Config, fork: Option<&Path>) -> io::Result<(Self, Streams)> {
         std::fs::create_dir_all(&config.session_dir)?;
         let mut command = Command::new(&config.agent);
         command
-            .args(config.agent_args())
+            .args(config.agent_args(fork))
             .current_dir(&config.working_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -174,9 +179,9 @@ impl Writer {
 }
 
 /// The arguments one agent is started with, for logging.
-pub fn described(config: &Config) -> String {
+pub fn described(config: &Config, fork: Option<&Path>) -> String {
     let mut parts: Vec<OsString> = vec![config.agent.clone().into_os_string()];
-    parts.extend(config.agent_args());
+    parts.extend(config.agent_args(fork));
     parts
         .iter()
         .map(|part| part.to_string_lossy().into_owned())
@@ -202,6 +207,7 @@ mod tests {
             content_socket: PathBuf::from("/run/user/1000/scufris/content.sock"),
             attachment_dir: PathBuf::from("/home/test/.local/share/scufris/attachments"),
             working_dir: std::env::temp_dir(),
+            terminal_lease: false,
         }
     }
 
@@ -238,7 +244,7 @@ mod tests {
 
     #[test]
     fn an_agent_that_is_not_there_fails_to_start_rather_than_being_reported_as_running() {
-        let started = Agent::start(&config("/nonexistent/scufris", scratch("missing")));
+        let started = Agent::start(&config("/nonexistent/scufris", scratch("missing")), None);
         let Err(error) = started else {
             panic!("there is no such program");
         };
@@ -248,7 +254,7 @@ mod tests {
     #[test]
     fn starting_the_agent_makes_the_session_directory_it_was_given() {
         let session_dir = scratch("made");
-        let _ = Agent::start(&config("/nonexistent/scufris", session_dir.clone()));
+        let _ = Agent::start(&config("/nonexistent/scufris", session_dir.clone()), None);
         assert!(
             session_dir.is_dir(),
             "the directory is made before the agent is asked to store anything in it"
@@ -295,10 +301,25 @@ mod tests {
 
     #[test]
     fn the_agent_is_started_in_rpc_mode_on_its_own_session_directory() {
-        let described = described(&config("/bin/scufris", PathBuf::from("/srv/sessions")));
+        let described = described(
+            &config("/bin/scufris", PathBuf::from("/srv/sessions")),
+            None,
+        );
         assert_eq!(
             described,
             "/bin/scufris --session-dir /srv/sessions --continue --mode rpc"
+        );
+    }
+
+    #[test]
+    fn an_agent_started_for_a_handoff_forks_the_file_the_last_holder_wrote() {
+        let described = described(
+            &config("/bin/scufris", PathBuf::from("/srv/sessions")),
+            Some(Path::new("/srv/sessions/terminal.jsonl")),
+        );
+        assert_eq!(
+            described,
+            "/bin/scufris --session-dir /srv/sessions --fork /srv/sessions/terminal.jsonl --mode rpc"
         );
     }
 }

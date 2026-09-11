@@ -70,6 +70,14 @@ struct Options {
         value_name = "PATH"
     )]
     conversation_file: Option<PathBuf>,
+
+    /// Offer the terminal lease on the control socket.
+    ///
+    /// Off by default. A terminal Pi that holds the lease is the only agent
+    /// until it releases or its control connection closes, and then the
+    /// managed RPC agent restarts from the terminal's session.
+    #[arg(long, env = config::TERMINAL_LEASE_VARIABLE)]
+    terminal_lease: bool,
 }
 
 fn main() -> ExitCode {
@@ -96,7 +104,10 @@ fn main() -> ExitCode {
         named(options.session_dir),
         named(options.conversation_file),
     ) {
-        Ok(config) => config,
+        Ok(config) => Config {
+            terminal_lease: options.terminal_lease,
+            ..config
+        },
         Err(error) => {
             error!(%error, "the service is not configured");
             return ExitCode::from(FAILED);
@@ -144,6 +155,7 @@ fn main() -> ExitCode {
         conversation = %config.conversation_file.display(),
         briefings = %config.briefing_file.display(),
         attachments = %config.attachment_dir.display(),
+        terminal_lease = config.terminal_lease,
         "the service is listening"
     );
 

@@ -9,7 +9,11 @@
 //! The defaults exist so the binary can be run by hand from a terminal, which
 //! is how it gets tested before there is a unit for it.
 
-use std::{env, ffi::OsString, path::PathBuf};
+use std::{
+    env,
+    ffi::OsString,
+    path::{Path, PathBuf},
+};
 
 use scufris_control::service::{
     agent_socket_path, content_socket_path, control_socket_path, surface_socket_path,
@@ -23,6 +27,9 @@ pub const SESSION_DIR_VARIABLE: &str = "SCUFRIS_SERVICE_SESSION_DIR";
 
 /// Environment variable naming the canonical conversation snapshot.
 pub const CONVERSATION_FILE_VARIABLE: &str = "SCUFRIS_SERVICE_CONVERSATION_FILE";
+
+/// Environment variable that offers the terminal lease on the control socket.
+pub const TERMINAL_LEASE_VARIABLE: &str = "SCUFRIS_SERVICE_TERMINAL_LEASE";
 
 /// Program name looked up on `PATH` when [`AGENT_VARIABLE`] is unset.
 pub const DEFAULT_AGENT: &str = "scufris";
@@ -58,6 +65,12 @@ pub struct Config {
     pub attachment_dir: PathBuf,
     /// Directory the agent runs in.
     pub working_dir: PathBuf,
+    /// Whether a control connection may take the agent with a terminal lease.
+    ///
+    /// Off unless the unit or a terminal says so. The lease stops the managed
+    /// agent, and a deployed service should not offer that to whatever can
+    /// reach its control socket until the person asks for it.
+    pub terminal_lease: bool,
 }
 
 impl Config {
@@ -157,22 +170,36 @@ impl Config {
             content_socket: PathBuf::new(),
             attachment_dir: data_home.join("scufris/attachments"),
             working_dir: home,
+            terminal_lease: false,
         })
     }
 
     /// The command line that starts the agent in RPC mode on this session.
     ///
     /// `--continue` rather than a named session: the newest session in the
-    /// directory is the conversation, and after a debug lease that is the file
-    /// the terminal was just writing to.
-    pub fn agent_args(&self) -> Vec<OsString> {
-        vec![
+    /// directory is the conversation, and the child's own fork-backs are made
+    /// with the child's cwd, so `--continue` finds them and skips the
+    /// terminal's repo-cwd files.
+    ///
+    /// `fork` is the file the last holder wrote. Pi copies that branch into a
+    /// new session with this process's cwd, which is how the conversation
+    /// comes back from a terminal with the model's context intact. Forking
+    /// says which file to start from, so it replaces `--continue`.
+    pub fn agent_args(&self, fork: Option<&Path>) -> Vec<OsString> {
+        let mut args = vec![
             OsString::from("--session-dir"),
             self.session_dir.clone().into_os_string(),
-            OsString::from("--continue"),
-            OsString::from("--mode"),
-            OsString::from("rpc"),
-        ]
+        ];
+        match fork {
+            Some(file) => {
+                args.push(OsString::from("--fork"));
+                args.push(file.as_os_str().to_os_string());
+            }
+            None => args.push(OsString::from("--continue")),
+        }
+        args.push(OsString::from("--mode"));
+        args.push(OsString::from("rpc"));
+        args
     }
 
     #[cfg(test)]
@@ -188,6 +215,7 @@ impl Config {
             content_socket: runtime.join("content.sock"),
             attachment_dir: runtime.join("attachments"),
             working_dir: std::env::temp_dir(),
+            terminal_lease: true,
         }
     }
 }
@@ -367,11 +395,28 @@ mod tests {
     fn the_agent_runs_in_rpc_mode() {
         let config = resolved(os("/bin/scufris"), os("/srv/sessions"));
         assert_eq!(
-            config.agent_args(),
+            config.agent_args(None),
             [
                 "--session-dir",
                 "/srv/sessions",
                 "--continue",
+                "--mode",
+                "rpc"
+            ]
+            .map(OsString::from)
+        );
+    }
+
+    #[test]
+    fn a_fork_names_the_file_to_start_from_instead_of_continuing() {
+        let config = resolved(os("/bin/scufris"), os("/srv/sessions"));
+        assert_eq!(
+            config.agent_args(Some(Path::new("/srv/sessions/terminal.jsonl"))),
+            [
+                "--session-dir",
+                "/srv/sessions",
+                "--fork",
+                "/srv/sessions/terminal.jsonl",
                 "--mode",
                 "rpc"
             ]

@@ -14,6 +14,7 @@ import { AGENT_RESPONSE_EVENT, type AtomicResponse } from "./service/client.ts";
 import {
   MAX_CITATIONS,
   MAX_OFFERS,
+  recordedText,
   type Citation,
 } from "./service/protocol.ts";
 
@@ -23,6 +24,16 @@ export const maxDetailBytes = 32 * 1024;
 export const maxResponseBytes = 8 * 1024;
 export const finalResponsePolicy =
   "Use scufris_final_response for every final answer. Put mandatory short literal plain prose in text: do not put Markdown headings, lists, emphasis, code fences, inline code, or Markdown links there. Put any formatted explanation in optional Markdown details. Put optional stored attachment IDs in attachments and optional best-effort presentation calls in widgets. Call scufris_final_response as the only tool in the final tool batch. Do not write assistant text before or after it.";
+/** What changes when the person is reading this Pi directly.
+ *
+ * The tool exists so an answer can carry receipts, offers, and attachments.
+ * In a terminal the answer is already on the screen, and making the model
+ * route every sentence through a tool would make its own terminal worse for
+ * the sake of a mirror.
+ */
+export const terminalResponsePolicy =
+  "You are answering in a terminal a person is reading. Answer natively: write the answer as your own message, in Markdown, and the desktop and phone mirror your final message as it is. Call scufris_final_response only when the answer needs measured receipts, an offer, or stored attachments; then it is the only tool in the final batch and you write no assistant text around it.";
+
 export const offerPolicy =
   "Put an optional next step in offers only when you are reporting on a job this turn and there is one obvious thing the user would ask for next about that job: land it, stop it, open the review. Name the job in job_id, give the button two or three words in label, and write what you would do in prompt as a plain instruction. Never offer a measured fact, a question, or anything the user did not ask about. An offer naming a job this answer carries no measured badges for is dropped.";
 
@@ -95,6 +106,7 @@ function emit(
   pi: ExtensionAPI,
   response: AtomicResponse,
   offerPrompts?: Record<string, string>,
+  render = true,
 ): ResponseEntry {
   const entry: ResponseEntry = {
     version: 5,
@@ -103,13 +115,29 @@ function emit(
       ? { offer_prompts: offerPrompts }
       : {}),
   };
-  pi.appendEntry(RESPONSE_ENTRY, entry);
+  // In a terminal the model's own message is already drawn, so appending a
+  // rendered copy of it would print the answer twice.
+  if (render) pi.appendEntry(RESPONSE_ENTRY, entry);
   pi.events.emit(AGENT_RESPONSE_EVENT, response);
   return entry;
 }
 
-export default function response(pi: ExtensionAPI): void {
+export interface ResponseOptions {
+  /** A person is reading this Pi, so it renders natively. */
+  terminal?: boolean;
+}
+
+export default function response(
+  pi: ExtensionAPI,
+  options: ResponseOptions = {},
+): void {
   if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
+  const terminal = options.terminal ?? process.env.SCUFRIS_TERMINAL === "1";
+  // The last assistant text of this turn, and whether the tool already
+  // answered it. Together they are the rule: the tool wins, and the message
+  // is what is shared when the tool was not called.
+  let lastText: string | undefined;
+  let answered = false;
   const prepared = new Map<
     string,
     AtomicResponse & { offers?: OfferDraft[] }
@@ -158,12 +186,15 @@ export default function response(pi: ExtensionAPI): void {
   const answer = (
     text: AtomicResponse,
     offers?: OfferDraft[],
+    render = true,
   ): ResponseEntry => {
+    answered = true;
     const { receipts, prompts } = cite(offers);
     return emit(
       pi,
       { ...text, ...(receipts.length > 0 ? { receipts } : {}) },
       prompts,
+      render,
     );
   };
 
@@ -199,18 +230,27 @@ export default function response(pi: ExtensionAPI): void {
       rememberOffer(id, prompt);
   });
 
-  pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\n${finalResponsePolicy}\n\n${offerPolicy}`,
-  }));
-
-  pi.registerMarkdownTransformer((markdown, context) => {
-    if (
-      context.messageType === "assistant-thinking" ||
-      (context.messageType === "assistant" && context.isStreaming)
-    )
-      return "";
-    return markdown;
+  pi.on("before_agent_start", (event) => {
+    lastText = undefined;
+    answered = false;
+    const policy = terminal
+      ? `${terminalResponsePolicy}\n\n${finalResponsePolicy}\n\n${offerPolicy}`
+      : `${finalResponsePolicy}\n\n${offerPolicy}`;
+    return { systemPrompt: `${event.systemPrompt}\n\n${policy}` };
   });
+
+  // Hiding streamed text and thinking is what keeps an RPC child from drawing
+  // two copies of an answer nobody is watching it write. In a terminal it is
+  // the opposite of native, so there it is left alone.
+  if (!terminal)
+    pi.registerMarkdownTransformer((markdown, context) => {
+      if (
+        context.messageType === "assistant-thinking" ||
+        (context.messageType === "assistant" && context.isStreaming)
+      )
+        return "";
+      return markdown;
+    });
 
   pi.registerEntryRenderer<ResponseEntry>(
     RESPONSE_ENTRY,
@@ -273,6 +313,13 @@ export default function response(pi: ExtensionAPI): void {
       };
     }
     if (message.stopReason !== "stop") return;
+    if (terminal) {
+      // The words are already drawn, and the turn is not over: a tool batch
+      // may still follow. What is shared is decided at agent_settled.
+      const spoken = assistantText(message);
+      if (spoken) lastText = spoken;
+      return;
+    }
     const text = plainProse(assistantText(message));
     if (!text) return;
     // Badges are measured, so an answer that arrives as bare assistant text
@@ -280,6 +327,20 @@ export default function response(pi: ExtensionAPI): void {
     answer({ text });
     return { message: { ...message, content: [{ type: "text", text }] } };
   });
+
+  if (terminal)
+    pi.on("agent_settled", () => {
+      const text = lastText;
+      const sent = answered;
+      lastText = undefined;
+      answered = false;
+      // The tool wins when it was called: it carries receipts, offers, and
+      // attachments that a bare message cannot.
+      if (sent || text === undefined) return;
+      // Markdown, newlines and all: the mirror carries the message as the
+      // person read it, and `details` is what the tool path uses instead.
+      answer({ text: recordedText(text) }, undefined, false);
+    });
 
   pi.registerTool(
     defineTool({

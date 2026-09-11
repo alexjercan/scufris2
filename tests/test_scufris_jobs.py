@@ -233,6 +233,191 @@ class HelperBoundsTest(unittest.TestCase):
             self.assertEqual(b"\n".join(self.jobs.report_entries(current)), current)
 
 
+class JobOwnershipTest(unittest.TestCase):
+    """Who owns a job when the agent moves between the service and a terminal.
+
+    The records are fixtures. What is under test is the three verbs that move
+    ownership: `recover --also`, `migrate-owner`, and the kind of owner that
+    `orphans` names.
+    """
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory(prefix="scufris-owner-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.env = os.environ.copy()
+        self.env.update({"XDG_STATE_HOME": str(self.root / "state")})
+        self.env.pop("SCUFRIS_CONFIG", None)
+        self.jobs = load_jobs_module()
+
+    def call(self, command: str, request: dict[str, Any]) -> dict[str, Any]:
+        result = subprocess.run(
+            [str(HELPER), command],
+            input=json.dumps(request),
+            text=True,
+            capture_output=True,
+            env=self.env,
+            timeout=30,
+            check=False,
+        )
+        value = json.loads(result.stdout)
+        if result.returncode != 0 or not value["ok"]:
+            self.fail(f"helper failed: {value} stderr={result.stderr}")
+        return value["result"]
+
+    def fixture_job(self, job_id: str, owner: str) -> Path:
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
+        directory.mkdir(parents=True)
+        status = directory / "status"
+        # Finished work. Recovering a job that is still running reconciles tmux
+        # panes, which is the workflow tests' subject; what is under test here
+        # is only who owns the record.
+        status.write_text(
+            json.dumps(
+                {"generation": 1, "event": "done", "summary": "fixture finished"},
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        record = {
+            "version": 2,
+            "job_id": job_id,
+            "owner_session": owner,
+            "workflow_id": hashlib.sha256(f"workflow:{job_id}".encode()).hexdigest(),
+            "root_job": job_id,
+            "parent_job": None,
+            "project": None,
+            "project_root": None,
+            "project_root_device": None,
+            "project_root_inode": None,
+            "context_fingerprint": None,
+            "workspace": "temporary",
+            "feature": None,
+            "review_of": None,
+            "working_directory": str(directory / "workspace"),
+            "workspace_device": self.root.stat().st_dev,
+            "workspace_inode": self.root.stat().st_ino,
+            "landing_branch": None,
+            "harness": "pi",
+            "harness_session": "00000000-0000-4000-8000-000000000000",
+            "model": "fixture-model",
+            "thinking": "medium",
+            "state": "done",
+            "summary": "fixture finished",
+            "created_at": "2026-08-23T12:00:00Z",
+            "archived_at": None,
+            "generation": 1,
+            "event_offset": 0,
+            "status_device": status.stat().st_dev,
+            "status_inode": status.stat().st_ino,
+            "execution_state": None,
+            "tmux_session_name": None,
+            "tmux_session_id": None,
+            "tmux_window_id": None,
+            "tmux_pane_id": None,
+            "execution_token": None,
+            "cleanup": None,
+        }
+        (directory / "job.json").write_text(json.dumps(record))
+        (directory / "report.md").write_text("")
+        (directory / "report.lock").write_text("")
+        (directory / "prompt.md").write_text("Fixture prompt.\n")
+        (directory / "conversation.md").write_text("")
+        (directory / ".report-auth.json").write_text(
+            json.dumps(
+                {
+                    "generation": 1,
+                    "launch_capability_hash": None,
+                    "report_capability_hash": None,
+                    "trusted_capability_hash": "0" * 64,
+                }
+            )
+        )
+        return directory
+
+    def owner_of(self, job_id: str) -> str:
+        record = json.loads(
+            (self.root / "state" / "scufris" / "jobs" / job_id / "job.json").read_text()
+        )
+        return record["owner_session"]
+
+    def test_recover_adopts_the_owners_it_was_told_about_once(self) -> None:
+        self.fixture_job("aaaaaaaaaaaa", "session-one")
+        self.fixture_job("bbbbbbbbbbbb", "someone-else")
+        first = self.call(
+            "recover", {"owner_session": "foreground", "also": ["session-one"]}
+        )
+        self.assertEqual(first["adopted"], 1)
+        self.assertEqual([job["job_id"] for job in first["jobs"]], ["aaaaaaaaaaaa"])
+        self.assertEqual(self.owner_of("aaaaaaaaaaaa"), "foreground")
+        # Every capability is rotated on adoption, so a holder that lost the
+        # lease cannot report as the new one.
+        self.assertNotEqual(first["jobs"][0]["trusted_capability"], "0" * 64)
+        # The job nobody named is nobody else's business.
+        self.assertEqual(self.owner_of("bbbbbbbbbbbb"), "someone-else")
+
+        again = self.call(
+            "recover", {"owner_session": "foreground", "also": ["session-one"]}
+        )
+        self.assertEqual(again["adopted"], 0)
+        self.assertEqual([job["job_id"] for job in again["jobs"]], ["aaaaaaaaaaaa"])
+
+    def test_recover_without_also_adopts_nothing(self) -> None:
+        self.fixture_job("cccccccccccc", "session-one")
+        result = self.call("recover", {"owner_session": "foreground"})
+        self.assertEqual(result["adopted"], 0)
+        self.assertEqual(result["jobs"], [])
+        self.assertEqual(self.owner_of("cccccccccccc"), "session-one")
+
+    def test_migrate_owner_moves_the_work_back(self) -> None:
+        self.fixture_job("dddddddddddd", "foreground")
+        self.fixture_job("eeeeeeeeeeee", "foreground")
+        self.fixture_job("ffffffffffff", "other")
+        moved = self.call(
+            "migrate-owner", {"from_owner": "foreground", "to_owner": "session-one"}
+        )
+        self.assertEqual(moved["job_ids"], ["dddddddddddd", "eeeeeeeeeeee"])
+        self.assertEqual(self.owner_of("dddddddddddd"), "session-one")
+        self.assertEqual(self.owner_of("ffffffffffff"), "other")
+        self.assertEqual(
+            self.call(
+                "migrate-owner",
+                {"from_owner": "foreground", "to_owner": "session-one"},
+            )["job_ids"],
+            [],
+        )
+
+    def test_migrating_onto_the_same_owner_is_refused(self) -> None:
+        result = subprocess.run(
+            [str(HELPER), "migrate-owner"],
+            input=json.dumps({"from_owner": "a", "to_owner": "a"}),
+            text=True,
+            capture_output=True,
+            env=self.env,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(
+            json.loads(result.stdout),
+            {"ok": False, "error": "the owners are the same"},
+        )
+
+    def test_the_kind_of_owner_is_what_orphans_can_say(self) -> None:
+        # A session identifier names nothing a person can act on. Whether the
+        # conversation holds the job, or some other terminal does, is the whole
+        # difference in what is worth saying about it.
+        self.assertEqual(self.jobs.owner_kind("foreground"), "conversation")
+        self.assertEqual(self.jobs.owner_kind("01H-some-session"), "session")
+
+    def test_orphans_names_the_kind_of_owner_of_a_stray_job(self) -> None:
+        self.fixture_job("aaaaaaaaaaab", "foreground")
+        stray = self.call("orphans", {"owner_session": "session-one"})
+        # Nothing is running, so nothing is stray; the shape is what matters
+        # here and the live-pane case is covered by the workflow tests.
+        self.assertEqual(stray["jobs"], [])
+
+
 class ReplacementJobsTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="scufris-jobs-")

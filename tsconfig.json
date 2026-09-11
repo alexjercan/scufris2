@@ -10,5 +10,9 @@
     "target": "ES2022",
     "types": ["node"]
   },
-  "include": ["agent/extensions/**/*.ts", "tests/**/*.ts"]
+  "include": [
+    "agent/extensions/**/*.ts",
+    ".pi/extensions/**/*.ts",
+    "tests/**/*.ts"
+  ]
 }

@@ -9,6 +9,30 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Added
+
+- A terminal can hold the conversation. `scufris-terminal` starts normal
+  interactive Pi on a fork of the session the background service owns, takes
+  the agent from it, and gives it back on exit; every surface keeps talking to
+  the same conversation while it runs. Inside a checkout that carries the
+  terminal extension, plain `pi` joins the same way with catch-up.
+  `/scufris status`, `release`, `attach`, and `hold` control it from the
+  terminal, and `scufris-ctl state` and `scufris-ctl lineage prune` control it
+  from outside. The service refuses every request until
+  `programs.scufris.service.terminalLease` is on, and it is off by default.
+- `programs.scufris.desktop.speech.speakTerminal` reads out an answer a
+  terminal asked for. Off by default, because the person typing is usually at
+  the machine and reading it.
+
+### Changed
+
+- Surface and agent protocol 11 adds the terminal lease, turn correlation, and
+  the agent holder in surface state. Host, agent, desktop, gateway, control
+  client, and iPhone must update together.
+- A delegated job is owned by the conversation rather than by a Pi session, so
+  work keeps its owner across a handoff. The first foreground session after the
+  update adopts the jobs the previous owner held.
+
 ### Fixed
 
 - Job receipts now recognize normal ancestry, squash-equivalent trees, and

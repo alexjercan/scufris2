@@ -20,7 +20,7 @@ serializes every mutating command. All state lives under
 A logical job is a durable version 2 record (`job.json`) plus artifacts in one
 job directory. The record pins:
 
-- Identity: 12-hex `job_id`, owner Pi session, random 64-hex `workflow_id`,
+- Identity: 12-hex `job_id`, `owner_session`, random 64-hex `workflow_id`,
   `root_job`, and `parent_job`. Implementation jobs are workflow roots;
   reviewers record their parent and inherit the workflow.
 - Project: opaque project ID, canonical project root and workspace paths with
@@ -280,24 +280,59 @@ the command line, and a briefing source declared for the machine reads it with
 `--json`. A `since` that is not a moment is refused rather than ignored, and a
 record whose own timestamps cannot be read is listed rather than hidden.
 
+## Who owns a job
+
+`owner_session` is a token, not always a session identifier. Work the
+conversation delegates is owned by `foreground`, which every launcher of the
+foreground agent exports as `SCUFRIS_JOB_OWNER`. The agent moves between the
+background service and a terminal, and the Pi session identifier changes on
+every move; the token does not, so a job started before a handoff is still the
+conversation's after it.
+
+The order of what decides the owner: the last `scufris:owner` announcement from
+the service binding, then `SCUFRIS_JOB_OWNER`, then this Pi's session
+identifier. A plain interactive Pi owns its own jobs under its session, as
+before.
+
+An announcement re-runs `recover` for the new owner and closes the watches of
+the old one. Nothing is stopped by the change: a worker keeps running and the
+holder that owns it now is the one that watches it.
+
 ## Recovery
 
 At foreground `session_start`, `recover` reconciles every job owned by that
-session: it finishes interrupted execution creation, marks lost executions
-failed with a linked report entry, resolves terminal events left in `status`,
-stops leftover panes, rotates the trusted capability, and returns the owned
-jobs for watching. `session_shutdown` calls `suspend-owner`, which stops
-executions exactly and marks nonterminal jobs `suspended`.
+owner: it finishes interrupted execution creation, marks lost executions failed
+with a linked report entry, resolves terminal events left in `status`, stops
+leftover panes, rotates the trusted capability, and returns the owned jobs for
+watching. `recover` also takes an `also` list of owners to adopt. The
+conversation passes its own session identifier, which rewrites records written
+before the token existed. It runs once per record, and finding nothing is the
+normal answer after the first time.
 
-`orphans` lists live panes owned by other sessions, with the tmux session name
-each can be reached by, and touches none of them. The foreground asks after
-`recover` and says what came back once. It is usually empty: the service starts
-Pi with `--continue`, so the session identifier survives a restart and `recover`
-answers for those jobs. What it catches is a session killed outright, a
-development Pi run beside the service, or a state directory carried to a new
-session - panes that keep running and keep spending for nobody. Adoption is not
-offered: another session's capabilities are not this session's to hold, so the
-tmux session name is what a person acts on.
+`migrate-owner` moves every job of one owner to another by hand. It is the
+rollback of adoption, and the only way to give the conversation's work back to
+a named session:
+
+```bash
+echo '{"from_owner":"foreground","to_owner":"<session id>"}' |
+  tools/jobs/scufris-jobs migrate-owner
+```
+
+`session_shutdown` calls `suspend-owner`, which stops executions exactly and
+marks nonterminal jobs `suspended`. It is skipped when the conversation owns
+the work: the agent moves by design, and the next holder's `recover` adopts
+what is running. A holder that crashes leaves those jobs running for the same
+reason.
+
+`orphans` lists live panes owned by another owner, with the tmux session name
+each can be reached by and which kind of owner holds it, and touches none of
+them. The foreground asks after `recover` and says what came back once. Panes
+the conversation owns are running under whichever holder has the agent now;
+panes under a session identifier belong to a Pi that is not here - one killed
+outright, a development Pi run beside the service, or a state directory carried
+to a new session. Adoption is not offered for either: another owner's
+capabilities are not this one's to hold, so the tmux session name is what a
+person acts on.
 
 ---
 

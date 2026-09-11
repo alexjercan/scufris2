@@ -1,4 +1,4 @@
-//! Scufris protocol v10 typed channels.
+//! Scufris protocol v11 typed channels.
 //!
 //! Surface, agent, and control traffic use separate Unix sockets and separate
 //! enums. Each decoder accepts only its channel and direction.
@@ -13,7 +13,7 @@ use crate::{
     is_identifier, read_line,
 };
 
-pub const SERVICE_VERSION: u32 = 10;
+pub const SERVICE_VERSION: u32 = 11;
 pub const SURFACE_FILE_NAME: &str = "surface.sock";
 pub const AGENT_FILE_NAME: &str = "agent.sock";
 pub const CONTROL_FILE_NAME: &str = "control.sock";
@@ -27,6 +27,20 @@ pub const CONVERSATION_ENTRIES: usize = 200;
 /// none of them matches it: nothing is spoken, and no live widget call runs.
 /// No surface may register it, which is what keeps that true.
 pub const UNPROMPTED_SURFACE: &str = "unprompted";
+/// Surface name a leased terminal's turns and answers are recorded under.
+///
+/// No surface may register it, for the same reason none may hold the
+/// unprompted name: the terminal is not a surface. It is where the person is
+/// sitting, so its answer is shown everywhere and, unless the desktop is told
+/// otherwise, spoken nowhere.
+pub const TERMINAL_SURFACE: &str = "terminal";
+/// Job-ownership token a conversation-owned job carries while the foreground
+/// agent can move between the managed child and a leased terminal.
+///
+/// A Pi session id would do instead, and did: it is what `owner_session` held
+/// before the handoff existed. It cannot any more, because a handoff changes
+/// the session id twice and jobs the conversation owns outlive both.
+pub const FOREGROUND_OWNER: &str = "foreground";
 pub const MAX_SURFACE_NAME_BYTES: usize = 256;
 pub const MAX_TEXT_BYTES: usize = 8 * 1024;
 pub const MAX_DETAILS_BYTES: usize = 32 * 1024;
@@ -60,6 +74,23 @@ pub const MAX_JOB_SUMMARY_BYTES: usize = 512;
 /// inside the shared 64 KiB frame bound.
 pub const MAX_BRIEFING_ROWS: usize = 64;
 pub const MAX_BRIEFING_SUMMARY_BYTES: usize = 256;
+/// Canonical conversation entries one catch-up page may carry.
+///
+/// A page is read by a model as one message, and it is bounded twice: by this
+/// count and by the shared frame size. Both bounds are small enough that a
+/// catch-up cannot itself be what triggers a compaction on join.
+pub const MAX_CONVERSATION_PAGE: usize = 64;
+/// Images one terminal turn may report having carried.
+///
+/// The images themselves stay in the terminal; only the count crosses, and it
+/// is bounded so a count cannot be used to write an unbounded label.
+pub const MAX_TURN_IMAGES: u8 = 8;
+/// Maximum accepted length of one filesystem path on the wire.
+///
+/// Session files and working directories are recorded and forked from, never
+/// executed. They are still bounded, because an unbounded path is an
+/// unbounded log line and an unbounded argument list.
+pub const MAX_PATH_BYTES: usize = 4 * 1024;
 
 pub fn surface_socket_path() -> Result<PathBuf, ControlPathError> {
     socket_path(SURFACE_FILE_NAME)
@@ -320,6 +351,81 @@ pub struct ConversationMessage {
     pub receipts: Vec<Citation>,
 }
 
+/// Which process is the agent right now.
+///
+/// Two values and no third. `Managed` is the service's own `pi --mode rpc`
+/// child, running or restarting; `Terminal` is an interactive Pi that holds
+/// the lease. "Nobody" is not a holder: the state word already says whether
+/// anything is up, and a third value would name a difference no surface and
+/// no launcher could act on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentHolder {
+    /// The child the service started and can restart. The default, because a
+    /// host that was never handed the agent is holding it itself.
+    #[default]
+    Managed,
+    Terminal,
+}
+
+impl AgentHolder {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Managed => "managed",
+            Self::Terminal => "terminal",
+        }
+    }
+}
+
+/// What a terminal says about itself when it asks for the lease.
+///
+/// None of it is trusted with anything: the pid is for the log that says who
+/// took the agent, and the paths are recorded and forked from, never run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeaseHolder {
+    pub pid: u32,
+    /// The session file this terminal is writing, when it has one yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_file: Option<String>,
+    pub cwd: String,
+}
+
+/// The Pi session one agent is writing, whichever agent it is.
+///
+/// The service keeps the latest as the lineage file: the thing the next
+/// holder forks from, so model context follows the conversation across a
+/// handoff instead of starting again.
+///
+/// `parent` is what a fork writes in its own header. It is the difference
+/// between an agent that already has the conversation in its context and one
+/// that only has a new file, which is what decides whether catch-up is worth
+/// sending. Without it the service would have to send the replay to a fork
+/// that already holds every word of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSession {
+    pub id: String,
+    pub file: String,
+    pub cwd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+}
+
+/// One canonical conversation entry, as a joining agent is handed it.
+///
+/// Text only. Tool results, widgets, attachments, and receipts are
+/// presentation or model-side detail that a catch-up cannot reconstruct, and
+/// claiming to carry them would be the dishonest half of this path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConversationEntry {
+    pub sequence: u64,
+    pub role: ConversationRole,
+    pub surface: String,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ScufrisState {
@@ -431,7 +537,15 @@ pub enum SurfaceResponseBody {
     #[serde(rename = "surface.aborted")]
     Aborted { id: String },
     #[serde(rename = "surface.state")]
-    State { state: ScufrisState, detail: String },
+    State {
+        state: ScufrisState,
+        detail: String,
+        /// Which process is answering right now. Absent on the wire while it
+        /// is the managed child, so the common case costs no bytes and an
+        /// older snapshot reads as the managed one it was written under.
+        #[serde(default, skip_serializing_if = "is_managed")]
+        holder: AgentHolder,
+    },
     /// Every job row at once, replacing whatever the surface holds.
     ///
     /// Sent whenever the list changes and replayed on connect, because a row
@@ -493,8 +607,49 @@ impl AgentRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", deny_unknown_fields)]
 pub enum AgentRequestBody {
+    /// `lease` is the generation a lease was granted with. It is the writer
+    /// fence: while a lease is held, only a hello that names its generation
+    /// is accepted on the agent channel. `session` is the Pi session this
+    /// agent is writing, which the service keeps as the lineage file.
     #[serde(rename = "agent.hello")]
-    Hello,
+    Hello {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lease: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session: Option<AgentSession>,
+    },
+    /// This agent is now writing a different session file.
+    ///
+    /// Sent after `/tree`, a fork, or any start that produced a new file, so
+    /// the lineage the next holder forks from is the current one.
+    #[serde(rename = "agent.session")]
+    Session {
+        id: String,
+        file: String,
+        cwd: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent: Option<String>,
+    },
+    /// One user turn typed into the terminal that holds the lease.
+    ///
+    /// The words are already in Pi when this arrives, so there is nothing to
+    /// refuse: the identifier exists so the answer can be attached to exactly
+    /// this turn rather than to whatever association happened to be open.
+    #[serde(rename = "agent.turn")]
+    Turn {
+        id: String,
+        text: String,
+        /// How many images the person pasted. The images stay in the
+        /// terminal; the count is what the HUD is told, plainly.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        images: u8,
+    },
+    /// Whether the leased terminal is working.
+    ///
+    /// The managed child's RPC stdout carries this for the child. A terminal
+    /// Pi has no such stream, so it says so itself.
+    #[serde(rename = "agent.activity")]
+    Activity { working: bool },
     /// Pi delivered one exact queued custom message and started its turn.
     #[serde(rename = "agent.proactive_started")]
     ProactiveStarted { proactive_id: String },
@@ -507,6 +662,9 @@ pub enum AgentRequestBody {
         /// Correlates only a service-owned proactive terminal turn.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         proactive_id: Option<String>,
+        /// Correlates the accepted terminal turn this answer closes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         details: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -580,8 +738,33 @@ pub enum AgentResponseBody {
     /// A surface took one offer. The agent holds the words it stands for.
     #[serde(rename = "agent.offer_take")]
     OfferTake { id: String },
+    /// One terminal turn was recorded, at that sequence in the canonical
+    /// conversation.
+    #[serde(rename = "agent.turn_ack")]
+    TurnAck { id: String, sequence: u64 },
+    /// The service is about to stop or drop this agent so the other one can
+    /// take over.
+    ///
+    /// It is sent before the shutdown, which is what lets the agent tell a
+    /// handoff from a crash: a handoff keeps the conversation's jobs running
+    /// for the next holder, and a plain exit suspends them.
+    #[serde(rename = "agent.handoff")]
+    Handoff { generation: u64, next: AgentHolder },
+    /// Every canonical entry this agent has not seen, so a joining agent can
+    /// answer about what was said while it was not there.
+    #[serde(rename = "agent.catch_up")]
+    CatchUp {
+        since: u64,
+        entries: Vec<ConversationEntry>,
+    },
     #[serde(rename = "agent.rejected")]
-    Rejected { code: String, detail: String },
+    Rejected {
+        /// The turn this refusal is about, when it is about one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        code: String,
+        detail: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -628,6 +811,38 @@ pub enum ControlRequestBody {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         wake: Option<BriefingWake>,
     },
+    /// Take the agent away from the service.
+    ///
+    /// The service stops its RPC child and answers with a lease generation
+    /// once the child is reaped, so reading the reply is what says the agent
+    /// channel is free. The lease is this connection: when it closes, the
+    /// child starts again whether or not a release was said first.
+    ///
+    /// `abort_working` is the difference between taking the agent and waiting
+    /// for it. Left false, a child mid-turn refuses with `agent_busy`.
+    #[serde(rename = "control.lease_acquire")]
+    LeaseAcquire {
+        id: String,
+        holder: LeaseHolder,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        abort_working: bool,
+    },
+    /// The holder is still alive.
+    ///
+    /// A closed socket is the usual end of a lease, but a stopped or
+    /// suspended terminal keeps its socket open while answering nothing, and
+    /// that is the case this exists for.
+    #[serde(rename = "control.lease_ping")]
+    LeasePing { id: String },
+    /// Give the agent back before the connection closes.
+    #[serde(rename = "control.lease_release")]
+    LeaseRelease { id: String },
+    /// Read the canonical conversation from a sequence onwards.
+    ///
+    /// One page at a time, so a joining agent can be handed what it missed
+    /// without the frame bound deciding how much history it gets.
+    #[serde(rename = "control.conversation")]
+    Conversation { id: String, since: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -655,11 +870,53 @@ pub enum ControlResponseBody {
         id: String,
         state: ScufrisState,
         detail: String,
+        #[serde(default, skip_serializing_if = "is_managed")]
+        holder: AgentHolder,
+        /// The live lease generation, while one is held.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generation: Option<u64>,
+        /// Where every session in the lineage is written.
+        ///
+        /// The launcher needs it to start a terminal in the same directory,
+        /// and answering it here is what keeps one default from being written
+        /// down twice and drifting.
+        session_dir: String,
+        /// The session file the next holder would fork from.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lineage_file: Option<String>,
     },
     #[serde(rename = "control.wake_ack")]
     WakeAck { id: String },
     #[serde(rename = "control.briefing_ack")]
     BriefingAck { id: String },
+    /// The lease was granted.
+    ///
+    /// `lineage_file` is the session the service will fork from and the one
+    /// the holder should already have forked; `sequence` is where the holder's
+    /// catch-up starts; `owner` is the job-ownership token that moved with it.
+    #[serde(rename = "control.lease")]
+    Lease {
+        id: String,
+        generation: u64,
+        session_dir: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lineage_file: Option<String>,
+        sequence: u64,
+        owner: String,
+    },
+    #[serde(rename = "control.lease_pong")]
+    LeasePong { id: String, generation: u64 },
+    #[serde(rename = "control.lease_released")]
+    LeaseReleased { id: String },
+    /// One page of canonical entries, oldest first.
+    #[serde(rename = "control.conversation_entries")]
+    ConversationEntries {
+        id: String,
+        entries: Vec<ConversationEntry>,
+        /// Whether asking again from the last sequence would return more.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        more: bool,
+    },
     #[serde(rename = "control.rejected")]
     Rejected {
         id: String,
@@ -700,6 +957,51 @@ fn read_exact<T: for<'de> Deserialize<'de>>(
     let message: T = serde_json::from_value(value)?;
     validate(&message)?;
     Ok(message)
+}
+
+/// Whether the holder is the one that costs no bytes on the wire.
+fn is_managed(holder: &AgentHolder) -> bool {
+    matches!(holder, AgentHolder::Managed)
+}
+
+fn is_zero(value: &u8) -> bool {
+    *value == 0
+}
+
+/// Validates one absolute filesystem path carried for the record.
+///
+/// Absolute because every consumer resolves it from somewhere else: the
+/// service forks from it with its own working directory, and a relative path
+/// would name a different file for each of them.
+fn path(value: &str, field: &'static str) -> Result<(), MessageError> {
+    text(value, MAX_PATH_BYTES, field, false)?;
+    if !value.starts_with('/') || value.contains('\n') {
+        return Err(MessageError::InvalidSubmission(field));
+    }
+    Ok(())
+}
+
+/// Validates one Pi session an agent reports writing.
+pub fn validate_agent_session(session: &AgentSession) -> Result<(), MessageError> {
+    text(&session.id, MAX_IDENTIFIER_LENGTH, "session id", false)?;
+    path(&session.file, "session file")?;
+    path(&session.cwd, "session cwd")?;
+    match &session.parent {
+        Some(parent) => path(parent, "session parent"),
+        None => Ok(()),
+    }
+}
+
+/// Validates one page of canonical entries against the bounds both ends hold.
+fn conversation_entries(entries: &[ConversationEntry]) -> Result<(), MessageError> {
+    if entries.len() > MAX_CONVERSATION_PAGE {
+        return Err(MessageError::InvalidSubmission("conversation entries"));
+    }
+    for entry in entries {
+        id(&entry.surface, "conversation surface")?;
+        text(&entry.text, MAX_TEXT_BYTES, "conversation text", false)?;
+    }
+    Ok(())
 }
 
 fn bytes(value: &Value) -> usize {
@@ -950,7 +1252,7 @@ pub fn validate_briefing_wake(value: &BriefingWake) -> Result<(), MessageError> 
 }
 fn validate_registration(surface: &SurfaceRegistration) -> Result<(), MessageError> {
     id(&surface.id, "surface id")?;
-    if surface.id == UNPROMPTED_SURFACE {
+    if surface.id == UNPROMPTED_SURFACE || surface.id == TERMINAL_SURFACE {
         return Err(MessageError::InvalidSubmission("surface id"));
     }
     text(&surface.name, MAX_SURFACE_NAME_BYTES, "surface name", false)?;
@@ -1034,12 +1336,40 @@ fn validate_surface_response(message: &SurfaceResponse) -> Result<(), MessageErr
 }
 fn validate_agent_request(message: &AgentRequest) -> Result<(), MessageError> {
     match &message.body {
-        AgentRequestBody::Hello => Ok(()),
+        AgentRequestBody::Hello { session, .. } => match session {
+            Some(session) => validate_agent_session(session),
+            None => Ok(()),
+        },
+        AgentRequestBody::Session {
+            id: one,
+            file,
+            cwd,
+            parent,
+        } => validate_agent_session(&AgentSession {
+            id: one.clone(),
+            file: file.clone(),
+            cwd: cwd.clone(),
+            parent: parent.clone(),
+        }),
+        AgentRequestBody::Turn {
+            id: one,
+            text: body,
+            images,
+        } => {
+            id(one, "turn id")?;
+            text(body, MAX_TEXT_BYTES, "turn text", false)?;
+            if *images > MAX_TURN_IMAGES {
+                return Err(MessageError::InvalidSubmission("turn images"));
+            }
+            Ok(())
+        }
+        AgentRequestBody::Activity { .. } => Ok(()),
         AgentRequestBody::ProactiveStarted { proactive_id }
         | AgentRequestBody::ProactiveSettled { proactive_id } => id(proactive_id, "proactive id"),
         AgentRequestBody::Response {
             text: body,
             proactive_id,
+            turn_id,
             details,
             widgets,
             attachments,
@@ -1047,6 +1377,9 @@ fn validate_agent_request(message: &AgentRequest) -> Result<(), MessageError> {
         } => {
             if let Some(one) = proactive_id {
                 id(one, "proactive id")?;
+            }
+            if let Some(one) = turn_id {
+                id(one, "turn id")?;
             }
             text(body, MAX_TEXT_BYTES, "response text", false)?;
             if let Some(details) = details {
@@ -1087,7 +1420,17 @@ fn validate_agent_response(message: &AgentResponse) -> Result<(), MessageError> 
         AgentResponseBody::Abort { id: one } => id(one, "abort id"),
         AgentResponseBody::JobCommand { id: one, .. } => id(one, "job id"),
         AgentResponseBody::OfferTake { id: one } => id(one, "offer id"),
-        AgentResponseBody::Rejected { code, detail } => {
+        AgentResponseBody::TurnAck { id: one, .. } => id(one, "turn id"),
+        AgentResponseBody::Handoff { .. } => Ok(()),
+        AgentResponseBody::CatchUp { entries, .. } => conversation_entries(entries),
+        AgentResponseBody::Rejected {
+            id: one,
+            code,
+            detail,
+        } => {
+            if let Some(one) = one {
+                id(one, "turn id")?;
+            }
             id(code, "rejection code")?;
             text(detail, MAX_DETAIL_BYTES, "rejection detail", true)
         }
@@ -1118,19 +1461,61 @@ fn validate_control_request(message: &ControlRequest) -> Result<(), MessageError
             }
             Ok(())
         }
+        ControlRequestBody::LeaseAcquire {
+            id: one, holder, ..
+        } => {
+            id(one, "lease request id")?;
+            if let Some(file) = &holder.session_file {
+                path(file, "holder session file")?;
+            }
+            path(&holder.cwd, "holder cwd")
+        }
+        ControlRequestBody::LeasePing { id: one }
+        | ControlRequestBody::LeaseRelease { id: one }
+        | ControlRequestBody::Conversation { id: one, .. } => id(one, "lease request id"),
     }
 }
 fn validate_control_response(message: &ControlResponse) -> Result<(), MessageError> {
     match &message.body {
         ControlResponseBody::Ready => Ok(()),
         ControlResponseBody::State {
-            id: one, detail, ..
+            id: one,
+            detail,
+            session_dir,
+            lineage_file,
+            ..
         } => {
             id(one, "state id")?;
+            path(session_dir, "state session dir")?;
+            if let Some(file) = lineage_file {
+                path(file, "lineage file")?;
+            }
             text(detail, MAX_DETAIL_BYTES, "state detail", true)
         }
         ControlResponseBody::WakeAck { id: one } => id(one, "wake id"),
         ControlResponseBody::BriefingAck { id: one } => id(one, "briefing request id"),
+        ControlResponseBody::Lease {
+            id: one,
+            session_dir,
+            lineage_file,
+            owner,
+            ..
+        } => {
+            id(one, "lease request id")?;
+            path(session_dir, "lease session dir")?;
+            if let Some(file) = lineage_file {
+                path(file, "lease lineage file")?;
+            }
+            id(owner, "lease owner")
+        }
+        ControlResponseBody::LeasePong { id: one, .. }
+        | ControlResponseBody::LeaseReleased { id: one } => id(one, "lease request id"),
+        ControlResponseBody::ConversationEntries {
+            id: one, entries, ..
+        } => {
+            id(one, "lease request id")?;
+            conversation_entries(entries)
+        }
         ControlResponseBody::Rejected {
             id: one,
             code,
@@ -1150,15 +1535,171 @@ mod tests {
 
     #[test]
     fn channels_and_directions_are_distinct() {
-        let line = b"{\"v\":10,\"type\":\"agent.hello\"}\n";
+        let line = b"{\"v\":11,\"type\":\"agent.hello\"}\n";
         assert!(read_agent_request(&mut Cursor::new(line)).is_ok());
         assert!(matches!(
             read_surface_request(&mut Cursor::new(line)),
             Err(MessageError::InvalidJson(_))
         ));
-        let outbound = b"{\"v\":10,\"type\":\"surface.ready\",\"surface\":\"desk\"}\n";
+        let outbound = b"{\"v\":11,\"type\":\"surface.ready\",\"surface\":\"desk\"}\n";
         assert!(read_surface_response(&mut Cursor::new(outbound)).is_ok());
         assert!(read_surface_request(&mut Cursor::new(outbound)).is_err());
+    }
+
+    #[test]
+    fn the_lease_is_a_control_grant_and_an_agent_fence() {
+        // The grant and its heartbeat live on the control channel only. A
+        // surface cannot express one, which is what keeps the phone from
+        // being able to take the agent.
+        let acquire = b"{\"v\":11,\"type\":\"control.lease_acquire\",\"id\":\"l1\",\"holder\":{\"pid\":42,\"cwd\":\"/home/alex/personal/scufris2\"}}\n";
+        assert!(matches!(
+            read_control_request(&mut Cursor::new(acquire)).unwrap().body,
+            ControlRequestBody::LeaseAcquire { id, holder, abort_working: false }
+                if id == "l1" && holder.pid == 42
+        ));
+        assert!(read_surface_request(&mut Cursor::new(acquire)).is_err());
+        assert!(read_agent_request(&mut Cursor::new(acquire)).is_err());
+        // A relative path names a different file for every process that
+        // resolves it, and the service resolves this one from its own cwd.
+        let relative = b"{\"v\":11,\"type\":\"control.lease_acquire\",\"id\":\"l1\",\"holder\":{\"pid\":42,\"cwd\":\"scufris2\"}}\n";
+        assert!(matches!(
+            read_control_request(&mut Cursor::new(relative)),
+            Err(MessageError::InvalidSubmission("holder cwd"))
+        ));
+
+        let grant = ControlResponse::new(ControlResponseBody::Lease {
+            id: "l1".into(),
+            generation: 3,
+            session_dir: "/srv/sessions".into(),
+            lineage_file: None,
+            sequence: 17,
+            owner: FOREGROUND_OWNER.into(),
+        });
+        let mut line = Vec::new();
+        crate::write_message(&mut line, &grant).unwrap();
+        assert!(
+            !String::from_utf8(line.clone())
+                .unwrap()
+                .contains("lineage_file")
+        );
+        assert_eq!(
+            read_control_response(&mut Cursor::new(line)).unwrap(),
+            grant
+        );
+
+        // A hello without a generation is the hello it always was, and one
+        // with a generation names the lease it was granted under.
+        let plain = b"{\"v\":11,\"type\":\"agent.hello\"}\n";
+        assert!(matches!(
+            read_agent_request(&mut Cursor::new(plain)).unwrap().body,
+            AgentRequestBody::Hello {
+                lease: None,
+                session: None
+            }
+        ));
+        let mut encoded = Vec::new();
+        crate::write_message(
+            &mut encoded,
+            &AgentRequest::new(AgentRequestBody::Hello {
+                lease: None,
+                session: None,
+            }),
+        )
+        .unwrap();
+        assert_eq!(encoded, plain);
+        let fenced = b"{\"v\":11,\"type\":\"agent.hello\",\"lease\":3,\"session\":{\"id\":\"s1\",\"file\":\"/srv/sessions/a.jsonl\",\"cwd\":\"/home/alex\"}}\n";
+        assert!(matches!(
+            read_agent_request(&mut Cursor::new(fenced)).unwrap().body,
+            AgentRequestBody::Hello { lease: Some(3), session: Some(session) }
+                if session.file == "/srv/sessions/a.jsonl"
+        ));
+
+        // A terminal turn is bounded the way a surface message is, carries an
+        // identifier its answer can name, and reports images it does not send.
+        let turn = format!(
+            "{{\"v\":11,\"type\":\"agent.turn\",\"id\":\"t-01\",\"text\":\"{}\"}}\n",
+            "x".repeat(MAX_TEXT_BYTES + 1)
+        );
+        assert!(read_agent_request(&mut Cursor::new(turn.as_bytes())).is_err());
+        let empty = b"{\"v\":11,\"type\":\"agent.turn\",\"id\":\"t-01\",\"text\":\" \"}\n";
+        assert!(read_agent_request(&mut Cursor::new(empty)).is_err());
+        let many = format!(
+            "{{\"v\":11,\"type\":\"agent.turn\",\"id\":\"t-01\",\"text\":\"see these\",\"images\":{}}}\n",
+            MAX_TURN_IMAGES + 1
+        );
+        assert!(matches!(
+            read_agent_request(&mut Cursor::new(many.as_bytes())),
+            Err(MessageError::InvalidSubmission("turn images"))
+        ));
+        let activity = b"{\"v\":11,\"type\":\"agent.activity\",\"working\":true}\n";
+        assert!(matches!(
+            read_agent_request(&mut Cursor::new(activity)).unwrap().body,
+            AgentRequestBody::Activity { working: true }
+        ));
+
+        // The terminal name is reserved the way the unprompted one is.
+        let hello = format!(
+            "{{\"v\":11,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{TERMINAL_SURFACE}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
+        );
+        assert!(read_surface_request(&mut Cursor::new(hello.as_bytes())).is_err());
+    }
+
+    #[test]
+    fn a_catch_up_page_is_bounded_and_the_holder_costs_nothing_to_omit() {
+        let entry = |sequence: u64| ConversationEntry {
+            sequence,
+            role: ConversationRole::User,
+            surface: "phone".into(),
+            text: "Where did we get to?".into(),
+        };
+        let page = AgentResponse::new(AgentResponseBody::CatchUp {
+            since: 4,
+            entries: (0..MAX_CONVERSATION_PAGE as u64).map(entry).collect(),
+        });
+        let mut bytes = Vec::new();
+        crate::write_message(&mut bytes, &page).unwrap();
+        assert_eq!(read_agent_response(&mut Cursor::new(bytes)).unwrap(), page);
+        let over = AgentResponse::new(AgentResponseBody::CatchUp {
+            since: 4,
+            entries: (0..MAX_CONVERSATION_PAGE as u64 + 1).map(entry).collect(),
+        });
+        let mut bytes = Vec::new();
+        crate::write_message(&mut bytes, &over).unwrap();
+        assert!(matches!(
+            read_agent_response(&mut Cursor::new(bytes)),
+            Err(MessageError::InvalidSubmission("conversation entries"))
+        ));
+
+        // The managed child is the common case, so it is the one that writes
+        // no holder at all; a version-11 reader with no field reads managed.
+        let managed = SurfaceResponse::new(SurfaceResponseBody::State {
+            state: ScufrisState::Idle,
+            detail: String::new(),
+            holder: AgentHolder::Managed,
+        });
+        let mut bytes = Vec::new();
+        crate::write_message(&mut bytes, &managed).unwrap();
+        assert!(!String::from_utf8(bytes.clone()).unwrap().contains("holder"));
+        assert_eq!(
+            read_surface_response(&mut Cursor::new(bytes)).unwrap(),
+            managed
+        );
+        let leased = SurfaceResponse::new(SurfaceResponseBody::State {
+            state: ScufrisState::Idle,
+            detail: String::new(),
+            holder: AgentHolder::Terminal,
+        });
+        let mut bytes = Vec::new();
+        crate::write_message(&mut bytes, &leased).unwrap();
+        assert!(
+            String::from_utf8(bytes.clone())
+                .unwrap()
+                .contains("terminal")
+        );
+        assert_eq!(
+            read_surface_response(&mut Cursor::new(bytes)).unwrap(),
+            leased
+        );
     }
 
     #[test]
@@ -1168,7 +1709,7 @@ mod tests {
         // would speak every briefing the owner never asked for.
         let hello = |id: &str| {
             format!(
-                "{{\"v\":10,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{id}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
+                "{{\"v\":11,\"type\":\"surface.hello\",\"surface\":{{\"id\":\"{id}\",\"name\":\"Desk\",\"widgets\":[]}}}}\n"
             )
         };
         assert!(read_surface_request(&mut Cursor::new(hello("desk"))).is_ok());
@@ -1344,7 +1885,7 @@ mod tests {
     fn only_the_control_channel_carries_a_wake() {
         // A wake is not a second way to drive the conversation, so the channel
         // the remote gateway speaks cannot express one.
-        let line = b"{\"v\":10,\"type\":\"control.wake\",\"id\":\"wake-1\",\"custom_type\":\"scufris-wake\",\"text\":\"Wake up.\"}\n";
+        let line = b"{\"v\":11,\"type\":\"control.wake\",\"id\":\"wake-1\",\"custom_type\":\"scufris-wake\",\"text\":\"Wake up.\"}\n";
         assert!(read_control_request(&mut Cursor::new(line)).is_ok());
         assert!(read_surface_request(&mut Cursor::new(line)).is_err());
         assert!(read_agent_request(&mut Cursor::new(line)).is_err());
@@ -1378,6 +1919,7 @@ mod tests {
     fn bounded_atomic_response_round_trips() {
         let response = AgentRequest::new(AgentRequestBody::Response {
             proactive_id: None,
+            turn_id: None,
             text: "Done.".into(),
             details: Some("## Check\n\nPassed.".into()),
             widgets: Some(vec![WidgetCall {
@@ -1419,6 +1961,7 @@ mod tests {
         // strips under one message with no reading that says which is which.
         let response = AgentRequest::new(AgentRequestBody::Response {
             proactive_id: None,
+            turn_id: None,
             text: "Both jobs finished.".into(),
             details: None,
             widgets: None,
@@ -1434,6 +1977,7 @@ mod tests {
 
         let doubled = AgentRequest::new(AgentRequestBody::Response {
             proactive_id: None,
+            turn_id: None,
             text: "One job, twice.".into(),
             details: None,
             widgets: None,
@@ -1457,6 +2001,7 @@ mod tests {
         second.offers[0].id = cited("750a4de8a80d").offers[0].id.clone();
         let clashing = AgentRequest::new(AgentRequestBody::Response {
             proactive_id: None,
+            turn_id: None,
             text: "Two offers, one name.".into(),
             details: None,
             widgets: None,
@@ -1484,6 +2029,7 @@ mod tests {
                 &mut bytes,
                 &AgentRequest::new(AgentRequestBody::Response {
                     proactive_id: None,
+                    turn_id: None,
                     text: "Done.".into(),
                     details: None,
                     widgets: None,
@@ -1644,21 +2190,21 @@ mod tests {
         // Neither is a way to drive the conversation, so the request channel
         // that carries them is the one a registered surface already speaks.
         let line =
-            b"{\"v\":10,\"type\":\"job.command\",\"id\":\"3f81c204b1e9\",\"action\":\"cancel\"}\n";
+            b"{\"v\":11,\"type\":\"job.command\",\"id\":\"3f81c204b1e9\",\"action\":\"cancel\"}\n";
         assert!(read_surface_request(&mut Cursor::new(line)).is_ok());
         assert!(read_agent_request(&mut Cursor::new(line)).is_err());
         assert!(read_control_request(&mut Cursor::new(line)).is_err());
 
-        let take = b"{\"v\":10,\"type\":\"offer.take\",\"id\":\"offer-1\"}\n";
+        let take = b"{\"v\":11,\"type\":\"offer.take\",\"id\":\"offer-1\"}\n";
         assert!(read_surface_request(&mut Cursor::new(take)).is_ok());
         assert!(read_agent_request(&mut Cursor::new(take)).is_err());
 
-        let dismiss = b"{\"v\":10,\"type\":\"briefing.dismiss\",\"id\":\"generation-a\"}\n";
+        let dismiss = b"{\"v\":11,\"type\":\"briefing.dismiss\",\"id\":\"generation-a\"}\n";
         assert!(read_surface_request(&mut Cursor::new(dismiss)).is_ok());
         assert!(read_agent_request(&mut Cursor::new(dismiss)).is_err());
         assert!(read_control_request(&mut Cursor::new(dismiss)).is_err());
 
-        let invalid = b"{\"v\":10,\"type\":\"briefing.dismiss\",\"id\":\"../generation\"}\n";
+        let invalid = b"{\"v\":11,\"type\":\"briefing.dismiss\",\"id\":\"../generation\"}\n";
         assert!(matches!(
             read_surface_request(&mut Cursor::new(invalid)),
             Err(MessageError::InvalidSubmission("briefing id"))

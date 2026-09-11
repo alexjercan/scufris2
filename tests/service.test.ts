@@ -14,6 +14,7 @@ import {
   MAX_JOB_ROWS,
   MAX_JOB_SUMMARY_BYTES,
   REFUSAL,
+  SERVICE_VERSION,
   surfacePrompt,
   takeLines,
 } from "../agent/extensions/scufris/service/protocol.ts";
@@ -49,7 +50,7 @@ test("the encoder holds the host's content rules so a violation is not a teardow
   // costs the answer in flight and says nothing. These have to match.
   const response = (details: string) =>
     encodeAgentRequest({
-      v: 10,
+      v: 11,
       type: "agent.response",
       text: "Done.",
       details,
@@ -61,7 +62,7 @@ test("the encoder holds the host's content rules so a violation is not a teardow
   assert.throws(
     () =>
       encodeAgentRequest({
-        v: 10,
+        v: 11,
         type: "agent.response",
         text: "one\rtwo",
       }),
@@ -71,7 +72,7 @@ test("the encoder holds the host's content rules so a violation is not a teardow
   // worker's captured output was enough to close the channel.
   const listed = (summary: string) =>
     encodeAgentRequest({
-      v: 10,
+      v: 11,
       type: "agent.jobs",
       jobs: [
         {
@@ -100,7 +101,7 @@ test("a job row summary is clamped rather than lost", () => {
   assert.doesNotMatch(wide, /�/);
   assert.ok(
     encodeAgentRequest({
-      v: 10,
+      v: 11,
       type: "agent.jobs",
       jobs: [
         {
@@ -123,7 +124,7 @@ test("badges are grouped by job and an offer names one offer in the message", ()
   });
   assert.ok(
     encodeAgentRequest({
-      v: 10,
+      v: 11,
       type: "agent.response",
       text: "Both finished.",
       receipts: [
@@ -134,7 +135,7 @@ test("badges are grouped by job and an offer names one offer in the message", ()
   );
   const refused = (receipts: ReturnType<typeof cited>[]) =>
     encodeAgentRequest({
-      v: 10,
+      v: 11,
       type: "agent.response",
       text: "Both finished.",
       receipts,
@@ -189,13 +190,13 @@ test("a job list is bounded and every row names one job", () => {
   // identifier never may.
   assert.ok(
     encodeAgentRequest({
-      v: 10,
+      v: 11,
       type: "agent.jobs",
       jobs: [row("3f81c204b1e9")],
     }),
   );
   const refused = (jobs: ReturnType<typeof row>[]) =>
-    encodeAgentRequest({ v: 10, type: "agent.jobs", jobs });
+    encodeAgentRequest({ v: 11, type: "agent.jobs", jobs });
   assert.throws(
     () => refused([row("3f81c204b1e9"), row("3f81c204b1e9")]),
     /duplicate job row/,
@@ -211,32 +212,32 @@ test("a job list is bounded and every row names one job", () => {
   );
 });
 
-test("agent v10 messages are bounded and channel-specific", () => {
+test("agent v11 messages are bounded and channel-specific", () => {
   assert.equal(
-    encodeAgentRequest({ v: 10, type: "agent.hello" }),
-    '{"v":10,"type":"agent.hello"}\n',
+    encodeAgentRequest({ v: 11, type: "agent.hello" }),
+    '{"v":11,"type":"agent.hello"}\n',
   );
   assert.equal(
     encodeAgentRequest({
-      v: 10,
+      v: 11,
       type: "agent.proactive_started",
       proactive_id: "briefing-generation-a-terminal",
     }),
-    '{"v":10,"type":"agent.proactive_started","proactive_id":"briefing-generation-a-terminal"}\n',
+    '{"v":11,"type":"agent.proactive_started","proactive_id":"briefing-generation-a-terminal"}\n',
   );
   assert.throws(() =>
     encodeAgentRequest({
-      v: 10,
+      v: 11,
       type: "agent.proactive_started",
       proactive_id: "not an identifier",
     }),
   );
   assert.deepEqual(
     decodeAgentResponse(
-      '{"v":10,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}',
+      '{"v":11,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}',
     ),
     {
-      v: 10,
+      v: 11,
       type: "agent.message",
       id: "m-1",
       text: "hello",
@@ -246,7 +247,7 @@ test("agent v10 messages are bounded and channel-specific", () => {
   );
   assert.throws(() => decodeAgentResponse('{"v":6,"type":"agent.ready"}'));
   assert.throws(() =>
-    decodeAgentResponse('{"v":10,"type":"surface.ready","surface":"desk"}'),
+    decodeAgentResponse('{"v":11,"type":"surface.ready","surface":"desk"}'),
   );
 });
 
@@ -259,7 +260,7 @@ test("attachment descriptors are strict and reach the surface prompt", () => {
   };
   const message = decodeAgentResponse(
     JSON.stringify({
-      v: 10,
+      v: 11,
       type: "agent.message",
       id: "m-1",
       text: "See it.",
@@ -282,7 +283,7 @@ test("attachment descriptors are strict and reach the surface prompt", () => {
     assert.throws(() =>
       decodeAgentResponse(
         JSON.stringify({
-          v: 10,
+          v: 11,
           type: "agent.message",
           id: "m-1",
           text: "See it.",
@@ -312,13 +313,13 @@ test("framing retains partial lines and rejects oversized input", () => {
 });
 
 test("the agent client sends messages through sendUserMessage and steers while busy", async () => {
-  const root = await mkdtemp(join(tmpdir(), "scufris-agent-v10-"));
+  const root = await mkdtemp(join(tmpdir(), "scufris-agent-v11-"));
   const socketPath = join(root, "agent.sock");
   const server = createServer((socket) => {
     socket.once("data", () => {
-      socket.write('{"v":10,"type":"agent.ready"}\n');
+      socket.write('{"v":11,"type":"agent.ready"}\n');
       socket.write(
-        '{"v":10,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}\n',
+        '{"v":11,"type":"agent.message","id":"m-1","text":"hello","widgets":[]}\n',
       );
     });
   });
@@ -374,7 +375,7 @@ test("handshake EOF produces the local update-together message", async () => {
 test("a wake is decoded under its own kind with bounded details", () => {
   const wake = (fields: Record<string, unknown>) =>
     decodeAgentResponse(
-      JSON.stringify({ v: 10, type: "agent.wake", ...fields }),
+      JSON.stringify({ v: 11, type: "agent.wake", ...fields }),
     );
   assert.deepEqual(
     wake({
@@ -383,7 +384,7 @@ test("a wake is decoded under its own kind with bounded details", () => {
       details: { profile: "morning" },
     }),
     {
-      v: 10,
+      v: 11,
       type: "agent.wake",
       custom_type: "scufris-briefing",
       text: "The briefing is collected.",
@@ -391,7 +392,7 @@ test("a wake is decoded under its own kind with bounded details", () => {
     },
   );
   assert.deepEqual(wake({ custom_type: "scufris-wake", text: "Wake up." }), {
-    v: 10,
+    v: 11,
     type: "agent.wake",
     custom_type: "scufris-wake",
     text: "Wake up.",
@@ -578,9 +579,9 @@ test("a wake becomes a follow-up, never a user message", async () => {
   const socketPath = join(root, "agent.sock");
   const server = createServer((socket) => {
     socket.once("data", () => {
-      socket.write('{"v":10,"type":"agent.ready"}\n');
+      socket.write('{"v":11,"type":"agent.ready"}\n');
       socket.write(
-        '{"v":10,"type":"agent.wake","custom_type":"scufris-briefing","text":"Wake up.","details":{"profile":"morning"}}\n',
+        '{"v":11,"type":"agent.wake","custom_type":"scufris-briefing","text":"Wake up.","details":{"profile":"morning"}}\n',
       );
     });
   });
@@ -628,9 +629,9 @@ test("a durable wake is correlated only by the explicit turn identity", async ()
         for (const line of lines) {
           const message = JSON.parse(line) as Record<string, unknown>;
           if (message.type === "agent.hello") {
-            socket.write('{"v":10,"type":"agent.ready"}\n');
+            socket.write('{"v":11,"type":"agent.ready"}\n');
             socket.write(
-              '{"v":10,"type":"agent.wake","proactive_id":"briefing-generation-a-terminal","custom_type":"scufris-briefing","text":"Wake up."}\n',
+              '{"v":11,"type":"agent.wake","proactive_id":"briefing-generation-a-terminal","custom_type":"scufris-briefing","text":"Wake up."}\n',
             );
           } else if (
             message.type === "agent.proactive_started" ||
@@ -708,5 +709,70 @@ test("every refusal code is named the same on both sides", () => {
   assert.deepEqual(
     Object.fromEntries([...host].sort()),
     Object.fromEntries(Object.entries(REFUSAL).sort()),
+  );
+});
+
+// Verbs are the other half of the vocabulary, and they drift the same way a
+// refusal code does: a name added on one side only is a message nothing
+// answers. The two unions are read and compared whole.
+test("every agent verb is named the same on both sides", () => {
+  const verbs = (path: string, pattern: RegExp) => {
+    const source = readFileSync(
+      resolve(new URL("..", import.meta.url).pathname, path),
+      "utf8",
+    );
+    const found = new Set<string>();
+    for (const match of source.matchAll(pattern)) found.add(match[1]!);
+    return [...found].sort();
+  };
+  const host = verbs(
+    "shared/control/src/service.rs",
+    /rename = "(agent\.[a-z_]+)"/g,
+  );
+  assert.ok(host.length > 0, "no agent verbs were read from the Rust module");
+  assert.deepEqual(
+    verbs(
+      "agent/extensions/scufris/service/protocol.ts",
+      /type: "(agent\.[a-z_]+)"/g,
+    ),
+    host,
+  );
+});
+
+// The phone has no compiler here and no import of either module. Reading its
+// literals is what keeps a hand-written Swift decoder from answering a verb the
+// host never sends, or from claiming a version the host refuses.
+test("the phone names the version and the verbs the host uses", () => {
+  const root = new URL("..", import.meta.url).pathname;
+  const swift = readFileSync(
+    resolve(root, "surfaces/ios/Sources/Protocol.swift"),
+    "utf8",
+  );
+  const version = /let scufrisProtocolVersion = (\d+)/.exec(swift);
+  assert.equal(Number(version?.[1]), SERVICE_VERSION);
+
+  const module = readFileSync(
+    resolve(root, "shared/control/src/service.rs"),
+    "utf8",
+  );
+  const known = new Set(
+    [...module.matchAll(/rename = "([a-z_]+\.[a-z_]+)"/g)].map((m) => m[1]!),
+  );
+  const spoken = new Set<string>();
+  for (const name of ["Protocol.swift", "ConversationStore.swift"]) {
+    const source = readFileSync(
+      resolve(root, "surfaces/ios/Sources", name),
+      "utf8",
+    );
+    for (const match of source.matchAll(
+      /"(surface|job|briefing|offer)\.([a-z_]+)"/g,
+    )) {
+      spoken.add(`${match[1]}.${match[2]}`);
+    }
+  }
+  assert.ok(spoken.size > 0, "no verbs were read from the Swift sources");
+  assert.deepEqual(
+    [...spoken].filter((verb) => !known.has(verb)),
+    [],
   );
 });

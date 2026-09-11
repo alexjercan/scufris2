@@ -9,7 +9,8 @@ use std::{
 };
 
 use scufris_control::service::{
-    CONVERSATION_ENTRIES, ConversationMessage, validate_conversation_message,
+    CONVERSATION_ENTRIES, ConversationEntry, ConversationMessage, MAX_CONVERSATION_PAGE,
+    validate_conversation_message,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -85,12 +86,47 @@ impl ConversationHistory {
         self.entries.iter().map(|entry| &entry.message)
     }
 
+    /// The sequence of the newest entry, or zero when there is none.
+    ///
+    /// A holder joining the channel is told this number, and asks for
+    /// everything after the one it already has. Zero is "ask for everything",
+    /// which is what an empty replay should give.
+    pub fn latest_sequence(&self) -> u64 {
+        self.entries.back().map_or(0, |entry| entry.sequence)
+    }
+
+    /// One bounded page of the replay after `since`, and whether more follow.
+    ///
+    /// Text only: catch-up is what the next holder's model reads, and
+    /// receipts, offers, and attachments are surface state that the holder
+    /// cannot act on and should not repeat.
+    pub fn entries_since(&self, since: u64) -> (Vec<ConversationEntry>, bool) {
+        let mut page = Vec::new();
+        let mut more = false;
+        for entry in self.entries.iter().filter(|entry| entry.sequence > since) {
+            if page.len() == MAX_CONVERSATION_PAGE {
+                more = true;
+                break;
+            }
+            page.push(ConversationEntry {
+                sequence: entry.sequence,
+                role: entry.message.role,
+                surface: entry.message.surface.clone(),
+                text: entry.message.text.clone(),
+            });
+        }
+        (page, more)
+    }
+
     /// Adds one message to the replay and atomically snapshots the complete
     /// new bound. The in-memory replay remains current if storage fails, so a
     /// later message retries the complete snapshot.
-    pub fn record(&mut self, message: ConversationMessage) -> Result<(), PersistError> {
-        self.push(message, None);
-        self.persist()
+    ///
+    /// The assigned sequence comes back so the caller can acknowledge a
+    /// terminal turn with the place it was recorded at.
+    pub fn record(&mut self, message: ConversationMessage) -> Result<u64, PersistError> {
+        let sequence = self.push(message, None);
+        self.persist().map(|()| sequence)
     }
 
     /// Records one terminal proactive answer exactly once.
@@ -129,7 +165,7 @@ impl ConversationHistory {
             .map(|entry| &entry.message)
     }
 
-    fn push(&mut self, message: ConversationMessage, delivery_id: Option<String>) {
+    fn push(&mut self, message: ConversationMessage, delivery_id: Option<String>) -> u64 {
         if self.next_sequence == u64::MAX {
             self.resequence();
         }
@@ -143,6 +179,7 @@ impl ConversationHistory {
             delivery_id,
             message,
         });
+        sequence
     }
 
     /// Marks one offer taken, and says whether this press was the one that

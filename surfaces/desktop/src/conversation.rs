@@ -21,7 +21,7 @@
 use std::collections::VecDeque;
 
 use scufris_control::service::{
-    AttachmentDescriptor, BriefingRow, ConversationMessage, ConversationRole, JobRow,
+    AgentHolder, AttachmentDescriptor, BriefingRow, ConversationMessage, ConversationRole, JobRow,
     MAX_ATTACHMENTS, ScufrisState,
 };
 use serde::Serialize;
@@ -44,6 +44,8 @@ pub struct Notice {
     pub attachments: Vec<AttachmentDescriptor>,
     /// What went wrong, empty when nothing did.
     pub trouble: String,
+    /// Which process is the agent, as the service last said.
+    pub holder: AgentHolder,
 }
 
 /// One complete submission taken from the composer.
@@ -68,6 +70,10 @@ pub struct Conversation {
     /// The identifier of the line the service has not answered for yet.
     sending: Option<String>,
     thinking: bool,
+    /// Which process is the agent. Absent from the wire means the managed
+    /// child, so a service that never hands the agent over reads as it always
+    /// did.
+    holder: AgentHolder,
     attachments: Vec<AttachmentDescriptor>,
     /// The files the last `typed` took, kept until that line is answered for.
     ///
@@ -94,6 +100,7 @@ impl Conversation {
             briefings: Vec::new(),
             sending: None,
             thinking: false,
+            holder: AgentHolder::Managed,
             attachments: Vec::new(),
             withdrawn: Vec::new(),
             trouble: String::new(),
@@ -121,12 +128,13 @@ impl Conversation {
     }
 
     /// Presents the service's live agent state without adding conversation.
-    pub fn assistant(&mut self, state: ScufrisState) -> bool {
+    pub fn assistant(&mut self, state: ScufrisState, holder: AgentHolder) -> bool {
         let thinking = state == ScufrisState::Working;
-        if self.thinking == thinking {
+        if self.thinking == thinking && self.holder == holder {
             return false;
         }
         self.thinking = thinking;
+        self.holder = holder;
         true
     }
 
@@ -328,6 +336,7 @@ impl Conversation {
             thinking: self.thinking,
             attachments: self.attachments.clone(),
             trouble: self.trouble.clone(),
+            holder: self.holder,
         }
     }
 }
@@ -434,6 +443,7 @@ mod tests {
             Notice {
                 sending: false,
                 thinking: false,
+                holder: AgentHolder::Managed,
                 attachments: vec![],
                 trouble: String::new(),
             }
@@ -452,6 +462,7 @@ mod tests {
             Notice {
                 sending: false,
                 thinking: false,
+                holder: AgentHolder::Managed,
                 attachments: vec![],
                 trouble: "Scufris is not reachable.".into(),
             }
@@ -551,12 +562,27 @@ mod tests {
         assert!(conversation.notice().attachments.is_empty());
     }
 
+    /// The holder is not the state. A terminal at its prompt is idle, and the
+    /// pill says both, so a change in either is a change the page is told
+    /// about.
+    #[test]
+    fn who_holds_the_agent_is_part_of_what_the_page_is_told() {
+        let mut conversation = Conversation::new("p");
+        assert_eq!(conversation.notice().holder, AgentHolder::Managed);
+        assert!(conversation.assistant(ScufrisState::Idle, AgentHolder::Terminal));
+        assert_eq!(conversation.notice().holder, AgentHolder::Terminal);
+        assert!(!conversation.notice().thinking);
+        assert!(!conversation.assistant(ScufrisState::Idle, AgentHolder::Terminal));
+        assert!(conversation.assistant(ScufrisState::Idle, AgentHolder::Managed));
+        assert_eq!(conversation.notice().holder, AgentHolder::Managed);
+    }
+
     #[test]
     fn working_is_transient_and_a_final_answer_clears_it() {
         let mut conversation = Conversation::new("p");
-        assert!(conversation.assistant(ScufrisState::Working));
+        assert!(conversation.assistant(ScufrisState::Working, AgentHolder::Managed));
         assert!(conversation.notice().thinking);
-        assert!(!conversation.assistant(ScufrisState::Working));
+        assert!(!conversation.assistant(ScufrisState::Working, AgentHolder::Managed));
         assert!(conversation.said(said("done")));
         assert!(!conversation.notice().thinking);
         assert_eq!(conversation.lines().len(), 1);
@@ -565,10 +591,10 @@ mod tests {
     #[test]
     fn a_terminal_state_and_disconnect_clear_thinking() {
         let mut conversation = Conversation::new("p");
-        conversation.assistant(ScufrisState::Working);
-        assert!(conversation.assistant(ScufrisState::Blocked));
+        conversation.assistant(ScufrisState::Working, AgentHolder::Managed);
+        assert!(conversation.assistant(ScufrisState::Blocked, AgentHolder::Managed));
         assert!(!conversation.notice().thinking);
-        conversation.assistant(ScufrisState::Working);
+        conversation.assistant(ScufrisState::Working, AgentHolder::Managed);
         assert!(conversation.dropped("offline"));
         assert!(!conversation.notice().thinking);
     }
@@ -600,6 +626,7 @@ mod tests {
             Notice {
                 sending: false,
                 thinking: false,
+                holder: AgentHolder::Managed,
                 attachments: vec![],
                 trouble: "Scufris is not reachable.".into(),
             }

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stands in for the managed agent in the terminal lease test. Records its pid
+# and the arguments it was started with where the test asked, answers the boot
+# state so the service reads idle, and reads its stdin until the service closes
+# it. Checked in for the reason `agent` beside it is.
+printf '%s\n' "$$" >>"$SCUFRIS_TEST_PIDS"
+printf '%s\n' "$*" >>"$SCUFRIS_TEST_ARGS"
+printf '{"type":"response","id":"boot","success":true,"data":{"sessionFile":"%s","isStreaming":false}}\n' \
+  "$SCUFRIS_TEST_SESSION_FILE"
+cat >/dev/null

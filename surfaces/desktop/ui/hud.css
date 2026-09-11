@@ -79,6 +79,21 @@ body {
   color: var(--quartz);
 }
 
+/* Where the conversation is being answered, when that is not the usual place.
+ * Beside the mark rather than in the notice, because it outlasts every state
+ * the notice reports and is not about the line being typed. */
+.holder {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--quartz);
+}
+
+.holder:empty {
+  display: none;
+}
+
 /* What the window is waiting for, and what went wrong when something did. One
  * line, in the corner, because it is never the thing the person came to read. */
 .notice {

@@ -183,6 +183,71 @@ SCUFRIS_DESKTOP_COMMAND_SOCKET="$XDG_RUNTIME_DIR/scufris-staging/desktop-left.so
 
 These are the variables to keep explicit while several stacks are running.
 
+## Hold the conversation from a terminal
+
+A terminal can take the agent from the staging service and give it back. The
+service offers the lease only when it is started with
+`SCUFRIS_SERVICE_TERMINAL_LEASE=1`; without that every request is refused. Do
+this against staging first: the lease stops the agent of whichever service it
+reaches.
+
+Start a backend that offers the lease, and a companion to watch:
+
+```bash
+SCUFRIS_SERVICE_TERMINAL_LEASE=1 nix run .#staging -- backend
+nix run .#staging -- frontend left
+```
+
+Then, in a third terminal, from the repository root:
+
+```bash
+export SCUFRIS_RUNTIME_DIR="$XDG_RUNTIME_DIR/scufris-staging"
+export SCUFRIS_PROJECT_ROOTS='["/tmp/scufris-staging/projects"]'
+export SCUFRIS_TERMINAL_LOG=/tmp/scufris-staging/terminal.jsonl
+nix run .#scufris-terminal
+```
+
+`scufris-terminal` asks the service where its sessions are and which file the
+next holder continues from, then starts Pi on a fork of that file in this
+directory. The fork is what gives the model the context the phone built up.
+Plain `pi` with `SCUFRIS_TERMINAL=1` also works here and joins by catch-up
+instead, on a session of its own.
+
+Pi asks to trust the checkout on its first interactive start; a print-mode run
+needs `--approve`, because `-p` skips an untrusted project's `.pi` without a
+word.
+
+On start the extension takes the lease, the backend logs that the agent was
+stopped for a terminal, and the companion shows `starting` until this Pi has
+joined, then `idle` with `terminal` as the holder. `/scufris status` prints the
+same from here.
+
+What to try, and what `SCUFRIS_TERMINAL_LOG` records for each:
+
+| Case               | Do                                                                                                     | Expect                                                                                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| Typed turn         | Type a question.                                                                                       | `turn` with an id; the words appear in the companion as a user message; the answer appears under the same turn.                  |
+| Surface message    | Send from the companion.                                                                               | `surface_message`; the prompt shows in this terminal; the companion shows its own message and the answer.                        |
+| Commands           | `/compact`, `/model`, `/skill:den`.                                                                    | Built-in commands never reach `input`; a skill command reaches it with `command: true` and is recorded like any typed line.      |
+| Compaction         | `/compact`, or fill the context.                                                                       | `session_before_compact` and `session_compact` with the reason; the HUD is unchanged.                                            |
+| Steer or follow-up | Send from the companion while a turn runs.                                                             | `surface_message` with `busy: true`; the words land as a steer.                                                                  |
+| Session switch     | `/new` or `/resume`.                                                                                   | `session_before_switch`, then `session_start` with the new file; the lease is kept and the new session is declared.              |
+| Proactive wake     | `SCUFRIS_RUNTIME_DIR=$SCUFRIS_RUNTIME_DIR nix run .#scufris-ctl -- wake "Now."`                        | `wake`; the follow-up runs in this terminal; the answer is recorded as `unprompted`.                                             |
+| Attachments        | Ask for a file to be stored.                                                                           | `store_attachment` works through the staging `content.sock`; a typed turn cannot carry one.                                      |
+| Widgets            | Ask for a widget in the answer.                                                                        | Dropped from a terminal-owned answer; kept on a companion-owned one.                                                             |
+| Lineage            | Say a fact from the companion, attach, ask for it here; say a second, release, ask from the companion. | The model repeats both. A plain `pi` joined by catch-up repeats them from the catch-up text instead.                             |
+| Jobs               | Delegate from the companion, attach, then delegate from here and release.                              | Each job keeps its owner across the handoff; the holder that has the agent watches it and can cancel it; `orphans` stays empty.  |
+| Crash              | `kill -9` this Pi.                                                                                     | The backend ends the lease with `disconnected` and starts its agent again from this terminal's session; no release was recorded. |
+| Stopped terminal   | `kill -STOP` this Pi, wait 20 s, `kill -CONT`.                                                         | The backend ends the lease after three missed pings and starts its agent; the resumed Pi records `lease_lost` and reacquires.    |
+| Speech             | Set `speakTerminal`, then type a question.                                                             | The companion reads the answer out; with it off the companion stays silent and only shows the words.                             |
+| Clean exit         | `/quit` or Ctrl-D.                                                                                     | `session_shutdown`, `lease_released`; the backend starts its agent again with `--fork` on this terminal's session.               |
+| Backend gone       | Stop the backend while leased.                                                                         | `lease_lost`; this Pi keeps running and retries, backing off from one second to thirty.                                          |
+| Second terminal    | Start another `scufris-terminal`.                                                                      | `lease_refused` with `lease_held`; it runs as a plain terminal and keeps retrying.                                               |
+
+Jobs delegated from this terminal are owned by the conversation, not by this
+Pi's session, so they survive the handoff in both directions. `scufris-jobs
+orphans` names the jobs of some other owner.
+
 ## What it does not touch
 
 `$XDG_RUNTIME_DIR/scufris`, `~/.local/state/scufris`,

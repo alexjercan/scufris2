@@ -20,6 +20,12 @@ import {
   JOB_ROWS_EVENT,
   type JobCommandSignal,
 } from "../shared/job-rows.ts";
+import {
+  FOREGROUND_OWNER,
+  JOB_OWNER_VARIABLE,
+  OWNER_EVENT,
+  type OwnerSignal,
+} from "../shared/owner.ts";
 import { runPrivateHelper, toolPath, toolResult } from "../shared/runtime.ts";
 import {
   MAX_JOB_ROWS,
@@ -568,6 +574,68 @@ export class ForegroundAcknowledgmentGate {
   }
 }
 
+/**
+ * Who owns the work the foreground delegates, in the order of what knows.
+ *
+ * An announcement from the service binding is the live answer. Without one,
+ * the launcher's token says this process speaks for the conversation, and a
+ * plain Pi that was started by a person owns its own jobs under its session.
+ */
+export function resolveOwner(
+  announced: string | undefined,
+  environment: NodeJS.ProcessEnv,
+  sessionId: string | undefined,
+): string {
+  return announced ?? environment[JOB_OWNER_VARIABLE] ?? sessionId ?? "";
+}
+
+/**
+ * The owners whose records this one adopts on recovery.
+ *
+ * Only the conversation adopts, and only its own past. Records written before
+ * the token existed carry the session identifier of whoever wrote them, and
+ * rewriting them is what makes one handoff's jobs visible after the next.
+ */
+export function adoptedOwners(
+  holder: string,
+  sessionId: string | undefined,
+): string[] {
+  if (holder !== FOREGROUND_OWNER || !sessionId || sessionId === holder)
+    return [];
+  return [sessionId];
+}
+
+/**
+ * Whether this process exiting should suspend the work of `holder`.
+ *
+ * The agent moves between the service and a terminal by design, so work the
+ * conversation owns outlives every one of its holders and the next holder's
+ * recovery adopts it. Work under a session identifier has nobody else.
+ */
+export function suspendsOnExit(holder: string): boolean {
+  return holder !== FOREGROUND_OWNER;
+}
+
+/**
+ * What to say about worker panes this process cannot see or stop.
+ *
+ * Whose they are is as much as can be said. A pane the conversation owns is
+ * watched by whoever holds the agent now, so calling it abandoned would be
+ * wrong; a pane under a session identifier belongs to a Pi that is not here.
+ */
+export function strayWorkerNotice(
+  stray: Array<{ job_id: string; tmux_session: string; owner_kind?: string }>,
+): string | undefined {
+  if (stray.length === 0) return undefined;
+  const named = stray
+    .map((job) => `${job.job_id} in tmux session ${job.tmux_session}`)
+    .join(", ");
+  const whose = stray.every((job) => job.owner_kind === "conversation")
+    ? "Worker panes owned by the Scufris conversation are running under another holder of the agent, so this session cannot see their progress or stop them"
+    : "Worker panes from a previous foreground session are still running and this session cannot see their progress or stop them";
+  return `${whose}: ${named}. Say this to the user once, plainly, and tell them they can look with \`tmux attach -t <session>\` and end one with \`tmux kill-session -t <session>\`. Do not act on them yourself.`;
+}
+
 function jobIdOf(input: unknown): string | undefined {
   const value = (input as { job_id?: unknown } | undefined)?.job_id;
   return typeof value === "string" ? value : undefined;
@@ -868,7 +936,18 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   let eventStranded = false;
   let drainWakes = 0;
   let wakeMode: WakeMode = "minimal";
+  // Who owns the work this conversation delegates. The service binding says
+  // when it changed; until it says anything, the launcher's token names the
+  // conversation and a plain Pi owns its own jobs under its session id.
+  let announcedOwner: string | undefined;
   const acknowledgmentGate = registerForegroundAcknowledgmentLifecycle(pi);
+
+  const owner = (context?: ExtensionContext): string =>
+    resolveOwner(
+      announcedOwner,
+      process.env,
+      (context ?? extensionContext)?.sessionManager.getSessionId(),
+    );
 
   const publishRows = () => {
     pi.events.emit(
@@ -1324,7 +1403,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
           {
             job_id: generatedJobId,
             instructions: params.instructions,
-            owner_session: ctx.sessionManager.getSessionId(),
+            owner_session: owner(ctx),
             trusted_capability: trustedCapability,
             ...(resolved
               ? {
@@ -1786,18 +1865,94 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   // Only said. Another session's capabilities are not this one's to hold, so
   // nothing here can stop them; the tmux session names are what a person can
   // act on, so they are what is carried.
-  const reportStrayWorkers = async (owner: string) => {
+  // Takes the jobs of the current owner, whether that is the first read of a
+  // session or the moment the agent moved here from another process.
+  //
+  // `also` names what this owner used to be called: the session identifier of
+  // records written before the conversation had a token of its own. The helper
+  // rewrites those once and finding nothing is the normal answer afterwards.
+  const adoptJobs = async (ctx: ExtensionContext) => {
+    const holder = owner(ctx);
+    const adopted = adoptedOwners(holder, ctx.sessionManager.getSessionId());
+    const result = await runHelper<{
+      jobs: Array<
+        SpawnResult & {
+          trusted_capability: string;
+          summary: string;
+          window_alive: boolean;
+          status_file: string;
+        }
+      >;
+    }>("recover", {
+      owner_session: holder,
+      ...(adopted.length === 0 ? {} : { also: adopted }),
+    });
+    for (const recovered of result.jobs) {
+      const job: OwnedJob = { ...recovered };
+      jobs.set(job.job_id, job);
+      if (job.window_alive) watchJob(job);
+    }
+  };
+
+  // The agent moved. Nothing is stopped: the jobs of the owner this process
+  // no longer is keep running for whoever owns them now, and only this
+  // process's watch of them ends.
+  const changeOwner = async (signal: OwnerSignal) => {
+    if (signal.owner === announcedOwner) return;
+    announcedOwner = signal.owner;
+    const ctx = extensionContext;
+    const surrendered = [...jobs.values()];
+    jobs.clear();
+    for (const job of surrendered) {
+      job.status_watcher?.close();
+      job.status_watcher = undefined;
+    }
+    if (!ctx) return;
+    try {
+      await adoptJobs(ctx);
+      // A review surface belongs to the person looking at it. One whose job
+      // is still ours moves to the new record; one whose job is not closes,
+      // which ends a window and never a worker.
+      for (const job of surrendered) {
+        const review = job.quick_review;
+        job.quick_review = undefined;
+        if (!review) continue;
+        const carried = jobs.get(job.job_id);
+        if (carried) carried.quick_review = review;
+        else await review.close();
+      }
+      publishRows();
+      await readEvents();
+    } catch (error) {
+      if (ctx.hasUI)
+        ctx.ui.notify(
+          error instanceof Error ? error.message : String(error),
+          "error",
+        );
+    }
+  };
+
+  pi.events.on(OWNER_EVENT, (value: unknown) => {
+    const signal = value as OwnerSignal | undefined;
+    if (typeof signal?.owner !== "string" || signal.owner === "") return;
+    void changeOwner(signal);
+  });
+
+  const reportStrayWorkers = async (holder: string) => {
     const stray = await runHelper<{
-      jobs: Array<{ job_id: string; tmux_session: string; summary: string }>;
-    }>("orphans", { owner_session: owner });
-    if (stray.jobs.length === 0) return;
-    const named = stray.jobs
-      .map((job) => `${job.job_id} in tmux session ${job.tmux_session}`)
-      .join(", ");
+      jobs: Array<{
+        job_id: string;
+        tmux_session: string;
+        summary: string;
+        owner_kind: string;
+      }>;
+    }>("orphans", { owner_session: holder });
+    const notice = strayWorkerNotice(stray.jobs);
+    if (notice === undefined) return;
     pi.sendMessage(
       {
         customType: "scufris-job-event",
-        content: `Worker panes from a previous foreground session are still running and this session cannot see their progress or stop them: ${named}. Say this to the user once, plainly, and tell them they can look with \`tmux attach -t <session>\` and end one with \`tmux kill-session -t <session>\`. Do not act on them yourself.`,
+        content: notice,
         display: true,
         details: { stray_workers: stray.jobs },
       },
@@ -1818,23 +1973,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     ))
       deliveredEventIds.add(eventId);
     try {
-      const result = await runHelper<{
-        jobs: Array<
-          SpawnResult & {
-            trusted_capability: string;
-            summary: string;
-            window_alive: boolean;
-            status_file: string;
-          }
-        >;
-      }>("recover", {
-        owner_session: ctx.sessionManager.getSessionId(),
-      });
-      for (const recovered of result.jobs) {
-        const job: OwnedJob = { ...recovered };
-        jobs.set(job.job_id, job);
-        if (job.window_alive) watchJob(job);
-      }
+      await adoptJobs(ctx);
       // What Alex filed before the restart stays filed for that execution
       // generation. A later generation of the same logical job must appear.
       // Restoring after recovery lets us discard jobs that were stopped or
@@ -1850,7 +1989,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       // last night's failed row back in front of Alex.
       publishRows();
       await readEvents();
-      await reportStrayWorkers(ctx.sessionManager.getSessionId());
+      await reportStrayWorkers(owner(ctx));
     } catch (error) {
       if (ctx.hasUI)
         ctx.ui.notify(
@@ -1882,18 +2021,25 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     }
     eventReadController?.abort();
     eventReadController = undefined;
+    // Work the conversation owns outlives this process. The agent moves
+    // between the service and a terminal by design, and the next holder's
+    // recovery adopts it; suspending it here would stop a worker because one
+    // of its readers exited.
+    const holder = owner(context);
     try {
-      const suspended = await runHelper<{ errors: string[] }>(
-        "suspend-owner",
-        { owner_session: context.sessionManager.getSessionId() },
-        undefined,
-        30_000,
-      );
-      if (suspended.errors.length > 0 && extensionContext?.hasUI)
-        extensionContext.ui.notify(
-          `Scufris suspension incomplete: ${suspended.errors.join("; ")}`,
-          "error",
+      if (suspendsOnExit(holder)) {
+        const suspended = await runHelper<{ errors: string[] }>(
+          "suspend-owner",
+          { owner_session: holder },
+          undefined,
+          30_000,
         );
+        if (suspended.errors.length > 0 && extensionContext?.hasUI)
+          extensionContext.ui.notify(
+            `Scufris suspension incomplete: ${suspended.errors.join("; ")}`,
+            "error",
+          );
+      }
     } catch (error) {
       if (extensionContext?.hasUI)
         extensionContext.ui.notify(

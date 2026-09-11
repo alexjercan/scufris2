@@ -31,6 +31,10 @@ ARCHIVE_DIR = "_archive"
 UUID4 = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
+# The owner of work the conversation delegates. A session identifier changes
+# every time the agent moves between the service and a terminal; this does not,
+# so a job started before a handoff is still the conversation's after it.
+FOREGROUND_OWNER = "foreground"
 WORKER_EVENTS = {"working", "blocked", "done"}
 EVENTS = {*WORKER_EVENTS, "failed"}
 LOGICAL_STATES = {*EVENTS, "suspended"}
@@ -4096,11 +4100,64 @@ def recover_job(job: dict[str, Any]) -> dict[str, Any]:
     return job
 
 
+def adopt_owner(owner: str, previous: list[str]) -> int:
+    """Rewrites `owner_session` from each previous owner to `owner`.
+
+    A conversation that used to be owned by a session identifier becomes owned
+    by the conversation's own token. It runs once per record and finding
+    nothing is the normal answer on every start after the first.
+    """
+    adopted = 0
+    for job in all_job_records():
+        if job["owner_session"] == owner or job["owner_session"] not in previous:
+            continue
+        store_job({**job, "owner_session": owner})
+        adopted += 1
+    return adopted
+
+
+def owner_kind(owner: str) -> str:
+    """Whether a job belongs to the conversation or to one session."""
+    return "conversation" if owner == FOREGROUND_OWNER else "session"
+
+
+def migrate_owner(request: dict[str, Any]) -> dict[str, Any]:
+    """Moves every job of one owner to another, by hand.
+
+    The rollback of `recover --also`, and the only way to hand work to a named
+    session again once the conversation owns it.
+    """
+    validate_request(request, {"from_owner", "to_owner"})
+    source = request["from_owner"]
+    target = request["to_owner"]
+    for value in (source, target):
+        if not valid_record_text(value, 512):
+            raise JobError("owner must be text")
+    if source == target:
+        raise JobError("the owners are the same")
+    moved: list[str] = []
+    for job in all_job_records():
+        if job["owner_session"] != source:
+            continue
+        store_job({**job, "owner_session": target})
+        moved.append(job["job_id"])
+    return {"job_ids": sorted(moved)}
+
+
 def recover(request: dict[str, Any]) -> dict[str, Any]:
-    validate_request(request, {"owner_session"})
+    validate_request(request, {"owner_session"}, {"also"})
     owner = request["owner_session"]
     if not valid_record_text(owner, 512):
         raise JobError("owner session must be text")
+    # What this owner used to be called. The conversation's jobs were owned by
+    # a session identifier before the token existed, and are owned by the
+    # previous holder's identifier after a handoff that could not report.
+    previous = request.get("also", [])
+    if not isinstance(previous, list) or not all(
+        valid_record_text(value, 512) for value in previous
+    ):
+        raise JobError("also must be a list of owners")
+    adopted = adopt_owner(owner, previous)
     recovered: list[dict[str, Any]] = []
     for job in all_job_records():
         if job["owner_session"] != owner:
@@ -4136,7 +4193,7 @@ def recover(request: dict[str, Any]) -> dict[str, Any]:
                 "review_isolation": review_isolation(job["harness"], job["workspace"]),
             }
         )
-    return {"jobs": recovered}
+    return {"jobs": recovered, "adopted": adopted}
 
 
 def suspend_owner(request: dict[str, Any]) -> dict[str, Any]:
@@ -4178,6 +4235,11 @@ def orphans(request: dict[str, Any]) -> dict[str, Any]:
                 "job_id": job["job_id"],
                 "tmux_session": job["tmux_session_name"],
                 "summary": job["summary"],
+                # Which kind of owner, not which owner. A session identifier
+                # names nothing a person can act on; that the conversation
+                # holds it, or that some other terminal does, is the whole
+                # difference in what to say about it.
+                "owner_kind": owner_kind(job["owner_session"]),
             }
             for job in all_job_records()
             if job["owner_session"] != owner and pane_alive(job)
@@ -4215,6 +4277,7 @@ def main() -> int:
         "land": land,
         "stop": stop,
         "recover": recover,
+        "migrate-owner": migrate_owner,
         "suspend-owner": suspend_owner,
         "orphans": orphans,
     }
@@ -4238,6 +4301,7 @@ def main() -> int:
         "land",
         "stop",
         "recover",
+        "migrate-owner",
         "suspend-owner",
     }
     if command in mutating:

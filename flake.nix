@@ -60,6 +60,7 @@
             scufris-desktop = scufris.desktop;
             scufris-service = scufris.service;
             scufris-ctl = scufris.ctl;
+            scufris-terminal = scufris.terminal;
             scufris-staging = scufris.staging;
           };
 
@@ -86,6 +87,11 @@
               type = "app";
               program = "${scufris.ctl}/bin/scufris-ctl";
               meta.description = "Talk to Scufris from a terminal";
+            };
+            scufris-terminal = {
+              type = "app";
+              program = "${scufris.terminal}/bin/scufris-terminal";
+              meta.description = "Hold the Scufris conversation in this terminal";
             };
             ai-tools-api = {
               type = "app";

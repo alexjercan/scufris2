@@ -281,7 +281,7 @@ impl Surface {
 
 /// One thing the runtime is asked to do.
 ///
-/// Protocol v10 currently constructs only `Open`; the update and retirement
+/// Protocol v11 currently constructs only `Open`; the update and retirement
 /// commands remain tested runtime capabilities for local widget integrations.
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]

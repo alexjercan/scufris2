@@ -1,0 +1,237 @@
+[
+  {
+    "gate": "G1",
+    "pass": true,
+    "base": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G1/harness/sessions/2026-09-11T12-49-17-248Z_01a09083-e1c0-7137-8d75-0ed3bd5dfaeb.jsonl",
+    "rpc": {
+      "file": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G1/harness/sessions/2026-09-11T12-49-20-734Z_01a09083-ef5e-70fb-bde6-338d281dd260.jsonl",
+      "header": {
+        "type": "session",
+        "version": 3,
+        "id": "01a09083-ef5e-70fb-bde6-338d281dd260",
+        "timestamp": "2026-09-11T12:49:20.734Z",
+        "cwd": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G1/harness/terminal",
+        "parentSession": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G1/harness/sessions/2026-09-11T12-49-17-248Z_01a09083-e1c0-7137-8d75-0ed3bd5dfaeb.jsonl"
+      },
+      "parent_is_base": true,
+      "cwd": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G1/harness/terminal",
+      "cwd_is_terminal": true,
+      "copied_entry_types": [
+        "model_change",
+        "thinking_level_change",
+        "custom",
+        "message",
+        "message"
+      ],
+      "user_messages": 2,
+      "turn_appended": true,
+      "recalls": true
+    },
+    "tui": {
+      "file": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G1/harness/sessions/2026-09-11T12-49-25-727Z_01a09084-02de-71bf-8c34-8538fe10616d.jsonl",
+      "trace": [
+        {
+          "at": "2026-09-11T12:49:25.894Z",
+          "event": "session_start",
+          "reason": "startup",
+          "session": "01a09084-02de-71bf-8c34-8538fe10616d",
+          "file": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G1/harness/sessions/2026-09-11T12-49-25-727Z_01a09084-02de-71bf-8c34-8538fe10616d.jsonl",
+          "cwd": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G1/harness/terminal"
+        },
+        {
+          "at": "2026-09-11T12:49:33.557Z",
+          "event": "input",
+          "text": "What is the code word I gave you? Reply with only the word.",
+          "source": "interactive",
+          "images": 0,
+          "streaming": null
+        },
+        {
+          "at": "2026-09-11T12:49:33.559Z",
+          "event": "agent_start"
+        },
+        {
+          "at": "2026-09-11T12:50:03.595Z",
+          "event": "session_shutdown"
+        },
+        {
+          "at": "2026-09-11T12:50:03.605Z",
+          "event": "agent_settled"
+        }
+      ],
+      "header": {
+        "type": "session",
+        "version": 3,
+        "id": "01a09084-02de-71bf-8c34-8538fe10616d",
+        "timestamp": "2026-09-11T12:49:25.727Z",
+        "cwd": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G1/harness/terminal",
+        "parentSession": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G1/harness/sessions/2026-09-11T12-49-17-248Z_01a09083-e1c0-7137-8d75-0ed3bd5dfaeb.jsonl"
+      },
+      "parent_is_base": true,
+      "cwd_is_terminal": true,
+      "turn_appended": true,
+      "recalls": false,
+      "stalled": false
+    }
+  },
+  {
+    "gate": "G2",
+    "pass": true,
+    "home_file": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G2/harness/sessions/2026-09-11T12-50-04-009Z_01a09084-9869-76a2-8933-7411d5178fbe.jsonl",
+    "home_cwd": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G2/harness/home",
+    "project_file": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G2/harness/sessions/2026-09-11T12-50-07-739Z_01a09084-a6fb-7645-91e9-7e8e78c19ccd.jsonl",
+    "project_cwd": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G2/harness/project",
+    "grown": [
+      "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G2/harness/sessions/2026-09-11T12-50-04-009Z_01a09084-9869-76a2-8933-7411d5178fbe.jsonl"
+    ],
+    "created": [],
+    "stdout": "RESUMED"
+  },
+  {
+    "gate": "G3",
+    "pass": true,
+    "runs": {
+      "unguarded": {
+        "switches": 3560,
+        "completed": 3560,
+        "failed": 0,
+        "session_starts": 3561,
+        "resumed": true,
+        "seconds": 25.2,
+        "first_events": [
+          "session_start",
+          "gateattach_start",
+          "session_before_switch",
+          "dispatched",
+          "session_shutdown",
+          "session_start",
+          "gateattach_start",
+          "session_before_switch"
+        ]
+      },
+      "guarded": {
+        "switches": 1,
+        "completed": 1,
+        "failed": 0,
+        "session_starts": 2,
+        "resumed": true,
+        "seconds": 25.2,
+        "first_events": [
+          "session_start",
+          "gateattach_start",
+          "session_before_switch",
+          "dispatched",
+          "session_shutdown",
+          "session_start",
+          "gateattach_withsession",
+          "gateattach_done"
+        ]
+      }
+    },
+    "target": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G3/harness/sessions/2026-09-11T12-50-12-590Z_01a09084-b9ee-773d-9d1a-d315518ce39c.jsonl"
+  },
+  {
+    "gate": "G4",
+    "pass": true,
+    "inputs": [
+      {
+        "at": "2026-09-11T12:51:27.883Z",
+        "event": "input",
+        "text": "/skill:nothing-here",
+        "source": "interactive",
+        "images": 0,
+        "streaming": null
+      },
+      {
+        "at": "2026-09-11T12:51:30.924Z",
+        "event": "input",
+        "text": "Reply with only: TYPED",
+        "source": "interactive",
+        "images": 0,
+        "streaming": "steer"
+      }
+    ],
+    "extension_command_ran": true,
+    "bang_ran": true,
+    "skill_line_reached_input": true
+  },
+  {
+    "gate": "G5",
+    "pass": true,
+    "cancelled_reasons": ["new", "resume"],
+    "notice_drawn": true,
+    "session_starts": 1,
+    "created": [
+      "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G5/harness/sessions/2026-09-11T12-52-03-907Z_01a09086-6cc3-775d-9a90-d589e5b7d231.jsonl"
+    ],
+    "trace": [
+      {
+        "at": "2026-09-11T12:52:04.033Z",
+        "event": "session_start",
+        "reason": "startup",
+        "session": "01a09086-6cc3-775d-9a90-d589e5b7d231",
+        "file": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G5/harness/sessions/2026-09-11T12-52-03-907Z_01a09086-6cc3-775d-9a90-d589e5b7d231.jsonl",
+        "cwd": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G5/harness/project"
+      },
+      {
+        "at": "2026-09-11T12:52:11.696Z",
+        "event": "input",
+        "text": "Reply with only: ONE",
+        "source": "interactive",
+        "images": 0,
+        "streaming": null
+      },
+      {
+        "at": "2026-09-11T12:52:11.698Z",
+        "event": "agent_start"
+      },
+      {
+        "at": "2026-09-11T12:52:13.626Z",
+        "event": "agent_settled"
+      },
+      {
+        "at": "2026-09-11T12:52:36.871Z",
+        "event": "session_before_switch",
+        "reason": "new"
+      },
+      {
+        "at": "2026-09-11T12:52:36.872Z",
+        "event": "switch_cancelled",
+        "reason": "new"
+      },
+      {
+        "at": "2026-09-11T12:52:48.927Z",
+        "event": "session_before_switch",
+        "reason": "resume",
+        "target": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G5/harness/sessions/2026-09-11T12-52-03-907Z_01a09086-6cc3-775d-9a90-d589e5b7d231.jsonl"
+      },
+      {
+        "at": "2026-09-11T12:52:48.928Z",
+        "event": "switch_cancelled",
+        "reason": "resume"
+      },
+      {
+        "at": "2026-09-11T12:53:03.971Z",
+        "event": "session_shutdown"
+      }
+    ]
+  },
+  {
+    "gate": "G6",
+    "pass": true,
+    "modes": {
+      "nextTurn": {
+        "injected": true,
+        "custom_in_session": true,
+        "recalled": true,
+        "file": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G6/harness/sessions/2026-09-11T12-53-04-382Z_01a09087-58fd-74d3-b900-34da1398980a.jsonl"
+      },
+      "steer": {
+        "injected": true,
+        "custom_in_session": true,
+        "recalled": true,
+        "file": "/tmp/claude-1000/-home-alex--cache-sprouts-scufris2-terminal-pi-production/ac65c0b9-40b4-4dfe-be2a-289cf2b1c121/scratchpad/gate-full/G6/harness/sessions/2026-09-11T12-53-14-110Z_01a09087-7efe-74e4-afd8-86a44d641b7e.jsonl"
+      }
+    }
+  }
+]

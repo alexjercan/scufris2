@@ -166,6 +166,7 @@ in
       terminal_command=none
       restart_command=none
       speak_command=none
+      speak_terminal=false
       EOF
       diff -u expected-defaults defaults
 
@@ -184,6 +185,7 @@ in
         SCUFRIS_DESKTOP_CHAT_COMMAND=/nix/store/fake/bin/scufris-chat \
         SCUFRIS_DESKTOP_RESTART_COMMAND=/nix/store/fake/bin/scufris-restart-backend \
         SCUFRIS_DESKTOP_SPEAK_COMMAND=/nix/store/fake/bin/scufris-speak \
+        SCUFRIS_DESKTOP_SPEAK_TERMINAL=1 \
         ${desktop}/bin/scufris-desktop --print-config > overridden
       cat > expected-overridden <<'EOF'
       socket=/run/user/1000/scufris/surface.sock
@@ -198,6 +200,7 @@ in
       terminal_command=/nix/store/fake/bin/scufris-chat
       restart_command=/nix/store/fake/bin/scufris-restart-backend
       speak_command=/nix/store/fake/bin/scufris-speak
+      speak_terminal=true
       EOF
       diff -u expected-overridden overridden
 

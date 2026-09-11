@@ -48,7 +48,7 @@ interface Tick {
   level: number;
 }
 
-// Canonical protocol v10 conversation entry, relayed without reshaping.
+// Canonical protocol v11 conversation entry, relayed without reshaping.
 interface AttachmentDescriptor {
   id: string;
   name: string;
@@ -121,6 +121,8 @@ interface Notice {
   thinking: boolean;
   attachments: AttachmentDescriptor[];
   trouble: string;
+  /** Which process is the agent: the managed child, or a terminal. */
+  holder: "managed" | "terminal";
 }
 
 interface Backlog {

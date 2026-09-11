@@ -6,6 +6,7 @@
 worker event -> wake gate -> Pi turn -> final response -> service -> surfaces
 control.wake -> volatile agent.wake -> follow-up wake -> Pi turn
 control.briefing -> durable inbox -> correlated Pi turn -> canonical ack
+terminal typing -> agent.turn -> canonical user entry -> correlated answer
 quiet lifecycle update -> surface state only
 ```
 
@@ -13,12 +14,25 @@ Foreground Scufris coordinates three message flows: worker events into the
 conversation, workflow acknowledgments out of it, and the shaped final
 response to the user.
 
-Two ingress paths carry words into a turn. A `surface.message` is a user turn:
+Three ingress paths carry words into a turn. A `surface.message` is a user turn:
 it is recorded and echoed, and it opens the response association, which the
-answer to that turn closes. Everything else is a wake. A wake is an extension
-custom message delivered with `deliverAs: "followUp"` and `triggerTurn: true`.
-It is not a user turn, and it leaves the response association alone: an answer
-with no user turn open is recorded against `unprompted`.
+answer to that turn closes. An `agent.turn` is the same user turn typed into the
+terminal that holds the agent, recorded under the `terminal` surface. Everything
+else is a wake. A wake is an extension custom message delivered with
+`deliverAs: "followUp"` and `triggerTurn: true`. It is not a user turn, and it
+leaves the response association alone: an answer with no user turn open is
+recorded against `unprompted`.
+
+Every turn carries an identifier, and the answer names the turn it belongs to.
+Naming it is what keeps a phone's question and a locally typed question apart
+when both reach the same session. An answer naming a turn that already closed is
+still recorded; it does not steal the turn that is open.
+
+A fourth path carries words into the session without a turn at all. When an
+agent joins with a session that never saw the canonical conversation, the
+service sends `agent.catch_up`, and the agent injects one undisplayed custom
+message with `triggerTurn: false`. The model reads what it missed. Nobody is
+asked to answer it.
 
 ## Wakes from outside the agent process
 

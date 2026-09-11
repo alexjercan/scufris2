@@ -74,3 +74,21 @@ pub const BRIEFING_NOT_DISMISSIBLE: &str = "briefing_not_dismissible";
 
 /// The durable presentation-state write did not complete.
 pub const BRIEFING_DISMISSAL_FAILED: &str = "briefing_dismissal_failed";
+
+/// The service was not started with the terminal lease enabled.
+pub const LEASE_DISABLED: &str = "lease_disabled";
+
+/// Another control connection holds the terminal lease.
+pub const LEASE_HELD: &str = "lease_held";
+
+/// The lease is held and this hello did not carry its generation.
+pub const LEASE_REQUIRED: &str = "lease_required";
+
+/// The connection does not hold the lease it tried to use.
+pub const NOT_LEASE_HOLDER: &str = "not_lease_holder";
+
+/// The agent is mid-turn and the caller did not ask to abort it.
+pub const AGENT_BUSY: &str = "agent_busy";
+
+/// A heartbeat arrived for a lease that has already ended.
+pub const LEASE_PING_STALE: &str = "lease_ping_stale";

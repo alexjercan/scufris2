@@ -45,6 +45,14 @@
     briefing = defaults.briefingPackage;
     projectRoots = agentCfg.projectRoots;
   };
+  # The other end of the handoff. It is the same Pi the service would have
+  # started, told where the sessions are, so it is built from the same two
+  # packages the module already resolved rather than a third opinion.
+  terminal = import ./terminal.nix {
+    inherit pkgs;
+    piPackage = agentCfg.piPackage;
+    ctl = cfg.ctlPackage;
+  };
   # One unit pair for each profile, so a schedule is systemd's and the run
   # directory it collects into is that profile's own. The name is concrete
   # rather than a template instance: every profile carries its own OnCalendar,
@@ -446,6 +454,19 @@ in {
         '';
       };
 
+      terminalLease = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Let a terminal take the conversation from the service. Off by
+          default: with it off the service refuses every lease request and
+          keeps its own agent, which is the behaviour of a host that has never
+          heard of the handoff. Turning it off again on a host where a
+          terminal holds the lease is safe; the terminal loses the agent at
+          the next service restart and the service starts its own.
+        '';
+      };
+
       serviceName = lib.mkOption {
         type = lib.types.str;
         default = "scufris-service";
@@ -521,6 +542,17 @@ in {
           type = lib.types.strMatching "[A-Za-z0-9._-]+";
           default = "en_US-lessac-medium";
           description = "Speech voice sent to ai-tools-api.";
+        };
+
+        speakTerminal = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Speak an answer that a terminal asked for. Off by default: the
+            person typing in a terminal is usually at this machine and reads
+            the answer there, so speaking it would be the same words twice.
+            Needs `speech.enable`, which is what makes any sound at all.
+          '';
         };
       };
 
@@ -763,7 +795,12 @@ in {
         (lib.hm.assertions.assertPlatform "programs.scufris.service" pkgs lib.platforms.linux)
       ];
 
-      home.packages = [serviceCfg.package cfg.ctlPackage];
+      # The terminal launcher only where a terminal may take the agent. On a
+      # host with the lease off it would start a Pi the service refuses to
+      # hand anything to.
+      home.packages =
+        [serviceCfg.package cfg.ctlPackage]
+        ++ lib.optional serviceCfg.terminalLease terminal;
 
       systemd.user.services.${serviceCfg.serviceName} = {
         Unit = {
@@ -779,11 +816,14 @@ in {
           # Nothing about speech. The agent shapes every answer as one
           # prose paragraph whatever is listening, and whether a sound is
           # made is the companion's, which is where the speaker is.
-          Environment = [
-            "SCUFRIS_SERVICE_AGENT=${lib.getExe agentCfg.package}"
-            "SCUFRIS_SERVICE_SESSION_DIR=${serviceCfg.sessionDirectory}"
-            "SCUFRIS_SERVICE_CONVERSATION_FILE=${serviceCfg.conversationFile}"
-          ];
+          Environment =
+            [
+              "SCUFRIS_SERVICE_AGENT=${lib.getExe agentCfg.package}"
+              "SCUFRIS_SERVICE_SESSION_DIR=${serviceCfg.sessionDirectory}"
+              "SCUFRIS_SERVICE_CONVERSATION_FILE=${serviceCfg.conversationFile}"
+            ]
+            ++ lib.optional serviceCfg.terminalLease
+            "SCUFRIS_SERVICE_TERMINAL_LEASE=1";
           # The service restarts its own agent, so it going down is a fault of
           # the service itself and the conversation is on disk either way.
           Restart = "on-failure";
@@ -896,7 +936,9 @@ in {
             ++ lib.optional (widgetCfg.macrosDatabase != null)
             "MACROS_DATABASE=${widgetCfg.macrosDatabase}"
             ++ lib.optional speechCfg.enable
-            "SCUFRIS_DESKTOP_SPEAK_COMMAND=${lib.getExe speak}";
+            "SCUFRIS_DESKTOP_SPEAK_COMMAND=${lib.getExe speak}"
+            ++ lib.optional (speechCfg.enable && speechCfg.speakTerminal)
+            "SCUFRIS_DESKTOP_SPEAK_TERMINAL=1";
           # The companion must survive its own faults; a backend crash is
           # reported in the tray instead of taking the companion down.
           Restart = "on-failure";

@@ -9,6 +9,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-09-11
+
 ### Added
 
 - A terminal can hold the conversation. `scufris-terminal` starts normal
@@ -35,6 +37,22 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ### Fixed
 
+- Scheduled briefing sources can call `scufris-den` from their explicit unit
+  path without depending on an interactive login profile.
+- Proactive briefing delivery survives settlement before Pi starts a queued
+  message and deduplicates host redelivery across an agent reconnect. The
+  safety circuit distinguishes a recurring logical run from an honest backlog,
+  preserves measured summaries, and lets the next user turn retry stopped
+  rows; desktop and iPhone show that recovery instead of active work forever.
+- Briefing retention now fits every maximal row into the shared wire bound and
+  can evict the oldest stopped row before refusing new work. Publication
+  validates the run before taking a bounded lock and returns its canonical
+  prose on retry, while reconciliation reports a bounded set of refusals.
+- Filing a delegated-job row hides only that execution generation. Steering or
+  restarting the logical job makes its new active generation visible on every
+  surface without restoring the completed row that was acknowledged.
+- A widget summoned after the desktop has no free edge now explains the
+  capacity refusal in the HUD instead of writing it only to the journal.
 - Job receipts now recognize normal ancestry, squash-equivalent trees, and
   direct-base or no-content reconciliation as landed. They retain the actual
   base revision for post-cleanup receipts, measure publication from a remote
@@ -1140,7 +1158,8 @@ is unavailable: job.json`. Every variable that says where things are is now
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.7.0...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/alexjercan/scufris2/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/alexjercan/scufris2/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/alexjercan/scufris2/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/alexjercan/scufris2/compare/v2.4.1...v2.5.0

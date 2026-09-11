@@ -1,8 +1,8 @@
 # Terminal handoff production path
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 90
-- TAGS: pi,orchestration,protocol
+- TAGS: pi, orchestration, protocol
 
 Implement the production-ready terminal handoff described in
 `native-pi-scufris-clone/tasks/20260911-120039/DESIGN.md` without changing Pi
@@ -20,3 +20,8 @@ current master. Preserve the untracked surface study from
 `terminal-pi-surface-study/tasks/20260911-102043/`. Measure and record the
 Phase 0 Pi behaviour gates before code, and use the documented fallback when a
 gate fails. Convert debug naming to production naming, off by default.
+
+## Completion
+
+Implemented, verified through the recorded Phase 0 and acceptance gates, and
+landed on `master` as `ee84f869a7c604695e689c243feb9b38d22eda7d`.

@@ -979,6 +979,29 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     } satisfies FiledRowsEntry);
   };
 
+  /** What Alex filed, for the jobs this process has just adopted.
+   *
+   * The set is written into the session, so the branch is what it is read
+   * from, and the jobs in hand are what it is read against: a fence for work
+   * that is not here says nothing about a generation, and a legacy one cannot
+   * be migrated without it. A fence already held is kept, because every filing
+   * is persisted and nothing but a removed job unfiles a row.
+   *
+   * A terminal adopts the conversation's work only once the lease names it the
+   * holder, which is after its session started, so the restore at session
+   * start alone fenced nothing: every filed row came back to the surfaces on
+   * the next restart, and filing them again wrote the empty set over what was
+   * there.
+   */
+  const restoreFiling = (ctx: ExtensionContext) => {
+    const restored = restoreFiledRows(
+      ctx.sessionManager.getBranch(),
+      jobs.values(),
+    );
+    for (const [id, generation] of restored.filed) filed.set(id, generation);
+    if (restored.migratedLegacy) persistFiledRows();
+  };
+
   pi.registerCommand("wake", {
     description: "Control delegated-worker progress wakes: minimal or all.",
     getArgumentCompletions: (prefix) => {
@@ -1921,6 +1944,10 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         if (carried) carried.quick_review = review;
         else await review.close();
       }
+      // The work that just arrived arrives filed or unfiled, and only the
+      // session says which. Without this the rows of a conversation a terminal
+      // adopted were all published as new.
+      restoreFiling(ctx);
       publishRows();
       await readEvents();
     } catch (error) {
@@ -1978,12 +2005,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       // generation. A later generation of the same logical job must appear.
       // Restoring after recovery lets us discard jobs that were stopped or
       // landed and migrate broad v1 IDs without hiding active work.
-      const restored = restoreFiledRows(
-        ctx.sessionManager.getBranch(),
-        jobs.values(),
-      );
-      for (const [id, generation] of restored.filed) filed.set(id, generation);
-      if (restored.migratedLegacy) persistFiledRows();
+      restoreFiling(ctx);
       // A recovered job's terminal event was acknowledged before the restart
       // and is never redelivered, so this publish is the only thing that puts
       // last night's failed row back in front of Alex.

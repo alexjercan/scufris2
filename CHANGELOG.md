@@ -18,6 +18,15 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
   attachment. The wrapper is untouched in the session, in the model's context,
   and in the conversation the service replays, and `/calm off` still shows it.
 
+### Fixed
+
+- A job row that was filed stays filed after a restart. A terminal takes the
+  conversation after its session has started, so the work it owns arrives with
+  the lease; what was filed was read before that, against no jobs at all, and
+  every filed row came back to the HUD. Filing them again wrote the empty set
+  over what was there, so it never held. The holder now reads what was filed
+  when the work arrives.
+
 ## [2.8.1] - 2026-09-11
 
 ### Fixed

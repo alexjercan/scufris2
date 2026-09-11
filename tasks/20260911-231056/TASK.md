@@ -61,6 +61,26 @@ terminal that holds the conversation, and filing them again did not hold.
 - `nix develop -c npm run check`: TypeScript, 159 tests, and Prettier passed.
   Outside the development shell five `tests/briefing.test.ts` cases time out
   on a `python3` without markdown-it-py, on master as well as here.
-- Not deployed and not released. A terminal loads the extension from this
-  checkout, so `scufris-terminal` here already keeps the fence; the managed
-  child reads the packaged resources and is unchanged until a release.
+
+## Release
+
+- Scufris 2.8.2 (`da90de6`, tag `v2.8.2`), carrying this fix and the surface
+  message presentation. `SERVICE_VERSION` stayed at 11, so no surface had to
+  move with it and TestFlight was not needed.
+- Full checks before the tag: `nix develop -c npm run check` (159 tests), 411
+  Python tests, ruff, shellcheck, clippy with warnings denied, `cargo test`,
+  `nix fmt --check`, `nix flake check -L`, `git diff --check`. The one Prettier
+  warning was an untracked task another run was writing at the time; every
+  tracked file passed.
+- CI on the push: `release`, `check`, `Documentation`, and `iOS` all succeeded.
+  The release is source only, as the process requires.
+
+## Deploy
+
+- `personal/nix.dotfiles` input bumped to `v2.8.2` (`f671e2e`, not pushed) and
+  `home-manager switch --flake .#alex`.
+- `scufris-service-2.8.2` is active with all five sockets bound; the desktop
+  and the gateway are active; a terminal holds the lease again.
+- A surface probe of `surface.sock` reports no job rows.
+- The switch stopped the nightly briefing 45 minutes into its run, and that
+  run is recorded as failed. Nothing was lost but the night's review.

@@ -9,6 +9,14 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Fixed
+
+- Job receipts now recognize normal ancestry, squash-equivalent trees, and
+  direct-base or no-content reconciliation as landed. They retain the actual
+  base revision for post-cleanup receipts, measure publication from a remote
+  tag instead of treating any CI run as a release, and no longer read negated
+  or attributive landing words as completion claims.
+
 ## [2.7.0] - 2026-09-10
 
 ### Changed

@@ -75,6 +75,8 @@ def displayable(text: str) -> bool:
     the door the caller can see rather than two processes later.
     """
     return text.isprintable()
+
+
 MAX_EVENT_BATCH = 1024 * 1024
 MAX_REPORT_ENTRY = MAX_REPORT_DETAIL + MAX_EVENT_LINE + 5
 MAX_REPORT_FILE = 2 * 1024 * 1024
@@ -85,6 +87,8 @@ MAX_RECEIPTS_FILE = 256 * 1024
 # A receipt is measured inside a foreground wake, so every git and `gh` call
 # gets a short leash rather than the helper's ordinary 120 second default.
 RECEIPT_TIMEOUT = 15
+LANDING_HISTORY_LIMIT = 256
+RELEASE_LIST_LIMIT = 100
 RECEIPT_TRIGGERS = {*EVENTS, "land", "stop", "request"}
 LEGACY_JOB_FIELDS = {
     "job_id",
@@ -3180,6 +3184,74 @@ def measured_ancestor(
     return completed.returncode == 0, None
 
 
+def measured_unchanged_merge(
+    source: str, base_revision: str, cwd: Path
+) -> tuple[bool | None, str | None]:
+    """Whether combining `source` into one base revision changes no content."""
+    base_tree, reason = measured_text(
+        ["git", "rev-parse", f"{base_revision}^{{tree}}"], cwd
+    )
+    if base_tree is None:
+        return None, reason
+    # Exit 1 means merge conflicts. Git still writes the conflicted tree ID as
+    # the first line, which is enough to measure that it differs from the base.
+    completed, reason = measured(
+        ["git", "merge-tree", "--write-tree", base_revision, source],
+        cwd,
+        accept=(0, 1),
+    )
+    if completed is None:
+        return None, reason
+    lines = completed.stdout.decode("utf-8", "replace").splitlines()
+    merged_tree = lines[0].strip() if lines else ""
+    if re.fullmatch(r"[a-f0-9]{40,64}", merged_tree) is None:
+        return None, "git merge-tree returned no readable tree"
+    return merged_tree == base_tree, None
+
+
+def measured_landing(
+    source: str, base_ref: str, cwd: Path
+) -> tuple[bool | None, str | None, str | None]:
+    """Measures content landing and identifies the base revision that did it.
+
+    Ancestry preserves the ordinary Git answer. Squash and direct-base work
+    have different commit identities, so walk back over the base's first-parent
+    history while merging the source would leave each candidate unchanged. The
+    oldest consecutive match is the revision by which the content was present.
+    """
+    ancestor, reason = measured_ancestor(source, base_ref, cwd)
+    if ancestor is None:
+        return None, None, reason
+    if ancestor:
+        return True, source, None
+
+    history, reason = measured_text(
+        [
+            "git",
+            "rev-list",
+            "--first-parent",
+            f"--max-count={LANDING_HISTORY_LIMIT}",
+            base_ref,
+        ],
+        cwd,
+    )
+    if history is None:
+        return None, None, reason
+    landed_revision: str | None = None
+    for candidate in history.splitlines():
+        unchanged, reason = measured_unchanged_merge(source, candidate, cwd)
+        if unchanged is None:
+            if landed_revision is None:
+                return None, None, reason
+            break
+        if not unchanged:
+            break
+        landed_revision = candidate
+    if landed_revision is None:
+        return False, None, None
+    return True, landed_revision, None
+
+
 def record_fact(
     facts: dict[str, Any],
     unavailable: dict[str, str],
@@ -3243,7 +3315,14 @@ def measure_remote(
     facts: dict[str, Any],
     unavailable: dict[str, str],
 ) -> None:
-    remote_names = ("pushed", "ahead", "behind", "tags_remote", "release_run")
+    remote_names = (
+        "pushed",
+        "ahead",
+        "behind",
+        "tags_remote",
+        "release_run",
+        "release",
+    )
     listed, reason = measured_text(["git", "remote"], project_root)
     if listed is None:
         facts["remote"] = None
@@ -3289,8 +3368,9 @@ def measure_remote(
     else:
         facts["ahead"], facts["behind"] = int(fields[0]), int(fields[1])
 
-    measure_remote_tags(project_root, remote, commit, facts, unavailable)
+    remote_tags = measure_remote_tags(project_root, remote, commit, facts, unavailable)
     measure_release_run(project_root, commit, facts, unavailable)
+    measure_published_release(project_root, remote_tags, facts, unavailable)
 
 
 def measure_remote_tags(
@@ -3299,16 +3379,16 @@ def measure_remote_tags(
     commit: str | None,
     facts: dict[str, Any],
     unavailable: dict[str, str],
-) -> None:
+) -> list[str] | None:
     if commit is None:
         unmeasurable(
             facts, unavailable, ("tags_remote",), "there is no revision to measure"
         )
-        return
+        return None
     listed, reason = measured_text(["git", "ls-remote", "--tags", remote], project_root)
     if listed is None:
         unmeasurable(facts, unavailable, ("tags_remote",), reason or "unreadable")
-        return
+        return None
     tags: list[str] = []
     for line in listed.splitlines():
         parts = line.split("\t")
@@ -3319,6 +3399,7 @@ def measure_remote_tags(
             if name and name not in tags:
                 tags.append(name)
     facts["tags_remote"] = tags
+    return tags
 
 
 def measure_release_run(
@@ -3362,6 +3443,72 @@ def measure_release_run(
         )
         return
     facts["release_run"] = runs[0] if runs and isinstance(runs[0], dict) else None
+
+
+def measure_published_release(
+    project_root: Path,
+    remote_tags: list[str] | None,
+    facts: dict[str, Any],
+    unavailable: dict[str, str],
+) -> None:
+    """Measures publication, rather than treating any CI run as a release."""
+    if remote_tags is None:
+        reason = unavailable.get("tags_remote", "remote tags could not be measured")
+        unmeasurable(facts, unavailable, ("release",), reason)
+        return
+    if not remote_tags:
+        facts["release"] = False
+        return
+    listed, reason = measured_text(
+        [
+            "gh",
+            "release",
+            "list",
+            "--limit",
+            str(RELEASE_LIST_LIMIT),
+            "--json",
+            "isDraft,isPrerelease,publishedAt,tagName,url",
+        ],
+        project_root,
+    )
+    if listed is None:
+        unmeasurable(
+            facts,
+            unavailable,
+            ("release",),
+            reason or "published releases could not be measured",
+        )
+        return
+    try:
+        releases = json.loads(listed or "[]")
+    except json.JSONDecodeError:
+        unmeasurable(facts, unavailable, ("release",), "gh returned unreadable JSON")
+        return
+    if not isinstance(releases, list) or not all(
+        isinstance(release, dict) for release in releases
+    ):
+        unmeasurable(facts, unavailable, ("release",), "gh returned unreadable JSON")
+        return
+    tag_set = set(remote_tags)
+    for release in releases:
+        published_at = release.get("publishedAt")
+        if (
+            release.get("tagName") in tag_set
+            and release.get("isDraft") is False
+            and isinstance(published_at, str)
+            and published_at.strip()
+        ):
+            facts["release"] = release
+            return
+    if len(releases) >= RELEASE_LIST_LIMIT:
+        unmeasurable(
+            facts,
+            unavailable,
+            ("release",),
+            f"no matching release among the newest {RELEASE_LIST_LIMIT}",
+        )
+        return
+    facts["release"] = False
 
 
 def measure_workspace(subject: dict[str, Any]) -> dict[str, Any]:
@@ -3426,16 +3573,17 @@ def measure_workspace(subject: dict[str, Any]) -> dict[str, Any]:
             reason,
         )
 
-    # The revision this receipt is about: what `land` recorded, else the
-    # workspace HEAD, else the feature branch tip.
-    commit = job_cleanup_revision(subject) or facts.get("head")
-    if commit is None and workspace == "sprout" and facts.get("branch_exists"):
-        commit, _ = measured_text(
+    # Start with the source revision: what `land` recorded, else the workspace
+    # HEAD, else the feature branch tip. Content-equivalent landings replace it
+    # below with the base revision that actually carries the content.
+    source = job_cleanup_revision(subject) or facts.get("head")
+    if source is None and workspace == "sprout" and facts.get("branch_exists"):
+        source, _ = measured_text(
             ["git", "rev-parse", f"refs/heads/{subject['feature']}"], project_root
         )
-    context["commit"] = commit
 
-    if commit is None:
+    commit = source
+    if source is None:
         unmeasurable(
             facts,
             unavailable,
@@ -3444,9 +3592,13 @@ def measure_workspace(subject: dict[str, Any]) -> dict[str, Any]:
         )
         facts["landed_revision"] = None
     else:
-        landed, reason = measured_ancestor(commit, f"refs/heads/{base}", project_root)
+        landed, landed_revision, reason = measured_landing(
+            source, f"refs/heads/{base}", project_root
+        )
         record_fact(facts, unavailable, "landed", landed, reason)
-        facts["landed_revision"] = commit if facts.get("landed") else None
+        facts["landed_revision"] = landed_revision if landed else None
+        if landed_revision is not None:
+            commit = landed_revision
         tags, reason = measured_text(
             ["git", "tag", "--points-at", commit], project_root
         )
@@ -3457,6 +3609,7 @@ def measure_workspace(subject: dict[str, Any]) -> dict[str, Any]:
             [tag for tag in (tags or "").splitlines() if tag.strip()],
             reason,
         )
+    context["commit"] = commit
 
     measure_remote(project_root, base, commit, facts, unavailable)
     return {**context, "facts": facts, "unavailable": unavailable}
@@ -3470,7 +3623,7 @@ CLAIM_RULES: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     ("pushed", "pushed", re.compile(r"\bpushed\b", re.IGNORECASE)),
     (
         "released",
-        "release_run",
+        "release",
         re.compile(
             r"\breleased\b|\brelease\s+(?:was\s+)?(?:created|published|cut)\b",
             re.IGNORECASE,
@@ -3516,6 +3669,42 @@ def latest_report_entry(job_id: str) -> str:
     return text[index + 1 :] if index >= 0 else text
 
 
+def positive_claim_match(
+    text: str, name: str, pattern: re.Pattern[str]
+) -> re.Match[str] | None:
+    """Finds completed-action wording, excluding negation and adjectives."""
+    for match in pattern.finditer(text):
+        boundary = max(
+            text.rfind("\n", 0, match.start()),
+            text.rfind(".", 0, match.start()),
+            text.rfind(";", 0, match.start()),
+            text.rfind("!", 0, match.start()),
+            text.rfind("?", 0, match.start()),
+        )
+        prefix = text[boundary + 1 : match.start()]
+        negations = list(
+            re.finditer(
+                r"\b(?:no|not|never|without)\b(?!\s+only\b)",
+                prefix,
+                re.IGNORECASE,
+            )
+        )
+        if negations:
+            after = prefix[negations[-1].end() :]
+            if re.search(r"\b(?:but|however)\b", after, re.IGNORECASE) is None:
+                continue
+        if name == "landed" and re.search(
+            r"\b(?:a|an|the|this|that|these|those)\s+$",
+            prefix,
+            re.IGNORECASE,
+        ):
+            # "the landed safeguards" and "a merged branch" describe a noun;
+            # they do not claim that this job completed a landing.
+            continue
+        return match
+    return None
+
+
 def claim_checks(
     job_id: str, facts: dict[str, Any], unavailable: dict[str, str]
 ) -> list[dict[str, Any]]:
@@ -3526,7 +3715,7 @@ def claim_checks(
     text = latest_report_entry(job_id)
     claims: list[dict[str, Any]] = []
     for name, field, pattern in CLAIM_RULES:
-        match = pattern.search(text)
+        match = positive_claim_match(text, name, pattern)
         if match is None:
             continue
         support = fact_support(facts.get(field))
@@ -3711,22 +3900,11 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
 
     project_root = canonical_path(Path(root["project_root"]))
     branch = root["landing_branch"]
-    already_landed = (
-        run(
-            ["git", "merge-base", "--is-ancestor", revision, f"refs/heads/{branch}"],
-            cwd=project_root,
-            check=False,
-        ).returncode
-        == 0
+    already_landed, landed_revision, landing_reason = measured_landing(
+        revision, f"refs/heads/{branch}", project_root
     )
-    if not already_landed and Path(root["working_directory"]).exists():
-        feature_tree = run(
-            ["git", "rev-parse", f"{revision}^{{tree}}"], cwd=project_root
-        ).stdout.strip()
-        branch_tree = run(
-            ["git", "rev-parse", f"refs/heads/{branch}^{{tree}}"], cwd=project_root
-        ).stdout.strip()
-        already_landed = feature_tree == branch_tree
+    if already_landed is None:
+        raise JobError(landing_reason or "the landing state could not be measured")
     if not already_landed:
         validate_workspace_identity(root)
         # This guard reads the project checkout, not the workers, so it runs
@@ -3743,6 +3921,10 @@ def land(request: dict[str, Any]) -> dict[str, Any]:
             .stdout.decode()
             .strip()
         )
+    if landed_revision is not None and landed_revision != revision:
+        # A squash or no-content retry has a source identity that cannot be an
+        # ancestor of the base. Persist the base revision that carries it so a
+        # post-removal receipt and any cleanup retry measure the same truth.
         root = load_job(root["job_id"])
         root = {**root, "cleanup": {**intent, "revision": landed_revision}}
         store_job(root)

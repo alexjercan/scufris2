@@ -480,12 +480,12 @@ test("no model writes a badge: they are read off the measured receipt", () => {
   assert.deepEqual(
     receiptBadges({
       ...receipt,
-      facts: { landed: true, pushed: true, dirty: false, release_run: null },
+      facts: { landed: true, pushed: true, dirty: false, release: null },
       claims: [
         {
           claim: "released",
           said: "released v2.4.0",
-          field: "release_run",
+          field: "release",
           measured: null,
           reason: null,
           verdict: "claimed, not verified",

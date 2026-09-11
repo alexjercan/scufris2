@@ -211,26 +211,34 @@ Measured per workspace kind:
 
 - `sprout`: `head`, `dirty`, `landed`, `landed_revision`, `branch_exists`,
   `worktree_exists`, `remote`, `pushed`, `ahead`, `behind`, `tags_local`,
-  `tags_remote`, and `release_run`.
+  `tags_remote`, `release_run`, and `release`.
 - `project`: the same, without the feature branch and worktree facts.
 - `review`: the source job's workspace, because a reviewer shares it and owns
   no facts of its own. `measured_job` names the job actually measured.
 - `temporary`: no repository, recorded as the reason.
 
-Ancestry answers `landed` and `pushed`, against `refs/heads/<base>` and against
+Ancestry answers the normal `landed` case. A squash or direct-base workflow has
+a different commit identity, so the helper also combines the source with the
+base. When that merge leaves the base unchanged, no committed content remains
+to land. Walking back through consecutive matching first-parent revisions finds
+the base revision that first carried the content; remote, tag, CI, and release
+facts are measured against that revision. `pushed` then uses ancestry against
 `refs/remotes/<remote>/<base>` after a fetch. `git rev-list --left-right
 --count` gives `ahead` and `behind`, `git ls-remote --tags` gives the remote
-tags pointing at the revision, and `gh run list --commit` gives the CI run.
-Every call has a 15 second timeout, because the extension runs this inside a
-wake. The fetch updates remote-tracking refs in the real checkout; nothing
-touches the working tree, a local branch, or the index.
+tags pointing at the revision, `gh run list --commit` gives its CI run, and
+`gh release list` verifies publication when a remote tag points at it. Every
+call has a 15 second timeout, because the extension runs this inside a wake.
+The fetch and merge probe write Git objects and remote-tracking refs only;
+nothing touches the working tree, a local branch, or the index.
 
 `claims` is derived rather than measured, and stays out of `facts` for that
-reason. It matches completed-action wording in the newest report entry against
-the field that would back it. "ready to push" is not a claim that anything was
-pushed. An unbacked claim gets the verdict `claimed, not verified`, and
-`sentences` holds the exact words the foreground repeats, including
-`not landed`.
+reason. It matches positive completed-action wording in the newest report entry
+against the field that would back it. "ready to push" is not a claim that
+anything was pushed, `not landed or released` contains no positive claims, and
+`the landed safeguards` is an adjective rather than a claim. A published
+release, not an arbitrary CI run, backs `released`. An unbacked claim gets the
+verdict `claimed, not verified`, and `sentences` holds the exact words the
+foreground repeats, including `not landed`.
 
 ## Land, stop, and archive
 
@@ -241,10 +249,11 @@ Cleanup is workflow-scoped and archival:
   optionally removes Sprout worktrees, then archives descendants before the
   root.
 - `land` requires a Sprout workflow root. It records a durable `land` intent
-  with the exact revision, stops the graph, and lands with
+  with the exact source revision, stops the graph, and lands with
   `sprout land --dry-run` then `sprout land`. Already-landed revisions are
-  detected by ancestry or tree equality, so a retry is safe. Cleanup then
-  archives the graph.
+  detected by ancestry or by an unchanged merge into the base, so squash and
+  no-content retries are safe. It then records the base revision that carries
+  equivalent content. Cleanup archives the graph.
 - Archiving stamps `archived_at` and moves the job directory into
   `jobs/_archive/`. Reports, prompts, conversations, and harness transcripts
   stay readable; archived jobs refuse every reviving operation.

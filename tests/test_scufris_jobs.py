@@ -2712,12 +2712,88 @@ with (directory / 'status').open('a') as stream:
         )["result"]
         self.assertTrue(landed["landed"])
         self.assertTrue(landed["workspace_removed"])
+        self.assertIs(landed["receipt"]["facts"]["landed"], True)
+        self.assertEqual(
+            landed["receipt"]["commit"], self.git("rev-parse", "refs/heads/master")
+        )
+        self.assertNotIn("not landed", landed["receipt"]["sentences"])
         self.assertEqual(set(landed["removed_jobs"]), {job_id, reviewer_id})
         self.assert_archived(reviewer_id)
         self.assert_archived(job_id)
         self.assertEqual(
             (self.project / "RESULT.md").read_text(), "replacement works\n"
         )
+        self.assertFalse(worktree.exists())
+
+    @unittest.skipUnless(SPROUT, "sprout is not installed")
+    def test_manual_squash_and_official_noop_both_report_landed(self) -> None:
+        context = self.call("context", {"project": "projects/nova-protocol"})["result"]
+        job_id = "aa0000000013"
+        feature = f"manual-squash-{self.run_token}"
+        self.call(
+            "spawn",
+            {
+                "job_id": job_id,
+                "instructions": "Prepare the manually landed fixture.",
+                "owner_session": "manual-squash-owner",
+                "project": context["project"],
+                "project_root": context["project_root"],
+                "context_markdown": context["markdown"],
+                "context_fingerprint": context["fingerprint"],
+                "workspace": "sprout",
+                "feature": feature,
+            },
+        )
+        self.jobs.append(job_id)
+        directory = self.root / "state" / "scufris" / "jobs" / job_id
+        self.wait_for(directory / "status", "done: report complete")
+        record = json.loads((directory / "job.json").read_text())
+        worktree = Path(record["working_directory"])
+        (worktree / "RESULT.md").write_text("manual squash\n")
+        self.git("add", "RESULT.md", cwd=worktree)
+        self.git("commit", "-q", "-m", "feature identity", cwd=worktree)
+        source_revision = self.git("rev-parse", "HEAD", cwd=worktree)
+
+        subprocess.run(
+            ["sprout", "land", feature, "-m", "Manual squash landing"],
+            cwd=self.project,
+            env=self.env,
+            check=True,
+            capture_output=True,
+        )
+        landed_revision = self.git("rev-parse", "master")
+        self.assertNotEqual(source_revision, landed_revision)
+        self.assertEqual(
+            self.git("rev-parse", f"{source_revision}^{{tree}}"),
+            self.git("rev-parse", f"{landed_revision}^{{tree}}"),
+        )
+        (directory / "report.md").write_text(
+            "# done: Synced, re-verified, and landed the fix on master.\n"
+        )
+
+        done_receipt = self.call("receipt", {"job_id": job_id, "trigger": "done"})[
+            "result"
+        ]
+        self.assertIs(done_receipt["facts"]["landed"], True)
+        self.assertEqual(done_receipt["commit"], landed_revision)
+        self.assertEqual(done_receipt["claims"][0]["verdict"], "verified")
+        self.assertEqual(done_receipt["sentences"], [])
+
+        result = self.call(
+            "land",
+            {
+                "job_id": job_id,
+                "subject": "Manual squash landing",
+                "remove_workspace": True,
+            },
+        )["result"]
+        self.assertTrue(result["landed"])
+        self.assertIs(result["receipt"]["facts"]["landed"], True)
+        self.assertEqual(result["receipt"]["commit"], landed_revision)
+        self.assertEqual(result["receipt"]["claims"][0]["verdict"], "verified")
+        self.assertEqual(result["receipt"]["sentences"], [])
+        archived = self.assert_archived(job_id)
+        self.assertEqual(archived["cleanup"]["revision"], landed_revision)
         self.assertFalse(worktree.exists())
 
     # ------------------------------------------------------------------
@@ -2775,7 +2851,10 @@ with (directory / 'status').open('a') as stream:
             (directory / "report.md").write_text(report)
         return directory
 
-    def sprout_job(self, job_id: str, feature: str) -> Path:
+    def sprout_job(
+        self, job_id: str, feature: str, working_directory: Path | None = None
+    ) -> Path:
+        working = working_directory or self.project
         return self.fixture_job(
             job_id,
             {
@@ -2786,10 +2865,17 @@ with (directory / 'status').open('a') as stream:
                 "context_fingerprint": hashlib.sha256(b"context").hexdigest(),
                 "workspace": "sprout",
                 "feature": feature,
-                "working_directory": str(self.project),
+                "working_directory": str(working),
+                "workspace_device": working.stat().st_dev,
+                "workspace_inode": working.stat().st_ino,
                 "landing_branch": "master",
             },
         )
+
+    def feature_worktree(self, feature: str) -> Path:
+        working = self.root / f"worktree-{feature}"
+        self.git("worktree", "add", "-q", "-b", feature, str(working), "master")
+        return working
 
     def merged_feature_commit(self) -> str:
         self.git("checkout", "-q", "-b", "feature-work")
@@ -2818,6 +2904,7 @@ with (directory / 'status').open('a') as stream:
         self.assertIs(facts["landed"], True)
         self.assertIs(facts["pushed"], False)
         self.assertIsNone(facts["release_run"])
+        self.assertIs(facts["release"], False)
         self.assertEqual(facts["ahead"], 1)
         self.assertEqual(facts["behind"], 0)
         self.assertEqual(facts["remote"], "origin")
@@ -2833,7 +2920,9 @@ with (directory / 'status').open('a') as stream:
         self.assertIn("claimed, not verified", printed)
         self.assertIn("pushed: false", printed)
 
-    def test_receipt_says_not_landed_in_those_words(self) -> None:
+    def test_receipt_says_not_landed_without_treating_negation_as_a_claim(
+        self,
+    ) -> None:
         self.with_origin()
         self.git("checkout", "-q", "-b", "feature-unlanded")
         (self.project / "RESULT.md").write_text("unlanded\n")
@@ -2841,12 +2930,75 @@ with (directory / 'status').open('a') as stream:
         self.git("commit", "-q", "-m", "unlanded work")
         self.fake_program("gh", "#!/bin/sh\nprintf '[]\\n'\n")
         job_id = "aa0000000002"
-        self.project_job(job_id, "# done: complete\n\nThe work is finished.\n")
+        self.project_job(
+            job_id,
+            "# done: Fixed and verified the change; not landed or released.\n",
+        )
         value = self.call("receipt", {"job_id": job_id})["result"]
         self.assertIs(value["facts"]["landed"], False)
         self.assertIsNone(value["facts"]["landed_revision"])
-        self.assertIn("not landed", value["sentences"])
+        self.assertEqual(value["claims"], [])
+        self.assertEqual(value["sentences"], ["not landed"])
         self.assertIn("not landed", self.cli(job_id).stdout)
+
+    def test_direct_master_release_uses_the_first_equivalent_base_revision(
+        self,
+    ) -> None:
+        self.with_origin()
+        source = self.feature_worktree("release-work")
+        (source / "VERSION").write_text("9.9.9\n")
+        self.git("add", "VERSION", cwd=source)
+        self.git("commit", "-q", "-m", "prepare release", cwd=source)
+        source_revision = self.git("rev-parse", "HEAD", cwd=source)
+
+        # The release was committed directly on master with a different commit
+        # identity, then master gained an unrelated task-close commit.
+        (self.project / "VERSION").write_text("9.9.9\n")
+        self.git("add", "VERSION")
+        self.git("commit", "-q", "-m", "Release 9.9.9")
+        release_revision = self.git("rev-parse", "HEAD")
+        self.git("tag", "-a", "v9.9.9", "-m", "v9.9.9", release_revision)
+        (self.project / "CLOSED.md").write_text("closed\n")
+        self.git("add", "CLOSED.md")
+        self.git("commit", "-q", "-m", "close release task")
+        self.git("push", "-q", "origin", "master", "refs/tags/v9.9.9")
+
+        self.fake_program(
+            "gh",
+            "#!/bin/sh\n"
+            'if [ "$1 $2" = "release list" ]; then\n'
+            "  printf '%s\\n' "
+            '\'[{"isDraft":false,"isPrerelease":false,'
+            '"publishedAt":"2026-09-10T18:47:53Z",'
+            '"tagName":"v9.9.9","url":"https://release.invalid"}]\'\n'
+            "else\n"
+            '  printf \'[{"status":"completed",'
+            '"conclusion":"success","url":"https://run.invalid"}]\\n\'\n'
+            "fi\n",
+        )
+        job_id = "aa0000000012"
+        directory = self.sprout_job(job_id, "release-work", source)
+        (directory / "report.md").write_text(
+            "# done: Released Scufris v9.9.9; all release checks passed.\n\n"
+            "The task-close commit was pushed. Fixed an issue in the landed "
+            "safeguards.\n"
+        )
+        value = self.call("receipt", {"job_id": job_id})["result"]
+
+        self.assertNotEqual(source_revision, release_revision)
+        self.assertEqual(
+            self.git("rev-parse", f"{source_revision}^{{tree}}"),
+            self.git("rev-parse", f"{release_revision}^{{tree}}"),
+        )
+        self.assertIs(value["facts"]["landed"], True)
+        self.assertEqual(value["facts"]["landed_revision"], release_revision)
+        self.assertEqual(value["commit"], release_revision)
+        self.assertIs(value["facts"]["pushed"], True)
+        self.assertEqual(value["facts"]["tags_remote"], ["v9.9.9"])
+        self.assertEqual(value["facts"]["release"]["tagName"], "v9.9.9")
+        verdicts = {claim["claim"]: claim["verdict"] for claim in value["claims"]}
+        self.assertEqual(verdicts, {"pushed": "verified", "released": "verified"})
+        self.assertEqual(value["sentences"], [])
 
     def test_unmeasurable_facts_are_null_with_a_reason_never_false(self) -> None:
         # An unreachable remote must never read as "not pushed". That mistake
@@ -2868,13 +3020,22 @@ with (directory / 'status').open('a') as stream:
 
     def test_receipt_survives_an_unusable_gh_without_losing_git_facts(self) -> None:
         self.with_origin()
-        self.merged_feature_commit()
+        commit = self.merged_feature_commit()
+        self.git("tag", "release-candidate", commit)
+        self.git("push", "-q", "origin", "refs/tags/release-candidate")
         self.fake_program("gh", "#!/bin/sh\necho 'gh: not authenticated' >&2\nexit 1\n")
         job_id = "aa0000000004"
         self.project_job(job_id, "# done: shipped\n\nI released it.\n")
         value = self.call("receipt", {"job_id": job_id})["result"]
         self.assertIsNone(value["facts"]["release_run"])
         self.assertIn("not authenticated", value["unavailable"]["release_run"])
+        self.assertIsNone(value["facts"]["release"])
+        self.assertIn("not authenticated", value["unavailable"]["release"])
+        release_claim = next(
+            claim for claim in value["claims"] if claim["claim"] == "released"
+        )
+        self.assertIsNone(release_claim["measured"])
+        self.assertIn("not authenticated", release_claim["reason"])
         self.assertIs(value["facts"]["landed"], True)
         self.assertIs(value["facts"]["pushed"], False)
 

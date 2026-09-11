@@ -4,7 +4,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2024"
-version = "2.8.0"
+version = "2.8.1"
 license = "MIT"
 
 [workspace.lints.rust]

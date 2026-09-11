@@ -1,8 +1,8 @@
 # Fix the terminal lease variable and the terminal launcher PATH
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
-- TAGS: bug,nix,service
+- TAGS: bug, nix, service
 
 ## Purpose
 
@@ -85,3 +85,28 @@ piPackage]`, `launcher-runtime` fails. Both are the reported failures.
 - Not landed and not deployed. `personal/nix.dotfiles` pins
   `github:alexjercan/scufris2/v2.8.0`, so the running service keeps failing
   until a release carries this.
+
+## Release and deployment
+
+- Released as `v2.8.1`: version commit `e1b3b4b`, annotated tag on it, `master`
+  pushed first and the tag second. `SERVICE_VERSION` stayed at 11, so the
+  TestFlight step does not apply and the phone is unaffected.
+- Pre-release checks on the version commit: `npm run check`, 411 Python helper
+  tests, `ruff check`, `ruff format --check`, `shellcheck`, `cargo clippy -D
+warnings`, `cargo test` (476 across seven suites), `nix fmt --check`, `nix
+flake check -L`, and `git diff --check`. All passed.
+- CI on the push: `release`, `check`, `Documentation`, and `iOS` all green. The
+  release job published a source-only GitHub Release with generated notes and
+  no assets.
+- Deployed: `personal/nix.dotfiles` now pins `v2.8.1` (commit `af918ff`, not
+  pushed), built `.#homeConfigurations.alex.activationPackage`, and
+  `home-manager switch --flake .#alex`.
+- After the switch: `scufris-service` runs
+  `scufris-service-2.8.1`, is `active` with `scufris-desktop` and
+  `scufris-surface-gateway`, and binds all five sockets including
+  `control.sock`. `scufris-ctl state` answers `idle`, `holder: managed`, with a
+  lineage file. The journal shows the agent connected and briefing ingress
+  stored, and no restart loop.
+- The reported failure is gone end to end: under the deployed
+  `scufris-terminal` PATH, `tools/briefing/cli.py state` from this checkout
+  answers `collected` instead of raising `ModuleNotFoundError`.

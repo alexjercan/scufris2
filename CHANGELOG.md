@@ -9,6 +9,8 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+## [2.8.2] - 2026-09-11
+
 ### Changed
 
 - A message sent from the phone or a desktop panel reads as the message. It
@@ -1193,7 +1195,8 @@ is unavailable: job.json`. Every variable that says where things are is now
 - The Scufris Pi package: foreground identity, the delegated job loop, and the
   Nix flake with the Home Manager module.
 
-[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.8.1...HEAD
+[Unreleased]: https://github.com/alexjercan/scufris2/compare/v2.8.2...HEAD
+[2.8.2]: https://github.com/alexjercan/scufris2/compare/v2.8.1...v2.8.2
 [2.8.1]: https://github.com/alexjercan/scufris2/compare/v2.8.0...v2.8.1
 [2.8.0]: https://github.com/alexjercan/scufris2/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/alexjercan/scufris2/compare/v2.6.0...v2.7.0

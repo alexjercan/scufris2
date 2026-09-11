@@ -80,7 +80,7 @@
     failed: "fail",
     pending: "ready",
     in_progress: "write",
-    delivery_failed: "halt",
+    delivery_failed: "stopped",
     delivered: "done",
     partial: "partial",
   };
@@ -232,7 +232,8 @@
       const line = drawn[index] as HTMLElement | undefined;
       if (line === undefined) continue;
       if (line.dataset["transient"] !== undefined) continue;
-      return line.dataset["speaker"] ?? null;
+      const speaker = line.dataset["speaker"];
+      if (speaker !== undefined) return speaker;
     }
     return null;
   };
@@ -497,7 +498,9 @@
 
   /** Collection or terminal delivery still has work to do. */
   const briefingActive = (row: BriefingRow): boolean =>
-    row.collection === "collecting" || row.delivery !== "delivered";
+    row.collection === "collecting" ||
+    row.delivery === "pending" ||
+    row.delivery === "in_progress";
 
   /** A delivery stop, delivered failure, or measured partial needs attention. */
   const briefingAttention = (row: BriefingRow): boolean =>
@@ -520,7 +523,7 @@
     const attention = briefingAttention(row);
     drawn.dataset["state"] =
       row.delivery === "failed"
-        ? "failed"
+        ? "stopped"
         : row.collection === "failed"
           ? "failed"
           : attention
@@ -549,6 +552,9 @@
                   ? "partial"
                   : "delivered";
     state.textContent = BRIEFING_WORDS[key] ?? key;
+    if (row.delivery === "failed")
+      state.title =
+        "Delivery stopped. Send a message to retry, or restart the Scufris service.";
     const count = document.createElement("span");
     count.className = "briefing-count";
     count.textContent = `${row.completed}/${row.total}`;
@@ -558,10 +564,14 @@
     summary.title = row.summary;
     const failed = row.failed === 0 ? "" : `, ${row.failed} failed`;
     const needs = attention ? ", requires attention" : "";
+    const recovery =
+      row.delivery === "failed"
+        ? ", send a message to retry or restart the Scufris service"
+        : "";
     drawn.setAttribute("role", "group");
     drawn.setAttribute(
       "aria-label",
-      `${row.profile} briefing for ${row.date}, ${state.textContent}, ${row.completed} of ${row.total} sources${failed}${needs}: ${row.summary}`,
+      `${row.profile} briefing for ${row.date}, ${state.textContent}, ${row.completed} of ${row.total} sources${failed}${needs}${recovery}: ${row.summary}`,
     );
     drawn.append(profile, state, count, summary);
     if (attention && row.delivery === "delivered") {
@@ -594,9 +604,7 @@
       : ordered.filter(
           (row) => briefingActive(row) || row.id === latestAttention?.id,
         );
-    const hidden = briefingExpanded
-      ? 0
-      : Math.max(0, attention.length - (latestAttention ? 1 : 0));
+    const hidden = briefingExpanded ? 0 : ordered.length - shown.length;
     const facts = [
       active.length === 0 ? "" : `${active.length} active`,
       attention.length === 0
@@ -623,14 +631,38 @@
     drawBriefings();
   };
 
-  /** Keeps quiet lifecycle lists at the end of the conversation flow. */
+  /** Keeps quiet lifecycle lists at the end without detaching a focused
+   * disclosure or dismissal control on an unrelated redraw. */
   const tail = (): void => {
-    briefings.remove();
-    jobs.remove();
     briefings.hidden = briefingRows.children.length === 0;
     jobs.hidden = rows.children.length === 0;
-    if (!briefings.hidden) lines.append(briefings);
-    if (!jobs.hidden) lines.append(jobs);
+    if (briefings.hidden) briefings.remove();
+    if (jobs.hidden) jobs.remove();
+
+    if (!briefings.hidden) {
+      if (!jobs.hidden && jobs.parentElement === lines) {
+        if (briefings.parentElement !== lines || briefings.nextSibling !== jobs)
+          lines.insertBefore(briefings, jobs);
+      } else if (
+        briefings.parentElement !== lines ||
+        briefings.nextSibling !== null
+      ) {
+        lines.append(briefings);
+      }
+    }
+    if (
+      !jobs.hidden &&
+      (jobs.parentElement !== lines || jobs.nextSibling !== null)
+    )
+      lines.append(jobs);
+  };
+
+  /** The first transient or quiet row after canonical conversation lines. */
+  const conversationTail = (): ChildNode | null => {
+    for (const candidate of [thinkingLine, briefings, jobs]) {
+      if (candidate?.parentElement === lines) return candidate;
+    }
+    return null;
   };
 
   const append = (entry: ConversationEntry): void => {
@@ -644,12 +676,10 @@
     // The thinking row is the reply that has not arrived yet, so it stays
     // under everything that has. A line said while Scufris is working goes
     // above it rather than after it.
-    if (thinkingLine === null) {
-      lines.append(line);
-    } else {
-      lines.insertBefore(line, thinkingLine);
-      mark(thinkingLine, entry.role);
-    }
+    const afterConversation = conversationTail();
+    if (afterConversation === null) lines.append(line);
+    else lines.insertBefore(line, afterConversation);
+    if (thinkingLine !== null) mark(thinkingLine, entry.role);
     tail();
     if (following) pin();
     else unseen += 1;
@@ -692,7 +722,9 @@
         lastSpeaker(),
       );
       thinkingLine.dataset["transient"] = "thinking";
-      lines.append(thinkingLine);
+      const afterConversation = conversationTail();
+      if (afterConversation === null) lines.append(thinkingLine);
+      else lines.insertBefore(thinkingLine, afterConversation);
       tail();
     }
     if (follow) pin();

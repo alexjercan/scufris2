@@ -21,6 +21,7 @@
   --wisteria: #9e95c7;
   --niagara: #96a6c8;
   --yellow: #ffdd33;
+  --brown: #cc8c3c;
   --red: #f43841;
   --mono:
     Iosevka, "Iosevka Nerd Font", "Iosevka Term", "JetBrains Mono",
@@ -474,11 +475,12 @@ body {
   color: var(--muted);
 }
 
-/* A briefing row is status, not a job. Delivered failures and measured
- * partials alone have one explicit dismissal control. */
+/* A briefing row is status, not a job. Delivered collection failures and
+ * measured partials have one explicit dismissal control. A stopped delivery
+ * is a distinct recoverable state and remains nondismissible. */
 .briefing-row {
   display: grid;
-  grid-template-columns: minmax(0, 9em) 4.5em 3.5em minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 9em) 7em 3.5em minmax(0, 1fr) auto;
   gap: 10px;
   align-items: baseline;
   padding: 4px 0;
@@ -521,6 +523,10 @@ body {
   color: var(--red);
 }
 
+.briefing-row[data-state="stopped"] .briefing-state {
+  color: var(--brown);
+}
+
 .briefing-row[data-state="partial"] .briefing-state {
   color: var(--yellow);
 }
@@ -545,7 +551,7 @@ body {
 
 @media (max-width: 520px) {
   .briefing-row {
-    grid-template-columns: minmax(0, 1fr) 4.5em 3.5em auto;
+    grid-template-columns: minmax(0, 1fr) 7em 3.5em auto;
   }
 
   .briefing-summary {

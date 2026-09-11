@@ -317,12 +317,12 @@ and delivery are two state machines:
 | `collected`  | at least one source answered, or none existed |
 | `failed`     | every declared source failed                  |
 
-| service delivery | meaning                                                |
-| ---------------- | ------------------------------------------------------ |
-| `pending`        | the terminal wake is durably queued                    |
-| `in_progress`    | one correlated proactive model slot is reserved        |
-| `failed`         | the proactive circuit stopped it until service restart |
-| `delivered`      | the correlated answer is in canonical replay           |
+| service delivery | meaning                                                               |
+| ---------------- | --------------------------------------------------------------------- |
+| `pending`        | the terminal wake is durably queued                                   |
+| `in_progress`    | one correlated proactive model slot is reserved                       |
+| `failed`         | the proactive circuit stopped it until a user turn or service restart |
+| `delivered`      | the correlated answer is in canonical replay                          |
 
 A failed run is delivered because the absence of a briefing is itself the
 news: one source failing out of five was reported and five out of five used to
@@ -359,7 +359,9 @@ The runner records the generation outside the collection process before it
 starts. Its `OnFailure` unit runs outside the failed collection cgroup, reads
 systemd's measured result (including `oom-kill`), and finalizes only that exact
 generation. Persisted contributions survive; unanswered sources become failed.
-A delayed failure handler cannot finalize a newer run.
+A delayed failure handler cannot finalize a newer run. The collector, failure
+finalizer, and reconciler all use the same `MemoryHigh=3G` and `MemoryMax=4G`
+cgroup bounds behind their bounded readers.
 
 Collector announcements call `scufris-ctl briefing` after each durable event.
 They are latency hints, not the authority. Session startup scans every retained
@@ -441,9 +443,11 @@ than being captured by the briefing. The extension stores `proactive_id` on the
 exact custom message Pi queued, captures it when Pi delivers that message,
 sends `agent.proactive_started`, and adds the ID only to that turn's atomic
 `agent.response`. It then sends `agent.proactive_settled` on the same ordered
-socket. An unrelated follow-up cannot acknowledge the item, and its generic
-lifecycle event cannot retry a proactive message that is still waiting in Pi's
-queue.
+socket. If Pi settles before `message_end`, the extension settles the exact ID
+it put in the now-empty follow-up queue; the host releases and retries that
+slot. The extension also deduplicates a host redelivery while the same ID is
+still queued across a socket reconnect. An unrelated follow-up cannot
+acknowledge the item.
 
 Scufris reads the run, writes one briefing in its own voice from measured
 contributions, publishes the same prose into the artifact, and returns the
@@ -454,16 +458,20 @@ write retries the pending item; a crash after the replay write recovers it as
 delivered before an agent can connect, so no second visible answer is made.
 Duplicate or stale correlated responses are ignored. Publication is also
 idempotent. The first publish fixes `briefing.md`; the same prose is a no-op or
-repairs an interruption between the prose, manifest, and page writes. Different
-prose for the same generation is refused. `.publish.lock` serializes concurrent
-retries.
+repairs an interruption between the prose, manifest, and page writes. A retry
+that proposes different prose keeps and returns the generation's fixed prose so
+the response can use the canonical words. `.publish.lock` is taken without
+waiting and serializes concurrent retries; a missing or symlinked run is refused
+before that lock file is created.
 
 Consecutive proactive turns use bounded exponential backoff. The count resets
 when the queue stays empty through that backoff or a surface opens a user turn.
-Three consecutive proactive turn starts open a circuit before a fourth
-starts. All queued rows become
-`failed` and show restart instructions. They cannot be dismissed. An explicit
-service restart returns their durable wakes to `pending`.
+After three starts, another generation for a date/profile pair already seen in
+the sequence opens the circuit. A backlog of distinct dates or profiles drains;
+a producer repeatedly minting one logical run stops. All queued rows become
+`failed`, retain their measured summaries, and show recovery instructions. They
+cannot be dismissed. A surface user turn or service restart returns their
+durable wakes to `pending`.
 
 A delivered success then disappears from the drawer. A delivered run needs
 attention only if collection is `failed`, or if collection is `collected` with
@@ -476,10 +484,13 @@ surface. Repeating it is harmless.
 
 Dismissal is presentation state, not delivery acknowledgment or deletion. The
 service keeps the canonical response, collection artifacts, and row in its
-bounded audit. State format 2 stores up to 128 audit rows and a bounded set of
-dismissed IDs; format 1 loads with no dismissals. Active and undismissed
-attention rows never yield to eviction. The oldest delivered success or
-dismissed attention row yields first when audit space is needed.
+bounded audit. State format 2 stores up to 64 audit rows and a bounded set of
+dismissed IDs; format 1 loads with no dismissals. A format-2 file written under
+the original 128-row limit is compacted rather than rejected on upgrade. Active
+and undismissed delivered attention rows never yield to ordinary eviction. The
+oldest delivered success,
+dismissed attention row, or circuit-stopped row yields first when audit space
+is needed, so stopped deliveries cannot fill the store and block new ingress.
 
 Filesystem state remains the collection authority and service state remains
 the delivery authority. Preparing `briefing.md` does not acknowledge delivery,

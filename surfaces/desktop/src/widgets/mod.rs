@@ -33,6 +33,7 @@ use tracing::{debug, info, warn};
 use crate::{
     display,
     form::{self, Form},
+    hud::Hud,
     state::Assistant,
     widgets::{
         backends::{Backends, News, Order},
@@ -544,7 +545,19 @@ impl Widgets {
                 code: code.into(),
                 detail,
             }),
-            None => warn!(code, "a summoned widget was refused: {detail}"),
+            None => self.report_summon_refusal(code, detail),
+        }
+    }
+
+    /// Shows why one tray summon did not produce a panel.
+    fn report_summon_refusal(&self, code: &str, detail: String) {
+        warn!(code, "a summoned widget was refused: {detail}");
+        let Some(hud) = self.app.try_state::<Arc<Hud>>() else {
+            return;
+        };
+        hud.request_failed(format!("The widget could not open: {detail}."));
+        if let Err(error) = hud.show() {
+            warn!("the widget refusal could not be shown: {error}");
         }
     }
 
@@ -720,6 +733,9 @@ impl Widgets {
                     }
                 }
                 Act::Stick { surface, sticky } => self.stick(&surface, sticky),
+                Act::Notify { detail } => {
+                    self.report_summon_refusal(refusal::NO_FREE_SLOT, detail);
+                }
                 Act::Refuse { surface, detail } => {
                     self.pool.send(&surface, ShellMsg::Refused { detail });
                 }

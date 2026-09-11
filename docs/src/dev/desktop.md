@@ -82,13 +82,16 @@ three seconds, because stopping the wrong job costs an hour of an agent's work.
 Two or more finished rows also offer one control that files all of them.
 
 The `BRIEF` section is one compact drawer in the conversation flow. Its
-collapsed state shows every active briefing plus at most the newest delivered
-failure or measured partial result. The header reports active, attention, and
-hidden counts. Expanding it shows all relevant rows in stable order without
-moving a reader who has scrolled up. A delivered success disappears. A failed
-or partial row has one accessible `dismiss` control; the desktop sends only its
-opaque generation ID and waits for the service's whole-list update before the
-row disappears.
+collapsed state shows every active briefing plus at most the newest attention
+row. A circuit-stopped delivery is attention, not active work. The header
+reports active and attention totals plus the number of relevant rows actually
+hidden. Expanding it shows all relevant rows in stable order without moving a
+reader who has scrolled up or detaching the focused disclosure control on an
+unrelated redraw. A delivered success disappears. A delivered collection
+failure or measured partial has one accessible `dismiss` control; a stopped
+delivery instead shows its message-or-restart recovery and cannot be dismissed.
+The desktop sends only an opaque generation ID and waits for the service's
+whole-list update before a dismissed row disappears.
 
 Each message occupies two columns: the speaker marker in a fixed gutter and
 everything the message is made of - words, attachment cards, details - in one
@@ -201,7 +204,7 @@ process matching.
 - attachments: 8 unique references per message and 16 MiB per object;
 - receipts: 4 job groups per message, 6 badges and 2 offers per group;
 - job rows: 8;
-- briefing audit rows: 128;
+- briefing audit rows: 64;
 - local speech paragraph: 1000 UTF-8 bytes; and
 - reconnect backoff: 250 ms to 5 seconds.
 

@@ -288,7 +288,7 @@ struct ProtocolTests {
             failed: 0,
             summary: "delivery stopped; restart the Scufris service"
         )
-        #expect(stopped.isActive)
+        #expect(!stopped.isActive)
         #expect(stopped.requiresAttention)
         #expect(!stopped.canDismiss)
     }
@@ -326,7 +326,7 @@ struct ProtocolTests {
 
         let collapsed = BriefingDrawerPresentation(rows: listed, expanded: false)
         #expect(collapsed.rows.map(\.id) == ["active", "writing", "stopped"])
-        #expect(collapsed.activeCount == 3)
+        #expect(collapsed.activeCount == 2)
         #expect(collapsed.attentionCount == 3)
         #expect(collapsed.hiddenAttentionCount == 2)
 

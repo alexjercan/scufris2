@@ -55,7 +55,10 @@ pub const MAX_BADGE_BYTES: usize = 64;
 pub const MAX_JOB_ROWS: usize = 8;
 pub const MAX_JOB_SUMMARY_BYTES: usize = 512;
 /// How many briefing generations a surface can be asked to draw.
-pub const MAX_BRIEFING_ROWS: usize = 128;
+///
+/// At every field maximum, a whole `surface.briefings` replacement still fits
+/// inside the shared 64 KiB frame bound.
+pub const MAX_BRIEFING_ROWS: usize = 64;
 pub const MAX_BRIEFING_SUMMARY_BYTES: usize = 256;
 
 pub fn surface_socket_path() -> Result<PathBuf, ControlPathError> {
@@ -254,7 +257,10 @@ impl BriefingRow {
     /// Collection or terminal delivery still has work to do.
     pub fn active(&self) -> bool {
         self.collection == BriefingCollectionState::Collecting
-            || self.delivery != BriefingDeliveryState::Delivered
+            || matches!(
+                self.delivery,
+                BriefingDeliveryState::Pending | BriefingDeliveryState::InProgress
+            )
     }
 
     /// A terminal collection used at least one source failure.
@@ -918,7 +924,11 @@ pub fn validate_briefing_row(row: &BriefingRow) -> Result<(), MessageError> {
         MAX_BRIEFING_SUMMARY_BYTES,
         "briefing summary",
         true,
-    )
+    )?;
+    if row.summary.chars().any(char::is_control) {
+        return Err(MessageError::InvalidSubmission("briefing summary"));
+    }
+    Ok(())
 }
 
 fn briefing_rows(value: &[BriefingRow]) -> Result<(), MessageError> {
@@ -1589,9 +1599,43 @@ mod tests {
             delivery: BriefingDeliveryState::Failed,
             ..collecting
         };
-        assert!(stopped.active());
+        assert!(!stopped.active());
         assert!(stopped.requires_attention());
         assert!(!stopped.dismissible());
+    }
+
+    #[test]
+    fn a_maximal_briefing_list_fits_the_shared_frame() {
+        let rows = (0..MAX_BRIEFING_ROWS)
+            .map(|index| BriefingRow {
+                id: format!("{index:064x}"),
+                date: "9999-99-99".into(),
+                profile: "p".repeat(64),
+                collection: BriefingCollectionState::Collected,
+                delivery: BriefingDeliveryState::Failed,
+                since: u64::MAX,
+                completed: u32::MAX,
+                total: u32::MAX,
+                failed: u32::MAX,
+                // Every byte needs JSON escaping, so this bounds more than a
+                // plain maximal summary does.
+                summary: "\\\"".repeat(MAX_BRIEFING_SUMMARY_BYTES / 2),
+            })
+            .collect();
+        let response = SurfaceResponse::new(SurfaceResponseBody::Briefings { briefings: rows });
+        let mut bytes = Vec::new();
+        crate::write_message(&mut bytes, &response).unwrap();
+        assert!(bytes.len() <= crate::MAX_MESSAGE_BYTES);
+
+        let mut invalid = match response.body {
+            SurfaceResponseBody::Briefings { briefings } => briefings[0].clone(),
+            _ => unreachable!(),
+        };
+        invalid.summary = "two lines\nare not one row".into();
+        assert!(matches!(
+            validate_briefing_row(&invalid),
+            Err(MessageError::InvalidSubmission("briefing summary"))
+        ));
     }
 
     #[test]

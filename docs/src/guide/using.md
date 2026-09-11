@@ -71,10 +71,13 @@ because the service owns it.
 
 Scheduled work appears in the compact `BRIEF` drawer on desktop and iPhone.
 Active runs stay visible. A successful briefing leaves the drawer after its
-answer is delivered. A failed briefing, or one completed with measured source
-failures, stays until you dismiss it. Expand the drawer to inspect older items
-that need attention. Dismissal hides presentation on every surface but keeps
-the briefing answer, audit, and run artifacts.
+answer is delivered. A delivered briefing whose collection failed, or one
+completed with measured source failures, stays until you dismiss it. A
+`stopped` row means the proactive safety circuit halted delivery. It cannot be
+dismissed: send a message to retry stopped deliveries, or restart the Scufris
+service. Expand the drawer to inspect older items that need attention.
+Dismissal hides presentation on every surface but keeps the briefing answer,
+audit, and run artifacts.
 
 Useful local commands:
 

@@ -154,15 +154,36 @@ class Stub {
     },
   };
 
+  get parentElement(): Stub | null {
+    return this.parent;
+  }
+
+  get nextSibling(): Stub | null {
+    if (this.parent === null) return null;
+    const index = this.parent.children.indexOf(this);
+    return this.parent.children[index + 1] ?? null;
+  }
+
+  contains(node: Stub | null): boolean {
+    return node === this || this.children.some((child) => child.contains(node));
+  }
+
+  private detachForMove(): void {
+    if (this.parent === null) return;
+    const index = this.parent.children.indexOf(this);
+    if (index >= 0) this.parent.children.splice(index, 1);
+    this.parent = null;
+  }
+
   appendChild(node: Stub): Stub {
+    node.detachForMove();
     node.parent = this;
     this.children.push(node);
     return node;
   }
 
   append(...nodes: Stub[]): void {
-    for (const node of nodes) node.parent = this;
-    this.children.push(...nodes);
+    for (const node of nodes) this.appendChild(node);
   }
 
   replaceChildren(...nodes: Stub[]): void {
@@ -173,6 +194,7 @@ class Stub {
   }
 
   insertBefore(node: Stub, before: Stub): Stub {
+    node.detachForMove();
     const index = this.children.indexOf(before);
     node.parent = this;
     this.children.splice(index < 0 ? this.children.length : index, 0, node);
@@ -181,9 +203,9 @@ class Stub {
 
   remove(): void {
     if (this.parent === null) return;
-    const index = this.parent.children.indexOf(this);
-    if (index >= 0) this.parent.children.splice(index, 1);
-    this.parent = null;
+    if (this.contains(this.page?.activeElement ?? null) && this.page !== null)
+      this.page.activeElement = null;
+    this.detachForMove();
   }
 
   addEventListener(type: string, handler: Listener): void {
@@ -1407,19 +1429,19 @@ test("the briefing drawer keeps active and latest attention rows compact", async
   );
   assert.deepEqual(
     rows.children.map((row) => row.children[1]?.content),
-    ["gather", "write", "halt"],
+    ["gather", "write", "stopped"],
     "collapsed keeps every active row and only the latest attention row in stable order",
   );
   assert.equal(
     page.element("briefing-toggle").getAttribute("aria-expanded"),
     "false",
   );
-  assert.match(page.element("briefing-meta").content, /3 active/);
+  assert.match(page.element("briefing-meta").content, /2 active/);
   assert.match(page.element("briefing-meta").content, /3 need attention/);
   assert.match(page.element("briefing-meta").content, /2 hidden/);
   assert.match(
     rows.children[2]?.getAttribute("aria-label") ?? "",
-    /halt.*requires attention.*restart the Scufris service/,
+    /stopped.*requires attention.*send a message to retry or restart the Scufris service/,
   );
   assert.equal(
     rows.children[2]?.children.length,
@@ -1438,12 +1460,21 @@ test("the briefing drawer keeps active and latest attention rows compact", async
   );
   assert.deepEqual(
     rows.children.map((row) => row.children[1]?.content),
-    ["fail", "gather", "partial", "write", "halt"],
+    ["fail", "gather", "partial", "write", "stopped"],
   );
   assert.equal(
     scroller.scrollTop,
     31,
     "opening the drawer does not move a reader who scrolled up",
+  );
+
+  const toggle = page.element("briefing-toggle");
+  toggle.focus();
+  page.publish("scufris://jobs", [job("01ccbac98b97", "working")]);
+  assert.equal(
+    page.activeElement,
+    toggle,
+    "an unrelated row redraw keeps keyboard focus on the briefing disclosure",
   );
 
   const failedDismiss = rows.children[0]?.children[4];

@@ -12,6 +12,7 @@ import {
 import {
   AGENT_RESPONSE_EVENT,
   AgentClient,
+  type AgentClientOptions,
   type AtomicResponse,
 } from "./client.ts";
 import { registerAttachmentTool } from "./attachments.ts";
@@ -80,20 +81,50 @@ export function resolveSocketPath(
   return undefined;
 }
 
-export default function service(pi: ExtensionAPI): void {
-  if (process.env.SCUFRIS_ROLE !== "orchestrator") return;
+type ServiceAgentClient = Pick<
+  AgentClient,
+  | "start"
+  | "stop"
+  | "jobs"
+  | "response"
+  | "proactiveStarted"
+  | "proactiveSettled"
+>;
+
+export interface ServiceBindingOptions {
+  role?: string;
+  socketPath?: string;
+  createClient?: (options: AgentClientOptions) => ServiceAgentClient;
+}
+
+/** Bind the Pi lifecycle to one service client. Options exist for a bounded
+ * wiring test; normal extension loading uses only the Pi argument. */
+export function bindService(
+  pi: ExtensionAPI,
+  options: ServiceBindingOptions = {},
+): void {
+  if ((options.role ?? process.env.SCUFRIS_ROLE) !== "orchestrator") return;
   registerAttachmentTool(pi);
-  const socketPath = resolveSocketPath();
+  const socketPath = options.socketPath ?? resolveSocketPath();
+  const createClient =
+    options.createClient ?? ((clientOptions) => new AgentClient(clientOptions));
   // The host keeps nothing for an agent that went away, and rows published
   // while the socket was down were dropped. Holding the last list is what
   // lets a reconnect say again that a job is still blocked.
   let rows: JobRow[] = [];
   let context: ExtensionContext | undefined;
-  let client: AgentClient | undefined;
+  let client: ServiceAgentClient | undefined;
   // Set only when Pi delivers the correlated custom message. Queue receipt is
   // not turn receipt: workflow and offer follow-ups may be ahead of it.
   let turnProactiveId: string | undefined;
   let turnResponseSent = false;
+  // IDs accepted into Pi's follow-up queue, retained through socket reconnects
+  // so a host redelivery cannot queue a second copy of the same model turn.
+  let queuedProactiveIds: string[] = [];
+
+  const forgetProactive = (proactiveId: string): void => {
+    queuedProactiveIds = queuedProactiveIds.filter((id) => id !== proactiveId);
+  };
 
   const notify = (message: string, level: "info" | "error") => {
     if (context?.hasUI) context.ui.notify(`Scufris service: ${message}`, level);
@@ -125,13 +156,23 @@ export default function service(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", () => {
-    if (turnProactiveId === undefined) return;
-    if (!turnResponseSent)
+    const proactiveId = turnProactiveId ?? queuedProactiveIds[0];
+    if (proactiveId === undefined) return;
+    if (turnProactiveId === undefined)
       notify(
-        `proactive event ${turnProactiveId} settled without an atomic response`,
+        `proactive event ${proactiveId} settled before Pi delivered its queued message`,
         "error",
       );
-    client?.proactiveSettled(turnProactiveId);
+    else if (!turnResponseSent)
+      notify(
+        `proactive event ${proactiveId} settled without an atomic response`,
+        "error",
+      );
+    // agent_settled means no queued continuation remains. Reporting the exact
+    // queued ID here lets the host release a wake that was rejected or aborted
+    // before message_end, rather than reserving every surface forever.
+    client?.proactiveSettled(proactiveId);
+    forgetProactive(proactiveId);
     turnProactiveId = undefined;
     turnResponseSent = false;
   });
@@ -139,12 +180,13 @@ export default function service(pi: ExtensionAPI): void {
   pi.on("session_start", (_event, ctx) => {
     turnProactiveId = undefined;
     turnResponseSent = false;
+    queuedProactiveIds = [];
     context = ctx;
     if (!socketPath) {
       notify("XDG_RUNTIME_DIR is required to reach the agent channel", "error");
       return;
     }
-    client = new AgentClient({
+    const nextClient = createClient({
       socketPath,
       busy: () => context?.isIdle() === false,
       connected: publishRows,
@@ -167,22 +209,41 @@ export default function service(pi: ExtensionAPI): void {
       // type. It is a follow-up that triggers a turn, never a user message, so
       // nothing here looks like the owner typed it.
       wake: ({ proactiveId, customType, content, details }) => {
-        void pi.sendMessage(
-          {
-            customType,
-            content,
-            details:
-              proactiveId === undefined
-                ? details
-                : proactiveMessageDetails(proactiveId, details),
-            display: true,
-          },
-          { deliverAs: "followUp", triggerTurn: true },
-        );
+        if (
+          proactiveId !== undefined &&
+          (turnProactiveId === proactiveId ||
+            queuedProactiveIds.includes(proactiveId))
+        )
+          return;
+        if (proactiveId !== undefined) queuedProactiveIds.push(proactiveId);
+        try {
+          pi.sendMessage(
+            {
+              customType,
+              content,
+              details:
+                proactiveId === undefined
+                  ? details
+                  : proactiveMessageDetails(proactiveId, details),
+              display: true,
+            },
+            { deliverAs: "followUp", triggerTurn: true },
+          );
+        } catch (error) {
+          if (proactiveId !== undefined) {
+            forgetProactive(proactiveId);
+            client?.proactiveSettled(proactiveId);
+          }
+          notify(
+            `proactive message could not be queued: ${String(error)}`,
+            "error",
+          );
+        }
       },
       log: notify,
     });
-    client.start();
+    client = nextClient;
+    nextClient.start();
   });
 
   pi.on("session_shutdown", () => {
@@ -191,6 +252,9 @@ export default function service(pi: ExtensionAPI): void {
     context = undefined;
     turnProactiveId = undefined;
     turnResponseSent = false;
+    queuedProactiveIds = [];
     rows = [];
   });
 }
+
+export default bindService;

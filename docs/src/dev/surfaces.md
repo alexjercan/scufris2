@@ -49,7 +49,7 @@ flowchart TB
     Hello --> Replay["replayed surface.message entries<br/>0 to 200"]
     Replay --> State[surface.state]
     State --> Jobs["surface.jobs<br/>0 to 8 rows"]
-    Jobs --> Briefings["surface.briefings<br/>0 to 128 relevant rows"]
+    Jobs --> Briefings["surface.briefings<br/>0 to 64 relevant rows"]
     Briefings --> Ready["surface.ready<br/>matching stable ID"]
     Ready --> Live[enable live speech + widget effects]
 ```
@@ -89,7 +89,7 @@ surface.abort {id} -> surface.aborted {id}
 
 ## Messages a client sends
 
-All messages include `"v": 9`. Surface submissions carry only managed
+All messages include `"v": 10`. Surface submissions carry only managed
 attachment IDs. The service resolves them into canonical descriptors before a
 message reaches the agent, another surface, or replay.
 
@@ -120,7 +120,7 @@ behind an offer stay with the agent, so no surface can compose a prompt.
 | `surface.aborted`     | Settle the matching abort                                                                                                 |
 | `surface.state`       | Show `failed`, `blocked`, `working`, `starting`, or `idle`; conversation views present working as transient `thinking...` |
 | `surface.jobs`        | Replace the whole job list with these 0 to 8 rows                                                                         |
-| `surface.briefings`   | Replace up to 128 relevant briefing rows; never speak them or create a conversation line                                  |
+| `surface.briefings`   | Replace up to 64 relevant briefing rows; never speak them or create a conversation line                                   |
 | `surface.offer_taken` | Mark that offer spent wherever it is drawn                                                                                |
 | `surface.ready`       | End replay; enable live effects                                                                                           |
 | `surface.rejected`    | Show the bounded code/detail; keep user data when relevant                                                                |
@@ -152,9 +152,13 @@ independent collection and delivery states, start time, completed/total/failed
 counts, and a bounded measured summary. Draw it as quiet state outside the
 conversation messages. Desktop and iPhone retain the count at narrow widths and
 expose the complete row plus its disclosure and dismissal controls to
-accessibility. Show every active row. After delivery, hide success and retain
-only failed or measured-partial rows until `briefing.dismiss` is durably
-reflected in the next whole-list update.
+accessibility. Show every active row. A circuit-stopped delivery is attention,
+not active work: collapsed drawers show only the newest attention row and
+report the number of relevant rows actually hidden. After delivery, hide
+success and retain only collection-failed or measured-partial rows until
+`briefing.dismiss` is durably reflected in the next whole-list update. A
+stopped delivery is nondismissible and shows that a user message or service
+restart retries it.
 
 `text` is literal plain prose on every surface. Markdown delimiters in it stay
 literal, while safe bare HTTP and HTTPS URLs can become native links. Only

@@ -472,7 +472,7 @@ def keyword_lines(scope: str, keywords: Any) -> list[str]:
     # Keywords say how an agent is run. They render one per line so the
     # orchestrator can reproduce each value exactly.
     if not isinstance(keywords, dict):
-        raise ValueError(f"{scope} keywords must be a table")
+        raise TypeError(f"{scope} keywords must be a table")
     if "harness" in keywords:
         try:
             selected_adapter(
@@ -738,10 +738,10 @@ def user_briefing_sources(
             raise ValueError("this file declares briefings and nothing else")
         declared = document.get("briefings", {})
         if not isinstance(declared, dict):
-            raise ValueError("briefings must be a table")
+            raise TypeError("briefings must be a table")
         entries = declared.get(profile, {})
         if not isinstance(entries, dict):
-            raise ValueError(f"briefings.{profile} must be a table of named sources")
+            raise TypeError(f"briefings.{profile} must be a table of named sources")
         for name in sorted(entries):
             if not simple_identifier(name):
                 raise ValueError("briefing source names must be simple identifiers")
@@ -794,7 +794,7 @@ def briefing_sources(
             document = tomllib.loads(raw.decode("utf-8"))
             declared = document.get("briefings", {})
             if not isinstance(declared, dict):
-                raise ValueError("briefings must be a table")
+                raise TypeError("briefings must be a table")
             entry = declared.get(profile)
             if entry is None:
                 continue
@@ -1785,7 +1785,7 @@ def launch(job_id: str, launch_capability: str) -> NoReturn:
     # the only way out.
     try:
         executable, argv, env, capture_review = prepare_harness(job_id, job, auth)
-    except Exception as trouble:  # noqa: BLE001 - the pane is the last reader
+    except Exception as trouble:
         report_launch_failure(job_id, str(trouble))
         raise
     completed = subprocess.run(
@@ -2273,10 +2273,13 @@ def trimmed_report(current: bytes, entry: bytes) -> bytes:
         kept.append(piece)
         size += 1 + len(piece)
     dropped = len(older) - len(kept)
-    marker = b"# report trimmed\n\n" + (
-        f"{dropped} older {'entry' if dropped == 1 else 'entries'} dropped to "
-        "keep this file under its bound. What they said is gone.\n"
-    ).encode("utf-8")
+    marker = (
+        b"# report trimmed\n\n"
+        + (
+            f"{dropped} older {'entry' if dropped == 1 else 'entries'} dropped to "
+            "keep this file under its bound. What they said is gone.\n"
+        ).encode()
+    )
     return b"\n".join([marker, *reversed(kept), entry])
 
 

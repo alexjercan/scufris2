@@ -1,6 +1,6 @@
 # Nightly review
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 70
 - TAGS: review
 
@@ -642,3 +642,98 @@ to stop, with a manual service restart as the only way back.
 Coverage: G4 got a four-lane panel (correctness, contracts, red team, desktop);
 craft was not dispatched. G1, G2 and G3 got the direct reading recorded above
 and no panel at all. Every skip is named in "Lanes not dispatched".
+
+## Resolution - 2026-09-11
+
+The supported findings were re-derived against the current tree before editing.
+The two blockers and all actionable major findings are fixed. Focused regression
+tests cover the failure boundaries rather than only the successful path.
+
+### Implemented
+
+- The Pi extension now tests the complete service binding. It preserves an
+  exact proactive ID while queued, deduplicates host redelivery across an agent
+  socket reconnect, and reports exact settlement when Pi settles before the
+  custom message reaches `message_end`. The host accepts that exact pre-start
+  settlement and retries the durable wake with backoff. Unrelated settlement
+  still cannot release the slot.
+- The circuit now identifies a recurrence by logical date/profile. Three starts
+  still stop a producer that mints new generations for one logical run, while a
+  backlog of distinct dates and profiles drains. A user turn resets the circuit
+  and retries stopped rows; restart remains a recovery path. Circuit and retry
+  paths preserve measured summaries, mark retained rows consistently, and let a
+  failed job keep priority in the tray detail.
+- Circuit-stopped rows are attention, not active work. Desktop and iOS compact
+  them correctly, report the actual hidden-row count, distinguish `stopped`
+  from collection failure, show message-or-restart recovery, and keep stopped
+  rows nondismissible. Desktop quiet-list updates no longer detach an unrelated
+  focused drawer control.
+- The bounded store can evict its oldest stopped row and wake before refusing
+  later ingress. The wire-safe row cap is 64, a maximal escaped list is tested
+  against the 64 KiB frame, and control characters are refused in row
+  summaries. Existing format-2 stores under the original 128-row limit compact
+  on upgrade instead of being classified as corrupt.
+- Briefing publication validates the run before creating its lock, refuses a
+  busy lock without waiting, and returns the generation's fixed canonical prose
+  when a retry proposes different words. Prompts and docs tell the model to use
+  those returned words. Reconciliation now returns up to eight bounded refusal
+  details instead of discarding every cause.
+- Tray widget summons now put a capacity refusal in the HUD instead of only in
+  the journal.
+- Ruff now discovers all five extensionless Python executables. The newly
+  exposed findings in `tools/jobs/scufris-jobs` are corrected. Collector,
+  finalizer, and reconciler units share the same tested memory bounds.
+- User and developer documentation now matches protocol v10, the 64-row bound,
+  compact drawer semantics, recovery behavior, publication retries, and store
+  eviction.
+
+### Deferred observations
+
+- A rejected corrupt briefing store still keeps the bytes as
+  `briefings.json.corrupt`, logs the rejection, and is repopulated by retained
+  manifests. Turning that minor observation into durable surface state needs a
+  separate fault-lifecycle design; it is not coupled to the blocker fixes.
+- The general Rust service and gateway did not receive the briefing helpers'
+  4 GiB cgroup limit. They do not execute the Python artifact readers named by
+  the finding. A general daemon memory policy needs separate measurement.
+- Native iOS rendering was not run on this Linux host. The shared protocol,
+  Swift presentation logic, and Swift test expectations were updated together;
+  desktop DOM behavior has executable coverage here.
+
+### Verification
+
+- `env -u PI_PACKAGE_DIR npm run check`: 127 tests passed; typecheck, version
+  check, and Prettier passed. The unset removes the coding harness's stale
+  installed-Pi override so the repository's locked dependencies are tested.
+- `python3 -m unittest discover -s tests -p 'test_*.py'`: 396 passed.
+- `nix develop --command cargo test --workspace`: 447 passed.
+- `nix develop --command cargo clippy --workspace --all-targets -- -D warnings`:
+  passed.
+- `nix develop --command ruff check .`: passed, including extensionless Python
+  executables.
+- `nix develop --command ruff format --check .`: 267 files passed.
+- `nix build .#checks.x86_64-linux.briefing-timers --no-link`: passed.
+- `nix flake check`: all 63 checks passed.
+- `git diff --check`: passed.
+
+No service was restarted, no deployment or live briefing state was changed. At
+this initial closure boundary, the Sprout was not landed.
+
+## Follow-up sync and landing authorization - 2026-09-11
+
+The user later explicitly authorized synchronization and landing.
+`sprout sync nightly-review-fixes` merged current master `01a3b24` into the
+Sprout as `16a869a`. The merge completed without a conflict. Current master had
+changed `tools/jobs/scufris-jobs` and its tests, so the merged extensionless
+helper and all affected gates were checked again:
+
+- `env -u PI_PACKAGE_DIR npm run check`: 127 passed.
+- `python3 -m unittest discover -s tests -p 'test_*.py'`: 398 passed.
+- `nix develop --command cargo test --workspace`: 447 passed.
+- `nix develop --command ruff check .`: passed.
+- `nix develop --command ruff format --check .`: 268 files passed.
+- `nix flake check`: passed.
+- `git diff 01a3b24...HEAD --check`: passed.
+
+The authorized landing must remain a repository-only operation: no push,
+release, deployment, service restart, or live-state mutation.

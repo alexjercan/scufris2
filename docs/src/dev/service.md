@@ -118,11 +118,14 @@ briefing.
 The agent extension stores `proactive_id` on the exact custom message that Pi
 queues. It captures the ID only when Pi delivers that message, sends an
 `agent.proactive_started` marker, and adds the ID only to that turn's atomic
-response. It then sends `agent.proactive_settled` for the same turn. These
-markers and the response use one ordered agent socket. A different queued
-follow-up cannot consume or overwrite the correlation, and its generic
-lifecycle event cannot retry a proactive message that is still queued in Pi.
-The service accepts only the active event ID.
+response. It then sends `agent.proactive_settled` for the same turn. If Pi
+settles before the queued custom message reaches `message_end`, that final
+boundary sends settlement for the exact queued ID so the host can release and
+retry it. The extension retains queued IDs across socket reconnects and ignores
+a redelivery of an ID Pi already holds, so reconnect cannot duplicate a model
+turn. These markers and the response use one ordered agent socket. A different
+queued follow-up cannot consume or overwrite the correlation. The service
+accepts only the active event ID.
 
 The service atomically records the assistant message and delivery ID in
 canonical conversation replay, then marks the briefing `delivered` and removes
@@ -135,31 +138,39 @@ not produce a second visible answer.
 
 Consecutive proactive turns use exponential backoff from 2 seconds, bounded at
 30 seconds, between dispatches. The count resets when the queue stays empty
-through that backoff or a surface opens a user turn. Three consecutive
-proactive turn starts open a service-owned circuit before a fourth can start.
-Every retained queued row becomes `failed`, remains
-visible with restart instructions, and cannot be dismissed. Restarting the
-service is the explicit recovery: startup returns those durable wakes to
-`pending`.
+through that backoff or a surface opens a user turn. After three starts, the
+service-owned circuit opens before another turn for a date/profile pair already
+seen in that sequence. This stops a producer that keeps minting generations for
+one logical run while allowing a queued backlog of distinct days and profiles
+to drain. Every retained queued row becomes `failed`, keeps its measured
+summary, remains visible with recovery instructions, and cannot be dismissed.
+A surface user turn returns stopped rows to `pending` and resets the circuit;
+restarting the service performs the same recovery.
 
 Collection and delivery never overwrite each other. The filesystem helper owns
 `collecting`, `collected`, and `failed`; the service owns `pending`,
 `in_progress`, `failed`, and `delivered`.
 
-After delivery, a successful row leaves surface presentation. A failed row, or
-a measured partial row with `collection == collected && failed > 0`, remains
-until `briefing.dismiss`. Only a registered surface can send that request. The
+After delivery, a successful row leaves surface presentation. A delivered row
+with `collection == failed`, or a measured partial row with
+`collection == collected && failed > 0`, remains until `briefing.dismiss`. A
+circuit-stopped delivery is separate and nondismissible. Only a registered
+surface can send a dismissal request. The
 opaque ID must name a retained terminal, delivered generation. The service
 stores dismissal atomically and then broadcasts the new whole list. A repeated
 dismissal succeeds as a no-op; unknown and nondismissible IDs receive bounded
 rejections.
 
 Dismissal does not acknowledge delivery and does not remove the canonical
-answer, run artifacts, or audit row. Briefing state format 2 retains up to 128
+answer, run artifacts, or audit row. Briefing state format 2 retains up to 64
 audit rows plus their bounded dismissed-ID set and reads format 1 as no
-dismissals. Active and undismissed attention rows are protected from audit
-eviction. The oldest delivered success or dismissed attention row yields
-first.
+dismissals. Stores written under format 2's original 128-row bound compact on
+upgrade instead of being rejected. Active and undismissed delivered attention
+rows are protected from
+audit eviction. The oldest delivered success, dismissed attention row, or
+circuit-stopped row yields first. Evicting a stopped row also removes its wake,
+so a runaway producer cannot fill the store and refuse later legitimate
+ingress.
 
 ## Unprompted wake ingress
 
@@ -246,9 +257,10 @@ failed > blocked > working > starting > idle
 
 `failed` and `blocked` are folded from durable rows rather than sent as their
 own field. A failed job holds until it is filed. A circuit-stopped briefing
-holds `failed` until the service restart that returns it to `pending`. Thus the
-tray stays red while explicit recovery is still required, not only while a
-process happens to run.
+holds `failed` until a user turn or service restart returns it to `pending`.
+Thus the tray stays red while explicit recovery is still required, not only
+while a process happens to run. A failed job is named before the generic
+briefing stop when both need attention.
 
 Surfaces layer local listening, transcription, and speaking presentation over
 that state.

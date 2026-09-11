@@ -708,7 +708,7 @@ final class ConversationStore: NSObject, ObservableObject {
             jobs = listed.jobs
         case "surface.briefings":
             let listed = try decoder.decode(IncomingBriefings.self, from: data)
-            guard listed.briefings.count <= 128,
+            guard listed.briefings.count <= 64,
                   listed.briefings.allSatisfy(\.isProtocolValid),
                   Set(listed.briefings.map(\.id)).count == listed.briefings.count
             else {

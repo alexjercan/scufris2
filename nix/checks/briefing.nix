@@ -167,8 +167,15 @@ in
       grep -Fx 'Persistent=false' ${units}/scufris-briefing-weekly.timer
       grep -Fx 'WantedBy=timers.target' ${units}/scufris-briefing-morning.timer
       grep -Fx 'Type=oneshot' ${units}/scufris-briefing-morning.service
-      grep -Fx 'MemoryHigh=3G' ${units}/scufris-briefing-morning.service
-      grep -Fx 'MemoryMax=4G' ${units}/scufris-briefing-morning.service
+      for unit in \
+        scufris-briefing-morning.service \
+        scufris-briefing-weekly.service \
+        scufris-briefing-morning-failure.service \
+        scufris-briefing-weekly-failure.service \
+        scufris-briefing-reconcile.service; do
+        grep -Fx 'MemoryHigh=3G' "${units}/$unit"
+        grep -Fx 'MemoryMax=4G' "${units}/$unit"
+      done
       # The unit outlives the run deadline the collection holds itself to.
       grep -Fx 'TimeoutStartSec=2100' ${units}/scufris-briefing-morning.service
       grep -Fx 'TimeoutStartSec=3900' ${units}/scufris-briefing-weekly.service

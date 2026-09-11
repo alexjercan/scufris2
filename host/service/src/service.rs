@@ -1,7 +1,7 @@
 //! Canonical protocol v10 service state.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::BufRead,
     path::PathBuf,
     sync::{
@@ -43,6 +43,7 @@ const MAX_FAILURES: u32 = 3;
 /// runs the same restart, so this is the sentence and not a second mechanism.
 const RECOVERY: &str =
     " Restart it from the tray, or with `systemctl --user restart scufris-service`.";
+const PROACTIVE_RECOVERY: &str = " Send a message to retry stopped briefings, restart it from the tray, or use `systemctl --user restart scufris-service`.";
 const HELLO_GRACE: Duration = Duration::from_secs(10);
 const MAX_CONSECUTIVE_PROACTIVE_TURNS: u32 = 3;
 #[cfg(not(test))]
@@ -110,6 +111,10 @@ struct Inner {
     /// follow-up queue. A user turn or an inbox that stays empty through the
     /// backoff ends the sequence.
     consecutive_proactive: u32,
+    /// Date/profile pairs whose proactive turn started in this sequence.
+    /// Repeating one logical run is the runaway signature. A backlog of
+    /// distinct daily or profile runs is allowed to drain.
+    proactive_runs: HashSet<(String, String)>,
     proactive_not_before: Option<Instant>,
     proactive_timer_pending: bool,
     proactive_circuit_open: bool,
@@ -130,9 +135,6 @@ impl Inner {
     /// it rather than until the process happens to exit. Filing is the
     /// acknowledgement, and it is what puts the tray back to quiet.
     fn attention(&self) -> Option<(ScufrisState, &str)> {
-        if let Some(summary) = self.briefings.failed_delivery_summary() {
-            return Some((ScufrisState::Failed, summary));
-        }
         let worst = |wanted: JobRowState| {
             self.jobs
                 .iter()
@@ -153,7 +155,7 @@ impl Inner {
         if self.proactive_circuit_open {
             return (
                 ScufrisState::Failed,
-                format!("Briefing delivery stopped for safety.{RECOVERY}"),
+                format!("Briefing delivery stopped for safety.{PROACTIVE_RECOVERY}"),
             );
         }
         if self.lifecycle == Lifecycle::Failed {
@@ -268,12 +270,17 @@ impl Inner {
         }
         let Some((run_id, wake)) = self.briefings.next() else {
             self.consecutive_proactive = 0;
+            self.proactive_runs.clear();
             self.proactive_not_before = None;
             return;
         };
         let run_id = run_id.to_string();
         let wake = wake.clone();
-        if self.consecutive_proactive >= MAX_CONSECUTIVE_PROACTIVE_TURNS {
+        let logical_run = self.briefings.logical_run_for_event(&wake.event_id);
+        let repeated_run = logical_run
+            .as_ref()
+            .is_some_and(|run| self.proactive_runs.contains(run));
+        if self.consecutive_proactive >= MAX_CONSECUTIVE_PROACTIVE_TURNS && repeated_run {
             self.proactive_circuit_open = true;
             let failed = match self.briefings.queued_delivery_failed() {
                 Ok(failed) => failed,
@@ -299,9 +306,17 @@ impl Inner {
                 outcome = "circuit_open",
                 consecutive = self.consecutive_proactive,
                 limit = MAX_CONSECUTIVE_PROACTIVE_TURNS,
+                date = logical_run
+                    .as_ref()
+                    .map(|run| run.0.as_str())
+                    .unwrap_or("unknown"),
+                profile = logical_run
+                    .as_ref()
+                    .map(|run| run.1.as_str())
+                    .unwrap_or("unknown"),
                 failed,
                 pending = self.briefings.pending_len(),
-                "proactive briefing circuit opened; restart the service to retry"
+                "proactive briefing circuit opened; send a message or restart the service to retry"
             );
             self.publish_state();
             self.publish_briefings();
@@ -321,6 +336,9 @@ impl Inner {
                 pending = self.briefings.pending_len(),
                 "briefing delivery could not be reserved"
             );
+            if let Err(mark_error) = self.briefings.queued_delivery_failed() {
+                warn!(%mark_error, outcome = "persist_failed", "failed proactive deliveries could not be marked");
+            }
             self.publish_state();
             self.publish_briefings();
             return;
@@ -404,6 +422,7 @@ impl Service {
                 active_proactive: None,
                 active_proactive_started: false,
                 consecutive_proactive: 0,
+                proactive_runs: HashSet::new(),
                 proactive_not_before: None,
                 proactive_timer_pending: false,
                 proactive_circuit_open: false,
@@ -477,9 +496,16 @@ impl Service {
     /// Agent-socket ordering puts any atomic response before this marker.
     fn proactive_settled(self: &Arc<Self>, event_id: String) {
         let mut inner = self.lock();
-        if inner.active_proactive.as_deref() != Some(&event_id) || !inner.active_proactive_started {
+        if inner.active_proactive.as_deref() != Some(&event_id) {
+            warn!(
+                event = event_id,
+                expected = inner.active_proactive.as_deref().unwrap_or("none"),
+                outcome = "ignored",
+                "stale proactive settlement was ignored"
+            );
             return;
         }
+        let started = inner.active_proactive_started;
         let run_id = inner
             .briefings
             .run_for_event(&event_id)
@@ -530,6 +556,7 @@ impl Service {
                     run = run_id,
                     event = event_id,
                     outcome = "retry",
+                    started,
                     consecutive = inner.consecutive_proactive,
                     backoff_ms = wait.as_millis(),
                     pending = inner.briefings.pending_len(),
@@ -745,10 +772,36 @@ impl Service {
             return;
         }
         // This surface opens a turn and owns the answer that closes it. It
-        // also ends a normal consecutive proactive sequence. An opened
-        // circuit still requires the restart named by the failed row.
+        // also ends a proactive sequence. An explicit owner turn is the
+        // in-process recovery boundary for a circuit stop, so a person can
+        // continue without restarting the whole service.
+        if inner.proactive_circuit_open {
+            match inner.briefings.resume_stopped() {
+                Ok(resumed) => {
+                    inner.proactive_circuit_open = false;
+                    if inner.lifecycle == Lifecycle::Failed
+                        && inner
+                            .lifecycle_detail
+                            .starts_with("Briefing delivery stopped")
+                    {
+                        inner.lifecycle = Lifecycle::Idle;
+                        inner.lifecycle_detail.clear();
+                    }
+                    info!(
+                        resumed,
+                        outcome = "recovered",
+                        "owner turn reset the proactive circuit"
+                    );
+                    inner.publish_briefings();
+                }
+                Err(error) => {
+                    warn!(%error, outcome = "persist_failed", "owner turn could not reset the proactive circuit")
+                }
+            }
+        }
         if !inner.proactive_circuit_open {
             inner.consecutive_proactive = 0;
+            inner.proactive_runs.clear();
             inner.proactive_not_before = None;
         }
         inner.associated_surface = Some(surface.clone());
@@ -898,6 +951,9 @@ impl Service {
                 } else {
                     inner.active_proactive_started = true;
                     inner.consecutive_proactive += 1;
+                    if let Some(run) = inner.briefings.logical_run_for_event(&proactive_id) {
+                        inner.proactive_runs.insert(run);
+                    }
                     info!(
                         run = run_id,
                         event = proactive_id,
@@ -945,6 +1001,9 @@ impl Service {
                     if !inner.active_proactive_started {
                         inner.active_proactive_started = true;
                         inner.consecutive_proactive += 1;
+                        if let Some(run) = inner.briefings.logical_run_for_event(&event_id) {
+                            inner.proactive_runs.insert(run);
+                        }
                         warn!(
                             run = run_id,
                             event = event_id,
@@ -1033,6 +1092,9 @@ impl Service {
                         inner.active_proactive = None;
                         inner.active_proactive_started = false;
                         inner.proactive_circuit_open = true;
+                        if let Err(error) = inner.briefings.queued_delivery_failed() {
+                            warn!(%error, outcome = "persist_failed", "failed proactive deliveries could not be marked");
+                        }
                         error!(
                             run = run_id,
                             event = event_id,
@@ -1948,7 +2010,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unrelated_settled_event_cannot_retry_a_proactive_message_still_queued_in_pi() {
+    fn only_an_exact_settlement_retries_a_proactive_message_not_delivered_by_pi() {
         let service = service();
         let (agent, agent_in) = sync_channel(8);
         service.register_agent(10, agent);
@@ -1976,6 +2038,17 @@ mod tests {
         assert_eq!(inner.consecutive_proactive, 0);
         drop(inner);
 
+        service.agent_request(10, proactive_settled("generation-a"));
+        assert!(matches!(
+            agent_in
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the exact abandoned wake is retried")
+                .body,
+            AgentResponseBody::Wake {
+                proactive_id: Some(ref id),
+                ..
+            } if id == "briefing-generation-a-terminal"
+        ));
         service.agent_request(10, proactive_started("generation-a"));
         service.agent_request(10, proactive_answer("generation-a", "right turn"));
         service.agent_request(10, proactive_settled("generation-a"));
@@ -2005,7 +2078,7 @@ mod tests {
         service.agent_request(10, proactive_settled("generation-a"));
         assert!(matches!(
             agent_in
-                .recv_timeout(Duration::from_secs(1))
+                .recv_timeout(Duration::from_secs(5))
                 .expect("the backed-off retry")
                 .body,
             AgentResponseBody::Wake { .. }
@@ -2054,8 +2127,52 @@ mod tests {
     }
 
     #[test]
-    fn consecutive_proactive_turns_back_off_and_open_the_circuit() {
+    fn a_distinct_queued_backlog_drains_without_opening_the_circuit() {
         let service = service();
+        for (index, suffix) in ['a', 'b', 'c', 'd', 'e'].into_iter().enumerate() {
+            let id = format!("generation-{suffix}");
+            let mut row = briefing_row(&id);
+            row.date = format!("2026-09-{:02}", index + 1);
+            assert!(matches!(
+                service.control_briefing(format!("update-{id}"), row, Some(briefing_wake(&id)),),
+                ControlResponseBody::BriefingAck { .. }
+            ));
+        }
+        let (agent, agent_in) = sync_channel(16);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        service.apply(Event::AgentSettled);
+        for suffix in ['a', 'b', 'c', 'd', 'e'] {
+            assert!(matches!(
+                agent_in
+                    .recv_timeout(Duration::from_secs(2))
+                    .expect("the distinct backlog item")
+                    .body,
+                AgentResponseBody::Wake { .. }
+            ));
+            service.agent_request(10, proactive_started(&format!("generation-{suffix}")));
+            service.agent_request(
+                10,
+                proactive_answer(&format!("generation-{suffix}"), &format!("answer {suffix}")),
+            );
+            service.agent_request(10, proactive_settled(&format!("generation-{suffix}")));
+        }
+        let inner = service.lock();
+        assert!(!inner.proactive_circuit_open);
+        assert_eq!(inner.briefings.pending_len(), 0);
+        assert!(
+            inner
+                .briefings
+                .audit_rows()
+                .iter()
+                .all(|row| row.delivery == BriefingDeliveryState::Delivered)
+        );
+    }
+
+    #[test]
+    fn repeated_logical_runs_back_off_and_open_the_circuit() {
+        let service = service();
+        let (_, surface_in) = surface(&service, 1, "one");
         let (agent, agent_in) = sync_channel(16);
         service.register_agent(10, agent);
         agent_in.recv().unwrap();
@@ -2090,7 +2207,7 @@ mod tests {
         for id in ["generation-d", "generation-e"] {
             let failed = rows.iter().find(|row| row.id == id).unwrap();
             assert_eq!(failed.delivery, BriefingDeliveryState::Failed);
-            assert!(failed.summary.contains("restart"));
+            assert_eq!(failed.summary, "2 of 2 sources answered");
         }
         assert_eq!(inner.briefings.pending_len(), 0);
         assert!(inner.proactive_circuit_open);
@@ -2112,8 +2229,30 @@ mod tests {
             .find(|row| row.id == "generation-f")
             .unwrap();
         assert_eq!(failed.delivery, BriefingDeliveryState::Failed);
-        assert!(failed.summary.contains("restart"));
+        assert_eq!(failed.summary, "2 of 2 sources answered");
         assert_eq!(inner.briefings.pending_len(), 0);
+        drop(inner);
+
+        service.surface_message(
+            1,
+            "owner-recovery".into(),
+            "Continue and retry stopped briefings.".into(),
+            Vec::new(),
+        );
+        assert!(matches!(
+            agent_in.recv().unwrap().body,
+            AgentResponseBody::Message { .. }
+        ));
+        let inner = service.lock();
+        assert!(!inner.proactive_circuit_open);
+        assert_eq!(inner.consecutive_proactive, 0);
+        assert_eq!(inner.briefings.pending_len(), 3);
+        assert_eq!(inner.state().0, ScufrisState::Idle);
+        assert!(drain(&surface_in).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Briefings { briefings }
+                if briefings.iter().all(|row| row.delivery == BriefingDeliveryState::Pending)
+        )));
     }
 
     #[test]
@@ -2210,7 +2349,7 @@ mod tests {
             if fail_conversation {
                 assert!(matches!(
                     agent_in
-                        .recv_timeout(Duration::from_secs(1))
+                        .recv_timeout(Duration::from_secs(5))
                         .expect("the durable retry")
                         .body,
                     AgentResponseBody::Wake { .. }

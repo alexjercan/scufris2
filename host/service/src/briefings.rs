@@ -19,8 +19,10 @@ use tracing::warn;
 const FORMAT_VERSION: u32 = 2;
 const LEGACY_FORMAT_VERSION: u32 = 1;
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
-const DELIVERY_FAILED_SUMMARY: &str =
-    "delivery stopped after repeated proactive turns; restart the Scufris service";
+/// Format 2 originally admitted this many rows. Loading that state is an
+/// upgrade migration, not corruption, even though the wire-safe bound is now
+/// lower.
+const LEGACY_MAX_BRIEFING_ROWS: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -81,13 +83,16 @@ impl BriefingStore {
             #[cfg(test)]
             fail_persistence: false,
         };
-        if let Err(error) = store.load() {
-            warn!(%error, path = %store.path.display(), "briefing state was rejected; starting empty");
-            store.reject();
-        }
+        let mut changed = match store.load() {
+            Ok(compacted) => compacted,
+            Err(error) => {
+                warn!(%error, path = %store.path.display(), "briefing state was rejected; starting empty");
+                store.reject();
+                false
+            }
+        };
         // A service crash can leave a dispatched item in progress. No model is
         // still attached to this process, so it is pending again.
-        let mut changed = false;
         for row in &mut store.rows {
             if matches!(
                 row.delivery,
@@ -116,14 +121,6 @@ impl BriefingStore {
             })
             .cloned()
             .collect()
-    }
-
-    /// One circuit-stopped delivery that the service state must surface.
-    pub fn failed_delivery_summary(&self) -> Option<&str> {
-        self.rows
-            .iter()
-            .find(|row| row.delivery == BriefingDeliveryState::Failed)
-            .map(|row| row.summary.as_str())
     }
 
     /// The complete service audit, including the delivered successes and the
@@ -160,6 +157,15 @@ impl BriefingStore {
             .iter()
             .find(|queued| queued.wake.event_id == event_id)
             .map(|queued| queued.run_id.as_str())
+    }
+
+    /// The user-meaningful run identity behind one queued event.
+    pub fn logical_run_for_event(&self, event_id: &str) -> Option<(String, String)> {
+        let run_id = self.run_for_event(event_id)?;
+        self.rows
+            .iter()
+            .find(|row| row.id == run_id)
+            .map(|row| (row.date.clone(), row.profile.clone()))
     }
 
     /// Merges a generation update without allowing a stale writer to move it
@@ -250,13 +256,15 @@ impl BriefingStore {
         });
         self.rows.sort_by_key(|row| (row.since, row.id.clone()));
         while self.rows.len() > MAX_BRIEFING_ROWS {
-            // Never evict active or undismissed attention. Successful and
-            // dismissed delivered rows remain audit only and yield oldest
-            // first when the bounded audit is full.
+            // Never evict work that can still make progress or delivered
+            // attention the person has not dismissed. A circuit-stopped row
+            // cannot progress until recovery, so its oldest item yields before
+            // the store refuses newer legitimate ingress.
             let Some(index) = self.rows.iter().position(|row| {
-                row.delivery == BriefingDeliveryState::Delivered
-                    && !row.active()
-                    && (!row.requires_attention() || self.dismissed.contains(&row.id))
+                row.delivery == BriefingDeliveryState::Failed
+                    || (row.delivery == BriefingDeliveryState::Delivered
+                        && !row.active()
+                        && (!row.requires_attention() || self.dismissed.contains(&row.id)))
             }) else {
                 self.rows = previous_rows;
                 self.pending = previous_pending;
@@ -264,6 +272,7 @@ impl BriefingStore {
                 return Err(StoreError::Full);
             };
             let removed = self.rows.remove(index);
+            self.pending.retain(|queued| queued.run_id != removed.id);
             self.dismissed.remove(&removed.id);
         }
         if self.rows == previous_rows
@@ -369,9 +378,13 @@ impl BriefingStore {
         let previous_rows = self.rows.clone();
         let mut changed = 0;
         for row in &mut self.rows {
-            if run_ids.contains(&row.id) && row.delivery != BriefingDeliveryState::Delivered {
+            if run_ids.contains(&row.id)
+                && matches!(
+                    row.delivery,
+                    BriefingDeliveryState::Pending | BriefingDeliveryState::InProgress
+                )
+            {
                 row.delivery = BriefingDeliveryState::Failed;
-                row.summary = DELIVERY_FAILED_SUMMARY.into();
                 changed += 1;
             }
         }
@@ -383,6 +396,31 @@ impl BriefingStore {
             return Err(error);
         }
         Ok(changed)
+    }
+
+    /// Returns every circuit-stopped row to pending after an explicit owner
+    /// turn. This also repairs an in-progress row whose durable retry failed.
+    /// A service restart performs the same transition while opening the store.
+    pub fn resume_stopped(&mut self) -> Result<usize, StoreError> {
+        let previous_rows = self.rows.clone();
+        let mut resumed = 0;
+        for row in &mut self.rows {
+            if matches!(
+                row.delivery,
+                BriefingDeliveryState::Failed | BriefingDeliveryState::InProgress
+            ) {
+                row.delivery = BriefingDeliveryState::Pending;
+                resumed += 1;
+            }
+        }
+        if resumed == 0 {
+            return Ok(0);
+        }
+        if let Err(error) = self.persist() {
+            self.rows = previous_rows;
+            return Err(error);
+        }
+        Ok(resumed)
     }
 
     pub fn retry(&mut self, event_id: &str) -> Result<(), StoreError> {
@@ -450,14 +488,14 @@ impl BriefingStore {
         Ok(true)
     }
 
-    fn load(&mut self) -> Result<(), StoreError> {
+    fn load(&mut self) -> Result<bool, StoreError> {
         let file = match OpenOptions::new()
             .read(true)
             .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
             .open(&self.path)
         {
             Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
             Err(error) => return Err(error.into()),
         };
         let metadata = file.metadata()?;
@@ -475,9 +513,9 @@ impl BriefingStore {
         let stored: Stored = serde_json::from_slice(&bytes)
             .map_err(|error| StoreError::Malformed(error.to_string()))?;
         if !matches!(stored.version, LEGACY_FORMAT_VERSION | FORMAT_VERSION)
-            || stored.rows.len() > MAX_BRIEFING_ROWS
-            || stored.pending.len() > MAX_BRIEFING_ROWS
-            || stored.dismissed.len() > MAX_BRIEFING_ROWS
+            || stored.rows.len() > LEGACY_MAX_BRIEFING_ROWS
+            || stored.pending.len() > LEGACY_MAX_BRIEFING_ROWS
+            || stored.dismissed.len() > LEGACY_MAX_BRIEFING_ROWS
         {
             return Err(StoreError::Malformed("unsupported briefing state".into()));
         }
@@ -524,7 +562,26 @@ impl BriefingStore {
         self.rows.sort_by_key(|row| (row.since, row.id.clone()));
         self.pending = stored.pending;
         self.dismissed = dismissed;
-        Ok(())
+        let compacted = self.rows.len() > MAX_BRIEFING_ROWS;
+        while self.rows.len() > MAX_BRIEFING_ROWS {
+            // Prefer the ordinary audit yields. A legacy store containing only
+            // protected rows still has to fit the newer wire-safe bound; in
+            // that exceptional migration, its oldest row yields and retained
+            // run manifests can announce it again.
+            let index = self
+                .rows
+                .iter()
+                .position(|row| {
+                    row.delivery == BriefingDeliveryState::Failed
+                        || (row.delivery == BriefingDeliveryState::Delivered
+                            && (!row.requires_attention() || self.dismissed.contains(&row.id)))
+                })
+                .unwrap_or(0);
+            let removed = self.rows.remove(index);
+            self.pending.retain(|queued| queued.run_id != removed.id);
+            self.dismissed.remove(&removed.id);
+        }
+        Ok(compacted)
     }
 
     #[cfg(test)]
@@ -706,7 +763,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_delivery_needs_a_restart_before_it_is_pending_again() {
+    fn stopped_delivery_resumes_on_an_owner_turn_or_restart() {
         let root =
             std::env::temp_dir().join(format!("scufris-briefing-failed-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
@@ -727,7 +784,8 @@ mod tests {
             store.audit_rows()[0].delivery,
             BriefingDeliveryState::Failed
         );
-        assert!(store.audit_rows()[0].summary.contains("restart"));
+        assert_eq!(store.audit_rows()[0].summary, "measured state");
+        assert_eq!(store.queued_delivery_failed().unwrap(), 0);
         assert_eq!(
             store
                 .upsert(
@@ -738,7 +796,14 @@ mod tests {
                 .unwrap(),
             UpsertOutcome::Deduplicated
         );
-        assert!(store.audit_rows()[0].summary.contains("restart"));
+        assert_eq!(store.audit_rows()[0].summary, "measured state");
+        assert_eq!(store.resume_stopped().unwrap(), 1);
+        assert!(store.next().is_some());
+        store.in_progress("briefing-generation-a-terminal").unwrap();
+        assert_eq!(store.resume_stopped().unwrap(), 1);
+        store
+            .delivery_failed("briefing-generation-a-terminal")
+            .unwrap();
         drop(store);
 
         let restored = BriefingStore::open(path);
@@ -932,7 +997,49 @@ mod tests {
     }
 
     #[test]
-    fn bounded_audit_never_evicts_undismissed_attention() {
+    fn the_oldest_stopped_row_yields_before_ingress_is_refused() {
+        let root = std::env::temp_dir().join(format!(
+            "scufris-briefing-stopped-bound-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let path = root.join("briefings.json");
+        let mut store = BriefingStore::open(path);
+        for index in 0..MAX_BRIEFING_ROWS {
+            let id = format!("generation-{index:03}");
+            store
+                .upsert(
+                    row(&id, BriefingCollectionState::Collected),
+                    Some(wake(&id)),
+                    false,
+                )
+                .unwrap();
+        }
+        assert_eq!(store.queued_delivery_failed().unwrap(), MAX_BRIEFING_ROWS);
+        store
+            .upsert(
+                row("generation-next", BriefingCollectionState::Collected),
+                Some(wake("generation-next")),
+                false,
+            )
+            .unwrap();
+        assert_eq!(store.audit_rows().len(), MAX_BRIEFING_ROWS);
+        assert!(
+            store
+                .audit_rows()
+                .iter()
+                .all(|row| row.id != "generation-000")
+        );
+        assert_eq!(
+            store.run_for_event("briefing-generation-000-terminal"),
+            None
+        );
+        assert!(store.next().is_some());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bounded_audit_never_evicts_undismissed_delivered_attention() {
         let root =
             std::env::temp_dir().join(format!("scufris-briefing-bound-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
@@ -1000,6 +1107,52 @@ mod tests {
                 .any(|row| row.id == "generation-000")
         );
         assert!(store.rows().iter().any(|row| row.id == "generation-next"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_original_format_two_bound_compacts_instead_of_becoming_corrupt() {
+        let root =
+            std::env::temp_dir().join(format!("scufris-briefing-v2-bound-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let path = root.join("briefings.json");
+        fs::create_dir_all(&root).unwrap();
+        let mut rows = Vec::new();
+        let mut pending = Vec::new();
+        for index in 0..=MAX_BRIEFING_ROWS {
+            let id = format!("generation-{index:03}");
+            let mut stopped = row(&id, BriefingCollectionState::Collected);
+            stopped.delivery = BriefingDeliveryState::Failed;
+            rows.push(stopped);
+            pending.push(Queued {
+                run_id: id.clone(),
+                wake: wake(&id),
+            });
+        }
+        fs::write(
+            &path,
+            serde_json::to_vec(&Stored {
+                version: FORMAT_VERSION,
+                rows,
+                pending,
+                dismissed: vec![],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let store = BriefingStore::open(path.clone());
+        assert_eq!(store.audit_rows().len(), MAX_BRIEFING_ROWS);
+        assert!(store.next().is_some());
+        assert!(
+            store
+                .audit_rows()
+                .iter()
+                .all(|row| row.id != "generation-000")
+        );
+        let compacted: Stored = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(compacted.rows.len(), MAX_BRIEFING_ROWS);
+        assert_eq!(compacted.pending.len(), MAX_BRIEFING_ROWS);
         fs::remove_dir_all(root).unwrap();
     }
 

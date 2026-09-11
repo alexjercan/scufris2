@@ -173,7 +173,7 @@ struct BriefingRow: Codable, Equatable, Identifiable {
     let summary: String
 
     var isActive: Bool {
-        collection == .collecting || delivery != .delivered
+        collection == .collecting || delivery == .pending || delivery == .inProgress
     }
 
     var requiresAttention: Bool {
@@ -230,9 +230,7 @@ struct BriefingDrawerPresentation: Equatable {
             : relevant.filter { $0.isActive || $0.id == latestAttention?.id }
         activeCount = relevant.filter(\.isActive).count
         attentionCount = attention.count
-        hiddenAttentionCount = expanded
-            ? 0
-            : max(0, attention.count - (latestAttention == nil ? 0 : 1))
+        hiddenAttentionCount = expanded ? 0 : relevant.count - self.rows.count
     }
 }
 

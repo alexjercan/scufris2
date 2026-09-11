@@ -1119,6 +1119,12 @@ private struct BriefingRowView: View {
                 .foregroundStyle(ScufrisPalette.foreground)
                 .lineLimit(1)
                 .truncationMode(.tail)
+            if row.delivery == .failed {
+                Text("send a message to retry, or restart the Scufris service")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(ScufrisPalette.brown)
+                    .lineLimit(2)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilitySummary)
@@ -1126,7 +1132,7 @@ private struct BriefingRowView: View {
 
     private var word: String {
         if row.delivery == .inProgress { return "write" }
-        if row.delivery == .failed { return "halt" }
+        if row.delivery == .failed { return "stopped" }
         if row.collection == .collecting { return "gather" }
         if row.delivery == .pending { return "ready" }
         if row.collection == .failed { return "fail" }
@@ -1137,11 +1143,14 @@ private struct BriefingRowView: View {
     private var accessibilitySummary: String {
         let failed = row.failed == 0 ? "" : ", \(row.failed) failed"
         let attention = row.requiresAttention ? ", requires attention" : ""
-        return "\(row.profile) briefing for \(row.date), \(word), \(row.completed) of \(row.total) sources\(failed)\(attention): \(row.summary)"
+        let recovery = row.delivery == .failed
+            ? ", send a message to retry or restart the Scufris service"
+            : ""
+        return "\(row.profile) briefing for \(row.date), \(word), \(row.completed) of \(row.total) sources\(failed)\(attention)\(recovery): \(row.summary)"
     }
 
     private var colour: Color {
-        if row.delivery == .failed { return ScufrisPalette.red }
+        if row.delivery == .failed { return ScufrisPalette.brown }
         if row.collection == .failed { return ScufrisPalette.red }
         if row.requiresAttention { return ScufrisPalette.yellow }
         if row.delivery == .delivered { return ScufrisPalette.quartz }

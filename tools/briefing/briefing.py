@@ -94,6 +94,7 @@ MAX_PROSE = 64 * 1024
 MAX_MANIFEST = 512 * 1024
 MAX_CONFIG = 256 * 1024
 MAX_CONTRIBUTION = MAX_OUTPUT + MAX_BODY + 64 * 1024
+MAX_RECONCILE_REFUSAL_DETAILS = 8
 KEEP_DAYS = 30
 
 SOURCE_DEADLINE = 900.0
@@ -1765,6 +1766,9 @@ def publish(date: str, profile: str, prose: str) -> dict[str, Any]:
     """Serialize retries before fixing one generation's prose."""
     date = validated_date(date)
     profile = validated_profile(profile)
+    # Name a missing or unsafe run before trying to create a file beneath it.
+    # This also keeps a symlinked run directory from receiving our lock file.
+    read_manifest(date, profile)
     directory = run_dir(date, profile)
     lock_path = directory / ".publish.lock"
     try:
@@ -1778,7 +1782,12 @@ def publish(date: str, profile: str, prose: str) -> dict[str, Any]:
             f"the {profile} briefing publication lock is unavailable: {trouble}"
         ) from None
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Refused(
+                f"the {profile} briefing is already being published"
+            ) from None
         return _publish_owned(date, profile, prose)
     finally:
         os.close(descriptor)
@@ -1790,7 +1799,9 @@ def _publish_owned(date: str, profile: str, prose: str) -> dict[str, Any]:
     Collection already wrote a page from the contributions alone. The first
     publish fixes the generation's prose. Repeating the same prose is a no-op,
     except that it repairs a crash between the prose, manifest, and page
-    writes. Different prose needs a new generation and is refused here.
+    writes. A retry that proposes different prose keeps and returns the prose
+    already fixed for this generation, so the caller can say the canonical
+    words instead of wedging delivery on an ordinary retry.
     """
     manifest = read_manifest(date, profile)
     if not isinstance(prose, str) or not prose.strip():
@@ -1802,8 +1813,12 @@ def _publish_owned(date: str, profile: str, prose: str) -> dict[str, Any]:
     directory = run_dir(date, profile)
     prose_path = directory / "briefing.md"
     existing = read_regular(prose_path, MAX_PROSE + 1, optional=True)
-    if existing is not None and existing != wanted:
-        raise Refused("this briefing generation already has different prose")
+    reused_existing = existing is not None and existing != wanted
+    if reused_existing:
+        try:
+            normalized = existing.decode("utf-8")
+        except UnicodeDecodeError:
+            raise Refused("this briefing generation has unreadable prose") from None
     if manifest.get("delivery") == "prepared" and existing is None:
         raise Refused("this prepared briefing generation has no prose")
 
@@ -1835,6 +1850,8 @@ def _publish_owned(date: str, profile: str, prose: str) -> dict[str, Any]:
     changed = wrote_prose or wrote_manifest or wrote_page
     if wrote_prose:
         outcome = "published"
+    elif reused_existing:
+        outcome = "already_published"
     elif changed:
         outcome = "recovered"
     else:
@@ -1845,6 +1862,7 @@ def _publish_owned(date: str, profile: str, prose: str) -> dict[str, Any]:
         "state": manifest["state"],
         "delivery": manifest["delivery"],
         "outcome": outcome,
+        "prose": normalized,
         "markdown": str(prose_path),
         "page": str(page_path),
     }
@@ -1886,9 +1904,11 @@ def wake_message(manifest: dict[str, Any]) -> str:
         "piece in your own voice that says what today needs, built from what "
         "the sources actually reported. Do not read the sources out one after "
         "another, and claim nothing none of them measured. Name any source "
-        "that could not answer. Call scufris_briefing_publish with that prose "
-        "and the same date and profile, then tell the user the same briefing "
-        "in the same words." + offers_instruction(manifest)
+        "that could not answer. If the run already contains prose, reuse it "
+        "exactly. Call scufris_briefing_publish with that prose and the same "
+        "date and profile. If the tool returns prose already published for a "
+        "retry, use those canonical words instead. Then tell the user the same "
+        "briefing in the same words." + offers_instruction(manifest)
     )
 
 
@@ -1927,7 +1947,8 @@ def failure_message(manifest: dict[str, Any]) -> str:
         "answer. Claim nothing about what they would have said. Call "
         "scufris_briefing_publish with that same sentence and the same date "
         f"and profile - a run nobody publishes is a run this asks about again "
-        "every session - then tell the user, and do not collect it again "
+        "every session - then tell the user the prose the tool keeps or returns, "
+        "and do not collect it again "
         "unless he asks."
     )
 
@@ -2058,14 +2079,15 @@ def finalize(date: str, profile: str, generation: str, cause: str) -> dict[str, 
     return finish(closed, contributions)
 
 
-def reconcile(*, ctl: str | None = None) -> dict[str, int]:
+def reconcile(*, ctl: str | None = None) -> dict[str, Any]:
     """Authoritatively replay kept rows and close stale ownerless runs."""
     root = state_root()
     sent = 0
     refused = 0
     finalized = 0
+    refusals: list[dict[str, str]] = []
     if not root.is_dir():
-        return {"sent": 0, "refused": 0, "finalized": 0}
+        return {"sent": 0, "refused": 0, "finalized": 0, "refusals": []}
     keep = environment_int("SCUFRIS_BRIEFING_KEEP_DAYS", KEEP_DAYS)
     days = [
         path
@@ -2094,12 +2116,25 @@ def reconcile(*, ctl: str | None = None) -> dict[str, int]:
                         "no matching collector remained after its deadline",
                     )
                     finalized += 1
-            ok, _reason = announce(manifest, ctl=ctl)
+            ok, reason = announce(manifest, ctl=ctl)
             if ok:
                 sent += 1
             else:
                 refused += 1
-    return {"sent": sent, "refused": refused, "finalized": finalized}
+                if len(refusals) < MAX_RECONCILE_REFUSAL_DETAILS:
+                    refusals.append(
+                        {
+                            "date": day.name,
+                            "profile": profile,
+                            "reason": reason[:512],
+                        }
+                    )
+    return {
+        "sent": sent,
+        "refused": refused,
+        "finalized": finalized,
+        "refusals": refusals,
+    }
 
 
 def wake(date: str, profile: str, *, ctl: str | None = None) -> dict[str, Any]:

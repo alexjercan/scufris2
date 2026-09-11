@@ -18,15 +18,23 @@ import {
   takeLines,
 } from "../agent/extensions/scufris/service/protocol.ts";
 import {
+  AGENT_RESPONSE_EVENT,
   AgentClient,
   UPDATE_TOGETHER,
+  type AgentClientOptions,
   type AgentWake,
+  type AtomicResponse,
 } from "../agent/extensions/scufris/service/client.ts";
 import {
+  bindService,
   proactiveIdFromMessage,
   proactiveMessageDetails,
   resolveSocketPath,
 } from "../agent/extensions/scufris/service/index.ts";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 
 const widget = {
   name: "summary",
@@ -431,6 +439,138 @@ test("proactive correlation stays on its exact queued custom message", () => {
     proactiveIdFromMessage({ ...queued, role: "assistant" }),
     undefined,
   );
+});
+
+test("the service binding correlates and settles the exact Pi follow-up", () => {
+  const handlers = new Map<
+    string,
+    (event?: unknown, context?: unknown) => void
+  >();
+  const bus = new Map<string, (value: unknown) => void>();
+  const sent: Array<{ message: unknown; options: unknown }> = [];
+  const calls: string[] = [];
+  let clientOptions: AgentClientOptions | undefined;
+  const client = {
+    start: () => calls.push("start"),
+    stop: () => calls.push("stop"),
+    jobs: () => calls.push("jobs"),
+    response: (response: AtomicResponse, proactiveId?: string) =>
+      calls.push(`response:${response.text}:${proactiveId ?? "none"}`),
+    proactiveStarted: (proactiveId: string) =>
+      calls.push(`started:${proactiveId}`),
+    proactiveSettled: (proactiveId: string) =>
+      calls.push(`settled:${proactiveId}`),
+  };
+  const pi = {
+    registerTool() {},
+    on(name: string, handler: (event?: unknown, context?: unknown) => void) {
+      handlers.set(name, handler);
+    },
+    events: {
+      on(name: string, handler: (value: unknown) => void) {
+        bus.set(name, handler);
+      },
+      emit() {},
+    },
+    sendMessage(message: unknown, options: unknown) {
+      sent.push({ message, options });
+    },
+    sendUserMessage() {},
+  } as unknown as ExtensionAPI;
+  bindService(pi, {
+    role: "orchestrator",
+    socketPath: "/tmp/scufris-test-agent.sock",
+    createClient(options) {
+      clientOptions = options;
+      return client;
+    },
+  });
+  const context = {
+    hasUI: false,
+    isIdle: () => true,
+    abort() {},
+  } as unknown as ExtensionContext;
+  handlers.get("session_start")?.({}, context);
+  assert.equal(calls[0], "start");
+  assert.ok(clientOptions);
+
+  const proactiveId = "briefing-generation-a-terminal";
+  clientOptions.wake({
+    proactiveId,
+    customType: "scufris-briefing",
+    content: "Wake up.",
+  });
+  // A reconnect can redeliver the host wake while the exact Pi message remains
+  // queued. It must not make a second model turn.
+  clientOptions.wake({
+    proactiveId,
+    customType: "scufris-briefing",
+    content: "Wake up.",
+  });
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0]?.options, {
+    deliverAs: "followUp",
+    triggerTurn: true,
+  });
+  const queued = sent[0]?.message as Record<string, unknown>;
+  handlers.get("message_end")?.({ message: { role: "custom", ...queued } });
+  bus.get(AGENT_RESPONSE_EVENT)?.({ text: "The briefing." });
+  handlers.get("agent_settled")?.();
+  assert.deepEqual(calls.slice(1), [
+    `started:${proactiveId}`,
+    `response:The briefing.:${proactiveId}`,
+    `settled:${proactiveId}`,
+  ]);
+  handlers.get("session_shutdown")?.();
+  assert.equal(calls.at(-1), "stop");
+});
+
+test("an undelivered Pi follow-up is settled by exact queued identity", () => {
+  const handlers = new Map<
+    string,
+    (event?: unknown, context?: unknown) => void
+  >();
+  let clientOptions: AgentClientOptions | undefined;
+  const settled: string[] = [];
+  const pi = {
+    registerTool() {},
+    on(name: string, handler: (event?: unknown, context?: unknown) => void) {
+      handlers.set(name, handler);
+    },
+    events: { on() {}, emit() {} },
+    sendMessage() {},
+    sendUserMessage() {},
+  } as unknown as ExtensionAPI;
+  bindService(pi, {
+    role: "orchestrator",
+    socketPath: "/tmp/scufris-test-agent.sock",
+    createClient(options) {
+      clientOptions = options;
+      return {
+        start() {},
+        stop() {},
+        jobs() {},
+        response() {},
+        proactiveStarted() {},
+        proactiveSettled: (id: string) => settled.push(id),
+      };
+    },
+  });
+  handlers.get("session_start")?.(
+    {},
+    { hasUI: false, isIdle: () => true, abort() {} },
+  );
+  const proactiveId = "briefing-generation-a-terminal";
+  assert.ok(clientOptions);
+  clientOptions.wake({
+    proactiveId,
+    customType: "scufris-briefing",
+    content: "Wake up.",
+  });
+  // No message_end arrived. Pi's settled boundary says the follow-up queue is
+  // empty, so the host receives the marker that releases and retries its slot.
+  handlers.get("agent_settled")?.();
+  assert.deepEqual(settled, [proactiveId]);
 });
 
 test("a wake becomes a follow-up, never a user message", async () => {

@@ -7,6 +7,7 @@ the harness is a script that answers whatever the test told it to.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import subprocess
@@ -1240,7 +1241,9 @@ class Run(unittest.TestCase):
         self.assertNotIn("no prose yet", rendered)
         self.assertEqual(result["outcome"], "published")
 
-    def test_repeated_publish_is_a_no_op_and_changed_prose_is_refused(self) -> None:
+    def test_repeated_publish_is_a_no_op_and_changed_prose_returns_fixed_prose(
+        self,
+    ) -> None:
         self.declare("the-den")
         briefing.collect("2026-08-31", "morning")
         prose = "Good morning. Two tasks are left over."
@@ -1263,32 +1266,35 @@ class Run(unittest.TestCase):
                 for name in ("manifest.json", "briefing.md", "briefing.html")
             },
         )
-        with self.assertRaises(briefing.Refused) as refused:
-            briefing.publish("2026-08-31", "morning", "A changed morning.")
-        self.assertIn("different prose", str(refused.exception))
+        retried = briefing.publish("2026-08-31", "morning", "A changed morning.")
+        self.assertEqual(retried["outcome"], "already_published")
+        self.assertEqual(retried["prose"], prose + "\n")
         self.assertEqual((directory / "briefing.md").read_text(), prose + "\n")
 
     def test_concurrent_publication_fixes_exactly_one_prose(self) -> None:
         self.declare("the-den")
         briefing.collect("2026-08-31", "morning")
+        proposals = ["First prose.", "Second prose."]
 
-        def attempt(prose: str) -> tuple[str, str]:
+        def attempt(prose: str) -> tuple[str, str | None]:
             try:
                 result = briefing.publish("2026-08-31", "morning", prose)
-                return ("published", result["outcome"])
-            except briefing.Refused as error:
-                return ("refused", str(error))
+            except briefing.Refused as refused:
+                self.assertIn("already being published", str(refused))
+                return ("busy", None)
+            return (result["outcome"], result["prose"])
 
         with ThreadPoolExecutor(max_workers=2) as pool:
-            results = list(pool.map(attempt, ["First prose.", "Second prose."]))
-        self.assertEqual([kind for kind, _ in results].count("published"), 1)
-        self.assertEqual([kind for kind, _ in results].count("refused"), 1)
-        self.assertIn(
-            (briefing.run_dir("2026-08-31", "morning") / "briefing.md")
-            .read_text()
-            .strip(),
-            {"First prose.", "Second prose."},
-        )
+            results = list(pool.map(attempt, proposals))
+        outcomes = [outcome for outcome, _ in results]
+        self.assertEqual(outcomes.count("published"), 1)
+        self.assertTrue(set(outcomes) <= {"published", "already_published", "busy"})
+        fixed = (briefing.run_dir("2026-08-31", "morning") / "briefing.md").read_text()
+        self.assertIn(fixed.strip(), proposals)
+        for proposal in proposals:
+            retried = briefing.publish("2026-08-31", "morning", proposal)
+            self.assertIn(retried["outcome"], {"unchanged", "already_published"})
+            self.assertEqual(retried["prose"], fixed)
 
     def test_publish_recovers_each_write_boundary_without_changing_prose(
         self,
@@ -1328,10 +1334,37 @@ class Run(unittest.TestCase):
                 self.assertIn(prose, Path(recovered["page"]).read_text())
 
     def test_publishing_a_run_that_is_not_there_is_refused(self) -> None:
-        with self.assertRaises(briefing.Refused):
+        with self.assertRaises(briefing.Refused) as refused:
             briefing.publish("2026-08-31", "morning", "Good morning.")
+        self.assertEqual(str(refused.exception), "no morning run for 2026-08-31")
         with self.assertRaises(briefing.Refused):
             briefing.publish("not-a-date", "morning", "Good morning.")
+
+    def test_publish_refuses_an_unsafe_run_and_a_busy_lock_without_waiting(
+        self,
+    ) -> None:
+        self.declare("the-den")
+        briefing.collect("2026-08-31", "morning")
+        directory = briefing.run_dir("2026-08-31", "morning")
+        lock_path = directory / ".publish.lock"
+        descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaises(briefing.Refused) as refused:
+                briefing.publish("2026-08-31", "morning", "Good morning.")
+            self.assertIn("already being published", str(refused.exception))
+        finally:
+            os.close(descriptor)
+
+        briefing.collect("2026-09-01", "morning")
+        run = briefing.run_dir("2026-09-01", "morning")
+        target = run.with_name("target")
+        run.rename(target)
+        run.symlink_to(target, target_is_directory=True)
+        with self.assertRaises(briefing.Refused) as refused:
+            briefing.publish("2026-09-01", "morning", "Good morning.")
+        self.assertIn("unsafe directory link", str(refused.exception))
+        self.assertFalse((target / ".publish.lock").exists())
 
     def test_an_archived_nightly_run_uses_the_same_markdown_renderer(self) -> None:
         run = json.loads(MORNING_FIXTURE.read_text(encoding="utf-8"))
@@ -1616,6 +1649,29 @@ class Run(unittest.TestCase):
         self.control("#!/usr/bin/env python3\nraise SystemExit(0)\n")
         answer = briefing.wake("2026-08-31", "morning")
         self.assertTrue(answer["woken"])
+
+    def test_reconcile_reports_each_bounded_refusal_reason(self) -> None:
+        self.declare("the-den")
+        briefing.collect("2026-08-31", "morning")
+        self.control(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            'print("scufris-ctl: no_free_slot: store full", file=sys.stderr)\n'
+            "raise SystemExit(1)\n"
+        )
+        result = briefing.reconcile()
+        self.assertEqual(result["sent"], 0)
+        self.assertEqual(result["refused"], 1)
+        self.assertEqual(
+            result["refusals"],
+            [
+                {
+                    "date": "2026-08-31",
+                    "profile": "morning",
+                    "reason": "scufris-ctl: no_free_slot: store full",
+                }
+            ],
+        )
 
     def test_only_the_last_runs_are_kept(self) -> None:
         root = briefing.state_root()

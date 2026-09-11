@@ -281,7 +281,7 @@ impl Surface {
 
 /// One thing the runtime is asked to do.
 ///
-/// Protocol v9 currently constructs only `Open`; the update and retirement
+/// Protocol v10 currently constructs only `Open`; the update and retirement
 /// commands remain tested runtime capabilities for local widget integrations.
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
@@ -460,6 +460,11 @@ pub enum Act {
         surface: SurfaceId,
         /// True while it belongs on every workspace.
         sticky: bool,
+    },
+    /// Put a tray summon refusal in front of the person who clicked it.
+    Notify {
+        /// What prevented the panel from opening.
+        detail: String,
     },
     /// Tell one surface's chrome that a tick could not be carried out.
     Refuse {
@@ -1269,17 +1274,13 @@ fn failed(id: String, code: &str, detail: String) -> Act {
     })
 }
 
-/// Refuses one open, and says so only when somebody asked for it.
-///
-/// A summon from the tray that cannot land leaves the log line and nothing
-/// else. The person is looking at their own desktop, so the full edges that
-/// refused it are already on screen in front of them.
+/// Refuses one open to its requester, or to the person who summoned it.
 fn refused(id: Option<String>, code: &str, detail: String) -> Vec<Act> {
     match id {
         Some(id) => vec![failed(id, code, detail)],
         None => {
             warn!(code, "a summoned widget was refused: {detail}");
-            Vec::new()
+            vec![Act::Notify { detail }]
         }
     }
 }
@@ -1517,7 +1518,7 @@ cadence = 500
     }
 
     #[test]
-    fn a_summon_that_cannot_land_says_nothing_either() {
+    fn a_summon_that_cannot_land_reports_why() {
         let catalog = catalog();
         let mut runtime = Runtime::new();
         // Towers, because they are what actually fills the edges: four of them
@@ -1525,7 +1526,10 @@ cadence = 500
         for _ in 0..EDGE_SLOTS.len() {
             open(&mut runtime, &catalog, "tower", Posture::Instrument);
         }
-        assert_eq!(summon(&mut runtime, &catalog, "gauge"), Vec::new());
+        assert!(matches!(
+            summon(&mut runtime, &catalog, "gauge").as_slice(),
+            [Act::Notify { detail }] if detail.contains("no edge has")
+        ));
     }
 
     #[test]

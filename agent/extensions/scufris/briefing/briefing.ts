@@ -240,7 +240,7 @@ export default function briefing(pi: ExtensionAPI): void {
       promptGuidelines: [
         "Write the prose yourself from the contributions. This tool keeps what you wrote; it writes nothing of its own.",
         "Publish into the run you read: name the same profile you were woken for. Without one this publishes into the single run waiting to be written up, and refuses when two are or when none is.",
-        "Publish before telling the user, and tell them the same briefing you published.",
+        "Publish before telling the user. On a retry, the tool may return prose already fixed for the generation; tell the user those returned canonical words instead of your new draft.",
       ],
       parameters: Type.Object(
         {

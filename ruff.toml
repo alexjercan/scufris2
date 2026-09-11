@@ -1,3 +1,11 @@
+extend-include = [
+  "scripts/scufris-jobs",
+  "tools/jobs/scufris-jobs",
+  "tools/jobs/scufris-report",
+  "tools/quick-review-agent/scufris-quick-review-agent",
+  "tools/voice/scufris-speak",
+]
+
 [lint.per-file-ignores]
 # This backend is a build fragment. build.rs prepends the den prelude into the
 # same Python namespace before execution, and its integration tests assemble it

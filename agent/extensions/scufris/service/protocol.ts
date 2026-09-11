@@ -21,7 +21,7 @@ export const MAX_OFFERS = 2;
 export const MAX_BADGE_BYTES = 64;
 export const MAX_JOB_ROWS = 8;
 export const MAX_JOB_SUMMARY_BYTES = 512;
-export const MAX_BRIEFING_ROWS = 128;
+export const MAX_BRIEFING_ROWS = 64;
 export const MAX_BRIEFING_SUMMARY_BYTES = 256;
 
 export interface WidgetDefinition {

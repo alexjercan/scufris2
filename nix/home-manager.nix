@@ -87,6 +87,12 @@
     '';
   };
   briefingProfileName = "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$";
+  # Every briefing helper reads the same bounded run artifacts. Keep all of
+  # their cgroups behind the same second wall, not only scheduled collection.
+  briefingMemory = {
+    MemoryHigh = "3G";
+    MemoryMax = "4G";
+  };
   # The helper reads a TOML path and does not know Nix exists. This is one way
   # to produce that file: a typed option so a malformed entry fails the build
   # instead of costing a morning. Anyone not on NixOS writes the same file by
@@ -669,40 +675,41 @@ in {
               Description = "Scufris ${name} briefing";
               OnFailure = ["${briefingUnitName name}-failure.service"];
             };
-            Service = {
-              Type = "oneshot";
-              ExecStart = lib.getExe (briefingRunner name profile);
-              # Above the deadline the collection holds itself to, so a run
-              # still asking its sources is never killed halfway. What it has
-              # gathered by then is published either way.
-              TimeoutStartSec = profile.deadline + 300;
-              # A deadline bounds time, not memory, and the two fail
-              # differently. This is the second wall behind bounded readers:
-              # a future runaway is stopped while the machine stays usable.
-              MemoryMax = "4G";
-              MemoryHigh = "3G";
-              WorkingDirectory = "%h";
-            };
+            Service =
+              briefingMemory
+              // {
+                Type = "oneshot";
+                ExecStart = lib.getExe (briefingRunner name profile);
+                # Above the deadline the collection holds itself to, so a run
+                # still asking its sources is never killed halfway. What it has
+                # gathered by then is published either way.
+                TimeoutStartSec = profile.deadline + 300;
+                WorkingDirectory = "%h";
+              };
           })
         briefingCfg.profiles)
         (lib.mapAttrs' (name: _profile:
           lib.nameValuePair "${briefingUnitName name}-failure" {
             Unit.Description = "Finalize failed Scufris ${name} briefing";
-            Service = {
-              Type = "oneshot";
-              ExecStart = lib.getExe (briefingFinalizer name);
-              WorkingDirectory = "%h";
-            };
+            Service =
+              briefingMemory
+              // {
+                Type = "oneshot";
+                ExecStart = lib.getExe (briefingFinalizer name);
+                WorkingDirectory = "%h";
+              };
           })
         briefingCfg.profiles)
         {
           scufris-briefing-reconcile = {
             Unit.Description = "Reconcile durable Scufris briefing state";
-            Service = {
-              Type = "oneshot";
-              ExecStart = lib.getExe briefingReconciler;
-              WorkingDirectory = "%h";
-            };
+            Service =
+              briefingMemory
+              // {
+                Type = "oneshot";
+                ExecStart = lib.getExe briefingReconciler;
+                WorkingDirectory = "%h";
+              };
           };
         }
       ];

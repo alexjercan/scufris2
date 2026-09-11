@@ -118,8 +118,9 @@ stateDiagram-v2
 ```
 
 Use `/wake all` to wake on `working` too. Use `/wake minimal` to restore the
-default. Use `/calm off` to show Pi thinking and tool rows; `/calm on` is the
-default.
+default. Use `/calm off` to show Pi thinking and tool rows, and the envelope a
+message from the phone or a panel arrives in; `/calm on` is the default and
+shows such a message as the words that were sent.
 
 Inspect jobs from a shell:
 

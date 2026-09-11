@@ -35,6 +35,13 @@ XML-delimited block. User text and widget JSON are JSON encoded, and XML
 characters inside that JSON are escaped. The complete block is sent through
 `pi.sendUserMessage()`. A busy Pi receives it with `deliverAs: "steer"`.
 
+`calm.ts` draws that block as the words that were sent. The widget catalogue is
+the right thing to give the model and four thousand characters of schema around
+one sentence to put in front of a person, so the person is given the sentence,
+with any attachment named. It is display only, through
+`pi.registerMarkdownTransformer`: the session, the model's context, and the
+conversation the service replays all keep the block, and `/calm off` shows it.
+
 `agent.abort` calls the active extension context's abort method.
 
 `workflow/` publishes every delegated job as one `agent.jobs` list. The list is

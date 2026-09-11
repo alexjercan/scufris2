@@ -9,6 +9,15 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Changed
+
+- A message sent from the phone or a desktop panel reads as the message. It
+  arrives wrapped in the widget catalogue the model is offered, which was four
+  thousand characters of schema around one sentence on the screen of a terminal
+  holding the conversation; Calm now draws the sentence, and names any
+  attachment. The wrapper is untouched in the session, in the model's context,
+  and in the conversation the service replays, and `/calm off` still shows it.
+
 ## [2.8.1] - 2026-09-11
 
 ### Fixed

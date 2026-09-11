@@ -10,9 +10,11 @@
   fixtures,
   ...
 }: let
-  inherit (scufris) resources launcher piPackage terminal ctl;
+  inherit (pkgs) lib;
+  inherit (scufris) resources launcher piPackage terminal ctl den briefing;
   inherit (fixtures) systemPi;
   python = import ../python.nix {inherit pkgs;};
+  agentRuntime = import ../agent-runtime.nix {inherit pkgs den briefing;};
 in {
   launcher-normal =
     pkgs.runCommand "scufris-launcher-normal-check" {
@@ -73,6 +75,18 @@ in {
       ! grep -q -- '--extension' "$script"
       touch "$out"
     '';
+
+  # The two launchers start the same composition, so they put the same
+  # programs on its PATH. The terminal used to carry none of them: the
+  # briefing failed at its first import, in a terminal only, and the
+  # interpreter it needed was on the other launcher all along.
+  launcher-runtime = pkgs.runCommand "scufris-launcher-runtime-check" {} ''
+    for program in ${lib.concatMapStringsSep " " toString agentRuntime}; do
+      grep -q "$program" ${launcher}/bin/scufris
+      grep -q "$program" ${terminal}/bin/scufris-terminal
+    done
+    touch "$out"
+  '';
 
   launcher-fallback-pi = pkgs.runCommand "scufris-launcher-fallback-pi-check" {} ''
     export HOME="$TMPDIR/home"

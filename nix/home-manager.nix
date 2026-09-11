@@ -46,12 +46,16 @@
     projectRoots = agentCfg.projectRoots;
   };
   # The other end of the handoff. It is the same Pi the service would have
-  # started, told where the sessions are, so it is built from the same two
-  # packages the module already resolved rather than a third opinion.
+  # started, told where the sessions are, so it is built from the packages the
+  # module already resolved rather than a third opinion. The journal and the
+  # briefing are among them for the same reason they are on the launcher: the
+  # agent a terminal holds is the same agent, and it runs the same programs.
   terminal = import ./terminal.nix {
     inherit pkgs;
     piPackage = agentCfg.piPackage;
     ctl = cfg.ctlPackage;
+    den = defaults.denPackage;
+    briefing = defaults.briefingPackage;
   };
   # One unit pair for each profile, so a schedule is systemd's and the run
   # directory it collects into is that profile's own. The name is concrete

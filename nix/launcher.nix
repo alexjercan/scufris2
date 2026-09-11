@@ -26,19 +26,11 @@
 in
   pkgs.writeShellApplication {
     name = "scufris";
-    # No speech inference here. The agent decides what is worth saying aloud and the
-    # frontend synthesises it, so nothing in this process tree makes sound.
-    runtimeInputs = [
-      # The briefing extension runs `tools/briefing` by resource path, so the
-      # `python3` this puts on PATH is the one that has to be able to import
-      # what those scripts import.
-      (import ./python.nix {inherit pkgs;})
-      pkgs.tmux
-      # The journal, which the den skill runs by name.
-      den
-      # The morning briefing, which the briefing extension runs by name.
-      briefing
-    ];
+    # The programs the agent runs, which the terminal launcher carries too:
+    # there is one composition and it runs them from either. No speech
+    # inference among them. The agent decides what is worth saying aloud and
+    # the frontend synthesises it, so nothing in this process tree makes sound.
+    runtimeInputs = import ./agent-runtime.nix {inherit pkgs den briefing;};
     text = ''
       if [[ -z "''${SCUFRIS_PROJECT_ROOTS+x}" ]]; then
         export SCUFRIS_PROJECT_ROOTS=${pkgs.lib.escapeShellArg (builtins.toJSON projectRoots)}

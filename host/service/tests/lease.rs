@@ -33,6 +33,19 @@ use scufris_control::write_message;
 const PATIENCE: Duration = Duration::from_secs(15);
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
+/// How a run is told to offer the lease.
+///
+/// The flag is what a service started by hand takes. The variable is what the
+/// unit the Home Manager module writes sets, and it sets it to `1`, so a
+/// binary that reads only `true` and `false` there never starts at all on the
+/// deployment that asked for the handoff.
+#[derive(Clone, Copy)]
+enum Lease {
+    Off,
+    Flag,
+    Variable,
+}
+
 struct Harness {
     root: PathBuf,
     runtime: PathBuf,
@@ -43,7 +56,7 @@ struct Harness {
 }
 
 impl Harness {
-    fn start(terminal_lease: bool) -> Self {
+    fn start(lease: Lease) -> Self {
         let root = std::env::temp_dir().join(format!(
             "scufris-lease-{}-{}",
             std::process::id(),
@@ -80,8 +93,14 @@ impl Harness {
             } else {
                 Stdio::null()
             });
-        if terminal_lease {
-            command.arg("--terminal-lease");
+        match lease {
+            Lease::Off => {}
+            Lease::Flag => {
+                command.arg("--terminal-lease");
+            }
+            Lease::Variable => {
+                command.env("SCUFRIS_SERVICE_TERMINAL_LEASE", "1");
+            }
         }
         let service = command.spawn().expect("the service binary starts");
         let harness = Self {
@@ -365,7 +384,7 @@ fn wait_until_gone(pid: i32) {
 
 #[test]
 fn the_lease_is_refused_when_the_service_does_not_offer_it() {
-    let harness = Harness::start(false);
+    let harness = Harness::start(Lease::Off);
     let first = harness.wait_for_agents(1)[0];
     let mut control = harness.control();
     control.wait_for_state(ScufrisState::Idle);
@@ -380,8 +399,25 @@ fn the_lease_is_refused_when_the_service_does_not_offer_it() {
 }
 
 #[test]
+fn the_variable_the_deployment_sets_offers_the_lease() {
+    // The unit sets `SCUFRIS_SERVICE_TERMINAL_LEASE=1`, which is also what the
+    // reference documents. A service that refuses that value exits before it
+    // binds anything, so the harness would not find a control socket here, and
+    // the failure a person sees is a missing socket rather than a rejected
+    // value.
+    let harness = Harness::start(Lease::Variable);
+    harness.wait_for_agents(1);
+    let mut control = harness.control();
+    control.wait_for_state(ScufrisState::Idle);
+    assert!(matches!(
+        control.acquire("l"),
+        ControlResponseBody::Lease { .. }
+    ));
+}
+
+#[test]
 fn a_terminal_takes_the_agent_and_gives_it_back() {
-    let harness = Harness::start(true);
+    let harness = Harness::start(Lease::Flag);
     let first = harness.wait_for_agents(1)[0];
     let mut control = harness.control();
     control.wait_for_state(ScufrisState::Idle);
@@ -632,7 +668,7 @@ fn a_terminal_takes_the_agent_and_gives_it_back() {
 
 #[test]
 fn a_terminal_that_did_not_fork_is_told_what_it_missed() {
-    let harness = Harness::start(true);
+    let harness = Harness::start(Lease::Flag);
     harness.wait_for_agents(1);
     let mut control = harness.control();
     control.wait_for_state(ScufrisState::Idle);

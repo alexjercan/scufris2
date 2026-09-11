@@ -9,6 +9,21 @@ immutable `vX.Y.Z` tags; see [RELEASE.md](RELEASE.md) for the process.
 
 ## [Unreleased]
 
+### Fixed
+
+- The background service starts again where the terminal handoff is turned on.
+  The unit the Home Manager module writes sets
+  `SCUFRIS_SERVICE_TERMINAL_LEASE=1`, which is the documented spelling, and the
+  service read only `true` and `false` there: it exited before binding
+  anything, restarted every three seconds, and every client saw a missing
+  socket rather than a rejected value. `1`, `true`, `yes`, and `on` are all
+  read now, and so are their negatives.
+- A terminal that holds the agent finds the programs the agent runs. The
+  terminal launcher carried `scufris-ctl` and Pi only, so the briefing failed
+  at its first import, in a terminal and nowhere else. Both launchers now take
+  one list of the agent's programs, and a check asserts they carry the same
+  one.
+
 ## [2.8.0] - 2026-09-11
 
 ### Added

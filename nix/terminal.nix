@@ -2,6 +2,8 @@
   pkgs,
   piPackage,
   ctl,
+  den,
+  briefing,
 }:
 # Normal interactive Pi, started as the holder of the Scufris conversation.
 # The launcher is one script in the store rather than a copy of its text here,
@@ -18,7 +20,9 @@ in
     name = "scufris-terminal";
     # `scufris-ctl` says where the sessions are, and Pi is what this becomes.
     # A `pi` already on PATH wins, the way the agent launcher lets it win.
-    runtimeInputs = [ctl piPackage];
+    # The rest is what the agent runs: the checkout composition this starts is
+    # the deployment's, so it needs the deployment's programs.
+    runtimeInputs = [ctl piPackage] ++ import ./agent-runtime.nix {inherit pkgs den briefing;};
     text = ''
       exec bash ${source}/scripts/scufris-terminal "$@"
     '';

@@ -28,7 +28,7 @@ mod service;
 
 use std::{path::PathBuf, process::ExitCode, sync::Arc, thread};
 
-use clap::Parser;
+use clap::{ArgAction, Parser, builder::BoolishValueParser};
 use nix::sys::signal::{SigSet, Signal};
 use tracing::{error, info};
 
@@ -76,7 +76,18 @@ struct Options {
     /// Off by default. A terminal Pi that holds the lease is the only agent
     /// until it releases or its control connection closes, and then the
     /// managed RPC agent restarts from the terminal's session.
-    #[arg(long, env = config::TERMINAL_LEASE_VARIABLE)]
+    ///
+    /// The variable is the deployment's spelling of the flag, and the unit the
+    /// Home Manager module writes sets it to `1`. Clap's parser for a `bool`
+    /// takes only `true` and `false`, so the boolish one is named here: a
+    /// service that refuses the value its own module writes never starts, and
+    /// says nothing about the lease while it fails.
+    #[arg(
+        long,
+        env = config::TERMINAL_LEASE_VARIABLE,
+        action = ArgAction::SetTrue,
+        value_parser = BoolishValueParser::new(),
+    )]
     terminal_lease: bool,
 }
 

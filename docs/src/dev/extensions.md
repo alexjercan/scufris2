@@ -143,6 +143,12 @@ thinking are no longer hidden, and the shared answer is the last assistant
 message of the turn unless `scufris_final_response` was called, in which case
 the tool's text, receipts, offers, and attachments win.
 
+The composition is the checkout's, but the programs under it are the
+deployment's. `nix/agent-runtime.nix` names them once - the interpreter the
+helper scripts import from, tmux, the journal, and the briefing - and both
+`nix/launcher.nix` and `nix/terminal.nix` take that list, so a tool that works
+for the managed child works in a terminal.
+
 ## Lifecycle rules
 
 Long-lived links start from `session_start`, not from extension factories. They

@@ -9,6 +9,7 @@
   profile,
   briefing,
   jobs,
+  den,
   ctl,
   pi,
   projectRoots,
@@ -17,13 +18,13 @@
   inherit (pkgs) lib;
   quoted = lib.escapeShellArg name;
   # A user manager does not inherit the login shell, so everything the run
-  # reaches for by name is put here: the helper, the job reader a machine
-  # source reports from, the control client the wake is carried by, the harness
-  # a source runs under, and `git` and `python3`, which the project reader
-  # needs and a source's own guidance often does.
+  # reaches for by name is put here: the helper, the job and den readers a
+  # machine source reports from, the control client the wake is carried by,
+  # the harness a source runs under, and `git` and `python3`, which the project
+  # reader needs and a source's own guidance often does.
   # The user profile and the system path come last, so a deployment that pins
   # its own `pi` or ships `claude` keeps working without this knowing.
-  binaries = lib.makeBinPath [briefing jobs ctl pi pkgs.coreutils pkgs.git pkgs.python3];
+  binaries = lib.makeBinPath [briefing jobs den ctl pi pkgs.coreutils pkgs.git pkgs.python3];
 in
   pkgs.runCommand "scufris-briefing-${name}" {
     nativeBuildInputs = [pkgs.systemd];

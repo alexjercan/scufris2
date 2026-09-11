@@ -55,6 +55,7 @@
       inherit pkgs name profile;
       briefing = defaults.briefingPackage;
       jobs = defaults.jobsPackage;
+      den = defaults.denPackage;
       ctl = cfg.ctlPackage;
       pi = agentCfg.piPackage;
       projectRoots = agentCfg.projectRoots;

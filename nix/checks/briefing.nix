@@ -189,10 +189,12 @@ in
       grep -F -- 'SCUFRIS_BRIEFING_KEEP_DAYS=30' "$reconciler"
       grep -F -- 'briefing reconcile --json' "$reconciler"
 
-      # A machine source reports on jobs, so the reader is a program on the
-      # run's own PATH. A user manager inherits no login shell, and guidance
-      # that named a checkout would work on one machine and nowhere else.
-      grep -E '^export PATH=' "$runner" | grep -F scufris-jobs
+      # Machine sources report on jobs and the den, so both readers are
+      # programs on the run's own PATH. A user manager inherits no login shell,
+      # and guidance that relied on a profile would work in the foreground but
+      # not from the schedule.
+      grep -E '^export PATH=' "$runner" | grep -F ${scufris.jobs}/bin
+      grep -E '^export PATH=' "$runner" | grep -F ${scufris.den}/bin
       touch "$out"
     '';
 

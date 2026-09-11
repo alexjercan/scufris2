@@ -48,10 +48,13 @@ worker's own transcript), and private authorization files.
 prompt, report, conversation, and workspace. Steering appends one guidance
 line to `conversation.md`, increments the generation, rotates launch and
 report authority, validates the recorded workspace identity, and starts a new
-execution. Generation 1 opens `prompt.md`; every later generation restores the
-job's own harness session, so a continuation is a true restore, not a prompt
-replay. Pi passes `--session-id` every time; Claude pins the ID first and
-resumes it after. Initial creation, precreated completion, restart, and recovery
+execution. HUD filing belongs to the completed generation, not to this logical
+job: the new active generation appears again under the same job ID and its
+terminal row must be filed separately. Generation 1 opens `prompt.md`; every
+later generation restores the job's own harness session, so a continuation is
+a true restore, not a prompt replay. Pi passes `--session-id` every time;
+Claude pins the ID first and resumes it after. Initial creation, precreated
+completion, restart, and recovery
 revalidate the recorded workspace path, device, and inode before tmux launch.
 The launch wrapper then validates its inherited current-directory inode before
 starting the harness, closing the path replacement window between checking a

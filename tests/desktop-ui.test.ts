@@ -1553,6 +1553,32 @@ test("a job row outlives its job and the list is the last thing in the flow", as
   );
 });
 
+test("a restarted logical job returns after its prior row was cleared", async () => {
+  const id = "01ccbac98b97";
+  const page = hud(true, [], [job(id, "done")]);
+  await settle();
+  const lines = page.element("lines");
+  const rows = page.element("rows");
+
+  // The service reflects the old generation's filing as a whole empty list.
+  page.publish("scufris://jobs", []);
+  assert.equal(
+    lines.children.some((child) => child.id === "jobs"),
+    false,
+  );
+
+  // Steering keeps the logical ID but starts a new execution generation. The
+  // next whole list must put that active row back on this surface.
+  page.publish("scufris://jobs", [
+    job(id, "working", { summary: "foreground guidance submitted" }),
+  ]);
+  assert.equal(lines.children[lines.children.length - 1]?.id, "jobs");
+  assert.equal(rows.children.length, 1);
+  assert.equal(rows.children[0]?.children[0]?.content, id);
+  assert.equal(rows.children[0]?.dataset["state"], "working");
+  assert.equal(rows.children[0]?.children[5]?.dataset["act"], "cancel");
+});
+
 test("stopping a job arms before it fires and forgets it was pressed", async () => {
   const page = hud(true, [], [job("3f81c204b1e9", "working")]);
   await settle();

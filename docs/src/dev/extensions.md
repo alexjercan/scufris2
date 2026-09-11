@@ -42,10 +42,13 @@ state message.
 
 Two verbs come back. `agent.job_command` carries one row control: `cancel`
 stops the job and keeps an unmerged branch, `archive` only files the row. A
-filing is written into the session, so it survives a restart: `recover` hands
-back every job that was never stopped or landed, and a row filed in memory
-alone would come back the next morning. Filing a row never touches the job
-record, so `scufris-jobs` still lists it until `stop` or `land` archives it.
+filing is written into the session against the current execution generation,
+so it survives a restart without hiding later work: `recover` hands back every
+job that was never stopped or landed, and a row filed in memory alone would
+come back the next morning. Steering starts a new generation under the same
+logical job ID, so that active row appears again and must be filed separately
+when it finishes. Filing never touches the job record, so `scufris-jobs` still
+lists it until `stop` or `land` archives it.
 `agent.offer_take` carries one offer identifier. The words behind an offer
 never cross the socket: `response.ts` stores the prompt it composed and runs
 that, so no surface control can put a sentence into the conversation.

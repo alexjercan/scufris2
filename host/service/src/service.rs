@@ -3201,6 +3201,56 @@ mod tests {
     }
 
     #[test]
+    fn a_restarted_logical_job_returns_after_the_prior_snapshot_was_cleared() {
+        let service = service();
+        let (_, inbox) = surface(&service, 1, "one");
+        let (agent, agent_in) = sync_channel(8);
+        service.register_agent(10, agent);
+        agent_in.recv().unwrap();
+        let id = "3f81c204b1e9";
+
+        service.agent_request(
+            10,
+            AgentRequestBody::Jobs {
+                jobs: vec![row(id, JobRowState::Done, "generation one complete")],
+            },
+        );
+        assert!(drain(&inbox).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Jobs { jobs }
+                if jobs.len() == 1 && jobs[0].id == id && jobs[0].state == JobRowState::Done
+        )));
+
+        // Filing generation one reaches the service as a whole empty list.
+        service.agent_request(10, AgentRequestBody::Jobs { jobs: vec![] });
+        assert!(
+            drain(&inbox)
+                .iter()
+                .any(|body| matches!(body, SurfaceResponseBody::Jobs { jobs } if jobs.is_empty()))
+        );
+
+        // Steering reuses the logical ID. The new active generation is still a
+        // new whole snapshot and must be broadcast to every surface.
+        service.agent_request(
+            10,
+            AgentRequestBody::Jobs {
+                jobs: vec![row(
+                    id,
+                    JobRowState::Working,
+                    "foreground guidance submitted",
+                )],
+            },
+        );
+        assert!(drain(&inbox).iter().any(|body| matches!(
+            body,
+            SurfaceResponseBody::Jobs { jobs }
+                if jobs.len() == 1
+                    && jobs[0].id == id
+                    && jobs[0].state == JobRowState::Working
+        )));
+    }
+
+    #[test]
     fn an_offer_is_taken_once_and_stays_taken_in_the_replay() {
         // Spent lives on the message that carries the badge, because that
         // message is what a reconnecting surface replays. Without it every

@@ -124,18 +124,29 @@ interface WakeStateEntry {
   mode: WakeMode;
 }
 
-/** Which rows Alex has filed, written where a restart can read it.
+/** Which job generations Alex has filed, written where a restart can read it.
  *
  * Filing a row is an acknowledgement, and an acknowledgement a restart
  * forgets is not one: the service starts Pi with `--continue`, so `recover`
- * hands back every job that was never stopped or landed, and a row filed in
- * memory alone came straight back the next morning.
+ * hands back every job that was never stopped or landed. The generation is
+ * part of the tombstone because steering that logical job is new work.
  */
-const filedRowsType = "scufris-filed-rows-v1";
+const legacyFiledRowsType = "scufris-filed-rows-v1";
+const filedRowsType = "scufris-filed-rows-v2";
 
-interface FiledRowsEntry {
+interface FiledRow {
+  id: string;
+  generation: number;
+}
+
+interface LegacyFiledRowsEntry {
   version: 1;
   filed: string[];
+}
+
+interface FiledRowsEntry {
+  version: 2;
+  filed: FiledRow[];
 }
 
 export interface WorkerEvent {
@@ -224,23 +235,122 @@ function restoredWakeMode(context: ExtensionContext): WakeMode {
   return wakeModeFromEntries(context.sessionManager.getBranch());
 }
 
-/** The rows a restarted session has to keep filed.
+interface FilingSessionEntry {
+  type: string;
+  customType?: string;
+  data?: unknown;
+  details?: unknown;
+  message?: unknown;
+}
+
+function workerGenerationFromEntry(
+  entry: FilingSessionEntry,
+): FiledRow | undefined {
+  const message = entry.message as
+    | { customType?: string; details?: unknown }
+    | undefined;
+  const details = (
+    entry.type === "custom_message" && entry.customType === "scufris-job-event"
+      ? entry.details
+      : entry.type === "message" && message?.customType === "scufris-job-event"
+        ? message.details
+        : undefined
+  ) as { job_id?: unknown; generation?: unknown } | undefined;
+  if (
+    typeof details?.job_id !== "string" ||
+    typeof details.generation !== "number" ||
+    !Number.isInteger(details.generation) ||
+    details.generation < 1
+  )
+    return undefined;
+  return { id: details.job_id, generation: details.generation };
+}
+
+/** The job generations a restarted session has to keep filed.
  *
- * Each entry carries the whole set as it stood, so the last one written is
- * the answer: a row can be unfiled - by the job leaving, or by a drain that
- * failed again - and a union would file it forever.
+ * Each filing entry carries the whole set as it stood, so the last one written
+ * is the answer. Legacy entries did not carry a generation. Terminal worker
+ * messages did, so an ID first added to a v1 set takes the latest generation
+ * known at that point. Later v1 snapshots preserve that fence even if hidden
+ * work under the same logical ID reports a newer generation.
  */
-export function filedRowsFromEntries(
-  entries: Iterable<{ type: string; customType?: string; data?: unknown }>,
-): Set<string> {
-  let filed = new Set<string>();
+function parseFiledRows(entries: Iterable<FilingSessionEntry>): {
+  filed: Map<string, number | null>;
+  legacy: boolean;
+} {
+  const knownGenerations = new Map<string, number>();
+  let filed = new Map<string, number | null>();
+  let legacy = false;
   for (const entry of entries) {
-    if (entry.type !== "custom" || entry.customType !== filedRowsType) continue;
+    const reported = workerGenerationFromEntry(entry);
+    if (reported) knownGenerations.set(reported.id, reported.generation);
+    if (entry.type !== "custom") continue;
+    if (entry.customType === legacyFiledRowsType) {
+      const data = entry.data as Partial<LegacyFiledRowsEntry> | undefined;
+      if (data?.version !== 1 || !Array.isArray(data.filed)) continue;
+      const next = new Map<string, number | null>();
+      for (const id of data.filed) {
+        if (typeof id !== "string") continue;
+        next.set(
+          id,
+          filed.has(id) ? filed.get(id)! : (knownGenerations.get(id) ?? null),
+        );
+      }
+      filed = next;
+      legacy = true;
+      continue;
+    }
+    if (entry.customType !== filedRowsType) continue;
     const data = entry.data as Partial<FiledRowsEntry> | undefined;
-    if (data?.version !== 1 || !Array.isArray(data.filed)) continue;
-    filed = new Set(data.filed.filter((id) => typeof id === "string"));
+    if (data?.version !== 2 || !Array.isArray(data.filed)) continue;
+    const next = new Map<string, number | null>();
+    for (const value of data.filed) {
+      if (typeof value !== "object" || value === null) continue;
+      const row = value as Partial<FiledRow>;
+      if (
+        typeof row.id === "string" &&
+        typeof row.generation === "number" &&
+        Number.isInteger(row.generation) &&
+        row.generation >= 0
+      )
+        next.set(row.id, row.generation);
+    }
+    filed = next;
+    legacy = false;
   }
-  return filed;
+  return { filed, legacy };
+}
+
+export function filedRowsFromEntries(
+  entries: Iterable<FilingSessionEntry>,
+): Map<string, number | null> {
+  return parseFiledRows(entries).filed;
+}
+
+export function restoreFiledRows(
+  entries: Iterable<FilingSessionEntry>,
+  jobs: Iterable<{ job_id: string; generation: number; state: string }>,
+): { filed: Map<string, number>; migratedLegacy: boolean } {
+  const current = new Map([...jobs].map((job) => [job.job_id, job]));
+  const restored = parseFiledRows(entries);
+  const filed = new Map<string, number>();
+  for (const [id, generation] of restored.filed) {
+    if (id === EVENT_DRAIN_ROW) {
+      filed.set(id, 0);
+      continue;
+    }
+    const job = current.get(id);
+    if (!job) continue;
+    if (generation === null) {
+      // A missing terminal message is ambiguous. Preserve generation 1, or
+      // fence the immediate predecessor, but never hide later recovered work.
+      if (job.generation === 1 && jobRowIsTerminal(job)) filed.set(id, 1);
+      else if (job.generation > 1) filed.set(id, job.generation - 1);
+    } else if (generation <= job.generation) {
+      filed.set(id, generation);
+    }
+  }
+  return { filed, migratedLegacy: restored.legacy };
 }
 
 export function deliveredWorkerEventIds(
@@ -271,6 +381,11 @@ export function deliveredWorkerEventIds(
       result.add(message.details.event_id);
   }
   return result;
+}
+
+function jobRowIsTerminal(job: { state: string }): boolean {
+  const state = JOB_ROW_STATES[job.state] ?? "working";
+  return state === "done" || state === "failed";
 }
 
 /** Draws one owned job as the row the surfaces show.
@@ -321,21 +436,21 @@ export function boundedRows(rows: JobRow[]): JobRow[] {
 
 /** Every row the surfaces should hold, given the jobs and what is filed.
  *
- * A row outlives its job, so the archived set is the only thing that removes
- * one. The drain is not a job, but a drain that has stopped is exactly as
- * unattended as a failed one and has no other way to be seen: `hasUI` is
+ * A row outlives its generation, so filing that exact generation is the only
+ * thing that removes it. The drain is not a job, but a drain that has stopped
+ * is exactly as unattended as a failed one and has no other way to be seen: `hasUI` is
  * false under the service, so the notification it used to raise reported it
  * to nobody.
  */
 export function publishedRows(
-  jobs: Iterable<Parameters<typeof jobRow>[0]>,
-  archived: ReadonlySet<string>,
+  jobs: Iterable<Parameters<typeof jobRow>[0] & { generation: number }>,
+  filed: ReadonlyMap<string, number>,
   drain?: { since: number; error?: string },
 ): JobRow[] {
   const rows = [...jobs]
-    .filter((job) => !archived.has(job.job_id))
+    .filter((job) => filed.get(job.job_id) !== job.generation)
     .map((job) => jobRow(job));
-  if (drain && !archived.has(EVENT_DRAIN_ROW))
+  if (drain && !filed.has(EVENT_DRAIN_ROW))
     rows.push({
       id: EVENT_DRAIN_ROW,
       state: "failed",
@@ -738,10 +853,10 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
 
   const contexts = new Map<string, ResolvedContext>();
   const jobs = new Map<string, OwnedJob>();
-  // A row outlives its job, so filing it is the only thing that clears it.
-  // Archiving never touches the workspace: it is an acknowledgement, and the
-  // job stays exactly where `scufris-jobs` keeps it.
-  const archived = new Set<string>();
+  // A row outlives its execution generation, so filing it is the only thing
+  // that clears it. Filing never touches the workspace or logical job. The
+  // generation fence lets a later execution of that job appear again.
+  const filed = new Map<string, number>();
   const deliveredEventIds = new Set<string>();
   let drainFailedAt: number | undefined;
   let readingEvents = false;
@@ -760,7 +875,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
       JOB_ROWS_EVENT,
       publishedRows(
         jobs.values(),
-        archived,
+        filed,
         drainFailedAt === undefined
           ? undefined
           : {
@@ -780,8 +895,8 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
 
   const persistFiledRows = () => {
     pi.appendEntry(filedRowsType, {
-      version: 1,
-      filed: [...archived],
+      version: 2,
+      filed: [...filed].map(([id, generation]) => ({ id, generation })),
     } satisfies FiledRowsEntry);
   };
 
@@ -821,7 +936,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     if (extensionContext?.hasUI) extensionContext.ui.notify(message, "error");
     eventError = message;
     drainFailedAt ??= Math.floor(Date.now() / 1000);
-    if (archived.delete(EVENT_DRAIN_ROW)) persistFiledRows();
+    if (filed.delete(EVENT_DRAIN_ROW)) persistFiledRows();
     publishRows();
     if (drainWakes >= MAX_DRAIN_WAKES) return;
     drainWakes += 1;
@@ -842,7 +957,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     eventStranded = false;
     drainWakes = 0;
     drainFailedAt = undefined;
-    if (archived.delete(EVENT_DRAIN_ROW)) persistFiledRows();
+    if (filed.delete(EVENT_DRAIN_ROW)) persistFiledRows();
     publishRows();
   };
 
@@ -997,7 +1112,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
     let unfiled = false;
     for (const removedJob of removed) {
       jobs.delete(removedJob);
-      if (archived.delete(removedJob)) unfiled = true;
+      if (filed.delete(removedJob)) unfiled = true;
     }
     if (unfiled) persistFiledRows();
     publishRows();
@@ -1008,8 +1123,16 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   // because a surface press is never permission to throw work away.
   const runJobCommand = async ({ id, action }: JobCommandSignal) => {
     if (action === "archive") {
-      if (!archived.has(id)) {
-        archived.add(id);
+      const job = jobs.get(id);
+      const generation =
+        id === EVENT_DRAIN_ROW
+          ? 0
+          : job && jobRowIsTerminal(job)
+            ? job.generation
+            : undefined;
+      if (generation === undefined) return;
+      if (filed.get(id) !== generation) {
+        filed.set(id, generation);
         persistFiledRows();
       }
       publishRows();
@@ -1685,7 +1808,7 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     extensionContext = ctx;
     shuttingDown = false;
-    archived.clear();
+    filed.clear();
     drainFailedAt = undefined;
     wakeMode = restoredWakeMode(ctx);
     acknowledgmentGate.reset();
@@ -1712,13 +1835,16 @@ export default function workflowOrchestration(pi: ExtensionAPI): void {
         jobs.set(job.job_id, job);
         if (job.window_alive) watchJob(job);
       }
-      // What Alex filed before the restart, kept filed. Restored here rather
-      // than at the top of this handler because this is the first moment the
-      // jobs are known: an id no recovery returned names a job that has been
-      // stopped or landed since, and carrying it forever would grow the entry
-      // without bound.
-      for (const id of filedRowsFromEntries(ctx.sessionManager.getBranch()))
-        if (jobs.has(id) || id === EVENT_DRAIN_ROW) archived.add(id);
+      // What Alex filed before the restart stays filed for that execution
+      // generation. A later generation of the same logical job must appear.
+      // Restoring after recovery lets us discard jobs that were stopped or
+      // landed and migrate broad v1 IDs without hiding active work.
+      const restored = restoreFiledRows(
+        ctx.sessionManager.getBranch(),
+        jobs.values(),
+      );
+      for (const [id, generation] of restored.filed) filed.set(id, generation);
+      if (restored.migratedLegacy) persistFiledRows();
       // A recovered job's terminal event was acknowledged before the restart
       // and is never redelivered, so this publish is the only thing that puts
       // last night's failed row back in front of Alex.

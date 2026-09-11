@@ -140,12 +140,14 @@ follows is the only thing that reports it. No user line appears.
 
 A job row carries the twelve-character job ID, an optional project, one of
 `working`, `blocked`, `done`, or `failed`, the Unix second the job started, and
-a bounded summary. A row outlives its job: finishing does not remove it, and
-`archive` is what clears it, for good rather than until the host restarts.
-Filing a row says it has been seen and nothing more: the job record is
-untouched, and `cancel`, `stop` or `land` is what ends the work itself. The list is whole on every send, live rows are
-never dropped at the cap, and the aggregate `surface.state` word is folded from
-these rows.
+a bounded summary. A row outlives its execution: finishing does not remove it,
+and `archive` clears that generation across host restarts. Filing says the
+completed generation has been seen and nothing more: the logical job record is
+untouched. Steering can start a new generation under the same row ID, which
+makes the active row visible again and leaves its eventual terminal row to be
+filed separately. `cancel`, `stop`, or `land` ends work. The list is whole on
+every send, live rows are never dropped at the cap, and the aggregate
+`surface.state` word is folded from these rows.
 
 A briefing row carries an opaque generation ID, date and profile labels,
 independent collection and delivery states, start time, completed/total/failed

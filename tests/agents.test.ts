@@ -21,6 +21,7 @@ import {
   publishedRows,
   QUICK_REVIEW_TOOL,
   resolveWakeCommand,
+  restoreFiledRows,
   TERMINAL_OWNERSHIP_STATES,
   toolBatchAllowsAction,
   wakeModeFromEntries,
@@ -352,16 +353,17 @@ test("live rows never drop and the oldest finished rows fall off first", () => {
   );
 });
 
-test("a row outlives its job, and filing it is what clears it", () => {
-  const job = (id: string, state: string) => ({
+test("filing one generation does not hide the next generation", () => {
+  const job = (id: string, state: string, generation = 1) => ({
     job_id: id,
     project: "personal/scufris2",
     state,
     summary: `job ${id}`,
     created_at: "2026-09-08T21:00:00Z",
+    generation,
   });
   const live = [job("abcdef123456", "working"), job("123456abcdef", "working")];
-  const filed = new Set<string>();
+  const filed = new Map<string, number>();
   assert.deepEqual(
     publishedRows(live, filed).map((row) => [row.id, row.state]),
     [
@@ -378,36 +380,121 @@ test("a row outlives its job, and filing it is what clears it", () => {
       ["abcdef123456", "done"],
     ],
   );
-  for (const row of done) filed.add(row.job_id);
+  for (const row of done) filed.set(row.job_id, row.generation);
   assert.deepEqual(publishedRows(done, filed), []);
+
+  // Exact reported sequence: generation 1 appeared and was cleared. Steering
+  // starts generation 2 under the same logical ID. The old terminal generation
+  // remains filed, while the new active generation returns to the whole list.
+  const restarted = [job("abcdef123456", "working", 2)];
+  assert.deepEqual(
+    publishedRows(restarted, filed).map((row) => [row.id, row.state]),
+    [["abcdef123456", "working"]],
+  );
+  // Generation 2 has its own terminal row and must be acknowledged separately.
+  assert.deepEqual(
+    publishedRows([job("abcdef123456", "done", 2)], filed).map((row) => row.id),
+    ["abcdef123456"],
+  );
 });
 
-test("filing a row survives the restart that brings the job back", () => {
-  const entry = (filed: string[]) => ({
+test("generation-scoped filing survives restarts and migrates broad IDs", () => {
+  const legacy = (filed: string[]) => ({
     type: "custom",
     customType: "scufris-filed-rows-v1",
     data: { version: 1, filed },
   });
-  // The service starts Pi with `--continue`, so `recover` hands back every
-  // job that was never stopped or landed. A row filed in memory alone came
-  // straight back, which is not what filing one means.
-  assert.deepEqual(
-    [...filedRowsFromEntries([entry(["abcdef123456", "123456abcdef"])])],
-    ["abcdef123456", "123456abcdef"],
-  );
-  // The whole set is written each time, so the last entry is the answer: a
-  // row can be unfiled, and a union would file it for good.
+  const entry = (filed: Array<{ id: string; generation: number }>) => ({
+    type: "custom",
+    customType: "scufris-filed-rows-v2",
+    data: { version: 2, filed },
+  });
+  const workerEvent = (id: string, generation: number) => ({
+    type: "message",
+    message: {
+      customType: "scufris-job-event",
+      details: { job_id: id, generation },
+    },
+  });
+  // The whole generation-scoped map is written each time, so the last entry is
+  // the answer. Keeping a previous generation does not hide the current one.
   assert.deepEqual(
     [
       ...filedRowsFromEntries([
-        entry(["abcdef123456", "123456abcdef"]),
-        entry(["abcdef123456"]),
+        entry([
+          { id: "abcdef123456", generation: 1 },
+          { id: "123456abcdef", generation: 1 },
+        ]),
+        entry([{ id: "abcdef123456", generation: 2 }]),
       ]),
     ],
-    ["abcdef123456"],
+    [["abcdef123456", 2]],
   );
   assert.deepEqual([...filedRowsFromEntries([])], []);
-  // Nothing else in the branch is read as a filing.
+
+  // The old shape had no generation. Its preceding terminal worker message
+  // did. Once an ID is filed, later whole v1 snapshots keep the original fence
+  // even if the hidden logical job reports another generation.
+  const historical = [
+    workerEvent("abcdef123456", 1),
+    legacy(["abcdef123456"]),
+    workerEvent("abcdef123456", 2),
+    workerEvent("123456abcdef", 3),
+    legacy(["abcdef123456", "123456abcdef"]),
+  ];
+  assert.deepEqual(
+    [...filedRowsFromEntries(historical)],
+    [
+      ["abcdef123456", 1],
+      ["123456abcdef", 3],
+    ],
+  );
+  const jobs = (state: string) => [
+    {
+      job_id: "abcdef123456",
+      project: "personal/scufris2",
+      generation: 2,
+      state,
+      summary: "generation two",
+      created_at: "2026-09-08T21:00:00Z",
+    },
+  ];
+  const migrated = restoreFiledRows(historical, jobs("done"));
+  assert.deepEqual([...migrated.filed], [["abcdef123456", 1]]);
+  assert.equal(migrated.migratedLegacy, true);
+  assert.deepEqual(
+    publishedRows(jobs("done"), migrated.filed).map((row) => [
+      row.id,
+      row.state,
+    ]),
+    [["abcdef123456", "done"]],
+  );
+
+  // If old session history lacks the worker message, migration still never
+  // turns an ambiguous logical-ID tombstone into a current-generation fence.
+  const ambiguous = restoreFiledRows(
+    [legacy(["abcdef123456"])],
+    jobs("working"),
+  );
+  assert.deepEqual([...ambiguous.filed], [["abcdef123456", 1]]);
+  assert.equal(ambiguous.migratedLegacy, true);
+  const firstGeneration = restoreFiledRows(
+    [legacy(["abcdef123456"])],
+    [{ ...jobs("done")[0]!, generation: 1 }],
+  );
+  assert.deepEqual([...firstGeneration.filed], [["abcdef123456", 1]]);
+
+  // A v2 restart restores the old tombstone itself. Matching by generation,
+  // rather than deleting history, is what lets generation 2 appear.
+  const recovered = restoreFiledRows(
+    [entry([{ id: "abcdef123456", generation: 1 }])],
+    jobs("working"),
+  );
+  assert.deepEqual([...recovered.filed], [["abcdef123456", 1]]);
+  assert.equal(recovered.migratedLegacy, false);
+  assert.equal(restoreFiledRows([legacy([])], []).migratedLegacy, true);
+
+  // Nothing else in the branch is read as filing state.
   assert.deepEqual(
     [
       ...filedRowsFromEntries([
@@ -417,21 +504,21 @@ test("filing a row survives the restart that brings the job back", () => {
           customType: "scufris-wake-state-v1",
           data: { version: 1, filed: ["123456abcdef"] },
         },
-        entry(["0011aabbccdd"]),
+        entry([{ id: "0011aabbccdd", generation: 3 }]),
         {
           type: "custom",
-          customType: "scufris-filed-rows-v1",
-          data: { version: 2, filed: ["from-a-later-shape"] },
+          customType: "scufris-filed-rows-v2",
+          data: { version: 3, filed: [] },
         },
       ]),
     ],
-    ["0011aabbccdd"],
+    [["0011aabbccdd", 3]],
   );
 });
 
 test("a drain that stopped is a row, because nothing else reports it", () => {
   const drain = { since: 1_788_901_200, error: "permission denied" };
-  const [row] = publishedRows([], new Set(), drain);
+  const [row] = publishedRows([], new Map(), drain);
   assert.deepEqual(row, {
     id: EVENT_DRAIN_ROW,
     state: "failed",
@@ -439,7 +526,10 @@ test("a drain that stopped is a row, because nothing else reports it", () => {
     summary: "Scufris cannot read worker events: permission denied",
   });
   // Filing it is the acknowledgement, exactly as it is for a job.
-  assert.deepEqual(publishedRows([], new Set([EVENT_DRAIN_ROW]), drain), []);
+  assert.deepEqual(
+    publishedRows([], new Map([[EVENT_DRAIN_ROW, 0]]), drain),
+    [],
+  );
 });
 
 test("no model writes a badge: they are read off the measured receipt", () => {

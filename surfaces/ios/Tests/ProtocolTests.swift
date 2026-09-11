@@ -235,6 +235,27 @@ struct ProtocolTests {
     }
 
     @Test
+    func aRestartedLogicalJobCanReturnAfterItsPriorSnapshotWasCleared() throws {
+        let cleared = try JSONDecoder().decode(
+            IncomingJobs.self,
+            from: Data(#"{"v":10,"type":"surface.jobs","jobs":[]}"#.utf8)
+        )
+        let restarted = try JSONDecoder().decode(
+            IncomingJobs.self,
+            from: Data(
+                #"{"v":10,"type":"surface.jobs","jobs":[{"id":"01ccbac98b97","project":"personal/scufris2","state":"working","since":1788901200,"summary":"foreground guidance submitted"}]}"#.utf8
+            )
+        )
+
+        // Each frame is a complete snapshot. A later execution keeps the
+        // logical ID, and the iPhone accepts it again as an active row.
+        #expect(cleared.jobs.isEmpty)
+        #expect(restarted.jobs.map(\.id) == ["01ccbac98b97"])
+        #expect(restarted.jobs.first?.state == .working)
+        #expect(restarted.jobs.first?.isTerminal == false)
+    }
+
+    @Test
     func briefingRowsKeepCollectionAndDeliveryIndependent() throws {
         let data = Data(
             #"{"v":10,"type":"surface.briefings","briefings":[{"id":"generation-a","date":"2026-09-10","profile":"nightly","collection":"collected","delivery":"in_progress","since":1788901200,"completed":3,"total":3,"failed":1,"summary":"2 of 3 sources answered; 1 failed"}]}"#.utf8
